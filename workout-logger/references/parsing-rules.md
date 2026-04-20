@@ -10,8 +10,8 @@
 - **Set**: 1, 2, 3... per exercise
 - **kg**: 0 if no weight. `k` = `kg`. `lbs` or `lb` → divide by 2.205, round to nearest 0.5.
 - **Volume**: Reps × kg
-- **Reps**: 0 for carries, walks, holds — put duration/distance in Notes.
-- **Notes**: Only from parenthetical input like `(felt heavy)`. Never invent notes.
+- **Reps**: 0 for carries, walks, holds, isometric positions. Put the duration in the `duration_min` field (accepts `MM:SS` or decimal minutes) so the coach can read it structurally. Put distance in `distance_km` when the exercise tracks distance (farmer walks, loaded carries). Use Notes only for qualitative detail like "per hand" or "beltless".
+- **Notes**: Only from parenthetical input like `(felt heavy)`. Never invent notes. Exception: `Deload Workout` on the first row of a session when the header line contains the `deload` keyword (see "Session-level flags" below).
 
 ## Multi-Set Separator
 
@@ -25,13 +25,22 @@ Assign the larger number to kg and smaller to reps unless context makes it obvio
 
 ## Name Matching Priority
 
-The output name must ALWAYS be a canonical name from `exercises-database.md`, in the exact casing it appears there. Never pass through the user's original casing.
+The output name must ALWAYS be a canonical name from `../../shared/exercises-database.md`, in the exact casing it appears there. Never pass through the user's original casing. Work down this ladder — stop at the first hit:
 
-1. **Exact match** (case-insensitive) → use database casing
-2. **Known alias** → check `aliases.md`
-3. **Substring match** → input contained in canonical name or vice versa; resolve with equipment context
-4. **Fuzzy match** → best guess, add Notes: `(matched from: "user's input")`
-5. **No match** → user's name in title case, add Notes: `(not in database)`
+1. **Exact match** (case-insensitive) → use database casing, no Notes annotation.
+2. **Known alias** → check `aliases.md`, use canonical name, no Notes annotation.
+3. **Substring match** → input contained in canonical name or vice versa, resolved with equipment context (e.g. `incline press` + no equipment word + user context → `Incline Chest Press Machine`). No Notes annotation.
+4. **Equipment-qualified fuzzy** → if the input contains an equipment word (`cable`, `dumbbell`, `machine`, `barbell`), prefer the canonical name that has both that equipment word and the highest string-similarity to the rest. Use it and add Notes: `fuzzy match from: "user's input"`.
+5. **difflib fuzzy match** → apply `difflib.get_close_matches(user_input.lower(), [name.lower() for name in canonical_names], n=1, cutoff=0.7)`. If there's a hit, use that canonical name (in its database casing) and add Notes: `fuzzy match from: "user's input"`. You can do the ratio in your head for obvious cases; for borderline ones run the inline snippet.
+6. **No close match** → user's name in title case, and add Notes: `(not in database)` so it stands out on review.
+
+**Mental shortcut for the fuzzy step:** if you'd reliably recognize the typo as the canonical exercise at a glance (`flat benchpres` → `Flat Bench Press`, `squatt` → `Squat`), treat it as a fuzzy match with high confidence. If you'd genuinely not know which exercise the user meant, fall through to step 6 rather than guessing.
+
+Never invent exercise names. Fuzzy match only picks from the canonical list.
+
+## Session-level flags
+
+If the word `deload` appears anywhere on the `/log` header line (before the first exercise bullet), set the first row of that session's `notes` to `Deload Workout`. The coach reads this marker to drive mesocycle analysis — it's the one piece of Notes the coach actually parses.
 
 ## Cardio
 

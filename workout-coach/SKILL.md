@@ -18,13 +18,13 @@ description: >
 
 ## Setup
 
-1. Read `references/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
+1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
 2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis.
-3. Read `./Workout Tracker.xlsx` from the current working directory. If it's not there, stop and say so in one line. Don't search the filesystem. Monthly sheets are named `YYYY.MM`; ignore `Exercises Database` and any `New Month` / `How To Use` templates if present.
+3. Run `scripts/read_tracker.py "./Workout Tracker.xlsx"` from the current working directory. The script returns one JSON blob with everything: flat row list (last 3 months), progression summary, deload dates, days since last session, and cardio totals for the last 14 days. If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
 Each row = one set. Columns: `Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`.
 
-4. Identify the **most recent workout** (last date with logged sets). Note which muscle groups it trained and which exercises were performed. Use this as the planning baseline: do not repeat the same primary muscle emphasis in the very next session, and carry forward any exercises where progression was visible. The rest of each session's slots are where variation lives — see §17.
+4. From the script's output, identify the **most recent workout** (last date with logged sets). Note which muscle groups it trained and which exercises were performed. Use this as the planning baseline: do not repeat the same primary muscle emphasis in the very next session, and carry forward any exercises where progression was visible. The rest of each session's slots are where variation lives — see §17.
 
 ## Output target
 
@@ -54,6 +54,12 @@ The file structure:
 ### Workout 2: <TYPE>
 ...
 
+### Cardio 1: Zone 2 (optional, only if behind §10 target)
+<plain bullet list with HR target and session notes>
+
+### Cardio 2: Intervals (optional)
+<work/rest structure>
+
 ## Why this plan
 <3-4 sentences>
 ```
@@ -62,82 +68,29 @@ Write the file in one pass at the end. Don't stream sections to chat while think
 
 ## Data Reading Strategy
 
-The monthly sheets keep a buffer of empty rows after the last logged set (roughly 2 rows on past months, ~50 on the current month after `/maintain` trims). Read with openpyxl and stop after 10 consecutive fully empty rows — don't dump raw sheet contents into context.
+`scripts/read_tracker.py` handles all the quirks (date normalization, empty-row streaks, case-insensitive grouping, numeric casting, deload detection, cardio categorization) and emits a single JSON blob. Call it once at the start of `/coach`. Don't re-read the xlsx inline unless you're debugging something the script can't see.
 
-**Critical data format notes:**
-- Dates are usually `'YYYY-MM-DD'` strings. Older rows may be `datetime` objects or have None (carry forward the last known date defensively — the current tracker fills every row, but historical data wasn't always that way).
-- Numeric columns (kg, Reps, Volume) are often strings. Cast to float/int before math.
-- Exercise names have inconsistent casing across sessions (e.g., `'Jumping jacks'` vs `'Jumping Jacks'`). Always compare case-insensitively.
-- Between sessions there can be a few truly empty rows. After the last real session there are hundreds. Stop after 10+ consecutive fully empty rows.
+What the JSON contains:
+- `today`, `last_session_date`, `days_since_last_session`
+- `rows`: every set from the last 3 months (default window; override with `--months N`)
+- `progression_summary`: last vs. previous best working set per exercise, case-insensitive, warmups excluded
+- `deloads`: list of dates where the session's first row had Notes `Deload Workout`
+- `weeks_since_last_deload`: float (null if no deload on record)
+- `cardio_last_14d`: `{zone2_minutes, interval_sessions, total_distance_km}`
 
-**Step 1: Discover sheets and date range.**
-```python
-import openpyxl
-from datetime import datetime
-wb = openpyxl.load_workbook('Workout Tracker.xlsx', data_only=True)
-import re
-data_sheets = [s for s in wb.sheetnames if re.match(r'^\d{4}\.\d{2}$', s)]
-```
-Only open sheets from the last 3 months unless progression analysis requires older data.
+Apply the standard filters on top of `rows`:
+- Volume analysis (report): last 4 weeks.
+- Progression trends (report): use `progression_summary` directly for major compounds (bench, squat, deadlift, OHP, row); filter `rows` if you need deeper history.
+- Workout planning: last 2 weeks.
+- Most recent session: filter to the max date.
 
-**Step 2: Extract data rows into a flat list.**
-Carry forward dates defensively. Stop after 10 consecutive empty rows:
-```python
-rows = []
-for name in data_sheets:
-    ws = wb[name]
-    current_date = None
-    empty_streak = 0
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        date_val = row[0]
-        exercise = row[2]
+**Critical format notes (for the rare case you need to read the xlsx directly):**
+- Dates are usually `'YYYY-MM-DD'` strings, occasionally `datetime`. The script normalizes; if you bypass it, normalize yourself.
+- Numeric columns (kg, Reps, Volume) are often stringified.
+- Exercise names have inconsistent casing across sessions. Compare case-insensitively.
+- Monthly sheets keep a buffer of empty rows (~2 past months, ~50 current month after `/maintain`). Stop after 10 consecutive fully empty rows.
 
-        if date_val is None and exercise is None:
-            empty_streak += 1
-            if empty_streak >= 10:
-                break
-            continue
-        empty_streak = 0
-
-        if date_val is not None:
-            if isinstance(date_val, datetime):
-                current_date = date_val.strftime('%Y-%m-%d')
-            else:
-                current_date = str(date_val).strip().split(' ')[0]
-
-        if exercise is None or current_date is None:
-            continue
-
-        rows.append({
-            'date': current_date,
-            'num': row[1],
-            'exercise': str(exercise).strip(),
-            'set': row[3],
-            'reps': int(float(row[4])) if row[4] else None,
-            'kg': float(row[5]) if row[5] else 0,
-            'volume': float(row[6]) if row[6] else 0,
-            'notes': row[7],
-        })
-```
-
-**Step 3: Filter for each analysis task.**
-- Volume analysis (report): last 4 weeks by date.
-- Progression trends (report): filter by exercise name (case-insensitive) over last 8-12 weeks. Only major compounds: bench, squat, deadlift, OHP, row.
-- Workout planning: last 2 weeks only.
-- Most recent session: filter to the max date. Always read in full.
-
-**Step 4: Generate a progression summary.**
-After extracting rows, run a summary that groups by exercise (case-insensitive) and prints the last session's best working set (heaviest weight × reps, excluding warmup) and the session before that. Example:
-```
-Dumbbell Flat Bench Press: Apr 5 → 52kg x 10 | Apr 1 → 52kg x 10 (at top of range, bump weight)
-Barbell Back Squat: Apr 10 → 65kg x 8 | Apr 4 → 65kg x 8 (stable, push reps)
-Cable Lat Pulldown: Apr 6 → 65kg x 8 | Apr 3 → 60kg x 10 (weight increased, monitor)
-```
-Use this output to set targets in the plan. Don't re-derive it in your thinking.
-
-Print the filtered results for your own use. The raw row list never goes into the response or the file.
-
-If the user has 6+ months of data, you still read the same windows. Coaching quality depends on recent patterns, not historical completeness.
+Print the filtered values you actually use; never dump the full `rows` list into the response or the file.
 
 ## Two-Layer Approach
 
@@ -167,7 +120,7 @@ Goals are fixed: hypertrophy + longevity. Never ask about goals.
 Keep the report tight. The user is an established trainee who has been coached before. If the data shows continuity (same exercises, steady progression, no new red flags), shorten WHAT'S WORKING and WHAT NEEDS FIXING to 2-3 items each. Only surface findings that changed since the last block. The report should feel proportional to what's new.
 
 ### The verdict
-2-3 sentences. What's the state of their training right now? Honest.
+2-3 sentences. What's the state of their training right now? Honest. Include `days_since_last_session` in context — "last trained 2 days ago, normal cadence" or "9 days since last session, longer break than usual".
 
 ### What's working
 Bullet points. Plain language. What they're doing well with specific exercises and numbers. 3-5 items max.
@@ -189,6 +142,16 @@ If data is too limited to judge, say that in one sentence.
 
 ### Missing from your tracking
 List what the tracker doesn't capture that would help you coach better. One line each. (This draws from §13 internally but don't cite it.)
+
+### Deload status
+One line. Compute from `weeks_since_last_deload`:
+- < 4 weeks: "On track — last deload was N weeks ago."
+- 4-6 weeks: "Deload window open — consider one in the next 1-2 weeks."
+- > 6 weeks: "Deload overdue — prescribing one this block."
+- null (no deloads on record): "No deload on record in the last 3 months — prescribing one."
+
+### Cardio check
+Compare `cardio_last_14d` against §10 targets (150 min Zone 2 + ~20 min intervals per week, so roughly 300 min Zone 2 + 2 interval sessions over 14 days). Flag shortfall in plain numbers: "Zone 2: 60 min logged, target ~300 min. Intervals: 0 sessions, target 2."
 
 ## Phase 2: Planning (into workout_plan.md `## Plan`)
 
@@ -212,7 +175,9 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 - **Volume, frequency, overload, push-pull balance, lengthened position, tendon safety, HRV session placement, deload timing**: §1, §5, §6, §7, §8, §9, §11.
 - Fix gaps from the report (underdeveloped muscles, missing patterns).
 - Maintain exercises the user is already progressing on.
-- No cardio in the plan.
+- **Deload handling (§11):** if `weeks_since_last_deload > 6` or null, the prescribed block IS a deload: reduce each exercise's working-set count to ~50% and keep loads at the last working weight (maintain intensity, cut volume). Tell the user explicitly in "Why this plan" that this block is a deload. In the 4-6 week window, don't force a deload but flag it in the report and offer to plan one if the user asks.
+- **Re-entry after long break:** if `days_since_last_session > 5` and no deload on record in that gap, treat the first prescribed session as a re-entry — drop one working set per compound, prescribe "leave 2-3 reps in the tank" instead of 1-2. Tendon adapts slower than muscle (§7), so under-load the first session back.
+- **Cardio (§10):** read the Cardio check numbers from the Report. If behind target, add cardio sessions to the plan after the strength sessions. Default weekly target: 3× Zone 2 @ 30-45min + 1× intervals @ 20min. Cap total cardio additions at 4 sessions per `/coach` run — if the user is very behind, note the shortfall and prescribe the max. User can override with `/coach no-cardio` to skip this entirely.
 
 **Core training:** Build strong, developed abs. Program 1-2 core exercises per session, aim for 3-4 sessions/week with core. Prefer weighted core (kneeling cable crunch, cable woodchop, captain's chair knee raise) alongside bodyweight (leg raises, dead bugs, hollow body holds). Vary patterns across sessions: flexion, anti-extension, rotation, isometric. Visibility is a body fat question, not a training question.
 
@@ -275,8 +240,35 @@ Rules for tables:
 - 2-3 warmup exercises at the top
 - Order: compounds → isolation → accessories
 
+### Cardio sessions (only when prescribed)
+
+Written as their own sections after the strength workouts, not mixed in. Two shapes:
+
+**Zone 2 (steady-state):**
+
+```
+### Cardio 1: Zone 2 (30-45 min)
+
+- Treadmill run or outdoor, HR 140-150bpm (65-75% max)
+- Target duration: 35 min
+- Notes: pair with an off day or separate from leg work by 6-24h (§10 interference)
+```
+
+**Intervals:**
+
+```
+### Cardio 2: Intervals (20 min total)
+
+- Warmup: 5 min easy
+- Work: 5 × 3 min @ HR 165-175bpm (Zone 4-5), 2 min easy between
+- Cooldown: 5 min easy
+- Notes: not within 24h of a heavy leg session
+```
+
+If the user is on target (`Cardio check` in the report shows no shortfall), don't add cardio sessions to the plan. Don't over-prescribe — cap at 4 cardio sessions total per `/coach` run.
+
 ### Why this plan
-One short paragraph at the end of the file — 3-4 sentences. What the overall block prioritizes and why these sessions are structured this way.
+One short paragraph at the end of the file — 3-4 sentences. What the overall block prioritizes and why these sessions are structured this way. If the block is a deload, say so explicitly.
 
 ## Common Mistakes
 
@@ -293,6 +285,10 @@ One short paragraph at the end of the file — 3-4 sentences. What the overall b
 | Neglecting core | Zero or one core exercise across a full planned week | 1-2 per session, 3-4 sessions/week. Vary patterns. |
 | Running the same exercises every session | Weekly volume looks fine but regions of each muscle go chronically under-stimulated (§17) | The week's selection must cover different regions per target muscle. Use the `exercises-database.md` tags to pick the second variant. |
 | Over-rotating variants every block | No single exercise repeats often enough to read a progression trend | Keep at least one anchor per muscle stable. Rotate 1-2 secondary variants per mesocycle, not the main lifts. |
+| Ignoring the deload window | 7+ weeks of continuous blocks because no one flagged it | `weeks_since_last_deload` drives it. >6 weeks → block IS a deload. 4-6 weeks → flag in report. |
+| Prescribing normal volume after a long break | User took 10 days off, coach plans a full 4-set compound session | `days_since_last_session > 5` and no deload → re-entry session with reduced sets and more RIR on the first day back (§7). |
+| Re-reading the xlsx inline | Re-deriving row parsing, empty-row stop, date quirks every run | Call `scripts/read_tracker.py` once. Only touch the xlsx directly if debugging something the script can't see. |
+| Hardcoding "no cardio" in the plan | Strength-only plan even when user is 150+ min behind §10 target | Cardio-in-plan is the default. Read `cardio_last_14d` from the report and append cardio sessions when behind target (cap 4/run). Honor `/coach no-cardio` if passed. |
 | Static plan with no mesocycle context | Weights and reps with no indication of block position | Tell the user where they are in the mesocycle and what this week targets (§15). |
 | Missing data from casing mismatch | Searching for "Leg Extension" misses rows logged as "Leg extension" | Compare case-insensitively. |
 | Reading empty template rows | Dumping 900+ rows per sheet into context | Stop after 10 consecutive fully empty rows. |

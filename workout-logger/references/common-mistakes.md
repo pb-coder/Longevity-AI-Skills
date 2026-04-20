@@ -14,3 +14,6 @@
 | `lying leg curl 50kg x 10` | "Lying Leg Curl" | "Leg Curl (Lying)" (alias table) |
 | `deadhang 30s` | "Deadhang" (not in database) | "Dead Hang" (alias table) |
 | `leg curl 55kg x 10 (seated)` | "Leg Curl" (ambiguous) | "Leg Curl (Seated)" — modifier resolves variant |
+| Tracker missing from CWD | Search the filesystem for it | Stop, one-line error: tracker must be in the working directory |
+| Date from a brand-new month | Ask the user if it's OK to create the sheet | Just call the script — it creates the `YYYY.MM` sheet with headers if missing |
+| Writing a standalone `.xlsx` or markdown table to chat | Claude.ai-era output | The tracker itself is the output. Summary line only. |

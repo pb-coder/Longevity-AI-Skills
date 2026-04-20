@@ -20,7 +20,8 @@
 | Choosing a training split           | §14 Split Selection |
 | Week-to-week progression within a block | §15 Mesocycle Structure |
 | Pairing exercises / supersets      | §16 Exercise Pairing |
-| Planning workouts / programming    | §1-§11, §14-§16 combined |
+| Regional coverage within a muscle  | §17 Exercise Variation |
+| Planning workouts / programming    | §1-§11, §14-§17 combined |
 
 ---
 
@@ -195,3 +196,18 @@ Straight sets (finish all sets of exercise A before starting exercise B) are the
 **RPE trade-off:** Supersets feel harder. The user should expect higher perceived effort. This doesn't reduce gains, but it affects adherence. Don't superset everything in a session.
 
 **Practical rule:** Supersets are a time-saving tool. Use them for isolation and accessory work. Keep compounds on straight sets. If the session is already within the 70-85 minute window without supersets, don't force them.
+
+## §17 Exercise Variation
+
+Different exercises grow different regions of the same muscle. Running the same exercises session after session under-stimulates parts of each muscle even when weekly volume is adequate. The case for variation is mechanical, not motivational.
+
+**Key evidence:** Burke et al. (2024), 8-week within-subject trial — leg extensions produced greater whole-muscle rectus femoris thickness than leg press (5.3mm vs 2.8mm), with the effect concentrated at the mid and distal measurement sites. Leg press, in turn, favored the vastus lateralis. Zabaleta-Korta et al. (2021) and earlier regional-hypertrophy work show the same pattern beyond the quads: pressing angle shifts pec emphasis (flat vs incline), pulldown grip and elbow path shift lat emphasis (wide vs neutral/V-bar), overhead vs flat triceps work shifts long-head vs lateral-head emphasis. Matching per-muscle volume across sessions is necessary but not sufficient — the selection determines which regions actually receive the stimulus.
+
+**Practical model:**
+
+- **Regional coverage within a week.** For each major muscle, the week's exercises should together cover different regions. Quads: a hip-extension compound (squat or leg press) plus a knee-extension isolation (leg extension), not two copies of either. Chest: at least one flat and one incline variant across the week. Back: vertical pull plus horizontal pull, and if volume allows, a grip-variant pair (wide plus neutral/close). Triceps: one overhead movement (long head) plus one extension/pushdown (lateral/medial).
+- **Cross-block rotation.** Every mesocycle (4-6 weeks, per §11 and §15), rotate 1-2 secondary variants. Flat DB press → incline DB press. Wide-grip pulldown → V-bar pulldown. Keep rotations scoped so progression tracking on at least one anchor per muscle stays continuous.
+- **Anchor compounds stay.** Preserve exercises where the user is actively progressing. The double-progression model in §15 needs a stable reference. Variation lives in the isolation and accessory slots and across blocks, not in the main lifts of an active block.
+- **Don't over-rotate.** Every swapped exercise costs progression data. Keep at least one stable reference per muscle so trends remain legible. Variety that shreds progression tracking is self-defeating.
+
+**Database hooks:** `exercises-database.md` already tags variants (`◆` lengthened-position, plus angle and grip modifiers). Use those tags when picking a second variant for a muscle. Prefer variants already in the database over inventing new ones for variety's sake.

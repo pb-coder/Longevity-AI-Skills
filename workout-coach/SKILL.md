@@ -24,7 +24,7 @@ description: >
 
 Each row = one set. Columns: `Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`.
 
-4. Identify the **most recent workout** (last date with logged sets). Note which muscle groups it trained and which exercises were performed. Use this as the planning baseline: do not repeat the same primary muscle emphasis in the very next session, and carry forward any exercises where progression was visible.
+4. Identify the **most recent workout** (last date with logged sets). Note which muscle groups it trained and which exercises were performed. Use this as the planning baseline: do not repeat the same primary muscle emphasis in the very next session, and carry forward any exercises where progression was visible. The rest of each session's slots are where variation lives — see §17.
 
 ## Output target
 
@@ -62,7 +62,7 @@ Write the file in one pass at the end. Don't stream sections to chat while think
 
 ## Data Reading Strategy
 
-The monthly sheets have 200-900 template rows after the real data. Read with openpyxl and stop after 10 consecutive fully empty rows — don't dump raw sheet contents into context.
+The monthly sheets keep a buffer of empty rows after the last logged set (roughly 2 rows on past months, ~50 on the current month after `/maintain` trims). Read with openpyxl and stop after 10 consecutive fully empty rows — don't dump raw sheet contents into context.
 
 **Critical data format notes:**
 - Dates are usually `'YYYY-MM-DD'` strings. Older rows may be `datetime` objects or have None (carry forward the last known date defensively — the current tracker fills every row, but historical data wasn't always that way).
@@ -208,6 +208,7 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 - **Split selection** (§14): match split to session count. Keep existing split unless there's a problem.
 - **Mesocycle structure** (§15): tell the user where they are in the block and what this week's targets are. No static plans.
 - **Exercise pairing** (§16): straight sets for compounds, supersets for isolation/accessories when it saves time.
+- **Exercise variation** (§17): the week's exercise selection must cover different regions of each major muscle. Anchor compounds where progression is live carry forward; variation plays out in isolation/accessory slots and across blocks.
 - **Volume, frequency, overload, push-pull balance, lengthened position, tendon safety, HRV session placement, deload timing**: §1, §5, §6, §7, §8, §9, §11.
 - Fix gaps from the report (underdeveloped muscles, missing patterns).
 - Maintain exercises the user is already progressing on.
@@ -290,6 +291,8 @@ One short paragraph at the end of the file — 3-4 sentences. What the overall b
 | Impossible cable weights | Suggesting 12kg or 17kg | Cable increments in 5kg steps. Round to the nearest plate. |
 | Scattering equipment | Cable exercises in positions 2, 5, 9 of the session | Batch by equipment within the isolation/accessory block. Never break compound order. |
 | Neglecting core | Zero or one core exercise across a full planned week | 1-2 per session, 3-4 sessions/week. Vary patterns. |
+| Running the same exercises every session | Weekly volume looks fine but regions of each muscle go chronically under-stimulated (§17) | The week's selection must cover different regions per target muscle. Use the `exercises-database.md` tags to pick the second variant. |
+| Over-rotating variants every block | No single exercise repeats often enough to read a progression trend | Keep at least one anchor per muscle stable. Rotate 1-2 secondary variants per mesocycle, not the main lifts. |
 | Static plan with no mesocycle context | Weights and reps with no indication of block position | Tell the user where they are in the mesocycle and what this week targets (§15). |
 | Missing data from casing mismatch | Searching for "Leg Extension" misses rows logged as "Leg extension" | Compare case-insensitively. |
 | Reading empty template rows | Dumping 900+ rows per sheet into context | Stop after 10 consecutive fully empty rows. |

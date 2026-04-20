@@ -129,6 +129,8 @@ Interference: cycling < running for interference. Separate from legs by 6-24h.
 
 Every 4-6 weeks: reduce volume 40-50%, maintain load. Not optional. Accumulated fatigue without deload increases tendon risk (§7) and masks strength.
 
+**Tracker convention:** the user marks deload sessions by writing `Deload Workout` in the Notes column of the first row of the session. `scripts/read_tracker.py` surfaces `deloads` (list of dates) and `weeks_since_last_deload`. Use those directly — don't infer deloads from volume patterns.
+
 ## §12 User Context
 
 25M, 180cm, 78kg, Berlin. Early intermediate (squat/DL 60-70kg). Strict vegan 10yr. Protein 2.0-2.2g/kg (156-172g) due to low plant leucine. PrEP daily (tenofovir → BMD risk; weight-bearing compounds protective). 10g creatine/day. 900mg Ca + D3 5000IU + K2. HRV weekday 30-40ms / weekend 60-70ms. Sleep 7.5-8h, 95%+. No blood work. No deloads. No effort tracking. No bodyweight trend. No protein tracking.

@@ -20,7 +20,7 @@ description: >
 ## Setup
 
 Read before processing:
-- `references/exercises-database.md` — canonical exercise names and tags
+- `../shared/exercises-database.md` — canonical exercise names and tags (shared with `/coach`)
 - `references/aliases.md` — alias table, modifier handling, equipment defaults
 - `references/parsing-rules.md` — parsing logic for all input formats
 - `references/common-mistakes.md` — known parsing traps
@@ -32,9 +32,20 @@ The tracker lives at `./Workout Tracker.xlsx` in the current working directory. 
 1. Parse the message into row dicts — one per set — using the references above.
 2. Write the rows as a JSON array to a temp file (e.g. `/tmp/workout_rows.json`).
 3. Run `scripts/append_workout.py "Workout Tracker.xlsx" /tmp/workout_rows.json`. The script routes each row to its `YYYY.MM` sheet, creating the sheet with headers if missing.
-4. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`.
+4. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)` to the line.
 
 The tracker itself is the output. No markdown tables, no files presented, no narration.
+
+## Session-level flags
+
+**Deload.** If the word `deload` appears anywhere on the header line of a session (before the first exercise bullet), that session is a deload. Examples that all trigger it:
+- `/log 22.04 deload`
+- `/log deload 22.04`
+- `/log 22.04 (deload)`
+
+When set, put the exact string `Deload Workout` in the `notes` field of the **first row** of that session. Subsequent rows for that session are unchanged. If the user also wrote a parenthetical note on the first exercise, merge both: `"Deload Workout; warmup"`.
+
+Multi-date `/log` messages: the `deload` keyword applies per session. The user must mark each date they want flagged.
 
 ## Row schema
 

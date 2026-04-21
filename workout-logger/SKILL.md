@@ -1,21 +1,22 @@
 ---
 name: workout-logger
 description: >
-  Use when the user's message starts with "/log". Do NOT trigger on general
-  fitness questions, training discussion, or workout logging that doesn't begin
-  with the literal command "/log".
+  Appends a parsed workout to ./Workout Tracker.xlsx with canonical styling
+  applied to the new rows. Invoked by the `/log` slash command or when the
+  user explicitly asks to log a workout. Do NOT trigger on general fitness
+  questions, training discussion, or anything that isn't an explicit request
+  to record a workout.
 ---
 
 # Workout Logger
 
-**Trigger**: Message starts with `/log`. No other messages.
+**Invocation**: The `/log` slash command delegates here. You can also be asked directly ("log this workout: …"). Do not trigger on anything else.
 
 ## When NOT to Use
 
 - General fitness questions
 - Training discussion or advice
-- Messages that mention logging but don't start with `/log`
-- Requests to analyze or review past workouts (that's `/coach`)
+- Requests to analyze or review past workouts (that's the `workout-coach` skill, invoked by `/coach`)
 
 ## Setup
 
@@ -31,7 +32,7 @@ The tracker lives at `./Workout Tracker.xlsx` in the current working directory. 
 
 1. Parse the message into row dicts — one per set — using the references above.
 2. Write the rows as a JSON array to a temp file (e.g. `/tmp/workout_rows.json`).
-3. Run `scripts/append_workout.py "Workout Tracker.xlsx" /tmp/workout_rows.json`. The script routes each row to its `YYYY.MM` sheet, creating the sheet with headers if missing.
+3. Run `scripts/append_workout.py "Workout Tracker.xlsx" /tmp/workout_rows.json`. The script routes each row to its `YYYY.MM` sheet (creating it with headers if missing) and applies the canonical monthly-sheet styling after writing — new rows land already styled.
 4. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)` to the line.
 
 The tracker itself is the output. No markdown tables, no files presented, no narration.

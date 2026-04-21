@@ -1,7 +1,9 @@
 """Append parsed workout rows to the right monthly sheet in Workout Tracker.xlsx.
 
 Routes each row to the YYYY.MM sheet matching its date. Creates the sheet
-(headers only) if missing. Leaves styling alone — /maintain handles that.
+(headers only) if missing. Styling is applied on every write via the shared
+`sheet_styles.style_monthly_sheet` so new rows match the rest of the sheet
+without waiting for /maintain.
 
 Input JSON schema (list of row dicts):
     [
@@ -34,6 +36,9 @@ import sys
 from pathlib import Path
 
 import openpyxl
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from sheet_styles import style_monthly_sheet  # noqa: E402
 
 HEADERS = [
     "Date", "#", "Exercise", "Set", "Reps", "kg", "Volume", "Notes",
@@ -104,6 +109,8 @@ def append_rows(tracker_path: Path, rows: list[dict]) -> list[str]:
             for col, val in enumerate(row_values(r), start=1):
                 ws.cell(row=write_row, column=col, value=val)
             write_row += 1
+
+        style_monthly_sheet(ws)
 
         dates = sorted({r["date"] for r in sheet_rows})
         tag = " (new sheet)" if created else ""

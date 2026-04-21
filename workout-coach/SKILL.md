@@ -1,19 +1,21 @@
 ---
 name: workout-coach
 description: >
-  Use when the user's message starts with "/coach". Do NOT trigger on general
-  fitness questions, training discussion, logging, or requests unrelated to the
-  workout tracker.
+  Reads ./Workout Tracker.xlsx, analyzes recent training state, and writes a
+  report plus the next workout plan to ./workout_plan.md. Invoked by the
+  `/coach` slash command or when the user explicitly asks for coaching,
+  analysis, or a new plan. Do NOT trigger on general fitness questions,
+  training discussion, logging, or requests unrelated to the tracker.
 ---
 
 # Workout Coach
 
-**Trigger**: Message starts with `/coach`. No other messages.
+**Invocation**: The `/coach` slash command delegates here. You can also be asked directly ("plan my next workout", "how is my training going"). Do not trigger on unrelated fitness chat.
 
 ## When NOT to Use
 
 - General fitness questions or training discussion
-- Logging a workout (that's `/log`)
+- Logging a workout (that's the `workout-logger` skill, invoked by `/log`)
 - Requests for one-off exercise advice unrelated to the tracker
 
 ## Setup

@@ -29,6 +29,19 @@ def iso_date(value) -> str | None:
     return str(value)[:10]
 
 
+def _find_date_in_row(row: tuple) -> tuple[str | None, int | None]:
+    """Return (YYYY-MM-DD, index) for the first date-shaped value in the first
+    two columns — tolerating both the 4-col layout (Year|Date|Kg|Notes) and
+    the legacy 3-col layout (Date|Kg|Notes)."""
+    for i, v in enumerate(row[:2]):
+        if v is None or v == "":
+            continue
+        s = iso_date(v)
+        if s and len(s) == 10 and s[4] == "-" and s[7] == "-":
+            return s, i
+    return None, None
+
+
 def check(tracker_path: Path, target_date: str) -> dict:
     if not tracker_path.exists():
         print(f"ERROR: tracker not found: {tracker_path}", file=sys.stderr)
@@ -45,9 +58,11 @@ def check(tracker_path: Path, target_date: str) -> dict:
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row:
             continue
-        date_str = iso_date(row[0])
-        kg = row[1] if len(row) > 1 else None
-        if date_str is None or kg is None:
+        date_str, date_idx = _find_date_in_row(row)
+        if date_str is None or date_idx is None:
+            continue
+        kg = row[date_idx + 1] if len(row) > date_idx + 1 else None
+        if kg is None:
             continue
         if date_str == target_date:
             has_today = True

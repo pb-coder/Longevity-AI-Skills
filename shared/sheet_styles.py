@@ -50,12 +50,14 @@ MONTHLY_COLS = 12
 DB_WIDTHS = {"A": 30, "B": 13, "C": 16, "D": 14, "E": 48}
 DB_COLS = 5
 
-# Bodyweight sheet: 3 columns (Date | Kg | Notes). Morning / empty-stomach
-# weigh-ins. Notes left-aligned; Date/Kg centered.
-BODYWEIGHT_WIDTHS = {"A": 12, "B": 7, "C": 40}
-BODYWEIGHT_LEFT_COLS = {"C"}
-BODYWEIGHT_COLS = 3
-BODYWEIGHT_HEADERS = ["Date", "Kg", "Notes"]
+# Bodyweight sheet: 4 columns (Year | Date | Kg | Notes). Morning / empty-stomach
+# weigh-ins. Sorted DESC (newest at the top). Column A holds the year label,
+# merged vertically across all rows that share that year. Notes left-aligned;
+# Year/Date/Kg centered.
+BODYWEIGHT_WIDTHS = {"A": 7, "B": 12, "C": 7, "D": 40}
+BODYWEIGHT_LEFT_COLS = {"D"}
+BODYWEIGHT_COLS = 4
+BODYWEIGHT_HEADERS = ["Year", "Date", "Kg", "Notes"]
 
 
 # ------------------------------------------------------------------ helpers
@@ -111,9 +113,15 @@ def style_monthly_sheet(ws):
 def style_bodyweight_sheet(ws):
     """Apply canonical styling to the Bodyweight sheet.
 
-    Chronological series (Date | Kg | Notes). Headers are always (re)written
-    to enforce canonical labels. Idempotent.
+    Layout: Year | Date | Kg | Notes. Data sorted DESC (newest on top) by the
+    writers (seed_bodyweight.py, append_workout.upsert_bodyweight). This
+    function restyles in place and re-applies the per-year vertical merge on
+    column A based on whatever dates are present in column B. Idempotent.
     """
+    # Unmerge any existing merges so we can re-apply cleanly.
+    for merged_range in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(merged_range))
+
     # Header row
     for c, label in enumerate(BODYWEIGHT_HEADERS, 1):
         cell = ws.cell(row=1, column=c, value=label)
@@ -122,9 +130,18 @@ def style_bodyweight_sheet(ws):
         cell.alignment = align_center
         cell.border = no_border
 
-    # Data rows
+    # Data rows: style every cell, and populate column A with the year
+    # derived from column B. We'll merge contiguous same-year runs below.
     last_data_row, _ = find_last_data_cell(ws)
     for r in range(2, last_data_row + 1):
+        date_val = ws.cell(row=r, column=2).value
+        year = None
+        if date_val is not None and date_val != "":
+            s = str(date_val)[:4]
+            if s.isdigit() and len(s) == 4:
+                year = int(s)
+        ws.cell(row=r, column=1, value=year)
+
         for c in range(1, BODYWEIGHT_COLS + 1):
             cell = ws.cell(row=r, column=c)
             cell.font = font_data
@@ -132,6 +149,21 @@ def style_bodyweight_sheet(ws):
             col = cell.column_letter
             cell.alignment = align_left if col in BODYWEIGHT_LEFT_COLS else align_center
             cell.border = no_border
+
+    # Merge column A in contiguous same-year runs. Requires DESC-sorted data
+    # so that each year's rows are grouped; writers guarantee this.
+    run_start = None
+    run_year = None
+    for r in range(2, last_data_row + 2):  # +2 to flush final run
+        year = ws.cell(row=r, column=1).value if r <= last_data_row else None
+        if year != run_year:
+            if run_year is not None and run_start is not None and r - 1 > run_start:
+                ws.merge_cells(
+                    start_row=run_start, end_row=r - 1,
+                    start_column=1, end_column=1,
+                )
+            run_start = r if year is not None else None
+            run_year = year
 
     # Column widths + freeze pane
     for col, w in BODYWEIGHT_WIDTHS.items():

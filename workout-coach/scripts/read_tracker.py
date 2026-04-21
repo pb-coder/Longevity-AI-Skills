@@ -212,31 +212,46 @@ def find_deloads(wb) -> list[str]:
     return sorted(deloads)
 
 
+def _bw_locate_date(raw: tuple):
+    """Return (date_str, date_idx) for the first date-shaped value in the
+    first two columns. Tolerates both the 4-col layout (Year|Date|Kg|Notes)
+    and the legacy 3-col layout (Date|Kg|Notes) so old trackers still load.
+    """
+    for i, v in enumerate(raw[:2]):
+        if v in (None, ""):
+            continue
+        s = normalize_date(v)
+        if s and len(s) == 10 and s[4] == "-" and s[7] == "-":
+            return s, i
+    return None, None
+
+
 def read_bodyweight(wb) -> list[dict]:
     """Return all Bodyweight entries sorted ascending by date.
 
     Each entry: {"date": "YYYY-MM-DD", "kg": float, "notes": str|None}.
-    Returns [] if the sheet is missing. The Bodyweight sheet owes its
-    morning/empty-stomach convention to the /log capture flow; a non-empty
-    `notes` usually marks an exception to that convention.
+    Returns [] if the sheet is missing. The sheet stores newest-first with
+    a per-year merge on column A, but this function re-sorts ascending so
+    the trend/recent helpers see a stable chronological order.
     """
     if "Bodyweight" not in wb.sheetnames:
         return []
     ws = wb["Bodyweight"]
     out: list[dict] = []
     for raw in ws.iter_rows(min_row=2, values_only=True):
-        if not raw or raw[0] in (None, ""):
+        if not raw:
             continue
-        date_str = normalize_date(raw[0])
-        if date_str is None:
+        date_str, date_idx = _bw_locate_date(raw)
+        if date_str is None or date_idx is None:
             continue
+        kg_raw = raw[date_idx + 1] if len(raw) > date_idx + 1 else None
         try:
-            kg = float(raw[1]) if raw[1] not in (None, "") else None
+            kg = float(kg_raw) if kg_raw not in (None, "") else None
         except (TypeError, ValueError):
             continue
         if kg is None:
             continue
-        notes = raw[2] if len(raw) > 2 else None
+        notes = raw[date_idx + 2] if len(raw) > date_idx + 2 else None
         out.append({
             "date": date_str,
             "kg": kg,

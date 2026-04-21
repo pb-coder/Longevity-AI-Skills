@@ -50,6 +50,13 @@ MONTHLY_COLS = 12
 DB_WIDTHS = {"A": 30, "B": 13, "C": 16, "D": 14, "E": 48}
 DB_COLS = 5
 
+# Bodyweight sheet: 3 columns (Date | Kg | Notes). Morning / empty-stomach
+# weigh-ins. Notes left-aligned; Date/Kg centered.
+BODYWEIGHT_WIDTHS = {"A": 12, "B": 7, "C": 40}
+BODYWEIGHT_LEFT_COLS = {"C"}
+BODYWEIGHT_COLS = 3
+BODYWEIGHT_HEADERS = ["Date", "Kg", "Notes"]
+
 
 # ------------------------------------------------------------------ helpers
 def find_last_data_cell(ws):
@@ -97,6 +104,37 @@ def style_monthly_sheet(ws):
 
     # Column widths + freeze pane
     for col, w in MONTHLY_WIDTHS.items():
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A2"
+
+
+def style_bodyweight_sheet(ws):
+    """Apply canonical styling to the Bodyweight sheet.
+
+    Chronological series (Date | Kg | Notes). Headers are always (re)written
+    to enforce canonical labels. Idempotent.
+    """
+    # Header row
+    for c, label in enumerate(BODYWEIGHT_HEADERS, 1):
+        cell = ws.cell(row=1, column=c, value=label)
+        cell.font = font_header
+        cell.fill = fill_header
+        cell.alignment = align_center
+        cell.border = no_border
+
+    # Data rows
+    last_data_row, _ = find_last_data_cell(ws)
+    for r in range(2, last_data_row + 1):
+        for c in range(1, BODYWEIGHT_COLS + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.font = font_data
+            cell.fill = fill_data
+            col = cell.column_letter
+            cell.alignment = align_left if col in BODYWEIGHT_LEFT_COLS else align_center
+            cell.border = no_border
+
+    # Column widths + freeze pane
+    for col, w in BODYWEIGHT_WIDTHS.items():
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
 

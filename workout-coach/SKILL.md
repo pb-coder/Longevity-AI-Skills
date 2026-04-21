@@ -22,7 +22,7 @@ description: >
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
 2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis.
-3. Run `scripts/read_tracker.py "./Workout Tracker.xlsx"` from the current working directory. The script returns one JSON blob with everything: flat row list (last 3 months), progression summary, deload dates, days since last session, and cardio totals for the last 14 days. If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
+3. Run `scripts/read_tracker.py "./Workout Tracker.xlsx"` from the current working directory. The script returns one JSON blob with everything: flat row list (last 3 months), progression summary, deload dates, days since last session, cardio totals for the last 14 days, and bodyweight series (`bodyweight_latest`, `bodyweight_trend_kg_per_week`, `bodyweight_recent`). If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
 Each row = one set. Columns: `Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`.
 
@@ -79,6 +79,9 @@ What the JSON contains:
 - `deloads`: list of dates where the session's first row had Notes `Deload Workout`
 - `weeks_since_last_deload`: float (null if no deload on record)
 - `cardio_last_14d`: `{zone2_minutes, interval_sessions, total_distance_km}`
+- `bodyweight_latest`: `{date, kg}` of the most recent weigh-in, or null
+- `bodyweight_trend_kg_per_week`: slope over the last 8 clean (fasted) entries, or null if too few data points or span < 7 days
+- `bodyweight_recent`: the last 12 entries, each `{date, kg, notes}` — notes usually empty; non-empty flags an exception to morning/empty-stomach (e.g. `"evening, not fasted"`). The trend function already excludes flagged rows.
 
 Apply the standard filters on top of `rows`:
 - Volume analysis (report): last 4 weeks.
@@ -137,13 +140,24 @@ For each major exercise with enough data:
 
 If data is too limited to judge, say that in one sentence.
 
+**Bodyweight line.** Add one line at the bottom of this section using `bodyweight_latest` and `bodyweight_trend_kg_per_week`:
+
+- Trend null (too few entries or span < 7 days): `Bodyweight: 76.1kg (2026-04-21) — not enough data for a trend yet.`
+- Trend between +0.25 and +0.5 kg/week for hypertrophy: `Bodyweight: 76.1kg, +0.3kg/week — on track for hypertrophy surplus.`
+- Flat (±0.1 kg/week): `Bodyweight: 76.1kg, flat — surplus too small for hypertrophy (§5 expects +0.25–0.5 kg/week at this bodyweight).`
+- Dropping (< -0.1 kg/week): `Bodyweight: 76.1kg, -0.2kg/week — losing weight. Either intentional cut or under-eating; flag it.`
+- Gaining fast (> +0.5 kg/week): `Bodyweight: 76.1kg, +0.7kg/week — surplus too aggressive; fat gain is outrunning muscle.`
+
+Cross-reference `references/training-science.md` for the numbers. Don't cite §5 to the user. The entries assume morning/empty-stomach (standing convention); the trend function excludes rows whose Notes flag non-fasted context so intra-day variance doesn't distort the slope.
+
 **Data sufficiency thresholds:**
 - Progression trend: minimum 3 sessions with the same exercise over 2+ weeks. Below that, state "not enough data" for that exercise.
 - Volume analysis: minimum 2 full training weeks. Below that, report what's visible but caveat the sample size in THE VERDICT.
 - Single-session data: skip ARE YOU GETTING STRONGER entirely. State why.
+- Bodyweight trend: null from `read_tracker.py` → "not enough data for a trend yet." Don't fabricate a direction.
 
 ### Missing from your tracking
-List what the tracker doesn't capture that would help you coach better. One line each. (This draws from §13 internally but don't cite it.)
+List what the tracker doesn't capture that would help you coach better. One line each. (This draws from §13 internally but don't cite it.) Bodyweight is captured on the `Bodyweight` sheet by the morning /log prompt; don't flag it as missing.
 
 ### Deload status
 One line. Compute from `weeks_since_last_deload`:

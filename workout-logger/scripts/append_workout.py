@@ -109,25 +109,46 @@ def ensure_bodyweight_sheet(wb):
     return ws, True
 
 
+def _bw_date_from_row(row: tuple):
+    """Find a YYYY-MM-DD value in the first two columns. Tolerates legacy layout."""
+    for v in row[:2]:
+        if v is None or v == "":
+            continue
+        s = str(v)[:10]
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
+            return s
+    return None
+
+
 def upsert_bodyweight(wb, entries: list[dict]) -> list[str]:
-    """Insert or overwrite bodyweight entries by date. Sort ascending after."""
+    """Insert or overwrite bodyweight entries by date. Sort DESC after."""
     if not entries:
         return []
     ws, created = ensure_bodyweight_sheet(wb)
 
-    # Read existing rows into a date-keyed dict.
+    # Read existing rows into a date-keyed dict. Robust to both the 4-col
+    # layout (Year|Date|Kg|Notes) and the legacy 3-col layout (Date|Kg|Notes).
     merged: dict[str, dict] = {}
     for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or row[0] in (None, ""):
+        if not row:
             continue
-        date = str(row[0])[:10]
+        date = _bw_date_from_row(row)
+        if date is None:
+            continue
+        date_idx = next(
+            (i for i, v in enumerate(row[:2]) if v is not None and str(v)[:10] == date),
+            None,
+        )
+        if date_idx is None:
+            continue
+        kg_raw = row[date_idx + 1] if len(row) > date_idx + 1 else None
+        notes = row[date_idx + 2] if len(row) > date_idx + 2 else None
         try:
-            kg = float(row[1]) if row[1] is not None else None
+            kg = float(kg_raw) if kg_raw is not None else None
         except (TypeError, ValueError):
             continue
         if kg is None:
             continue
-        notes = row[2] if len(row) > 2 else None
         merged[date] = {"kg": kg, "notes": notes}
 
     added = 0
@@ -144,14 +165,18 @@ def upsert_bodyweight(wb, entries: list[dict]) -> list[str]:
             added += 1
             merged[date] = {"kg": kg, "notes": notes}
 
-    # Rewrite sheet body in ascending-date order.
+    # Rewrite sheet body in DESC order. Unmerge first so delete_rows is safe.
+    for merged_range in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(merged_range))
     if ws.max_row > 1:
         ws.delete_rows(2, ws.max_row - 1)
-    for i, date in enumerate(sorted(merged.keys()), start=2):
+    for i, date in enumerate(sorted(merged.keys(), reverse=True), start=2):
         entry = merged[date]
-        ws.cell(row=i, column=1, value=date)
-        ws.cell(row=i, column=2, value=entry["kg"])
-        ws.cell(row=i, column=3, value=entry.get("notes") or None)
+        year = int(date[:4])
+        ws.cell(row=i, column=1, value=year)
+        ws.cell(row=i, column=2, value=date)
+        ws.cell(row=i, column=3, value=entry["kg"])
+        ws.cell(row=i, column=4, value=entry.get("notes") or None)
 
     style_bodyweight_sheet(ws)
 

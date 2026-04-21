@@ -2,7 +2,8 @@
 
 Takes a JSON array of entries and writes them into the Bodyweight sheet
 (creating the sheet if missing), deduplicates by date (last-write-wins),
-sorts ascending, and applies canonical styling.
+sorts DESCENDING (newest at the top), and applies canonical styling
+(Year | Date | Kg | Notes, with column A vertically merged per year).
 
 Input JSON schema:
     [
@@ -19,6 +20,8 @@ This is an import tool, not part of the normal /log flow. For ongoing
 daily captures, append_workout.py handles writes via the `bodyweight`
 payload key.
 """
+from __future__ import annotations
+
 import json
 import sys
 from pathlib import Path
@@ -45,18 +48,44 @@ def ensure_bodyweight_sheet(wb):
     return ws
 
 
+def _date_from_row(row: tuple) -> str | None:
+    """Find a YYYY-MM-DD value in the first two columns, regardless of layout.
+
+    Handles both the current 4-col layout (Year | Date | Kg | Notes) and the
+    legacy 3-col layout (Date | Kg | Notes) so migrations stay safe.
+    """
+    for v in row[:2]:
+        if v is None or v == "":
+            continue
+        s = str(v)[:10]
+        if len(s) == 10 and s[4] == "-" and s[7] == "-":
+            return s
+    return None
+
+
 def read_existing(ws) -> dict[str, dict]:
     """Return {date: {kg, notes}} for existing rows so new entries can merge."""
     out = {}
     for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or row[0] in (None, ""):
+        if not row:
             continue
-        date = str(row[0])[:10]
+        date = _date_from_row(row)
+        if date is None:
+            continue
+        # Kg is the column right after Date. In 4-col, that's index 2; in
+        # legacy 3-col, it's index 1. Detect by locating the date.
+        date_idx = next(
+            (i for i, v in enumerate(row[:2]) if v is not None and str(v)[:10] == date),
+            None,
+        )
+        if date_idx is None:
+            continue
+        kg_raw = row[date_idx + 1] if len(row) > date_idx + 1 else None
+        notes = row[date_idx + 2] if len(row) > date_idx + 2 else None
         try:
-            kg = float(row[1]) if row[1] is not None else None
+            kg = float(kg_raw) if kg_raw is not None else None
         except (TypeError, ValueError):
             continue
-        notes = row[2] if len(row) > 2 else None
         if kg is None:
             continue
         out[date] = {"kg": kg, "notes": notes}
@@ -64,14 +93,22 @@ def read_existing(ws) -> dict[str, dict]:
 
 
 def write_sorted(ws, merged: dict[str, dict]):
-    """Clear old data rows and rewrite in ascending-date order."""
+    """Clear old data and rewrite in DESCENDING-date order with year in col A.
+
+    Unmerges any existing ranges first so the row-delete path can't collide
+    with merged cells left over from a prior styling pass.
+    """
+    for merged_range in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(merged_range))
     if ws.max_row > 1:
         ws.delete_rows(2, ws.max_row - 1)
-    for i, date in enumerate(sorted(merged.keys()), start=2):
+    for i, date in enumerate(sorted(merged.keys(), reverse=True), start=2):
         entry = merged[date]
-        ws.cell(row=i, column=1, value=date)
-        ws.cell(row=i, column=2, value=entry["kg"])
-        ws.cell(row=i, column=3, value=entry.get("notes") or None)
+        year = int(date[:4])
+        ws.cell(row=i, column=1, value=year)
+        ws.cell(row=i, column=2, value=date)
+        ws.cell(row=i, column=3, value=entry["kg"])
+        ws.cell(row=i, column=4, value=entry.get("notes") or None)
 
 
 def seed(tracker_path: Path, entries: list[dict]) -> int:

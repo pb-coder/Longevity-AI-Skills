@@ -7,6 +7,9 @@ Emits one JSON blob on stdout with everything the coach needs:
   - deloads: dates whose first row has Notes 'Deload Workout'
   - weeks_since_last_deload: float, or null if no deload on record
   - cardio_last_14d: zone2_minutes, interval_sessions, total_distance_km
+  - bodyweight_recent: last 12 weigh-ins from the Bodyweight sheet
+  - bodyweight_trend_kg_per_week: slope over the last 8 entries, or null
+  - bodyweight_latest: {date, kg} of the most recent entry, or null
 
 Usage:
     python3 read_tracker.py "<tracker path>" [--months 3] [--today YYYY-MM-DD]
@@ -209,6 +212,64 @@ def find_deloads(wb) -> list[str]:
     return sorted(deloads)
 
 
+def read_bodyweight(wb) -> list[dict]:
+    """Return all Bodyweight entries sorted ascending by date.
+
+    Each entry: {"date": "YYYY-MM-DD", "kg": float, "notes": str|None}.
+    Returns [] if the sheet is missing. The Bodyweight sheet owes its
+    morning/empty-stomach convention to the /log capture flow; a non-empty
+    `notes` usually marks an exception to that convention.
+    """
+    if "Bodyweight" not in wb.sheetnames:
+        return []
+    ws = wb["Bodyweight"]
+    out: list[dict] = []
+    for raw in ws.iter_rows(min_row=2, values_only=True):
+        if not raw or raw[0] in (None, ""):
+            continue
+        date_str = normalize_date(raw[0])
+        if date_str is None:
+            continue
+        try:
+            kg = float(raw[1]) if raw[1] not in (None, "") else None
+        except (TypeError, ValueError):
+            continue
+        if kg is None:
+            continue
+        notes = raw[2] if len(raw) > 2 else None
+        out.append({
+            "date": date_str,
+            "kg": kg,
+            "notes": (str(notes).strip() if notes else None),
+        })
+    out.sort(key=lambda e: e["date"])
+    return out
+
+
+def bodyweight_trend_kg_per_week(entries: list[dict]) -> float | None:
+    """Simple slope over the last 8 entries: (last_kg - first_kg) / weeks_between.
+
+    Returns None if fewer than 3 entries or the span is <7 days (too noisy).
+    Excludes entries with notes flagging non-morning/non-fasted context.
+    """
+    clean = [e for e in entries if not _is_flagged_nonfasted(e)]
+    window = clean[-8:]
+    if len(window) < 3:
+        return None
+    first_d = datetime.strptime(window[0]["date"], "%Y-%m-%d").date()
+    last_d = datetime.strptime(window[-1]["date"], "%Y-%m-%d").date()
+    days = (last_d - first_d).days
+    if days < 7:
+        return None
+    weeks = days / 7.0
+    return round((window[-1]["kg"] - window[0]["kg"]) / weeks, 3)
+
+
+def _is_flagged_nonfasted(entry: dict) -> bool:
+    notes = (entry.get("notes") or "").lower()
+    return any(k in notes for k in ("not fasted", "evening", "after", "post-meal"))
+
+
 def cardio_last_14d(rows: list[dict], today_d: date) -> dict:
     cutoff = today_d - timedelta(days=14)
     zone2_min = 0.0
@@ -272,6 +333,13 @@ def main() -> int:
         d = datetime.strptime(deloads[-1], "%Y-%m-%d").date()
         weeks_since_deload = round((today_d - d).days / 7.0, 1)
 
+    bw_all = read_bodyweight(wb)
+    bw_recent = bw_all[-12:]
+    bw_latest = (
+        {"date": bw_all[-1]["date"], "kg": bw_all[-1]["kg"]}
+        if bw_all else None
+    )
+
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
         "last_session_date": last_session,
@@ -279,6 +347,9 @@ def main() -> int:
         "deloads": deloads,
         "weeks_since_last_deload": weeks_since_deload,
         "cardio_last_14d": cardio_last_14d(rows, today_d),
+        "bodyweight_latest": bw_latest,
+        "bodyweight_trend_kg_per_week": bodyweight_trend_kg_per_week(bw_all),
+        "bodyweight_recent": bw_recent,
         "progression_summary": progression_summary(rows),
         "rows": rows,
     }

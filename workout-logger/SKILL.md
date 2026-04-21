@@ -30,12 +30,27 @@ The tracker lives at `./Workout Tracker.xlsx` in the current working directory. 
 
 ## Flow
 
-1. Parse the message into row dicts — one per set — using the references above.
-2. Write the rows as a JSON array to a temp file (e.g. `/tmp/workout_rows.json`).
-3. Run `scripts/append_workout.py "Workout Tracker.xlsx" /tmp/workout_rows.json`. The script routes each row to its `YYYY.MM` sheet (creating it with headers if missing) and applies the canonical monthly-sheet styling after writing — new rows land already styled.
-4. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)` to the line.
+1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log.
+2. **Bodyweight check.** For each date in the set, run `python3 scripts/check_bodyweight.py "Workout Tracker.xlsx" YYYY-MM-DD`. If `has_today` is `false`, ask the user via `AskUserQuestion`: *"Morning weight for {date}? (kg — empty-stomach. Reply with a number, or say 'skip'.)"* Parse the reply as a float. On "skip" / empty / non-numeric, record nothing for that date. The convention is **morning, empty stomach**; if the user's reply mentions a non-morning context, include that in the `notes` field of the bodyweight entry.
+3. Build the payload JSON (wrapper form) and write it to a temp file (e.g. `/tmp/workout_payload.json`):
+   ```json
+   {
+     "rows": [ ... parsed row dicts ... ],
+     "bodyweight": [ {"date": "YYYY-MM-DD", "kg": 78.4, "notes": null}, ... ]
+   }
+   ```
+   Omit `bodyweight` entirely (or send `[]`) if no weights were captured.
+4. Run `python3 scripts/append_workout.py "Workout Tracker.xlsx" /tmp/workout_payload.json`. The script routes rows to the right `YYYY.MM` sheet, upserts bodyweight entries on the `Bodyweight` sheet (creating it if missing), and applies canonical styling to both — new rows land already styled.
+5. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)`. If one or more weights were logged, append ` | morning weight: 78.4kg` (or comma-separate multiple dates).
 
 The tracker itself is the output. No markdown tables, no files presented, no narration.
+
+## Bodyweight prompting rules
+
+- Only ask when `check_bodyweight.py` says `has_today: false` for the date. Already-logged dates are silent.
+- One prompt per missing date. Don't retry on invalid input — accept a number or treat anything else as skip.
+- The standing convention is **morning, empty stomach**. Only emit a `notes` entry if the user explicitly signals otherwise (e.g. "after dinner" → `"notes": "evening, not fasted"`).
+- If the user has backfilled a workout for a past date and has no retroactive weight, they'll say "skip". That's normal. Never invent a weight.
 
 ## Session-level flags
 

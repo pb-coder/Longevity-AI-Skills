@@ -3,7 +3,7 @@
 Idempotent. Safe to re-run. Performs:
   1. Restyle all sheets to the canonical look
   2. Trim empty trailing rows/columns (with buffer for monthly sheets)
-  3. Reorder sheets: Exercises Database first, months newest → oldest
+  3. Reorder sheets: Exercises Database, Bodyweight, months newest → oldest
   4. Report row counts and verify data integrity
 
 Usage:
@@ -23,18 +23,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from sheet_styles import (  # noqa: E402
     MONTHLY_COLS,
     DB_COLS,
+    BODYWEIGHT_COLS,
     find_last_data_cell,
     style_monthly_sheet,
     style_db_sheet,
+    style_bodyweight_sheet,
 )
 
 # Row buffer policy when trimming empty rows.
 # Current-month sheet: leave a generous buffer since the user is actively logging.
 # Past-month sheets: 2 blank rows.
 # Exercises Database: 0 (static-ish lookup table).
+# Bodyweight: 10 (small buffer for upcoming entries).
 CURRENT_MONTH_BUFFER = 50
 PAST_MONTH_BUFFER = 2
 DB_BUFFER = 0
+BODYWEIGHT_BUFFER = 10
 
 
 # ------------------------------------------------------------------ helpers
@@ -63,12 +67,13 @@ def trim_sheet(ws, buffer: int, target_cols: int):
 
 # ------------------------------------------------------------------ reorder
 def reorder_sheets(wb):
-    """Put Exercises Database first, then monthly sheets newest → oldest."""
+    """Order: Exercises Database, Bodyweight, monthly sheets newest → oldest, then the rest."""
     names = list(wb.sheetnames)
     db = [n for n in names if n == "Exercises Database"]
+    bw = [n for n in names if n == "Bodyweight"]
     months = sorted((n for n in names if is_monthly(n)), reverse=True)
-    other = [n for n in names if n not in db and n not in months]
-    desired = db + months + other
+    other = [n for n in names if n not in db and n not in bw and n not in months]
+    desired = db + bw + months + other
 
     # Use move_sheet: openpyxl needs the sheet object and an index.
     for target_idx, name in enumerate(desired):
@@ -100,6 +105,9 @@ def run(path: Path, dry_run: bool = False) -> int:
         if name == "Exercises Database":
             style_db_sheet(ws)
             trim_sheet(ws, buffer=DB_BUFFER, target_cols=DB_COLS)
+        elif name == "Bodyweight":
+            style_bodyweight_sheet(ws)
+            trim_sheet(ws, buffer=BODYWEIGHT_BUFFER, target_cols=BODYWEIGHT_COLS)
         elif is_monthly(name):
             style_monthly_sheet(ws)
             buf = CURRENT_MONTH_BUFFER if name == current else PAST_MONTH_BUFFER

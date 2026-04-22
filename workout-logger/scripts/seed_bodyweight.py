@@ -3,7 +3,7 @@
 Takes a JSON array of entries and writes them into the Bodyweight sheet
 (creating the sheet if missing), deduplicates by date (last-write-wins),
 sorts DESCENDING (newest at the top), and applies canonical styling
-(Year | Date | Kg | Notes, with column A vertically merged per year).
+(Date | Kg | Notes).
 
 Input JSON schema:
     [
@@ -51,8 +51,8 @@ def ensure_bodyweight_sheet(wb):
 def _date_from_row(row: tuple) -> str | None:
     """Find a YYYY-MM-DD value in the first two columns, regardless of layout.
 
-    Handles both the current 4-col layout (Year | Date | Kg | Notes) and the
-    legacy 3-col layout (Date | Kg | Notes) so migrations stay safe.
+    Handles both the current 3-col layout (Date | Kg | Notes) and the
+    legacy 4-col layout (Year | Date | Kg | Notes) so migrations stay safe.
     """
     for v in row[:2]:
         if v is None or v == "":
@@ -72,8 +72,9 @@ def read_existing(ws) -> dict[str, dict]:
         date = _date_from_row(row)
         if date is None:
             continue
-        # Kg is the column right after Date. In 4-col, that's index 2; in
-        # legacy 3-col, it's index 1. Detect by locating the date.
+        # Kg is the column right after Date. In the current 3-col layout
+        # that's index 1; in the legacy 4-col layout it's index 2. Detect
+        # by locating the date first.
         date_idx = next(
             (i for i, v in enumerate(row[:2]) if v is not None and str(v)[:10] == date),
             None,
@@ -93,10 +94,11 @@ def read_existing(ws) -> dict[str, dict]:
 
 
 def write_sorted(ws, merged: dict[str, dict]):
-    """Clear old data and rewrite in DESCENDING-date order with year in col A.
+    """Clear old data and rewrite in DESCENDING-date order.
 
     Unmerges any existing ranges first so the row-delete path can't collide
-    with merged cells left over from a prior styling pass.
+    with merged cells left over from a prior styling pass (including legacy
+    per-year merges on column A).
     """
     for merged_range in list(ws.merged_cells.ranges):
         ws.unmerge_cells(str(merged_range))
@@ -104,11 +106,9 @@ def write_sorted(ws, merged: dict[str, dict]):
         ws.delete_rows(2, ws.max_row - 1)
     for i, date in enumerate(sorted(merged.keys(), reverse=True), start=2):
         entry = merged[date]
-        year = int(date[:4])
-        ws.cell(row=i, column=1, value=year)
-        ws.cell(row=i, column=2, value=date)
-        ws.cell(row=i, column=3, value=entry["kg"])
-        ws.cell(row=i, column=4, value=entry.get("notes") or None)
+        ws.cell(row=i, column=1, value=date)
+        ws.cell(row=i, column=2, value=entry["kg"])
+        ws.cell(row=i, column=3, value=entry.get("notes") or None)
 
 
 def seed(tracker_path: Path, entries: list[dict]) -> int:

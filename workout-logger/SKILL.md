@@ -75,7 +75,6 @@ Each row is a dict with these keys. `date` / `num` / `exercise` / `set` are requ
   "set": 1,
   "reps": 10,
   "kg": 52,
-  "volume": 520,
   "notes": null,
   "distance_km": null,
   "duration_min": null,
@@ -87,9 +86,9 @@ Each row is a dict with these keys. `date` / `num` / `exercise` / `set` are requ
 Rules:
 - `num` restarts at 1 for each new date. All sets of the same exercise share a `num`.
 - `set` is 1, 2, 3 within an exercise.
-- `volume` = `reps * kg`. Zero for bodyweight and cardio.
+- Do NOT compute or include a `volume` field — the sheet fills Volume via the formula `=reps*kg` and writes a SESSION total via `=SUM(...)` automatically. Skip the arithmetic.
 - The last four fields are cardio-only. Leave null for strength rows.
-- The monthly sheets are always 12 columns. There is no "strength vs cardio" schema switch.
+- The monthly sheets have 13 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`. SESSION is filled in by the styler (per-month session number, merged per date); leave it out of the row dict.
 - Sort rows in the JSON by date ascending, then `num`, then `set`. The script does not re-sort.
 
 ## Rules

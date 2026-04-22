@@ -32,6 +32,7 @@ import openpyxl
 MONTHLY_RE = re.compile(r"^\d{4}\.\d{2}$")
 DELOAD_MARKER = "deload workout"
 EMPTY_STREAK_STOP = 10
+TOTAL_LABEL = "TOTAL"
 
 
 # ---------- helpers ----------
@@ -92,7 +93,17 @@ def parse_distance_km(raw) -> float:
 
 
 # ---------- extraction ----------
-def extract_rows(wb, months_back: int, today_d: date) -> list[dict]:
+def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict]:
+    """Return (rows, session_totals).
+
+    ``rows`` excludes TOTAL summary rows — one entry per logged set. Keys:
+    ``session, date, num, exercise, set, reps, kg, volume, notes,
+    distance_km, duration_min, pace, avg_hr``.
+
+    ``session_totals`` maps ``YYYY-MM-DD`` → total volume lifted that session,
+    populated from the sheet's TOTAL rows (formula-driven). The coach should
+    use this instead of summing ``rows`` per date.
+    """
     cutoff = today_d - timedelta(days=months_back * 31)
     data_sheets = sorted(
         [s for s in wb.sheetnames if MONTHLY_RE.match(s)],
@@ -100,6 +111,7 @@ def extract_rows(wb, months_back: int, today_d: date) -> list[dict]:
     )
 
     rows: list[dict] = []
+    session_totals: dict[str, float] = {}
     for name in data_sheets:
         # Quick filter: sheet YYYY.MM vs cutoff
         y, m = name.split(".")
@@ -112,7 +124,8 @@ def extract_rows(wb, months_back: int, today_d: date) -> list[dict]:
         empty_streak = 0
 
         for raw in ws.iter_rows(min_row=2, values_only=True):
-            date_val, num, exercise, set_n, reps, kg, volume, notes, *rest = (list(raw) + [None] * 12)[:12]
+            (session, date_val, num, exercise, set_n, reps, kg, volume,
+             notes, *rest) = (list(raw) + [None] * 13)[:13]
             distance, duration, pace, avg_hr = rest[:4] if len(rest) >= 4 else (None, None, None, None)
 
             if date_val is None and exercise is None:
@@ -124,17 +137,37 @@ def extract_rows(wb, months_back: int, today_d: date) -> list[dict]:
 
             if date_val is not None:
                 current_date = normalize_date(date_val)
+
+            # TOTAL rows carry the session's total volume. Capture it, skip the row.
+            # Note: openpyxl with data_only=True returns None for formula cells
+            # whose cached value hasn't been written by Excel yet. We fall back
+            # to summing row volumes below if the cached TOTAL is missing.
+            if isinstance(exercise, str) and exercise.strip().upper() == TOTAL_LABEL:
+                if current_date is not None and volume not in (None, ""):
+                    session_totals[current_date] = to_float(volume)
+                continue
+
             if exercise is None or current_date is None:
                 continue
 
+            # Volume is formula-driven in the sheet; if Excel hasn't cached it,
+            # recompute from kg × reps so downstream consumers never see None.
+            reps_i = to_int_or_none(reps)
+            kg_f = to_float(kg)
+            if volume in (None, ""):
+                vol_f = kg_f * (reps_i or 0)
+            else:
+                vol_f = to_float(volume)
+
             rows.append({
+                "session": to_int_or_none(session),
                 "date": current_date,
                 "num": num,
                 "exercise": str(exercise).strip(),
                 "set": set_n,
-                "reps": to_int_or_none(reps),
-                "kg": to_float(kg),
-                "volume": to_float(volume),
+                "reps": reps_i,
+                "kg": kg_f,
+                "volume": vol_f,
                 "notes": (str(notes).strip() if notes else None),
                 "distance_km": parse_distance_km(distance) if distance else None,
                 "duration_min": parse_duration_minutes(duration) if duration else None,
@@ -143,7 +176,17 @@ def extract_rows(wb, months_back: int, today_d: date) -> list[dict]:
             })
 
     rows.sort(key=lambda r: (r["date"], r["num"] or 0, r["set"] or 0))
-    return rows
+
+    # Fill in session_totals for any date whose TOTAL cell lacked a cached
+    # value (common when openpyxl reads formulas Excel hasn't saved yet).
+    # Trust the sheet first — only sum rows for dates the sheet didn't cover.
+    cached_dates = set(session_totals.keys())
+    for r in rows:
+        if r["date"] in cached_dates:
+            continue
+        session_totals[r["date"]] = session_totals.get(r["date"], 0.0) + r["volume"]
+
+    return rows, session_totals
 
 
 def progression_summary(rows: list[dict]) -> list[dict]:
@@ -191,8 +234,9 @@ def find_deloads(wb) -> list[str]:
         seen_dates: set[str] = set()
         empty_streak = 0
         for raw in ws.iter_rows(min_row=2, values_only=True):
-            vals = list(raw) + [None] * 12
-            date_val, _, exercise, _, _, _, _, notes = vals[:8]
+            vals = list(raw) + [None] * 13
+            # SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | ...
+            _session, date_val, _num, exercise, _set_n, _reps, _kg, _vol, notes = vals[:9]
             if date_val is None and exercise is None:
                 empty_streak += 1
                 if empty_streak >= EMPTY_STREAK_STOP:
@@ -202,6 +246,9 @@ def find_deloads(wb) -> list[str]:
             if date_val is not None:
                 current_date = normalize_date(date_val)
             if current_date is None or exercise is None:
+                continue
+            # TOTAL rows never carry a deload marker; skip without consuming "first row".
+            if isinstance(exercise, str) and exercise.strip().upper() == TOTAL_LABEL:
                 continue
             # Only the first row of a date can mark the session as a deload.
             if current_date in seen_dates:
@@ -214,8 +261,9 @@ def find_deloads(wb) -> list[str]:
 
 def _bw_locate_date(raw: tuple):
     """Return (date_str, date_idx) for the first date-shaped value in the
-    first two columns. Tolerates both the 4-col layout (Year|Date|Kg|Notes)
-    and the legacy 3-col layout (Date|Kg|Notes) so old trackers still load.
+    first two columns. The current layout is 3-col (Date|Kg|Notes) with the
+    date in col A; the legacy 4-col layout (Year|Date|Kg|Notes) kept it in
+    col B. Scanning both positions lets this load either cleanly.
     """
     for i, v in enumerate(raw[:2]):
         if v in (None, ""):
@@ -334,7 +382,7 @@ def main() -> int:
     )
 
     wb = openpyxl.load_workbook(args.tracker, data_only=True)
-    rows = extract_rows(wb, args.months, today_d)
+    rows, session_totals = extract_rows(wb, args.months, today_d)
     deloads = find_deloads(wb)
 
     last_session = max((r["date"] for r in rows), default=None)
@@ -366,6 +414,7 @@ def main() -> int:
         "bodyweight_trend_kg_per_week": bodyweight_trend_kg_per_week(bw_all),
         "bodyweight_recent": bw_recent,
         "progression_summary": progression_summary(rows),
+        "session_totals": session_totals,
         "rows": rows,
     }
     json.dump(out, sys.stdout, ensure_ascii=False, indent=2)

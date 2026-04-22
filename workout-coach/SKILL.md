@@ -24,7 +24,7 @@ description: >
 2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis.
 3. Run `scripts/read_tracker.py "./Workout Tracker.xlsx"` from the current working directory. The script returns one JSON blob with everything: flat row list (last 3 months), progression summary, deload dates, days since last session, cardio totals for the last 14 days, and bodyweight series (`bodyweight_latest`, `bodyweight_trend_kg_per_week`, `bodyweight_recent`). If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
-Each row = one set. Columns: `Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`.
+Each row = one set. Columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`. SESSION is a per-month number merged across rows of the same date; the sheet closes each strength session with a `TOTAL` row carrying the session's total volume (`read_tracker.py` exposes these as `session_totals`, so don't sum yourself).
 
 4. From the script's output, identify the **most recent workout** (last date with logged sets). Note which muscle groups it trained and which exercises were performed. Use this as the planning baseline: do not repeat the same primary muscle emphasis in the very next session, and carry forward any exercises where progression was visible. The rest of each session's slots are where variation lives — see §17.
 
@@ -82,9 +82,10 @@ What the JSON contains:
 - `bodyweight_latest`: `{date, kg}` of the most recent weigh-in, or null
 - `bodyweight_trend_kg_per_week`: slope over the last 8 clean (fasted) entries, or null if too few data points or span < 7 days
 - `bodyweight_recent`: the last 12 entries, each `{date, kg, notes}` — notes usually empty; non-empty flags an exception to morning/empty-stomach (e.g. `"evening, not fasted"`). The trend function already excludes flagged rows.
+- `session_totals`: `{YYYY-MM-DD: total_volume_kg}` — one entry per strength session, populated from the sheet's TOTAL rows. Use this for weekly/recent volume reporting instead of summing `rows` yourself.
 
 Apply the standard filters on top of `rows`:
-- Volume analysis (report): last 4 weeks.
+- Volume analysis (report): last 4 weeks. Read totals from `session_totals` — don't sum `rows`.
 - Progression trends (report): use `progression_summary` directly for major compounds (bench, squat, deadlift, OHP, row); filter `rows` if you need deeper history.
 - Workout planning: last 2 weeks.
 - Most recent session: filter to the max date.

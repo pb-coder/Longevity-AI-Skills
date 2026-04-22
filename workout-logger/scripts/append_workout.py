@@ -47,14 +47,14 @@ import openpyxl
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from sheet_styles import (  # noqa: E402
     BODYWEIGHT_HEADERS,
+    MONTHLY_HEADERS,
+    TOTAL_LABEL,
+    _numeric_cell,
     style_bodyweight_sheet,
     style_monthly_sheet,
 )
 
-HEADERS = [
-    "Date", "#", "Exercise", "Set", "Reps", "kg", "Volume", "Notes",
-    "Distance (km)", "Duration (min)", "Pace (min/km)", "Avg HR",
-]
+HEADERS = MONTHLY_HEADERS
 
 
 def sheet_for_date(date_str: str) -> str:
@@ -64,9 +64,18 @@ def sheet_for_date(date_str: str) -> str:
 
 
 def find_last_data_row(ws) -> int:
-    """Return the last row containing any value. 1 if only headers / empty."""
+    """Return the last row containing real set data.
+
+    Trailing TOTAL rows are skipped so new sets land at the session boundary,
+    not after the TOTAL. When `style_monthly_sheet` runs after the append it
+    rebuilds TOTAL rows in the correct place.
+    """
     last = 1
     for row in ws.iter_rows(min_row=2):
+        # Column D (index 3) is Exercise in the 13-col layout.
+        exercise = row[3].value if len(row) > 3 else None
+        if exercise == TOTAL_LABEL:
+            continue
         if any(c.value is not None and c.value != "" for c in row):
             last = row[0].row
     return last
@@ -83,20 +92,31 @@ def ensure_sheet(wb, name: str):
 
 
 def row_values(r: dict):
-    """Build the 12-col row. Date/#/Exercise populated on every row (tracker convention)."""
+    """Build the 13-col row. SESSION and Volume are left blank — the styler
+    populates the SESSION number (merged per date) and writes the Volume
+    formula (``=F*G``) on every set row. Date/#/Exercise are populated on
+    every row (tracker convention).
+
+    Numeric columns are coerced to real ints/floats via ``_numeric_cell`` so
+    Excel can consume them in arithmetic formulas — stringified numbers like
+    ``"67,5"`` would silently break ``=F*G`` and produce #VALUE!. The
+    styler also normalises on every write, but pre-coercing here means any
+    intermediate inspection of the sheet shows clean types from the start.
+    """
     return [
+        None,  # SESSION — styler fills & merges
         r["date"],
-        r["num"],
+        _numeric_cell(r["num"]),
         r["exercise"],
-        r["set"],
-        r.get("reps"),
-        r.get("kg"),
-        r.get("volume"),
+        _numeric_cell(r["set"]),
+        _numeric_cell(r.get("reps")),
+        _numeric_cell(r.get("kg")),
+        None,  # Volume — styler writes =F*G formula
         r.get("notes") or None,
-        r.get("distance_km"),
-        r.get("duration_min"),
-        r.get("pace"),
-        r.get("avg_hr"),
+        _numeric_cell(r.get("distance_km")),
+        r.get("duration_min"),  # MM:SS string — not arithmetic
+        r.get("pace"),           # MM:SS string — not arithmetic
+        _numeric_cell(r.get("avg_hr")),
     ]
 
 
@@ -110,7 +130,9 @@ def ensure_bodyweight_sheet(wb):
 
 
 def _bw_date_from_row(row: tuple):
-    """Find a YYYY-MM-DD value in the first two columns. Tolerates legacy layout."""
+    """Find a YYYY-MM-DD value anywhere in the first two columns. Tolerates
+    the legacy 4-col layout (``Year | Date | Kg | Notes``) alongside the
+    current 3-col layout (``Date | Kg | Notes``)."""
     for v in row[:2]:
         if v is None or v == "":
             continue
@@ -126,8 +148,9 @@ def upsert_bodyweight(wb, entries: list[dict]) -> list[str]:
         return []
     ws, created = ensure_bodyweight_sheet(wb)
 
-    # Read existing rows into a date-keyed dict. Robust to both the 4-col
-    # layout (Year|Date|Kg|Notes) and the legacy 3-col layout (Date|Kg|Notes).
+    # Read existing rows into a date-keyed dict. Tolerates both the current
+    # 3-col layout (Date|Kg|Notes) and the legacy 4-col layout
+    # (Year|Date|Kg|Notes) so this runs cleanly against un-migrated trackers.
     merged: dict[str, dict] = {}
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row:
@@ -172,11 +195,9 @@ def upsert_bodyweight(wb, entries: list[dict]) -> list[str]:
         ws.delete_rows(2, ws.max_row - 1)
     for i, date in enumerate(sorted(merged.keys(), reverse=True), start=2):
         entry = merged[date]
-        year = int(date[:4])
-        ws.cell(row=i, column=1, value=year)
-        ws.cell(row=i, column=2, value=date)
-        ws.cell(row=i, column=3, value=entry["kg"])
-        ws.cell(row=i, column=4, value=entry.get("notes") or None)
+        ws.cell(row=i, column=1, value=date)
+        ws.cell(row=i, column=2, value=entry["kg"])
+        ws.cell(row=i, column=3, value=entry.get("notes") or None)
 
     style_bodyweight_sheet(ws)
 
@@ -197,6 +218,10 @@ def append_rows(tracker_path: Path, rows: list[dict]) -> list[str]:
 
     for sheet_name, sheet_rows in by_sheet.items():
         ws, created = ensure_sheet(wb, sheet_name)
+
+        # Ensure sheet is on the current 13-col layout before we write 13-col
+        # rows. Cheap idempotent no-op if already migrated.
+        style_monthly_sheet(ws)
 
         last_row = find_last_data_row(ws)
         write_row = last_row + 1
@@ -230,6 +255,8 @@ def write_payload(tracker_path: Path, rows: list[dict], bodyweight: list[dict]) 
             by_sheet.setdefault(sheet_for_date(r["date"]), []).append(r)
         for sheet_name, sheet_rows in by_sheet.items():
             ws, created = ensure_sheet(wb, sheet_name)
+            # Migrate legacy 12-col layout first so the 13-col write aligns.
+            style_monthly_sheet(ws)
             last_row = find_last_data_row(ws)
             write_row = last_row + 1
             for r in sheet_rows:

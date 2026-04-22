@@ -96,10 +96,21 @@ def run(path: Path, dry_run: bool = False) -> int:
         print(f"Backup: {backup.name}")
 
     wb = openpyxl.load_workbook(path)
+
+    # 0. Drop empty monthly sheets that aren't the current month — keeps the
+    # workbook lean. Empty sheets get created by accident (e.g. a future-month
+    # placeholder) and clutter the tab bar. The current month is preserved
+    # even when empty because /log may write to it any moment.
+    current = current_month_key()
+    for name in list(wb.sheetnames):
+        if is_monthly(name) and name != current:
+            if count_nonempty_rows(wb[name]) == 0:
+                del wb[name]
+                print(f"Dropped empty sheet: {name}")
+
     before_counts = {name: count_nonempty_rows(wb[name]) for name in wb.sheetnames}
 
     # 1. Style + trim every sheet
-    current = current_month_key()
     for name in list(wb.sheetnames):
         ws = wb[name]
         if name == "Exercises Database":
@@ -142,6 +153,30 @@ def run(path: Path, dry_run: bool = False) -> int:
 
 
 def count_nonempty_rows(ws) -> int:
+    """Count non-empty rows.
+
+    Monthly sheets: count rows with an Exercise value populated, excluding
+    TOTAL summary rows. Exercise sits at col C pre-migration, col D post-
+    migration; we read both and take whichever is populated. This ignores
+    legacy trailing rows that only held a carried-down Volume formula —
+    they have no exercise name, so they don't represent logged sets either
+    before or after migration. Keeps the before/after verify stable.
+
+    Other sheets: count any row with content.
+    """
+    if is_monthly(ws.title):
+        count = 0
+        for row in ws.iter_rows(min_row=2):
+            ex_c = row[2].value if len(row) > 2 else None  # col C
+            ex_d = row[3].value if len(row) > 3 else None  # col D
+            exercise = ex_c if isinstance(ex_c, str) else ex_d
+            if not isinstance(exercise, str) or not exercise.strip():
+                continue
+            if exercise.strip().upper() == "TOTAL":
+                continue
+            count += 1
+        return count
+
     count = 0
     for row in ws.iter_rows():
         if any(c.value is not None and c.value != "" for c in row):

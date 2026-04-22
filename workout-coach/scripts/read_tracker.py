@@ -24,6 +24,7 @@ import argparse
 import json
 import re
 import sys
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -33,6 +34,77 @@ MONTHLY_RE = re.compile(r"^\d{4}\.\d{2}$")
 DELOAD_MARKER = "deload workout"
 EMPTY_STREAK_STOP = 10
 TOTAL_LABEL = "TOTAL"
+
+# Per-muscle weekly volume landmarks (hard sets). Source: references/training-
+# science.md §1 + RP Strength tables. MV=maintenance, MEV=minimum effective,
+# MAV=maximum adaptive, MRV=maximum recoverable. Numbers are individual and
+# approximate; the coach uses them to name the band the current volume sits in.
+VOLUME_LANDMARKS = {
+    "chest":        {"mv": 6,  "mev": 10, "mav": 16, "mrv": 22},
+    "back":         {"mv": 6,  "mev": 10, "mav": 18, "mrv": 25},
+    "lats":         {"mv": 6,  "mev": 10, "mav": 16, "mrv": 22},
+    "quads":        {"mv": 6,  "mev": 10, "mav": 18, "mrv": 22},
+    "hamstrings":   {"mv": 4,  "mev": 8,  "mav": 14, "mrv": 18},
+    "glutes":       {"mv": 4,  "mev": 8,  "mav": 14, "mrv": 18},
+    "front_delts":  {"mv": 4,  "mev": 6,  "mav": 12, "mrv": 16},
+    "side_delts":   {"mv": 6,  "mev": 8,  "mav": 16, "mrv": 22},
+    "rear_delts":   {"mv": 6,  "mev": 8,  "mav": 16, "mrv": 22},
+    "biceps":       {"mv": 5,  "mev": 8,  "mav": 14, "mrv": 20},
+    "triceps":      {"mv": 4,  "mev": 6,  "mav": 12, "mrv": 18},
+    "calves":       {"mv": 6,  "mev": 8,  "mav": 16, "mrv": 22},
+    "forearms":     {"mv": 2,  "mev": 4,  "mav": 8,  "mrv": 12},
+    "abs":          {"mv": 0,  "mev": 4,  "mav": 16, "mrv": 25},
+    "core":         {"mv": 0,  "mev": 4,  "mav": 16, "mrv": 25},
+    "erectors":     {"mv": 2,  "mev": 4,  "mav": 10, "mrv": 16},
+    "traps":        {"mv": 2,  "mev": 4,  "mav": 10, "mrv": 16},
+    "adductors":    {"mv": 0,  "mev": 2,  "mav": 8,  "mrv": 12},
+    "neck":         {"mv": 0,  "mev": 2,  "mav": 6,  "mrv": 12},
+}
+
+# Canonicalise the muscle tokens that appear in exercises-database.md to the
+# snake_case keys used everywhere else (and in VOLUME_LANDMARKS).
+MUSCLE_ALIASES = {
+    "chest": "chest", "upper chest": "upper_chest",
+    "back": "back", "lats": "lats",
+    "biceps": "biceps", "triceps": "triceps",
+    "quads": "quads", "hamstrings": "hamstrings",
+    "glutes": "glutes", "adductors": "adductors",
+    "calves": "calves", "forearms": "forearms",
+    "abs": "abs", "core": "core",
+    "erectors": "erectors", "traps": "traps",
+    "neck": "neck",
+    "front delt": "front_delts", "front delts": "front_delts",
+    "side delt": "side_delts",  "side delts":  "side_delts",
+    "rear delt": "rear_delts",  "rear delts":  "rear_delts",
+    "external rotators": "external_rotators",
+    "shoulders": "shoulders",   "full body": "full_body",
+    "posterior chain": None,    # too broad to assign — skip as primary
+}
+
+# Which ## SECTION header implies which primary muscle. None means "use
+# subsection hint or parenthetical override". SHOULDERS is deliberately None
+# because its subsections route to specific delt regions.
+SECTION_PRIMARY = {
+    "WARMUP": None, "CARDIO": None, "FULL BODY": None, "FULL BODY (COMPOUND)": None,
+    "CHEST": "chest", "BACK": "back",
+    "SHOULDERS": None,
+    "BICEPS": "biceps", "TRICEPS": "triceps",
+    "QUADS": "quads", "HAMSTRINGS": "hamstrings",
+    "GLUTES": "glutes", "ADDUCTORS": "adductors",
+    "CALVES": "calves", "CORE": "core",
+    "NECK": "neck",
+}
+
+# Subsection hints that override the section heading (used inside SHOULDERS
+# and for the stray "Forearms" subsection under BICEPS). Matched by substring
+# against the lowercased subsection header.
+SUBSECTION_PRIMARY_HINTS = [
+    ("lateral delt", "side_delts"),
+    ("rear delt",    "rear_delts"),
+    ("vertical push","front_delts"),  # overhead press etc. primarily hit front delts
+    ("traps",        "traps"),
+    ("forearms",     "forearms"),
+]
 
 
 # ---------- helpers ----------
@@ -365,6 +437,269 @@ def cardio_last_14d(rows: list[dict], today_d: date) -> dict:
     }
 
 
+# ---------- exercises database ----------
+_BULLET_RE = re.compile(
+    r"^\s*-\s+"
+    r"(?P<name>.+?)"                                 # exercise name
+    r"(?:\s+\[(?P<equip>[^\]]+)\])?"                # [EQUIPMENT] optional
+    r"(?:\s*—\s*(?P<syn>[^◆(]+?))?"                 # synergist list after em-dash
+    r"(?P<leng>\s*◆)?"                              # optional lengthened flag
+    r"(?:\s*\((?P<note>[^)]+)\))?"                  # optional parenthetical note
+    r"\s*$"
+)
+
+
+def _canon_muscle(tok: str) -> str | None:
+    """Map a raw muscle token from the database to a canonical key (or None)."""
+    t = tok.strip().lower()
+    # Strip trailing "s" pluralisation only for a short whitelist — avoid
+    # collapsing "lats" and "hamstrings" which are already plural canonical.
+    if t in MUSCLE_ALIASES:
+        return MUSCLE_ALIASES[t]
+    # Secondary pass: split on "/" for things like "erectors/lower back".
+    for part in re.split(r"[/,]", t):
+        p = part.strip()
+        if p in MUSCLE_ALIASES:
+            return MUSCLE_ALIASES[p]
+    return None
+
+
+def _primary_from_note(note: str | None) -> str | None:
+    """If the bullet has ``(primary: X)``, return X's canonical muscle."""
+    if not note:
+        return None
+    m = re.match(r"\s*primary:\s*(.+)$", note.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    return _canon_muscle(m.group(1))
+
+
+def load_exercises_db(path: Path) -> dict[str, dict]:
+    """Parse ``exercises-database.md`` into a dict keyed by lowercased
+    exercise name. Each value:
+      ``{"primary": str|None, "synergists": [str], "lengthened": bool,
+         "equipment": str|None, "is_warmup": bool}``
+
+    Unknown muscle tokens are silently dropped (not mapped) — the caller
+    can detect gaps by comparing logged exercise names against this dict
+    and surfacing anything missing as ``unknown_exercises``.
+    """
+    db: dict[str, dict] = {}
+    if not path.exists():
+        return db
+
+    section = None        # e.g. "CHEST"
+    subsection_primary = None  # regional override from a ### hint
+    section_primary = None     # derived from SECTION_PRIMARY[section]
+
+    for line in path.read_text().splitlines():
+        s = line.rstrip()
+        if s.startswith("## "):
+            section = s[3:].strip().upper()
+            section_primary = SECTION_PRIMARY.get(section)
+            subsection_primary = None
+            continue
+        if s.startswith("### "):
+            sub = s[4:].strip().lower()
+            subsection_primary = None
+            for key, muscle in SUBSECTION_PRIMARY_HINTS:
+                if key in sub:
+                    subsection_primary = muscle
+                    break
+            continue
+        m = _BULLET_RE.match(s)
+        if not m:
+            continue
+
+        name = m.group("name").strip()
+        # Bullets in prose paragraphs (e.g. "(Biceps receive ~0.5 sets from…)")
+        # are parenthetical, not exercises.
+        if name.startswith("(") or ":" in name:
+            continue
+
+        equip = (m.group("equip") or "").strip() or None
+        lengthened = m.group("leng") is not None
+        note = m.group("note")
+        raw_syn = m.group("syn") or ""
+
+        synergists: list[str] = []
+        for tok in raw_syn.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            # Each synergist in the database is written as "+muscle".
+            if tok.startswith("+"):
+                tok = tok[1:].strip()
+            canon = _canon_muscle(tok)
+            if canon:
+                synergists.append(canon)
+
+        # Primary resolution order: (primary: X) override → subsection hint
+        # → section heading. None falls through for untagged sections (WARMUP,
+        # CARDIO, FULL BODY) — those exercises get zero volume attribution.
+        primary = (
+            _primary_from_note(note)
+            or subsection_primary
+            or section_primary
+        )
+
+        db[name.lower()] = {
+            "primary": primary,
+            "synergists": synergists,
+            "lengthened": lengthened,
+            "equipment": equip,
+            "is_warmup": section == "WARMUP",
+            "is_cardio": section == "CARDIO",
+        }
+    return db
+
+
+# ---------- derived coach features ----------
+def _is_working_set(r: dict) -> bool:
+    """A working set has a positive rep count and no 'warmup' in Notes.
+    Bodyweight sets (kg=0, reps>0 like Pull-Up or Plank) count. Cardio rows
+    (reps=0) and warmup-tagged rows are skipped."""
+    reps = r.get("reps") or 0
+    if reps <= 0:
+        return False
+    notes = (r.get("notes") or "").lower()
+    if "warmup" in notes:
+        return False
+    return True
+
+
+def weekly_volume_per_muscle(
+    rows: list[dict],
+    db: dict[str, dict],
+    today_d: date,
+    window_days: int,
+    unknown_out: set[str],
+) -> dict:
+    """Fractional hard-set count per muscle over the last ``window_days``.
+
+    Primary muscle = 1.0 set, each synergist = 0.5 set (per training-science
+    §1). Warmup exercises (database section) and warmup-marked sets are
+    skipped. Unknown exercises — logged names that don't appear in the db —
+    are collected into ``unknown_out`` for the caller to surface.
+    """
+    cutoff = today_d - timedelta(days=window_days)
+    sets: dict[str, float] = defaultdict(float)
+    for r in rows:
+        if not _is_working_set(r):
+            continue
+        try:
+            d = datetime.strptime(r["date"], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d < cutoff:
+            continue
+        entry = db.get(r["exercise"].lower())
+        if entry is None:
+            unknown_out.add(r["exercise"])
+            continue
+        if entry.get("is_warmup"):
+            continue
+        if entry["primary"]:
+            sets[entry["primary"]] += 1.0
+        for syn in entry["synergists"]:
+            sets[syn] += 0.5
+
+    current = {m: round(v, 1) for m, v in sets.items()}
+    landmarks = {m: VOLUME_LANDMARKS[m] for m in current if m in VOLUME_LANDMARKS}
+    return {
+        "window_days": window_days,
+        "current": current,
+        "landmarks": landmarks,
+    }
+
+
+def estimated_1rm(rows: list[dict]) -> dict:
+    """Epley 1RM projection per exercise.
+
+    For each exercise, take the heaviest projected e1RM per date (over all
+    working sets that session), then report current/prev/best/last_date and
+    the current-vs-prev delta in kg. Bodyweight and warmup sets excluded.
+    """
+    by_ex: dict[str, list[dict]] = {}
+    canonical_name: dict[str, str] = {}
+    for r in rows:
+        if not _is_working_set(r):
+            continue
+        kg = r.get("kg") or 0
+        reps = r.get("reps") or 0
+        if kg <= 0 or reps <= 0:
+            continue
+        key = r["exercise"].lower()
+        canonical_name.setdefault(key, r["exercise"])
+        e1rm = kg * (1.0 + reps / 30.0)
+        by_ex.setdefault(key, []).append({"date": r["date"], "e1rm": e1rm})
+
+    out: dict[str, dict] = {}
+    for key, entries in by_ex.items():
+        # Per date, keep the heaviest projected e1RM.
+        per_date: dict[str, float] = {}
+        for e in entries:
+            if e["e1rm"] > per_date.get(e["date"], -1):
+                per_date[e["date"]] = e["e1rm"]
+        dates_desc = sorted(per_date.keys(), reverse=True)
+        if not dates_desc:
+            continue
+        current = per_date[dates_desc[0]]
+        prev = per_date[dates_desc[1]] if len(dates_desc) >= 2 else None
+        best = max(per_date.values())
+        out[canonical_name[key]] = {
+            "current_e1rm_kg": round(current, 1),
+            "prev_e1rm_kg":    round(prev, 1) if prev is not None else None,
+            "best_e1rm_kg":    round(best, 1),
+            "last_date":       dates_desc[0],
+            "delta_vs_prev_kg":(round(current - prev, 1) if prev is not None else None),
+        }
+    return out
+
+
+def stale_exercises(
+    rows: list[dict], db: dict[str, dict], today_d: date, threshold_days: int
+) -> list[dict]:
+    """Exercises whose last appearance is ≥ ``threshold_days`` ago.
+
+    Warmup-section exercises are excluded — those cycle on and off by
+    design. Useful for spotting movements that were tried once or twice and
+    dropped; the coach can decide whether to retire or reintroduce them.
+    """
+    last_seen: dict[str, str] = {}
+    sessions_count: dict[str, set[str]] = defaultdict(set)
+    canonical: dict[str, str] = {}
+    for r in rows:
+        if not _is_working_set(r):
+            continue
+        key = r["exercise"].lower()
+        entry = db.get(key)
+        if entry and (entry.get("is_warmup") or entry.get("is_cardio")):
+            continue
+        canonical.setdefault(key, r["exercise"])
+        if r["date"] > last_seen.get(key, ""):
+            last_seen[key] = r["date"]
+        sessions_count[key].add(r["date"])
+
+    out = []
+    for key, last in last_seen.items():
+        try:
+            d = datetime.strptime(last, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        days = (today_d - d).days
+        if days < threshold_days:
+            continue
+        out.append({
+            "exercise":        canonical[key],
+            "last_date":       last,
+            "weeks_since":     round(days / 7.0, 1),
+            "sessions_logged": len(sessions_count[key]),
+        })
+    out.sort(key=lambda e: e["weeks_since"], reverse=True)
+    return out
+
+
 # ---------- main ----------
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -403,6 +738,25 @@ def main() -> int:
         if bw_all else None
     )
 
+    # Parse the exercises database once; it's read-only for this run.
+    db_path = Path(__file__).resolve().parents[2] / "shared" / "exercises-database.md"
+    db = load_exercises_db(db_path)
+
+    unknown_set: set[str] = set()
+    weekly_volume = weekly_volume_per_muscle(rows, db, today_d, 28, unknown_set)
+    e1rm = estimated_1rm(rows)
+    stale = stale_exercises(rows, db, today_d, 28)
+
+    # Surface any logged exercise across the full loaded window that doesn't
+    # match an entry in the database — not just the 28-day volume window.
+    # Catches typos/rename drift (e.g. "Deadhang" vs "Dead Hang") that would
+    # otherwise silently under-count volume and dodge rotation decisions.
+    for r in rows:
+        if not _is_working_set(r):
+            continue
+        if r["exercise"].lower() not in db:
+            unknown_set.add(r["exercise"])
+
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
         "last_session_date": last_session,
@@ -415,6 +769,10 @@ def main() -> int:
         "bodyweight_recent": bw_recent,
         "progression_summary": progression_summary(rows),
         "session_totals": session_totals,
+        "weekly_volume_per_muscle": weekly_volume,
+        "estimated_1rm": e1rm,
+        "stale_exercises": stale,
+        "unknown_exercises": sorted(unknown_set),
         "rows": rows,
     }
     json.dump(out, sys.stdout, ensure_ascii=False, indent=2)

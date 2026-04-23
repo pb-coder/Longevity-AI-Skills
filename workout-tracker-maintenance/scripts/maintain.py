@@ -20,7 +20,7 @@ from pathlib import Path
 import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from sheet_styles import (  # noqa: E402
+from tracker_sheet import (  # noqa: E402
     MONTHLY_COLS,
     DB_COLS,
     BODYWEIGHT_COLS,

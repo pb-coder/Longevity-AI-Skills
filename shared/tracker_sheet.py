@@ -1,10 +1,16 @@
-"""Canonical Workout Tracker styling.
+"""Canonical Workout Tracker sheet module.
 
-Shared between /log (applied on every append) and /maintain (full-sheet
-restyle). Idempotent: running `style_monthly_sheet` twice in a row is a no-op.
+Single source of truth for:
 
-Keep this module the single source of truth for fonts, fills, borders,
-column widths, and alignment.
+- **Layout**: headers, column counts, widths (monthly / bodyweight / DB).
+- **Coercions**: ``date_str`` for Date cells, ``_numeric_cell`` for
+  stringified numbers, ``bw_locate_date`` for the bodyweight row layout.
+- **Styling**: fonts, fills, borders, alignment, freeze pane.
+
+Shared by ``/log`` (applied on every append) and ``/maintain`` (full-sheet
+restyle). ``/coach`` imports the coercion helpers only. Every
+``style_*_sheet`` function is idempotent — running it twice in a row is a
+no-op.
 """
 from datetime import datetime, date
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -94,20 +100,45 @@ def _to_num(v):
         return 0.0
 
 
-def _date_str(v):
+def date_str(v):
     """Coerce a Date cell value to a canonical ``YYYY-MM-DD`` string.
 
+    Contract:
+    - ``None`` or ``""`` → ``None``
+    - ``datetime`` / ``date`` → ``"YYYY-MM-DD"``
+    - anything else → ``str(v).strip()[:10]`` (covers bare strings, the
+      ``"2026-04-20 00:00:00"`` form Excel sometimes emits, and stray
+      non-string values).
+
     Legacy rows imported via Numbers/Excel autoformat can land as
-    ``datetime.datetime`` or ``datetime.date`` objects. The convention is
-    strings, and mixing types breaks any comparison (sort, dict-key merge,
-    equality-based session grouping). Normalise here so the rest of the
-    styler can treat dates as strings. Unknown types pass through unchanged.
+    ``datetime`` objects; mixing types breaks any comparison (sort,
+    dict-key merge, equality-based session grouping). Callers coerce
+    unconditionally and rely on the ``None`` sentinel for empty cells.
     """
+    if v is None or v == "":
+        return None
     if isinstance(v, datetime):
         return v.strftime("%Y-%m-%d")
     if isinstance(v, date):
         return v.isoformat()
-    return v
+    return str(v).strip()[:10]
+
+
+def bw_locate_date(row):
+    """Find the date in a Bodyweight row, return ``(date, date_idx)``.
+
+    The current 3-col layout is ``Date | Kg | Notes`` (date at index 0); the
+    legacy 4-col layout kept ``Year | Date | Kg | Notes`` (date at index 1).
+    Scanning both positions lets callers read either cleanly.
+
+    Returns ``(None, None)`` if no date-shaped value is found. ``Kg`` is at
+    ``date_idx + 1`` and ``Notes`` at ``date_idx + 2`` in both layouts.
+    """
+    for i, v in enumerate(row[:2]):
+        s = date_str(v)
+        if s and len(s) == 10 and s[4] == "-" and s[7] == "-":
+            return s, i
+    return None, None
 
 
 def _numeric_cell(v):
@@ -174,7 +205,7 @@ def style_monthly_sheet(ws):
     sessions: list[dict] = []
     current: dict | None = None
     for r in range(2, max(last_r, 1) + 1):
-        date_val = _date_str(ws.cell(row=r, column=2).value)
+        date_val = date_str(ws.cell(row=r, column=2).value)
         ex_val = ws.cell(row=r, column=4).value
 
         # Drop pre-existing TOTAL rows; we'll rebuild them.
@@ -301,9 +332,8 @@ def style_monthly_sheet(ws):
 def style_bodyweight_sheet(ws):
     """Apply canonical styling to the Bodyweight sheet.
 
-    Layout: Date | Kg | Notes. Data sorted DESC (newest on top) by the
-    writers (seed_bodyweight.py, append_workout.upsert_bodyweight).
-    Idempotent.
+    Layout: Date | Kg | Notes. Data sorted DESC (newest on top) by
+    ``append_workout.upsert_bodyweight`` (the single writer). Idempotent.
 
     Migrates the legacy 4-col layout (Year | Date | Kg | Notes) by dropping
     the leading Year column — Year was derivable from Date and added noise.

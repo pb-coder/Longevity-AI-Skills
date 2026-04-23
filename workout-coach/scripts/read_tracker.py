@@ -129,6 +129,22 @@ def to_int_or_none(v):
         return None
 
 
+def _compact(obj):
+    """Recursively drop ``None``-valued keys from dicts.
+
+    Applied once to the top-level payload before serialisation so every
+    row, summary entry, and nested dict sheds its ``None`` ballast.
+    ``0``, ``""``, ``False``, and empty collections are preserved —
+    they carry meaning. An absent key and a key set to ``null`` are
+    equivalent to an LLM reading the JSON as prose.
+    """
+    if isinstance(obj, dict):
+        return {k: _compact(v) for k, v in obj.items() if v is not None}
+    if isinstance(obj, list):
+        return [_compact(v) for v in obj]
+    return obj
+
+
 def parse_duration_minutes(raw) -> float:
     """Accept '30:00', '28:30', '30', 30, 30.0 — return minutes as float."""
     if raw in (None, ""):
@@ -696,7 +712,7 @@ def main() -> int:
         datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
     )
 
-    wb = openpyxl.load_workbook(args.tracker, data_only=True)
+    wb = openpyxl.load_workbook(args.tracker, data_only=True, read_only=True)
     rows, session_totals = extract_rows(wb, args.months, today_d)
     deloads = find_deloads(wb)
 
@@ -755,7 +771,7 @@ def main() -> int:
         "unknown_exercises": sorted(unknown_set),
         "rows": rows,
     }
-    json.dump(out, sys.stdout, ensure_ascii=False, indent=2)
+    json.dump(_compact(out), sys.stdout, ensure_ascii=False, indent=2)
     return 0
 
 

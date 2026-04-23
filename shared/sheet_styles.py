@@ -6,6 +6,7 @@ restyle). Idempotent: running `style_monthly_sheet` twice in a row is a no-op.
 Keep this module the single source of truth for fonts, fills, borders,
 column widths, and alignment.
 """
+from datetime import datetime, date
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -93,6 +94,22 @@ def _to_num(v):
         return 0.0
 
 
+def _date_str(v):
+    """Coerce a Date cell value to a canonical ``YYYY-MM-DD`` string.
+
+    Legacy rows imported via Numbers/Excel autoformat can land as
+    ``datetime.datetime`` or ``datetime.date`` objects. The convention is
+    strings, and mixing types breaks any comparison (sort, dict-key merge,
+    equality-based session grouping). Normalise here so the rest of the
+    styler can treat dates as strings. Unknown types pass through unchanged.
+    """
+    if isinstance(v, datetime):
+        return v.strftime("%Y-%m-%d")
+    if isinstance(v, date):
+        return v.isoformat()
+    return v
+
+
 def _numeric_cell(v):
     """Coerce stringified numbers (incl. European comma decimals like ``"67,5"``)
     to int or float. Returns the original value for anything that isn't purely
@@ -126,8 +143,13 @@ def style_monthly_sheet(ws):
 
     - Migrate legacy 12-col layout (A="Date") to the 13-col layout by
       inserting a leftmost SESSION column.
-    - Rebuild SESSION column: per-month session numbers (1..N), merged
-      vertically across each session's rows.
+    - Normalise Date cells to ``YYYY-MM-DD`` strings (legacy datetime cells
+      are coerced), then sort sessions by date ascending and merge any
+      same-date sessions that became non-contiguous on disk — e.g. after a
+      backfill row got appended at the bottom instead of into its day's
+      block.
+    - Rebuild SESSION column: per-month session numbers (1..N, chronological
+      after the sort), merged vertically across each session's rows.
     - Rebuild TOTAL row at the end of each strength session with
       ``=SUM(H{first}:H{last})`` in the Volume column. Cardio-only sessions
       (every row has kg=0 and reps=0) get no TOTAL row.
@@ -152,7 +174,7 @@ def style_monthly_sheet(ws):
     sessions: list[dict] = []
     current: dict | None = None
     for r in range(2, max(last_r, 1) + 1):
-        date_val = ws.cell(row=r, column=2).value
+        date_val = _date_str(ws.cell(row=r, column=2).value)
         ex_val = ws.cell(row=r, column=4).value
 
         # Drop pre-existing TOTAL rows; we'll rebuild them.
@@ -180,6 +202,21 @@ def style_monthly_sheet(ws):
             current = {"date": date_val, "rows": []}
             sessions.append(current)
         current["rows"].append(row_data)
+
+    # ---- Sort sessions by date ascending and merge any that share a date.
+    # A shared-date pair happens when a backfill row (earlier than existing
+    # data) got appended to the end of the sheet and is no longer contiguous
+    # with that date's original block. Without this, backfilled workouts end
+    # up stranded at the bottom and SESSION numbers drift out of chronological
+    # order.
+    merged: dict = {}
+    for sess in sessions:
+        date = sess["date"]
+        merged.setdefault(date, {"date": date, "rows": []})["rows"].extend(sess["rows"])
+    sessions = sorted(
+        merged.values(),
+        key=lambda s: (s["date"] is None, s["date"] or ""),
+    )
 
     # ---- Clear data area.
     if ws.max_row > 1:

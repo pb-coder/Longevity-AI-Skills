@@ -30,6 +30,9 @@ from pathlib import Path
 
 import openpyxl
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from tracker_sheet import bw_locate_date, date_str  # noqa: E402
+
 MONTHLY_RE = re.compile(r"^\d{4}\.\d{2}$")
 DELOAD_MARKER = "deload workout"
 EMPTY_STREAK_STOP = 10
@@ -108,14 +111,6 @@ SUBSECTION_PRIMARY_HINTS = [
 
 
 # ---------- helpers ----------
-def normalize_date(v) -> str | None:
-    if v is None or v == "":
-        return None
-    if isinstance(v, datetime):
-        return v.strftime("%Y-%m-%d")
-    return str(v).strip().split(" ")[0]
-
-
 def to_float(v) -> float:
     if v in (None, ""):
         return 0.0
@@ -208,7 +203,7 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict]
             empty_streak = 0
 
             if date_val is not None:
-                current_date = normalize_date(date_val)
+                current_date = date_str(date_val)
 
             # TOTAL rows carry the session's total volume. Capture it, skip the row.
             # Note: openpyxl with data_only=True returns None for formula cells
@@ -316,7 +311,7 @@ def find_deloads(wb) -> list[str]:
                 continue
             empty_streak = 0
             if date_val is not None:
-                current_date = normalize_date(date_val)
+                current_date = date_str(date_val)
             if current_date is None or exercise is None:
                 continue
             # TOTAL rows never carry a deload marker; skip without consuming "first row".
@@ -329,21 +324,6 @@ def find_deloads(wb) -> list[str]:
             if notes and DELOAD_MARKER in str(notes).lower():
                 deloads.add(current_date)
     return sorted(deloads)
-
-
-def _bw_locate_date(raw: tuple):
-    """Return (date_str, date_idx) for the first date-shaped value in the
-    first two columns. The current layout is 3-col (Date|Kg|Notes) with the
-    date in col A; the legacy 4-col layout (Year|Date|Kg|Notes) kept it in
-    col B. Scanning both positions lets this load either cleanly.
-    """
-    for i, v in enumerate(raw[:2]):
-        if v in (None, ""):
-            continue
-        s = normalize_date(v)
-        if s and len(s) == 10 and s[4] == "-" and s[7] == "-":
-            return s, i
-    return None, None
 
 
 def read_bodyweight(wb) -> list[dict]:
@@ -361,8 +341,8 @@ def read_bodyweight(wb) -> list[dict]:
     for raw in ws.iter_rows(min_row=2, values_only=True):
         if not raw:
             continue
-        date_str, date_idx = _bw_locate_date(raw)
-        if date_str is None or date_idx is None:
+        d, date_idx = bw_locate_date(raw)
+        if d is None:
             continue
         kg_raw = raw[date_idx + 1] if len(raw) > date_idx + 1 else None
         try:
@@ -373,7 +353,7 @@ def read_bodyweight(wb) -> list[dict]:
             continue
         notes = raw[date_idx + 2] if len(raw) > date_idx + 2 else None
         out.append({
-            "date": date_str,
+            "date": d,
             "kg": kg,
             "notes": (str(notes).strip() if notes else None),
         })

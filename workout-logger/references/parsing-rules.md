@@ -55,3 +55,17 @@ Extended columns activate for the entire workout if any cardio row is present.
 
 Convert pace input: `8'53"` → `8:53`. Never use decimal for time fields.
 Leave fields blank if not provided.
+
+## Bodyweight (opt-in)
+
+If (and only if) the `/log` message contains an explicit bodyweight line, parse it into a `bodyweight` entry keyed to the session's date. Accepted forms (case-insensitive):
+
+- `weight 76.5`, `weight: 76.5`, `weight 76.5 kg`
+- `bw 76.5`, `bw: 76.5kg`
+- `bodyweight 76.5`, `bodyweight: 76.5`
+
+Default `notes` to `null`. Only set `notes` when the user gave an explicit non-morning context on the same line (e.g. `weight 77.1 after dinner` → `"evening, not fasted"`). The standing convention is **morning, empty stomach**, so a bare number needs no note.
+
+For multi-date logs, attach the weight to the date on whose header line it appears. If the user wrote the weight on the top-level `/log` header, attach it to every date in the message.
+
+Never invent or guess a weight. If no bodyweight line is present, omit `bodyweight` from the payload entirely.

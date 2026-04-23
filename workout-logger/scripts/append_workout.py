@@ -2,7 +2,7 @@
 
 Routes each row to the YYYY.MM sheet matching its date. Creates the sheet
 (headers only) if missing. Styling is applied on every write via the shared
-`sheet_styles.style_monthly_sheet` so new rows match the rest of the sheet
+`tracker_sheet.style_monthly_sheet` so new rows match the rest of the sheet
 without waiting for /maintain.
 
 Input JSON is either a bare list of row dicts (legacy) or a wrapper object:
@@ -45,11 +45,12 @@ from pathlib import Path
 import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from sheet_styles import (  # noqa: E402
+from tracker_sheet import (  # noqa: E402
     BODYWEIGHT_HEADERS,
     MONTHLY_HEADERS,
     TOTAL_LABEL,
     _numeric_cell,
+    bw_locate_date,
     style_bodyweight_sheet,
     style_monthly_sheet,
 )
@@ -129,40 +130,22 @@ def ensure_bodyweight_sheet(wb):
     return ws, True
 
 
-def _bw_date_from_row(row: tuple):
-    """Find a YYYY-MM-DD value anywhere in the first two columns. Tolerates
-    the legacy 4-col layout (``Year | Date | Kg | Notes``) alongside the
-    current 3-col layout (``Date | Kg | Notes``)."""
-    for v in row[:2]:
-        if v is None or v == "":
-            continue
-        s = str(v)[:10]
-        if len(s) == 10 and s[4] == "-" and s[7] == "-":
-            return s
-    return None
-
-
 def upsert_bodyweight(wb, entries: list[dict]) -> list[str]:
     """Insert or overwrite bodyweight entries by date. Sort DESC after."""
     if not entries:
         return []
     ws, created = ensure_bodyweight_sheet(wb)
 
-    # Read existing rows into a date-keyed dict. Tolerates both the current
-    # 3-col layout (Date|Kg|Notes) and the legacy 4-col layout
-    # (Year|Date|Kg|Notes) so this runs cleanly against un-migrated trackers.
+    # Read existing rows into a date-keyed dict. `bw_locate_date` tolerates
+    # both the current 3-col layout (Date|Kg|Notes) and the legacy 4-col
+    # layout (Year|Date|Kg|Notes) so this runs cleanly against un-migrated
+    # trackers.
     merged: dict[str, dict] = {}
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row:
             continue
-        date = _bw_date_from_row(row)
+        date, date_idx = bw_locate_date(row)
         if date is None:
-            continue
-        date_idx = next(
-            (i for i, v in enumerate(row[:2]) if v is not None and str(v)[:10] == date),
-            None,
-        )
-        if date_idx is None:
             continue
         kg_raw = row[date_idx + 1] if len(row) > date_idx + 1 else None
         notes = row[date_idx + 2] if len(row) > date_idx + 2 else None
@@ -204,44 +187,6 @@ def upsert_bodyweight(wb, entries: list[dict]) -> list[str]:
     tag = " (new sheet)" if created else ""
     summary = ", ".join(f"{e['date']}={e['kg']}kg" for e in entries)
     return [f"Bodyweight{tag}: {added} new, {updated} updated ({summary})"]
-
-
-def append_rows(tracker_path: Path, rows: list[dict]) -> list[str]:
-    """Append rows grouped by sheet. Return human-readable status lines."""
-    wb = openpyxl.load_workbook(tracker_path)
-    status = []
-
-    # Group by target sheet, preserving input order within each group.
-    by_sheet: dict[str, list[dict]] = {}
-    for r in rows:
-        by_sheet.setdefault(sheet_for_date(r["date"]), []).append(r)
-
-    for sheet_name, sheet_rows in by_sheet.items():
-        ws, created = ensure_sheet(wb, sheet_name)
-
-        # Ensure sheet is on the current 13-col layout before we write 13-col
-        # rows. Cheap idempotent no-op if already migrated.
-        style_monthly_sheet(ws)
-
-        last_row = find_last_data_row(ws)
-        write_row = last_row + 1
-
-        for r in sheet_rows:
-            for col, val in enumerate(row_values(r), start=1):
-                ws.cell(row=write_row, column=col, value=val)
-            write_row += 1
-
-        style_monthly_sheet(ws)
-
-        dates = sorted({r["date"] for r in sheet_rows})
-        tag = " (new sheet)" if created else ""
-        status.append(
-            f"Appended {len(sheet_rows)} row(s) to {sheet_name}{tag} "
-            f"for {', '.join(dates)}"
-        )
-
-    wb.save(tracker_path)
-    return status
 
 
 def write_payload(tracker_path: Path, rows: list[dict], bodyweight: list[dict]) -> list[str]:

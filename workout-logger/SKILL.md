@@ -30,27 +30,29 @@ The tracker lives at `./Workout Tracker.xlsx` in the current working directory. 
 
 ## Flow
 
-1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log.
-2. **Bodyweight check.** For each date in the set, run `python3 scripts/check_bodyweight.py "Workout Tracker.xlsx" YYYY-MM-DD`. If `has_today` is `false`, ask the user via `AskUserQuestion`: *"Morning weight for {date}? (kg — empty-stomach. Reply with a number, or say 'skip'.)"* Parse the reply as a float. On "skip" / empty / non-numeric, record nothing for that date. The convention is **morning, empty stomach**; if the user's reply mentions a non-morning context, include that in the `notes` field of the bodyweight entry.
-3. Build the payload JSON (wrapper form) and write it to a temp file (e.g. `/tmp/workout_payload.json`):
+1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log. If the message contains an explicit bodyweight line (see parsing rules), also parse that into a bodyweight entry.
+2. Build the payload JSON (wrapper form) and write it to a temp file (e.g. `/tmp/workout_payload.json`):
    ```json
    {
      "rows": [ ... parsed row dicts ... ],
      "bodyweight": [ {"date": "YYYY-MM-DD", "kg": 78.4, "notes": null}, ... ]
    }
    ```
-   Omit `bodyweight` entirely (or send `[]`) if no weights were captured.
-4. Run `python3 scripts/append_workout.py "Workout Tracker.xlsx" /tmp/workout_payload.json`. The script routes rows to the right `YYYY.MM` sheet, upserts bodyweight entries on the `Bodyweight` sheet (creating it if missing), and applies canonical styling to both — new rows land already styled.
-5. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)`. If one or more weights were logged, append ` | morning weight: 78.4kg` (or comma-separate multiple dates).
+   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.**
+3. Run `python3 scripts/append_workout.py "Workout Tracker.xlsx" /tmp/workout_payload.json`. The script routes rows to the right `YYYY.MM` sheet, upserts bodyweight entries on the `Bodyweight` sheet (creating it if missing), and applies canonical styling to both — new rows land already styled.
+4. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)`. If one or more weights were logged, append ` | morning weight: 78.4kg` (or comma-separate multiple dates).
 
 The tracker itself is the output. No markdown tables, no files presented, no narration.
 
-## Bodyweight prompting rules
+## Bodyweight (opt-in)
 
-- Only ask when `check_bodyweight.py` says `has_today: false` for the date. Already-logged dates are silent.
-- One prompt per missing date. Don't retry on invalid input — accept a number or treat anything else as skip.
-- The standing convention is **morning, empty stomach**. Only emit a `notes` entry if the user explicitly signals otherwise (e.g. "after dinner" → `"notes": "evening, not fasted"`).
-- If the user has backfilled a workout for a past date and has no retroactive weight, they'll say "skip". That's normal. Never invent a weight.
+Bodyweight is opt-in. Record it only when the user explicitly includes it in the `/log` message — see `references/parsing-rules.md` for the accepted formats. No automatic prompts, no probing for missing weights, no `AskUserQuestion`. If the user didn't mention a weight, don't record one.
+
+The standing convention is **morning, empty stomach**. If the user writes something that implies a non-morning context (e.g. "after dinner"), include that in the entry's `notes` field (e.g. `"evening, not fasted"`).
+
+### Bulk-seed (historical import)
+
+To back-fill many historical weights at once, call `append_workout.py` with a payload of only bodyweight entries: `{"rows": [], "bodyweight": [{"date": "...", "kg": ..., "notes": null}, ...]}`. `upsert_bodyweight` dedupes by date and re-sorts newest-first.
 
 ## Session-level flags
 

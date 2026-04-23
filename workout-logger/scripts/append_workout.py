@@ -200,8 +200,14 @@ def write_payload(tracker_path: Path, rows: list[dict], bodyweight: list[dict]) 
             by_sheet.setdefault(sheet_for_date(r["date"]), []).append(r)
         for sheet_name, sheet_rows in by_sheet.items():
             ws, created = ensure_sheet(wb, sheet_name)
-            # Migrate legacy 12-col layout first so the 13-col write aligns.
-            style_monthly_sheet(ws)
+            # Legacy 12-col sheets had ``Date`` in column A; the current
+            # layout is ``SESSION | Date | …``. Trigger a full restyle only
+            # when we detect the old header — otherwise rely on the post-
+            # write restyle to handle sort/merge/TOTAL rebuilds. Skipping
+            # the redundant pre-pass roughly halves ``/log`` run time on
+            # large sheets.
+            if ws.cell(row=1, column=1).value == "Date":
+                style_monthly_sheet(ws)
             last_row = find_last_data_row(ws)
             write_row = last_row + 1
             for r in sheet_rows:

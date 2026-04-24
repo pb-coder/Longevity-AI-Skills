@@ -1,16 +1,29 @@
 ---
 name: workout-logger
 description: >
-  Appends a parsed workout to ./Workout Tracker.xlsx with canonical styling
-  applied to the new rows. Invoked by the `/log` slash command or when the
-  user explicitly asks to log a workout. Do NOT trigger on general fitness
-  questions, training discussion, or anything that isn't an explicit request
-  to record a workout.
+  Appends a parsed workout to the requested person's tracker (e.g.
+  ./Workout Tracker - Nihad.xlsx) with canonical styling applied to the new rows.
+  Invoked by the `/log` slash command or when the user explicitly asks to log a
+  workout. Do NOT trigger on general fitness questions, training discussion, or
+  anything that isn't an explicit request to record a workout.
 ---
 
 # Workout Logger
 
 **Invocation**: The `/log` slash command delegates here. You can also be asked directly ("log this workout: …"). Do not trigger on anything else.
+
+## Who is this for?
+
+Two trackers live alongside each other in the workout directory:
+- `Workout Tracker - Nihad.xlsx`
+- `Workout Tracker - Fabian.xlsx`
+
+Resolve which tracker this log is for BEFORE running the script:
+- If the user names a person ("log Fabian's push day", "this is for Nihad"), use that tracker.
+- If the user uses pronouns or context that clearly refer to one person ("my bf" / "boyfriend" → Fabian; "I" / "me" / "my" with no other person mentioned → Nihad, since Nihad is the account owner), use that tracker.
+- Otherwise ask: **"Is this for Nihad or Fabian?"** before proceeding.
+
+Pass the resolved path to `append_workout.py`. Bodyweight entries, deload flags, and all other session data route into whichever tracker file you picked — never split one session across both.
 
 ## When NOT to Use
 
@@ -26,7 +39,7 @@ Read before processing:
 - `references/parsing-rules.md` — parsing logic for all input formats
 - `references/common-mistakes.md` — known parsing traps
 
-The tracker lives at `./Workout Tracker.xlsx` in the current working directory. If it's not there, stop and say so in one line. Don't search the filesystem.
+The tracker for the resolved person (`./Workout Tracker - <Person>.xlsx`) lives in the current working directory. If it's not there, stop and say so in one line. Don't search the filesystem.
 
 ## Flow
 
@@ -39,7 +52,7 @@ The tracker lives at `./Workout Tracker.xlsx` in the current working directory. 
    }
    ```
    Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.**
-3. Run `python3 scripts/append_workout.py "Workout Tracker.xlsx" /tmp/workout_payload.json`. The script routes rows to the right `YYYY.MM` sheet, upserts bodyweight entries on the `Bodyweight` sheet (creating it if missing), and applies canonical styling to both — new rows land already styled.
+3. Run `python3 scripts/append_workout.py "Workout Tracker - <Person>.xlsx" /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `YYYY.MM` sheet, upserts bodyweight entries on the `Bodyweight` sheet (creating it if missing), and applies canonical styling to both — new rows land already styled.
 4. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)`. If one or more weights were logged, append ` | morning weight: 78.4kg` (or comma-separate multiple dates).
 
 The tracker itself is the output. No markdown tables, no files presented, no narration.

@@ -2,10 +2,11 @@
 name: workout-tracker-maintenance
 description: >
   ONLY activate when the user's message starts with "/maintain". Runs end-of-month
-  maintenance on Workout_Tracker.xlsx: restyles all sheets, trims empty rows/cols,
-  reorders sheets (DB first, months newest → oldest), and verifies data integrity.
-  Idempotent. Do NOT trigger on general spreadsheet questions, formatting requests,
-  or anything that doesn't begin with the literal command "/maintain".
+  maintenance on a workout tracker xlsx (e.g. Workout Tracker - Nihad.xlsx):
+  restyles all sheets, trims empty rows/cols, reorders sheets (DB first, months
+  newest → oldest), and verifies data integrity. Idempotent. Do NOT trigger on
+  general spreadsheet questions, formatting requests, or anything that doesn't
+  begin with the literal command "/maintain".
 ---
 
 # Workout Tracker Maintenance
@@ -14,11 +15,24 @@ description: >
 
 Run this at the end of each month (or any time the sheet looks messy). It's idempotent — safe to run repeatedly.
 
+## Who is this for?
+
+Two trackers live alongside each other in the workout directory:
+- `Workout Tracker - Nihad.xlsx`
+- `Workout Tracker - Fabian.xlsx`
+
+Resolve which tracker(s) `/maintain` should run on:
+- If the user names a person ("/maintain fabian"), run on that one tracker.
+- If the user says "both" or runs `/maintain` bare at end of month, offer to run on both back-to-back (one `python3 scripts/maintain.py` invocation per file).
+- Otherwise ask: **"Is this for Nihad, Fabian, or both?"** before proceeding.
+
+The script's safety backup (`<stem>.maintain-backup.xlsx`) lands next to whichever input file you pass — pass `Workout Tracker - Fabian.xlsx` and you get `Workout Tracker - Fabian.maintain-backup.xlsx` automatically. No per-person backup handling needed in this skill.
+
 ## When NOT to Use
 
 - General spreadsheet formatting questions
 - Ad-hoc styling requests
-- No `Workout_Tracker.xlsx` in the conversation or project directory
+- No tracker xlsx in the conversation or project directory
 
 ## What It Does
 
@@ -30,21 +44,23 @@ Run this at the end of each month (or any time the sheet looks messy). It's idem
    - Columns capped at 5 (DB) / 12 (monthly).
 3. **Reorders sheets**: `Exercises Database` first, then monthly sheets newest → oldest.
 4. **Verifies data integrity**: compares nonempty row counts before/after; aborts if any data was lost.
-5. **Takes a safety backup** (`Workout Tracker.maintain-backup.xlsx`) before writing.
+5. **Takes a safety backup** (`<stem>.maintain-backup.xlsx`, e.g. `Workout Tracker - Nihad.maintain-backup.xlsx`) before writing.
 
 ## How to Run
 
-Ask the user to confirm the path to `Workout_Tracker.xlsx`, then:
+After resolving the person (see "Who is this for?" above):
 
 ```bash
-python3 scripts/maintain.py "/path/to/Workout Tracker.xlsx"
+python3 scripts/maintain.py "/path/to/Workout Tracker - <Person>.xlsx"
 ```
 
 For a preview without writing:
 
 ```bash
-python3 scripts/maintain.py "/path/to/Workout Tracker.xlsx" --dry-run
+python3 scripts/maintain.py "/path/to/Workout Tracker - <Person>.xlsx" --dry-run
 ```
+
+When running on both, invoke the script twice — once per tracker — and report results per person.
 
 The script lives at `scripts/maintain.py` inside this skill. Read it before running so you can explain what it will do if the user asks.
 
@@ -94,7 +110,7 @@ Three options, in order of hands-off-ness:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| "file not found" | Wrong path | Pass the full path including `Workout Tracker.xlsx` |
-| "nonempty row count changed" | A delete went wrong | Restore from `Workout Tracker.maintain-backup.xlsx` and re-run with `--dry-run` to debug |
+| "file not found" | Wrong path | Pass the full path including `Workout Tracker - <Person>.xlsx` |
+| "nonempty row count changed" | A delete went wrong | Restore from the matching `Workout Tracker - <Person>.maintain-backup.xlsx` and re-run with `--dry-run` to debug |
 | Sheet appears unstyled after run | Opened in a viewer that ignores openpyxl styles | Open in Excel / Numbers / LibreOffice to verify |
 | Current-month sheet has no blank rows to append | Buffer math off | Bump `CURRENT_MONTH_BUFFER` in the script |

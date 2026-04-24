@@ -1,16 +1,30 @@
 ---
 name: workout-coach
 description: >
-  Reads ./Workout Tracker.xlsx, analyzes recent training state, and writes a
-  report plus the next workout plan to ./workout_plan.md. Invoked by the
-  `/coach` slash command or when the user explicitly asks for coaching,
-  analysis, or a new plan. Do NOT trigger on general fitness questions,
-  training discussion, logging, or requests unrelated to the tracker.
+  Reads the requested person's tracker (e.g. ./Workout Tracker - Nihad.xlsx),
+  analyzes recent training state, and writes a report plus the next workout plan
+  to ./workout_plan - <Person>.md. Invoked by the `/coach` slash command or when
+  the user explicitly asks for coaching, analysis, or a new plan. Do NOT trigger
+  on general fitness questions, training discussion, logging, or requests
+  unrelated to the tracker.
 ---
 
 # Workout Coach
 
 **Invocation**: The `/coach` slash command delegates here. You can also be asked directly ("plan my next workout", "how is my training going"). Do not trigger on unrelated fitness chat.
+
+## Who is this for?
+
+Two trackers live alongside each other in the workout directory:
+- `Workout Tracker - Nihad.xlsx`
+- `Workout Tracker - Fabian.xlsx`
+
+Resolve which tracker this request is about BEFORE running the script:
+- If the user names a person ("coach Fabian", "plan Nihad's next block"), use that tracker.
+- If the user uses pronouns or context that clearly refer to one person ("my bf" / "boyfriend" → Fabian; "I" / "me" / "my" with no other person mentioned → Nihad, since Nihad is the account owner), use that tracker.
+- Otherwise ask: **"Is this for Nihad or Fabian?"** before proceeding.
+
+Pass the resolved path to the script. The sidecar `workout_plan.md` follows the same naming — write to `./workout_plan - <Person>.md` (e.g. `./workout_plan - Fabian.md`). Never write one person's plan over the other.
 
 ## When NOT to Use
 
@@ -22,7 +36,7 @@ description: >
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
 2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis.
-3. Run `scripts/read_tracker.py "./Workout Tracker.xlsx"` from the current working directory. The script returns one JSON blob with everything: flat row list (last 3 months), progression summary, deload dates, days since last session, cardio totals for the last 14 days, and bodyweight series (`bodyweight_latest`, `bodyweight_trend_kg_per_week`, `bodyweight_recent`). If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
+3. Run `scripts/read_tracker.py "./Workout Tracker - <Person>.xlsx"` from the current working directory (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script returns one JSON blob with everything: flat row list (last 3 months), progression summary, deload dates, days since last session, cardio totals for the last 14 days, and bodyweight series (`bodyweight_latest`, `bodyweight_trend_kg_per_week`, `bodyweight_recent`). If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
 Each row = one set. Columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`. SESSION is a per-month number merged across rows of the same date; the sheet closes each strength session with a `TOTAL` row carrying the session's total volume (`read_tracker.py` exposes these as `session_totals`, so don't sum yourself).
 
@@ -30,7 +44,7 @@ Each row = one set. Columns: `SESSION | Date | # | Exercise | Set | Reps | kg | 
 
 ## Output target
 
-All user-facing output — the report AND the plan — goes into `./workout_plan.md`, overwriting whatever was there. The chat gets one short block: a one-line verdict plus `Wrote plan to workout_plan.md (N sessions)`. Nothing else.
+All user-facing output — the report AND the plan — goes into `./workout_plan - <Person>.md` (e.g. `./workout_plan - Nihad.md`), overwriting whatever was there. The chat gets one short block: a one-line verdict plus `Wrote plan to workout_plan - <Person>.md (N sessions)`. Nothing else. Never write to a file without the `- <Person>` suffix, and never write across people.
 
 The file structure:
 
@@ -320,7 +334,8 @@ One short paragraph at the end of the file — 3-4 sentences. What the overall b
 | Missing data from casing mismatch | Searching for "Leg Extension" misses rows logged as "Leg extension" | Compare case-insensitively. |
 | Reading empty template rows | Dumping 900+ rows per sheet into context | Stop after 10 consecutive fully empty rows. |
 | Breaking on None date | `if row[0] is None: break` stops at the first continuation row | Carry forward the last known date defensively. Only skip when BOTH date and exercise are None. |
-| Writing the report or plan inline in chat | Conversation gets flooded; plan is hard to find later | All report + plan content goes into `./workout_plan.md`. Chat gets one verdict line + the file pointer. |
+| Writing the report or plan inline in chat | Conversation gets flooded; plan is hard to find later | All report + plan content goes into `./workout_plan - <Person>.md`. Chat gets one verdict line + the file pointer. |
+| Writing one person's plan over the other | `workout_plan - Nihad.md` overwritten with Fabian's plan, or vice versa | Always resolve the person first and write to `./workout_plan - <Person>.md`. Never a bare `workout_plan.md`. |
 | Partial file writes | Streaming sections and forgetting to complete | Build the whole file in memory, then write once. |
 
 ## Rules

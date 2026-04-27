@@ -7,7 +7,7 @@ Source for the Claude Code skills used by pb-coder. Cloned from
 
 ```
 shared/               # Code + docs imported by multiple skills
-  tracker_sheet.py    # Single authority for Workout Tracker.xlsx:
+  tracker_sheet.py    # Single authority for the per-person tracker xlsx files:
                       #   layout constants (monthly / Bodyweight / DB),
                       #   coercions (date_str, bw_locate_date, _numeric_cell),
                       #   and canonical sheet styling (style_monthly_sheet,
@@ -63,6 +63,9 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
 
 ## Workout Tracker
 
-The tracker file (`Workout Tracker.xlsx`) lives in the user's personal
-directory, not in this repo. See that directory's `CLAUDE.md` for sheet
-format, column semantics, and backup strategy.
+The tracker xlsx files (`Workout Tracker - <Person>.xlsx`, one per
+person) live in the parent directory of this repo, not inside it. The
+skills resolve which person a request is about (see each `SKILL.md`'s
+"Who is this for?" section) and pass the matching path to their script.
+See the parent directory's `CLAUDE.md` for sheet format, column
+semantics, routing rules, and backup strategy.

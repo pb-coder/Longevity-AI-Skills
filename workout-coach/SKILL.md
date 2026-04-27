@@ -61,6 +61,8 @@ The file structure:
 ## Plan
 
 ### Workout 1: <TYPE>
+**Date:** ___________
+
 <quick list — plain bullets, one line per set>
 
 | # | Exercise | Sets × Reps | Notes |
@@ -68,6 +70,7 @@ The file structure:
 ...
 
 ### Workout 2: <TYPE>
+**Date:** ___________
 ...
 
 ### Cardio 1: Zone 2 (optional, only if behind §10 target)
@@ -235,6 +238,8 @@ For each workout, output the quick list immediately followed by the table for th
 
 Correct order: Quick List WO1 → Table WO1 → Quick List WO2 → Table WO2 → etc.
 
+Each workout heading is immediately followed by `**Date:** ___________` on its own line, then a blank line, then the quick list. The user fills in the date when they actually train so the session can be logged later without guessing. This applies to every strength workout — cardio sections do not need a date line.
+
 **Quick list** — what the user reads on their phone. One line per set, plain markdown bullets. No code fences. Format:
 - Bodyweight or single-rep: `Exercise Name : reps` (e.g., `Plank : 45s hold`)
 - Weighted: every set separated by `///`:
@@ -247,6 +252,7 @@ Example (markdown — no code fence around it in the actual file):
 
 ```
 ### Workout 1: UPPER PUSH + CORE
+**Date:** ___________
 
 - Jumping Jacks : 50
 - Band Pull-Apart : 15

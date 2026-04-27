@@ -347,3 +347,14 @@ Organized by primary muscle group > movement pattern. Tags:
 - Stationary Bike [Bike]
 - Stair Climber [Stair Climber]
 - Assault Bike [Assault Bike]
+- Hike [Outdoor]
+- Swim [Pool]
+- Walk [Outdoor]
+- Outdoor Run [Outdoor]
+- Outdoor Cycling [Outdoor]
+
+---
+
+## WELLNESS
+- Yoga [Mat]
+- Stretching [Mat]

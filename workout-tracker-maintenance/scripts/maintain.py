@@ -7,8 +7,8 @@ Idempotent. Safe to re-run. Performs:
   4. Report row counts and verify data integrity
 
 Usage:
-    python3 maintain.py "/path/to/Workout Tracker.xlsx"
-    python3 maintain.py "/path/to/Workout Tracker.xlsx" --dry-run
+    python3 maintain.py "/path/to/Workout Tracker - <Person>.xlsx"
+    python3 maintain.py "/path/to/Workout Tracker - <Person>.xlsx" --dry-run
 """
 import argparse
 import re

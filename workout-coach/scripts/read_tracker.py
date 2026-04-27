@@ -1,4 +1,4 @@
-"""Read Workout Tracker.xlsx for /coach analysis.
+"""Read the given tracker xlsx for /coach analysis.
 
 Emits one JSON blob on stdout with everything the coach needs:
   - today, days_since_last_session, last_session_date

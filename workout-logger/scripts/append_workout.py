@@ -1,4 +1,4 @@
-"""Append parsed workout rows to the right monthly sheet in Workout Tracker.xlsx.
+"""Append parsed workout rows to the right monthly sheet in the given tracker xlsx.
 
 Routes each row to the YYYY.MM sheet matching its date. Creates the sheet
 (headers only) if missing. Styling is applied on every write via the shared

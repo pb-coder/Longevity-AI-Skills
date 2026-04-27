@@ -52,8 +52,12 @@ The tracker for the resolved person (`./Workout Tracker - <Person>.xlsx`) lives 
    }
    ```
    Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.**
-3. Run `python3 scripts/append_workout.py "Workout Tracker - <Person>.xlsx" /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `YYYY.MM` sheet, upserts bodyweight entries on the `Bodyweight` sheet (creating it if missing), and applies canonical styling to both — new rows land already styled.
-4. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)`. If one or more weights were logged, append ` | morning weight: 78.4kg` (or comma-separate multiple dates).
+3. Run `python3 scripts/append_workout.py "Workout Tracker - <Person>.xlsx" /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `YYYY.MM` sheet, upserts bodyweight entries on the `Bodyweight` sheet (creating it if missing), and applies canonical styling to both.
+4. **Verify the write succeeded.** Capture the script's stdout and exit code:
+   - If the exit code is non-zero, print the exact stderr output and stop. Do not report success.
+   - If the exit code is 0 but stdout does not contain the word `Appended`, print the exact stdout and stop with: "Unexpected script output — please check the tracker manually."
+   - If stdout contains `Appended`, the write is confirmed. Proceed.
+5. Print the summary line: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)`. If one or more weights were logged, append ` | morning weight: 78.4kg` (or comma-separate multiple dates). The summary comes from the script's `Appended …` stdout line — extract N rows and dates from it.
 
 The tracker itself is the output. No markdown tables, no files presented, no narration.
 

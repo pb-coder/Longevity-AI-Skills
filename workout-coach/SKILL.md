@@ -226,7 +226,6 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 - **Exercise pairing** (§16): straight sets for compounds, supersets for isolation/accessories when it saves time.
 - **Exercise variation** (§17): the week's exercise selection must cover different regions of each major muscle. Anchor compounds where progression is live carry forward; variation plays out in isolation/accessory slots and across blocks.
 - **Volume, frequency, overload, push-pull balance, lengthened position, tendon safety, HRV session placement, deload timing**: §1, §5, §6, §7, §8, §9, §11.
-- **PrEP context (§12):** preserve at least one heavy lower-body compound per leg session (squat or trap-bar deadlift) for bone strain. Don't quietly drop it in favor of leg-press accessories even if the volume model is satisfied.
 - Fix gaps from the report (underdeveloped muscles, missing patterns).
 - Maintain exercises the user is already progressing on.
 - **Deload handling (§11):** if `weeks_since_last_deload > 6` or null, the prescribed block IS a deload: reduce each exercise's working-set count to ~50% and keep loads at the last working weight (maintain intensity, cut volume). Tell the user explicitly in "Why this plan" that this block is a deload. In the 4-6 week window, don't force a deload but flag it in the report and offer to plan one if the user asks.

@@ -133,7 +133,7 @@ Every 4-6 weeks: reduce volume 40-50%, maintain load. Not optional. Accumulated 
 
 ## §12 User Context
 
-25M, 180cm, 78kg, Berlin. Early intermediate (squat/DL 60-70kg). Strict vegan 10yr. Protein 2.0-2.2g/kg (156-172g) due to low plant leucine. PrEP daily (tenofovir → BMD risk; weight-bearing compounds protective). 10g creatine/day. 900mg Ca + D3 5000IU + K2. HRV weekday 30-40ms / weekend 60-70ms. Sleep 7.5-8h, 95%+. No blood work. No deloads. No effort tracking. No bodyweight trend. No protein tracking.
+25M, 180cm, 78kg, Berlin. Early intermediate (squat/DL 60-70kg). Strict vegan 10yr. Protein 2.0-2.2g/kg (156-172g); plant protein at adequate dose matches animal for hypertrophy (Hevia-Larraín 2021). PrEP daily (tenofovir → modest BMD loss in first ~24 weeks per Mulligan 2015; heavy compound loading offsets — preserve at least one heavy lower-body compound per leg session). 10g creatine/day (non-negotiable per user). 900mg Ca + D3 5000IU + K2. HRV weekday 30-40ms / weekend 60-70ms. Sleep 7.5-8h, 95%+. No blood work. No deloads. No effort tracking. No bodyweight trend. No protein tracking.
 
 ## §13 Tracker Blind Spots
 

@@ -609,13 +609,25 @@ def weekly_volume_per_muscle(
     }
 
 
-def estimated_1rm(rows: list[dict]) -> dict:
-    """Epley 1RM projection per exercise.
+def estimated_1rm(rows: list[dict], deload_dates: list[str] | None = None) -> dict:
+    """Epley 1RM projection per exercise, with trajectory and confidence.
 
     For each exercise, take the heaviest projected e1RM per date (over all
-    working sets that session), then report current/prev/best/last_date and
-    the current-vs-prev delta in kg. Bodyweight and warmup sets excluded.
+    working sets that session) and report:
+      - current/prev/best/last_date and current-vs-prev delta in kg
+      - e1rm_history: last 6 sessions newest-first, each with the top set
+        that produced the e1RM (so the coach can judge rep-range quality)
+      - slope_kg_per_4w: OLS slope over the last 6 sessions, scaled to a
+        4-week window. Null if fewer than 3 sessions.
+      - confidence: high|medium|low based on the rep ranges of the last
+        3 top sets — Epley is most accurate at 3-8 reps.
+      - stalled_sessions: count of consecutive most-recent sessions with
+        |Δe1RM| ≤ 0.5kg, broken by any deload that falls in the window.
+
+    Bodyweight and warmup sets excluded (kg must be > 0).
     """
+    deload_set = set(deload_dates or [])
+
     by_ex: dict[str, list[dict]] = {}
     canonical_name: dict[str, str] = {}
     for r in rows:
@@ -628,27 +640,104 @@ def estimated_1rm(rows: list[dict]) -> dict:
         key = r["exercise"].lower()
         canonical_name.setdefault(key, r["exercise"])
         e1rm = kg * (1.0 + reps / 30.0)
-        by_ex.setdefault(key, []).append({"date": r["date"], "e1rm": e1rm})
+        by_ex.setdefault(key, []).append({
+            "date": r["date"], "e1rm": e1rm, "reps": reps, "kg": kg,
+        })
 
     out: dict[str, dict] = {}
     for key, entries in by_ex.items():
-        # Per date, keep the heaviest projected e1RM.
-        per_date: dict[str, float] = {}
+        # Per date, keep the heaviest projected e1RM and remember the
+        # (reps, kg) that produced it — needed for the history block and
+        # for the confidence judgement.
+        per_date: dict[str, dict] = {}
         for e in entries:
-            if e["e1rm"] > per_date.get(e["date"], -1):
-                per_date[e["date"]] = e["e1rm"]
+            top = per_date.get(e["date"])
+            if top is None or e["e1rm"] > top["e1rm"]:
+                per_date[e["date"]] = {
+                    "e1rm": e["e1rm"], "reps": e["reps"], "kg": e["kg"],
+                }
         dates_desc = sorted(per_date.keys(), reverse=True)
         if not dates_desc:
             continue
-        current = per_date[dates_desc[0]]
-        prev = per_date[dates_desc[1]] if len(dates_desc) >= 2 else None
-        best = max(per_date.values())
+        current = per_date[dates_desc[0]]["e1rm"]
+        prev = per_date[dates_desc[1]]["e1rm"] if len(dates_desc) >= 2 else None
+        best = max(d["e1rm"] for d in per_date.values())
+
+        history = [
+            {
+                "date":         d,
+                "e1rm_kg":      round(per_date[d]["e1rm"], 1),
+                "top_set_reps": per_date[d]["reps"],
+                "top_set_kg":   per_date[d]["kg"],
+            }
+            for d in dates_desc[:6]
+        ]
+
+        # OLS slope (kg per 28 days) over the last 6 sessions.
+        slope = None
+        if len(history) >= 3:
+            pts: list[tuple[date, float]] = []
+            for h in history:
+                try:
+                    pts.append((datetime.strptime(h["date"], "%Y-%m-%d").date(), h["e1rm_kg"]))
+                except ValueError:
+                    continue
+            if len(pts) >= 3:
+                pts.sort(key=lambda p: p[0])
+                base = pts[0][0]
+                xs = [(p[0] - base).days for p in pts]
+                ys = [p[1] for p in pts]
+                n = len(xs)
+                mx = sum(xs) / n
+                my = sum(ys) / n
+                num = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+                den = sum((xs[i] - mx) ** 2 for i in range(n))
+                if den > 0:
+                    slope = round((num / den) * 28.0, 2)
+
+        # Confidence from rep ranges of the last 3 sessions' top sets.
+        # Epley is calibrated best for low-rep sets; 12+ rep top sets
+        # give a noisy projection.
+        recent_reps = [h["top_set_reps"] for h in history[:3]]
+        if len(recent_reps) < 2:
+            confidence = "low"
+        elif any(r >= 13 for r in recent_reps):
+            confidence = "low"
+        elif all(3 <= r <= 8 for r in recent_reps):
+            confidence = "high"
+        else:
+            confidence = "medium"
+
+        # Stalled: walk back through consecutive sessions while the
+        # e1RM swing is within ±0.5kg. Break on the first deload that
+        # falls inside (or at either end of) the gap between two
+        # consecutive sessions — a deliberate volume cut isn't a stall.
+        stalled = 0
+        for i in range(len(dates_desc) - 1):
+            this_date = dates_desc[i]
+            prev_date = dates_desc[i + 1]
+            crossed_deload = any(
+                prev_date <= d <= this_date for d in deload_set
+            )
+            if crossed_deload:
+                break
+            this_e = per_date[this_date]["e1rm"]
+            prev_e = per_date[prev_date]["e1rm"]
+            if abs(this_e - prev_e) <= 0.5:
+                stalled += 1
+            else:
+                break
+
         out[canonical_name[key]] = {
-            "current_e1rm_kg": round(current, 1),
-            "prev_e1rm_kg":    round(prev, 1) if prev is not None else None,
-            "best_e1rm_kg":    round(best, 1),
-            "last_date":       dates_desc[0],
-            "delta_vs_prev_kg":(round(current - prev, 1) if prev is not None else None),
+            "current_e1rm_kg":  round(current, 1),
+            "prev_e1rm_kg":     round(prev, 1) if prev is not None else None,
+            "best_e1rm_kg":     round(best, 1),
+            "last_date":        dates_desc[0],
+            "delta_vs_prev_kg": (round(current - prev, 1) if prev is not None else None),
+            "e1rm_history":     history,
+            "slope_kg_per_4w":  slope,
+            "confidence":       confidence,
+            "stalled_sessions": stalled,
         }
     return out
 
@@ -740,7 +829,7 @@ def main() -> int:
 
     unknown_set: set[str] = set()
     weekly_volume = weekly_volume_per_muscle(rows, db, today_d, 28, unknown_set)
-    e1rm = estimated_1rm(rows)
+    e1rm = estimated_1rm(rows, deloads)
     stale = stale_exercises(rows, db, today_d, 28)
 
     # Surface any logged exercise across the full loaded window that doesn't

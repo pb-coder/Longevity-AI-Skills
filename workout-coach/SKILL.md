@@ -101,7 +101,11 @@ What the JSON contains:
 - `bodyweight_recent`: the last 12 entries, each `{date, kg, notes}` — notes usually empty; non-empty flags an exception to morning/empty-stomach (e.g. `"evening, not fasted"`). The trend function already excludes flagged rows.
 - `session_totals`: `{YYYY-MM-DD: total_volume_kg}` — one entry per strength session, populated from the sheet's TOTAL rows. Use this for weekly/recent volume reporting instead of summing `rows` yourself.
 - `weekly_volume_per_muscle`: `{window_days: 28, current: {muscle: sets}, landmarks: {muscle: {mv, mev, mav, mrv}}}`. Fractional hard-set count per muscle over the last 28 days, pre-computed via the `exercises-database.md` primary/synergist rules (compound = 1 set primary + 0.5 per synergist). Don't re-derive — read `current[muscle]`, compare to `landmarks[muscle]`, name the band (MEV/MAV/MRV) explicitly in the report.
-- `estimated_1rm`: `{ExerciseName: {current_e1rm_kg, prev_e1rm_kg, best_e1rm_kg, last_date, delta_vs_prev_kg}}`. Epley projection (`kg × (1 + reps/30)`) on the heaviest working set per session, one entry per exercise with logged working weight. Use alongside raw top sets in the **Are you getting stronger?** section. Emitted for every exercise, not only the five major compounds — the coach decides which to surface.
+- `estimated_1rm`: `{ExerciseName: {current_e1rm_kg, prev_e1rm_kg, best_e1rm_kg, last_date, delta_vs_prev_kg, e1rm_history, slope_kg_per_4w, confidence, stalled_sessions}}`. Epley projection (`kg × (1 + reps/30)`) on the heaviest working set per session, one entry per exercise with logged working weight. Emitted for every exercise, not only the five major compounds — the coach decides which to surface.
+  - `e1rm_history`: last 6 sessions newest-first, each `{date, e1rm_kg, top_set_reps, top_set_kg}`. Use it when raw delta_vs_prev_kg looks ambiguous and you need to see the trajectory.
+  - `slope_kg_per_4w`: OLS slope over those sessions, scaled to a 4-week window. Null if fewer than 3 sessions logged. Treat this — not the last-vs-prev delta — as the primary "is this lift trending up?" signal.
+  - `confidence`: `high` (last 3 top sets all 3-8 reps), `medium` (mixed), `low` (any top set ≥13 reps or only one session). Epley is calibrated for low-rep work; a high-rep e1RM is noisy. When `confidence == low`, soften the trend language and surface the noise to the user.
+  - `stalled_sessions`: count of consecutive most-recent sessions where |Δe1RM| ≤ 0.5kg, broken by any deload that fell in the window. ≥2 means a real stall, not a one-off bad day.
 - `stale_exercises`: list of exercises not logged in ≥28 days, sorted newest-stale first. Each entry: `{exercise, last_date, weeks_since, sessions_logged}`. Warmup and cardio sections are pre-filtered. Use for rotation decisions (retire, reintroduce, or fold back into the plan).
 - `unknown_exercises`: logged exercise names across the full loaded window that don't match the database. Surface these in **Missing from your tracking** so the user can fix typos or add missing entries — untracked names silently under-count volume.
 
@@ -157,13 +161,19 @@ Bullet points. Plain language. What they're doing well with specific exercises a
 Bullet points. Prioritized by impact. Each item: what's wrong, why it matters for them, what to do. 3-5 items max. No technical justification beyond one sentence.
 
 ### Are you getting stronger?
-For each major exercise with enough data, combine the raw top-set line with the e1RM trend:
+For each major exercise with enough data, combine the raw top-set line with the e1RM trajectory:
 
-`Exercise Name: Xkg × Y reps → Xkg × Y reps, e1RM Akg → Bkg — getting stronger / stuck / going backwards`
+`Exercise Name: Xkg × Y reps → Xkg × Y reps, e1RM Akg → Bkg (+Ckg / 4 weeks) — getting stronger / stuck / going backwards`
 
-Pull the e1RM values from `estimated_1rm[exercise]` (`prev_e1rm_kg → current_e1rm_kg`). The e1RM catches progression/regression that the raw top-set line hides — e.g. 60kg×8 → 62.5kg×8 raw looks like progress, and the e1RM (75 → 78) confirms it; 85kg×10 → 30kg×10 on Ab Crunch Machine is a clear regression the delta makes obvious. A negative `delta_vs_prev_kg` on a main lift without a deload around it is a flag.
+Pull the values from `estimated_1rm[exercise]`:
+- `prev_e1rm_kg → current_e1rm_kg` for the immediate delta.
+- `slope_kg_per_4w` for the trajectory line (`+Ckg / 4 weeks`). Use this as the primary signal — it sees through one-off noise that a last-vs-prev delta can't. If it's null (fewer than 3 sessions), drop the trend chunk and rely on the raw delta only.
+- `confidence`: when `low` (high-rep top sets), append a clause like "e1RM is noisy at 12+ reps — push one heavier set to get a cleaner read." Don't claim a trend with confidence on a noisy signal.
+- `stalled_sessions ≥ 2` without a deload in the window: call out the stall explicitly. Suggest one of: bump volume, change variation, or schedule a deload (let Phase 2 decide which).
 
-If data is too limited to judge, say that in one sentence.
+A negative `delta_vs_prev_kg` and a flat-or-negative `slope_kg_per_4w` together on a main lift without a deload around it is a real flag. A negative delta with a positive slope is one bad session — don't over-react.
+
+If data is too limited to judge (history < 2 entries), say that in one sentence.
 
 **Bodyweight line.** Add one line at the bottom of this section using `bodyweight_latest` and `bodyweight_trend_kg_per_week`:
 
@@ -216,6 +226,7 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 - **Exercise pairing** (§16): straight sets for compounds, supersets for isolation/accessories when it saves time.
 - **Exercise variation** (§17): the week's exercise selection must cover different regions of each major muscle. Anchor compounds where progression is live carry forward; variation plays out in isolation/accessory slots and across blocks.
 - **Volume, frequency, overload, push-pull balance, lengthened position, tendon safety, HRV session placement, deload timing**: §1, §5, §6, §7, §8, §9, §11.
+- **PrEP context (§12):** preserve at least one heavy lower-body compound per leg session (squat or trap-bar deadlift) for bone strain. Don't quietly drop it in favor of leg-press accessories even if the volume model is satisfied.
 - Fix gaps from the report (underdeveloped muscles, missing patterns).
 - Maintain exercises the user is already progressing on.
 - **Deload handling (§11):** if `weeks_since_last_deload > 6` or null, the prescribed block IS a deload: reduce each exercise's working-set count to ~50% and keep loads at the last working weight (maintain intensity, cut volume). Tell the user explicitly in "Why this plan" that this block is a deload. In the 4-6 week window, don't force a deload but flag it in the report and offer to plan one if the user asks.

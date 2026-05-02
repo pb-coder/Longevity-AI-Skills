@@ -302,6 +302,11 @@ def extract_hl_workout(d: str, ts: datetime, raw: str) -> dict | None:
     if "Walking" in apple_type and duration is not None and duration < INCIDENTAL_WALK_MAX_MIN:
         notes = "incidental walk"
 
+    # HL emits the workout at end-time and we computed start_dt above as
+    # ``end - duration``. Without pause data, elapsed equals duration here —
+    # we surface it explicitly for note-builder symmetry with the XML path.
+    elapsed_min = round((end_dt - start_dt).total_seconds() / 60.0, 1) if duration else None
+
     return {
         "date":         start_dt.date().isoformat(),
         "start":        start_dt.strftime("%H:%M:%S"),
@@ -312,6 +317,12 @@ def extract_hl_workout(d: str, ts: datetime, raw: str) -> dict | None:
         "max_hr":       None,
         "min_hr":       None,
         "active_cal":   round(cal, 1) if cal is not None else None,
+        # HL .txt doesn't carry basal energy or elevation metadata, so the
+        # corresponding note fields will be omitted by build_auto_cardio_note.
+        "basal_cal":    None,
+        "total_cal":    None,
+        "elevation_m":  None,
+        "elapsed_min":  elapsed_min,
         "distance_km":  round(distance, 2) if distance is not None else None,
         "source":       "HLExport",
         "notes":        notes,
@@ -416,6 +427,11 @@ def main() -> int:
                     help="Path to Workout Tracker xlsx.")
     ap.add_argument("--since", default=None, type=parse_since,
                     help="Cutoff date (YYYY-MM-DD). Default: 6 months back.")
+    ap.add_argument("--auto-cardio-since", default=None, type=parse_since,
+                    help="Cutoff date for auto-cardio appends (YYYY-MM-DD). "
+                         "Default: start of the current calendar month, or "
+                         "Profile.auto_cardio_since if set. Health Metrics + "
+                         "Workout Sessions still ingest the full --since window.")
     ap.add_argument("--also-bodyweight", action="store_true",
                     help="Mirror the parsed bodyweight series into the Bodyweight sheet.")
     ap.add_argument("--dry-run", action="store_true",
@@ -500,7 +516,16 @@ def main() -> int:
     out_lines.extend(upsert_workout_sessions(wb, workout_rows))
 
     if profile.get("auto_cardio"):
+        # Resolve auto-cardio cutoff: CLI override > Profile cell > default
+        # (start of current calendar month).
+        ac_since = (
+            args.auto_cardio_since
+            or parse_since(profile.get("auto_cardio_since"))
+            or date.today().replace(day=1)
+        )
+        ac_cutoff = ac_since.isoformat()
         cardio_payload: list[dict] = []
+        skipped_old = 0
         for w in workout_rows:
             apple_type = w.get("apple_type") or ""
             if apple_type not in CARDIO_AUTOLOG_TYPES:
@@ -508,13 +533,27 @@ def main() -> int:
             tracker_name = APPLE_TO_TRACKER_EXERCISE.get(apple_type)
             if not tracker_name:
                 continue
+            d = str(w.get("date") or "")[:10]
+            if d < ac_cutoff:
+                skipped_old += 1
+                continue
             cardio_payload.append({
                 "date":         w.get("date"),
                 "exercise":     tracker_name,
                 "duration_min": w.get("duration_min"),
                 "distance_km":  w.get("distance_km"),
                 "avg_hr":       w.get("avg_hr"),
+                # HL doesn't supply basal/elevation/effort. active_cal +
+                # elapsed_min are present; the note builder skips the rest.
+                "active_cal":   w.get("active_cal"),
+                "total_cal":    w.get("total_cal"),
+                "elevation_m":  w.get("elevation_m"),
+                "elapsed_min":  w.get("elapsed_min"),
             })
+        out_lines.append(
+            f"Auto-cardio cutoff: {ac_cutoff} "
+            f"({skipped_old} eligible workouts older than cutoff skipped)"
+        )
         out_lines.extend(upsert_monthly_cardio(wb, cardio_payload))
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")

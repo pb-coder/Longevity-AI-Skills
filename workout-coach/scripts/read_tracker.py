@@ -32,8 +32,10 @@ import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from tracker_sheet import (  # noqa: E402
-    HEALTH_METRICS_FIELDS,
+    HEALTH_METRICS_COLS_BY_SOURCE,
+    HEALTH_METRICS_FIELDS_BY_SOURCE,
     HEALTH_METRICS_SHEET_NAME,
+    WORKOUT_SESSIONS_FIELDS_BY_SOURCE,
     WORKOUT_SESSIONS_SHEET_NAME,
     bw_locate_date,
     date_str,
@@ -493,6 +495,17 @@ def read_health_metrics(wb) -> list[dict]:
     """
     if HEALTH_METRICS_SHEET_NAME not in wb.sheetnames:
         return []
+    src = read_profile(wb).get("source") or "xml"
+    if src not in HEALTH_METRICS_FIELDS_BY_SOURCE:
+        src = "xml"
+    fields = HEALTH_METRICS_FIELDS_BY_SOURCE[src]
+    notes_idx = HEALTH_METRICS_COLS_BY_SOURCE[src] - 1  # zero-based notes col
+    # Keys callers may legitimately query but that the active source can't
+    # populate (HL slim schema). Surface them as None so downstream
+    # capability gates and trend helpers don't KeyError.
+    all_xml_keys = HEALTH_METRICS_FIELDS_BY_SOURCE["xml"]
+    missing_keys = [k for k in all_xml_keys if k not in fields]
+
     ws = wb[HEALTH_METRICS_SHEET_NAME]
     out: list[dict] = []
     for raw in ws.iter_rows(min_row=2, values_only=True):
@@ -502,7 +515,7 @@ def read_health_metrics(wb) -> list[dict]:
         if d is None:
             continue
         entry = {"date": d}
-        for i, key in enumerate(HEALTH_METRICS_FIELDS, start=1):
+        for i, key in enumerate(fields, start=1):
             v = raw[i] if len(raw) > i else None
             if v in (None, ""):
                 entry[key] = None
@@ -511,7 +524,9 @@ def read_health_metrics(wb) -> list[dict]:
                     entry[key] = float(v)
                 except (TypeError, ValueError):
                     entry[key] = None
-        notes = raw[14] if len(raw) > 14 else None
+        for k in missing_keys:
+            entry[k] = None
+        notes = raw[notes_idx] if len(raw) > notes_idx else None
         entry["notes"] = (str(notes).strip() if notes else None)
         out.append(entry)
     out.sort(key=lambda e: e["date"])
@@ -521,31 +536,48 @@ def read_health_metrics(wb) -> list[dict]:
 def read_workout_sessions(wb) -> list[dict]:
     """Return all Workout Sessions rows sorted ascending by date+start.
 
-    Each entry has the 12 columns of the sheet. Returns ``[]`` if the
-    sheet is missing.
+    Each entry has the per-source columns of the sheet (xml: 12 cols incl.
+    Avg/Max/Min HR; hl_export: 9 cols, HR fields surfaced as None).
+    Returns ``[]`` if the sheet is missing.
     """
     if WORKOUT_SESSIONS_SHEET_NAME not in wb.sheetnames:
         return []
+    src = read_profile(wb).get("source") or "xml"
+    if src not in WORKOUT_SESSIONS_FIELDS_BY_SOURCE:
+        src = "xml"
+    fields = WORKOUT_SESSIONS_FIELDS_BY_SOURCE[src]
+
+    # Per-key coercer. Keys absent from the active source's field list
+    # (HL: avg/max/min HR) get None.
+    numeric_keys = {"duration_min", "avg_hr", "active_cal", "distance_km"}
+    int_keys     = {"max_hr", "min_hr"}
+
     ws = wb[WORKOUT_SESSIONS_SHEET_NAME]
     out: list[dict] = []
     for raw in ws.iter_rows(min_row=2, values_only=True):
         d, s = ws_locate_date_start(raw)
         if d is None:
             continue
-        out.append({
-            "date":         d,
-            "start":        s,
-            "end":          raw[2]  if len(raw) > 2  else None,
-            "apple_type":   raw[3]  if len(raw) > 3  else None,
-            "duration_min": to_float(raw[4]) if len(raw) > 4 else 0.0,
-            "avg_hr":       to_float(raw[5]) if len(raw) > 5 else 0.0,
-            "max_hr":       to_int_or_none(raw[6]) if len(raw) > 6 else None,
-            "min_hr":       to_int_or_none(raw[7]) if len(raw) > 7 else None,
-            "active_cal":   to_float(raw[8]) if len(raw) > 8 else 0.0,
-            "distance_km":  to_float(raw[9]) if len(raw) > 9 else 0.0,
-            "source":       raw[10] if len(raw) > 10 else None,
-            "notes":        (str(raw[11]).strip() if len(raw) > 11 and raw[11] else None),
-        })
+        entry = {"date": d, "start": s}
+        # Map fields[i] → raw[i+1] (col 1 is Date, col 2..N is fields[0..N-1]).
+        for i, key in enumerate(fields, start=1):
+            v = raw[i] if len(raw) > i else None
+            if key in numeric_keys:
+                entry[key] = to_float(v) if v is not None else 0.0
+            elif key in int_keys:
+                entry[key] = to_int_or_none(v) if v is not None else None
+            elif key == "notes":
+                entry[key] = str(v).strip() if v else None
+            else:
+                entry[key] = v
+        # Backfill keys missing from the active schema so downstream code
+        # (e.g. session-HR cross-check) doesn't KeyError on HL trackers.
+        for missing in ("avg_hr", "max_hr", "min_hr",
+                        "duration_min", "active_cal", "distance_km",
+                        "end", "apple_type", "source", "notes"):
+            entry.setdefault(missing,
+                             0.0 if missing in numeric_keys else None)
+        out.append(entry)
     out.sort(key=lambda e: (e["date"], e["start"] or ""))
     return out
 

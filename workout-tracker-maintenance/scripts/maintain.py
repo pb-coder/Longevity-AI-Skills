@@ -24,12 +24,14 @@ from tracker_sheet import (  # noqa: E402
     MONTHLY_COLS,
     DB_COLS,
     BODYWEIGHT_COLS,
-    HEALTH_METRICS_COLS,
+    HEALTH_METRICS_COLS_BY_SOURCE,
     HEALTH_METRICS_SHEET_NAME,
     PROFILE_SHEET_NAME,
-    WORKOUT_SESSIONS_COLS,
+    WORKOUT_SESSIONS_COLS_BY_SOURCE,
     WORKOUT_SESSIONS_SHEET_NAME,
+    canonicalize_sheet_order,
     find_last_data_cell,
+    read_profile,
     style_monthly_sheet,
     style_db_sheet,
     style_bodyweight_sheet,
@@ -82,25 +84,14 @@ def trim_sheet(ws, buffer: int, target_cols: int):
 
 # ------------------------------------------------------------------ reorder
 def reorder_sheets(wb):
-    """Order: Exercises Database, Profile, Bodyweight, Health Metrics, Workout Sessions,
-    monthly sheets newest → oldest, then anything else."""
-    names = list(wb.sheetnames)
-    db = [n for n in names if n == "Exercises Database"]
-    pf = [n for n in names if n == PROFILE_SHEET_NAME]
-    bw = [n for n in names if n == "Bodyweight"]
-    hm = [n for n in names if n == HEALTH_METRICS_SHEET_NAME]
-    ws = [n for n in names if n == WORKOUT_SESSIONS_SHEET_NAME]
-    months = sorted((n for n in names if is_monthly(n)), reverse=True)
-    fixed = set(db + pf + bw + hm + ws + months)
-    other = [n for n in names if n not in fixed]
-    desired = db + pf + bw + hm + ws + months + other
+    """Delegate to the shared canonicalize_sheet_order helper.
 
-    # Use move_sheet: openpyxl needs the sheet object and an index.
-    for target_idx, name in enumerate(desired):
-        ws = wb[name]
-        cur_idx = wb.sheetnames.index(name)
-        if cur_idx != target_idx:
-            wb.move_sheet(ws, offset=target_idx - cur_idx)
+    Kept as a thin wrapper so existing callers (and tests, if any) don't
+    need to update their call sites — the canonical order logic lives in
+    ``tracker_sheet`` so writers (`/log`, importers, /maintain) all use
+    the same code path.
+    """
+    canonicalize_sheet_order(wb)
 
 
 # ------------------------------------------------------------------ main
@@ -130,6 +121,14 @@ def run(path: Path, dry_run: bool = False) -> int:
 
     before_counts = {name: count_nonempty_rows(wb[name]) for name in wb.sheetnames}
 
+    # Resolve the data source once — drives the slim/full schema for the
+    # Health Metrics + Workout Sessions sheets.
+    src = read_profile(wb).get("source") or "xml"
+    if src not in HEALTH_METRICS_COLS_BY_SOURCE:
+        src = "xml"
+    hm_cols = HEALTH_METRICS_COLS_BY_SOURCE[src]
+    ws_cols = WORKOUT_SESSIONS_COLS_BY_SOURCE[src]
+
     # 1. Style + trim every sheet
     for name in list(wb.sheetnames):
         ws = wb[name]
@@ -143,11 +142,11 @@ def run(path: Path, dry_run: bool = False) -> int:
             style_bodyweight_sheet(ws)
             trim_sheet(ws, buffer=BODYWEIGHT_BUFFER, target_cols=BODYWEIGHT_COLS)
         elif name == HEALTH_METRICS_SHEET_NAME:
-            style_health_metrics_sheet(ws)
-            trim_sheet(ws, buffer=HEALTH_METRICS_BUFFER, target_cols=HEALTH_METRICS_COLS)
+            style_health_metrics_sheet(ws, source=src)
+            trim_sheet(ws, buffer=HEALTH_METRICS_BUFFER, target_cols=hm_cols)
         elif name == WORKOUT_SESSIONS_SHEET_NAME:
-            style_workout_sessions_sheet(ws)
-            trim_sheet(ws, buffer=WORKOUT_SESSIONS_BUFFER, target_cols=WORKOUT_SESSIONS_COLS)
+            style_workout_sessions_sheet(ws, source=src)
+            trim_sheet(ws, buffer=WORKOUT_SESSIONS_BUFFER, target_cols=ws_cols)
         elif is_monthly(name):
             style_monthly_sheet(ws)
             buf = CURRENT_MONTH_BUFFER if name == current else PAST_MONTH_BUFFER

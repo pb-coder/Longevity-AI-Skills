@@ -76,41 +76,133 @@ BODYWEIGHT_LEFT_COLS = {"C"}
 BODYWEIGHT_COLS = 3
 BODYWEIGHT_HEADERS = ["Date", "Kg", "Notes"]
 
-# Health Metrics sheet: 15 columns of daily aggregates from Apple Health.
+# Health Metrics sheet: per-source schema. The XML pipeline supplies the
+# full 15-col surface; HLExport can never populate Resting HR / HRV SDNN /
+# Walking HR / Sleep Deep / Sleep REM / Wrist Temp / Sleep Breath Dist /
+# Exercise Min, so its tracker uses a 7-col slim schema that drops them.
 # Sorted DESC. Sparse-merge upserts: an incoming None never overwrites an
 # existing non-null value. Notes column is the only manual-input column;
 # the importer never touches it.
 HEALTH_METRICS_SHEET_NAME = "Health Metrics"
-HEALTH_METRICS_HEADERS = [
-    "Date", "Bodyweight (kg)", "VO2max", "Resting HR", "HRV SDNN",
-    "Walking HR", "HR Recovery 1min", "Sleep Total", "Sleep Deep",
-    "Sleep REM", "Resp Rate", "Wrist Temp", "Sleep Breath Dist",
-    "Exercise Min", "Notes",
-]
-HEALTH_METRICS_WIDTHS = {
-    "A": 12, "B": 14, "C": 9, "D": 11, "E": 10,
-    "F": 11, "G": 16, "H": 11, "I": 11,
-    "J": 11, "K": 11, "L": 11, "M": 17,
-    "N": 13, "O": 30,
-}
-HEALTH_METRICS_LEFT_COLS = {"O"}
-HEALTH_METRICS_COLS = 15
 
-# Workout Sessions sheet: 12 columns, one row per Apple Workout record.
-# Dedupe key is (Date, Start). Sorted DESC by date then start time.
-WORKOUT_SESSIONS_SHEET_NAME = "Workout Sessions"
-WORKOUT_SESSIONS_HEADERS = [
-    "Date", "Start", "End", "Apple Type", "Duration (min)",
-    "Avg HR (bpm)", "Max HR (bpm)", "Min HR (bpm)",
-    "Active Cal (kcal)", "Distance (km)", "Source", "Notes",
-]
-WORKOUT_SESSIONS_WIDTHS = {
-    "A": 12, "B": 7, "C": 7, "D": 22, "E": 14,
-    "F": 13, "G": 13, "H": 13,
-    "I": 17, "J": 13, "K": 18, "L": 28,
+HEALTH_METRICS_HEADERS_BY_SOURCE = {
+    "xml": [
+        "Date", "Bodyweight (kg)", "VO2max", "Resting HR", "HRV SDNN",
+        "Walking HR", "HR Recovery 1min", "Sleep Total", "Sleep Deep",
+        "Sleep REM", "Resp Rate", "Wrist Temp", "Sleep Breath Dist",
+        "Exercise Min", "Notes",
+    ],
+    "hl_export": [
+        "Date", "Bodyweight (kg)", "VO2max", "HR Recovery 1min",
+        "Sleep Total", "Resp Rate", "Notes",
+    ],
 }
-WORKOUT_SESSIONS_LEFT_COLS = {"D", "K", "L"}
-WORKOUT_SESSIONS_COLS = 12
+
+# Field-name list (matches the dict keys from the importers' per-day emit).
+# Position N corresponds to column N+1 (Date is col 1, fields[0] is col 2).
+# The trailing Notes column is reserved for manual notes and is NOT in
+# this list — upsert never touches it.
+HEALTH_METRICS_FIELDS_BY_SOURCE = {
+    "xml": [
+        "bodyweight_kg", "vo2max", "resting_hr", "hrv_sdnn",
+        "walking_hr", "hr_recovery_1min", "sleep_total_h", "sleep_deep_h",
+        "sleep_rem_h", "resp_rate", "wrist_temp_c", "sleep_breath_dist",
+        "exercise_min",
+    ],
+    "hl_export": [
+        "bodyweight_kg", "vo2max", "hr_recovery_1min",
+        "sleep_total_h", "resp_rate",
+    ],
+}
+
+HEALTH_METRICS_WIDTHS_BY_SOURCE = {
+    "xml": {
+        "A": 12, "B": 14, "C": 9, "D": 11, "E": 10,
+        "F": 11, "G": 16, "H": 11, "I": 11,
+        "J": 11, "K": 11, "L": 11, "M": 17,
+        "N": 13, "O": 30,
+    },
+    "hl_export": {
+        "A": 12, "B": 14, "C": 9, "D": 16, "E": 11, "F": 11, "G": 30,
+    },
+}
+
+HEALTH_METRICS_LEFT_COLS_BY_SOURCE = {
+    "xml":       {"O"},
+    "hl_export": {"G"},
+}
+
+HEALTH_METRICS_COLS_BY_SOURCE = {
+    "xml":       15,
+    "hl_export": 7,
+}
+
+# Back-compat aliases — callers that still import HEALTH_METRICS_HEADERS / etc.
+# get the xml shape, matching today's behaviour for Nihad's tracker.
+HEALTH_METRICS_HEADERS   = HEALTH_METRICS_HEADERS_BY_SOURCE["xml"]
+HEALTH_METRICS_FIELDS    = HEALTH_METRICS_FIELDS_BY_SOURCE["xml"]
+HEALTH_METRICS_WIDTHS    = HEALTH_METRICS_WIDTHS_BY_SOURCE["xml"]
+HEALTH_METRICS_LEFT_COLS = HEALTH_METRICS_LEFT_COLS_BY_SOURCE["xml"]
+HEALTH_METRICS_COLS      = HEALTH_METRICS_COLS_BY_SOURCE["xml"]
+
+# Workout Sessions sheet: per-source schema. XML carries per-workout
+# Avg/Max/Min HR; HL never does, so HL trackers drop those three columns
+# (12 → 9). Dedupe key is (Date, Start). Sorted DESC by date then start.
+WORKOUT_SESSIONS_SHEET_NAME = "Workout Sessions"
+
+WORKOUT_SESSIONS_HEADERS_BY_SOURCE = {
+    "xml": [
+        "Date", "Start", "End", "Apple Type", "Duration (min)",
+        "Avg HR (bpm)", "Max HR (bpm)", "Min HR (bpm)",
+        "Active Cal (kcal)", "Distance (km)", "Source", "Notes",
+    ],
+    "hl_export": [
+        "Date", "Start", "End", "Apple Type", "Duration (min)",
+        "Active Cal (kcal)", "Distance (km)", "Source", "Notes",
+    ],
+}
+
+# Field-name list per source, matching the XML/HL importer payload keys.
+# Position N corresponds to column N+1.
+WORKOUT_SESSIONS_FIELDS_BY_SOURCE = {
+    "xml": [
+        "start", "end", "apple_type", "duration_min",
+        "avg_hr", "max_hr", "min_hr",
+        "active_cal", "distance_km", "source", "notes",
+    ],
+    "hl_export": [
+        "start", "end", "apple_type", "duration_min",
+        "active_cal", "distance_km", "source", "notes",
+    ],
+}
+
+WORKOUT_SESSIONS_WIDTHS_BY_SOURCE = {
+    "xml": {
+        "A": 12, "B": 7, "C": 7, "D": 22, "E": 14,
+        "F": 13, "G": 13, "H": 13,
+        "I": 17, "J": 13, "K": 18, "L": 28,
+    },
+    "hl_export": {
+        "A": 12, "B": 7, "C": 7, "D": 22, "E": 14,
+        "F": 17, "G": 13, "H": 18, "I": 28,
+    },
+}
+
+WORKOUT_SESSIONS_LEFT_COLS_BY_SOURCE = {
+    "xml":       {"D", "K", "L"},
+    "hl_export": {"D", "H", "I"},
+}
+
+WORKOUT_SESSIONS_COLS_BY_SOURCE = {
+    "xml":       12,
+    "hl_export": 9,
+}
+
+# Back-compat aliases (xml-shaped).
+WORKOUT_SESSIONS_HEADERS   = WORKOUT_SESSIONS_HEADERS_BY_SOURCE["xml"]
+WORKOUT_SESSIONS_WIDTHS    = WORKOUT_SESSIONS_WIDTHS_BY_SOURCE["xml"]
+WORKOUT_SESSIONS_LEFT_COLS = WORKOUT_SESSIONS_LEFT_COLS_BY_SOURCE["xml"]
+WORKOUT_SESSIONS_COLS      = WORKOUT_SESSIONS_COLS_BY_SOURCE["xml"]
 
 
 # ------------------------------------------------------------------ helpers
@@ -428,22 +520,40 @@ def hm_locate_date(row):
     return None, None
 
 
-def style_health_metrics_sheet(ws):
+def _resolve_source(wb) -> str:
+    """Return the active data source (``xml`` | ``hl_export``).
+
+    Reads ``Profile.source``; defaults to ``"xml"`` if the Profile sheet is
+    missing or the cell is uninitialised. Fabian's tracker has
+    ``source = hl_export`` so its slim schemas apply; Nihad's defaults
+    to ``xml`` so existing behaviour is preserved.
+    """
+    src = read_profile(wb).get("source")
+    return src if src in ("xml", "hl_export") else "xml"
+
+
+def style_health_metrics_sheet(ws, source: str = "xml"):
     """Apply canonical styling to the Health Metrics sheet. Idempotent.
 
-    Layout: 15 columns, Date in col A, Notes in col O (left-aligned). Data
-    sorted DESC by ``upsert_health_metrics`` (the single writer). This
-    function only enforces header + data styling, widths, and freeze pane;
-    it does not reorder rows.
+    Layout depends on ``source``: 15 cols for ``xml``, 7 cols for
+    ``hl_export``. Date in col A, Notes in the rightmost column
+    (left-aligned). Data sorted DESC by ``upsert_health_metrics`` (the
+    single writer). This function only enforces header + data styling,
+    widths, and freeze pane; it does not reorder rows.
     """
+    headers   = HEALTH_METRICS_HEADERS_BY_SOURCE[source]
+    cols      = HEALTH_METRICS_COLS_BY_SOURCE[source]
+    widths    = HEALTH_METRICS_WIDTHS_BY_SOURCE[source]
+    left_cols = HEALTH_METRICS_LEFT_COLS_BY_SOURCE[source]
+
     for merged_range in list(ws.merged_cells.ranges):
         ws.unmerge_cells(str(merged_range))
 
     # Trim any stray columns beyond the canonical layout.
-    if ws.max_column > HEALTH_METRICS_COLS:
-        ws.delete_cols(HEALTH_METRICS_COLS + 1, ws.max_column - HEALTH_METRICS_COLS)
+    if ws.max_column > cols:
+        ws.delete_cols(cols + 1, ws.max_column - cols)
 
-    for c, label in enumerate(HEALTH_METRICS_HEADERS, 1):
+    for c, label in enumerate(headers, 1):
         cell = ws.cell(row=1, column=c, value=label)
         cell.font = font_header
         cell.fill = fill_header
@@ -452,15 +562,15 @@ def style_health_metrics_sheet(ws):
 
     last_data_row, _ = find_last_data_cell(ws)
     for r in range(2, last_data_row + 1):
-        for c in range(1, HEALTH_METRICS_COLS + 1):
+        for c in range(1, cols + 1):
             cell = ws.cell(row=r, column=c)
             cell.font = font_data
             cell.fill = fill_data
             col = get_column_letter(c)
-            cell.alignment = align_left if col in HEALTH_METRICS_LEFT_COLS else align_center
+            cell.alignment = align_left if col in left_cols else align_center
             cell.border = no_border
 
-    for col, w in HEALTH_METRICS_WIDTHS.items():
+    for col, w in widths.items():
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
 
@@ -481,21 +591,26 @@ def ws_locate_date_start(row):
     return d, s
 
 
-def style_workout_sessions_sheet(ws):
+def style_workout_sessions_sheet(ws, source: str = "xml"):
     """Apply canonical styling to the Workout Sessions sheet. Idempotent.
 
-    Layout: 12 columns, Date / Start / End / Apple Type / Duration / HR /
-    Calories / Distance / Source / Notes. Type, Source, and Notes are
-    left-aligned; everything else centered. Data sorted DESC by
-    ``upsert_workout_sessions`` (the single writer).
+    Layout depends on ``source``: 12 cols for ``xml`` (incl. Avg/Max/Min HR);
+    9 cols for ``hl_export`` (HR cols dropped — HL never delivers them).
+    Type / Source / Notes left-aligned; everything else centered. Data
+    sorted DESC by ``upsert_workout_sessions`` (the single writer).
     """
+    headers   = WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source]
+    cols      = WORKOUT_SESSIONS_COLS_BY_SOURCE[source]
+    widths    = WORKOUT_SESSIONS_WIDTHS_BY_SOURCE[source]
+    left_cols = WORKOUT_SESSIONS_LEFT_COLS_BY_SOURCE[source]
+
     for merged_range in list(ws.merged_cells.ranges):
         ws.unmerge_cells(str(merged_range))
 
-    if ws.max_column > WORKOUT_SESSIONS_COLS:
-        ws.delete_cols(WORKOUT_SESSIONS_COLS + 1, ws.max_column - WORKOUT_SESSIONS_COLS)
+    if ws.max_column > cols:
+        ws.delete_cols(cols + 1, ws.max_column - cols)
 
-    for c, label in enumerate(WORKOUT_SESSIONS_HEADERS, 1):
+    for c, label in enumerate(headers, 1):
         cell = ws.cell(row=1, column=c, value=label)
         cell.font = font_header
         cell.fill = fill_header
@@ -504,63 +619,68 @@ def style_workout_sessions_sheet(ws):
 
     last_data_row, _ = find_last_data_cell(ws)
     for r in range(2, last_data_row + 1):
-        for c in range(1, WORKOUT_SESSIONS_COLS + 1):
+        for c in range(1, cols + 1):
             cell = ws.cell(row=r, column=c)
             cell.font = font_data
             cell.fill = fill_data
             col = get_column_letter(c)
-            cell.alignment = align_left if col in WORKOUT_SESSIONS_LEFT_COLS else align_center
+            cell.alignment = align_left if col in left_cols else align_center
             cell.border = no_border
 
-    for col, w in WORKOUT_SESSIONS_WIDTHS.items():
+    for col, w in widths.items():
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
 
 
 def ensure_health_metrics_sheet(wb):
+    """Ensure the Health Metrics sheet exists with the per-source headers.
+
+    Returns ``(ws, created)``. The header row is written using the schema
+    matching the workbook's ``Profile.source`` (xml = 15 cols, hl_export
+    = 7 cols).
+    """
+    source = _resolve_source(wb)
     if HEALTH_METRICS_SHEET_NAME in wb.sheetnames:
         return wb[HEALTH_METRICS_SHEET_NAME], False
     ws = wb.create_sheet(title=HEALTH_METRICS_SHEET_NAME)
-    for col, header in enumerate(HEALTH_METRICS_HEADERS, start=1):
+    for col, header in enumerate(HEALTH_METRICS_HEADERS_BY_SOURCE[source], start=1):
         ws.cell(row=1, column=col, value=header)
     return ws, True
 
 
 def ensure_workout_sessions_sheet(wb):
+    """Ensure the Workout Sessions sheet exists with the per-source headers.
+
+    xml = 12 cols (Avg/Max/Min HR included), hl_export = 9 cols (HR dropped).
+    """
+    source = _resolve_source(wb)
     if WORKOUT_SESSIONS_SHEET_NAME in wb.sheetnames:
         return wb[WORKOUT_SESSIONS_SHEET_NAME], False
     ws = wb.create_sheet(title=WORKOUT_SESSIONS_SHEET_NAME)
-    for col, header in enumerate(WORKOUT_SESSIONS_HEADERS, start=1):
+    for col, header in enumerate(WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source], start=1):
         ws.cell(row=1, column=col, value=header)
     return ws, True
-
-
-# Order of metric fields in HEALTH_METRICS_HEADERS, by sheet column index.
-# Used by upsert_health_metrics to map dict keys → cells. The `notes` slot
-# is intentionally absent: incoming entries never carry notes, and the
-# Notes column is reserved for manual annotations.
-HEALTH_METRICS_FIELDS = [
-    "bodyweight_kg", "vo2max", "resting_hr", "hrv_sdnn",
-    "walking_hr", "hr_recovery_1min", "sleep_total_h", "sleep_deep_h",
-    "sleep_rem_h", "resp_rate", "wrist_temp_c", "sleep_breath_dist",
-    "exercise_min",
-]
 
 
 def upsert_health_metrics(wb, entries):
     """Sparse-merge per-date Health Metrics rows into the workbook.
 
     ``entries`` is a list of dicts. Each must have ``date`` (YYYY-MM-DD)
-    and any subset of the keys in ``HEALTH_METRICS_FIELDS``. Missing or
-    None values are treated as "no data this run" — they NEVER overwrite
-    an existing non-null cell. The Notes column (col O) is preserved
-    untouched on every upsert.
+    and any subset of the per-source field keys. Missing or None values
+    are treated as "no data this run" — they NEVER overwrite an existing
+    non-null cell. The Notes column (rightmost) is preserved untouched on
+    every upsert. Field list and column count are picked from the
+    workbook's ``Profile.source`` (xml: 13 fields + Notes; hl_export:
+    5 fields + Notes — the unsupported-by-HL fields silently never land).
 
     Returns a list of one summary string for the importer to print.
     """
     if not entries:
         return [f"{HEALTH_METRICS_SHEET_NAME}: 0 dates written / 0 updated"]
     ws, created = ensure_health_metrics_sheet(wb)
+    source = _resolve_source(wb)
+    fields = HEALTH_METRICS_FIELDS_BY_SOURCE[source]
+    cols   = HEALTH_METRICS_COLS_BY_SOURCE[source]
 
     # Read existing rows: keep the full per-field dict + the Notes cell so
     # we can faithfully rewrite the sheet without dropping manual notes.
@@ -572,10 +692,10 @@ def upsert_health_metrics(wb, entries):
         if d is None:
             continue
         record = {}
-        for i, key in enumerate(HEALTH_METRICS_FIELDS, start=1):
+        for i, key in enumerate(fields, start=1):
             v = row[i] if len(row) > i else None
             record[key] = v
-        notes = row[HEALTH_METRICS_COLS - 1] if len(row) >= HEALTH_METRICS_COLS else None
+        notes = row[cols - 1] if len(row) >= cols else None
         record["__notes"] = notes
         existing[d] = record
 
@@ -590,7 +710,7 @@ def upsert_health_metrics(wb, entries):
         cur = existing.get(d)
         if cur is None:
             new_record = {"__notes": None}
-            for key in HEALTH_METRICS_FIELDS:
+            for key in fields:
                 v = e.get(key)
                 new_record[key] = v if v is not None else None
             existing[d] = new_record
@@ -600,7 +720,7 @@ def upsert_health_metrics(wb, entries):
         # Sparse-merge: incoming None never erases existing values; non-null
         # incoming overwrites only when the value differs.
         changed = False
-        for key in HEALTH_METRICS_FIELDS:
+        for key in fields:
             v = e.get(key)
             if v is None:
                 continue
@@ -618,11 +738,11 @@ def upsert_health_metrics(wb, entries):
     for i, d in enumerate(sorted(existing.keys(), reverse=True), start=2):
         rec = existing[d]
         ws.cell(row=i, column=1, value=d)
-        for col_idx, key in enumerate(HEALTH_METRICS_FIELDS, start=2):
+        for col_idx, key in enumerate(fields, start=2):
             ws.cell(row=i, column=col_idx, value=rec.get(key))
-        ws.cell(row=i, column=HEALTH_METRICS_COLS, value=rec.get("__notes"))
+        ws.cell(row=i, column=cols, value=rec.get("__notes"))
 
-    style_health_metrics_sheet(ws)
+    style_health_metrics_sheet(ws, source=source)
 
     if seen_dates:
         date_range = f"{min(seen_dates)} → {max(seen_dates)}"
@@ -635,36 +755,33 @@ def upsert_health_metrics(wb, entries):
 def upsert_workout_sessions(wb, entries):
     """Insert or overwrite Workout Sessions rows by (date, start) dedupe key.
 
-    ``entries`` is a list of dicts with keys: ``date``, ``start``, ``end``,
-    ``apple_type``, ``duration_min``, ``avg_hr``, ``max_hr``, ``min_hr``,
-    ``active_cal``, ``distance_km``, ``source``, ``notes``. Re-running with
-    the same export is a no-op (same dedupe key → same payload). Sorts DESC
-    by (date, start) on every write.
+    ``entries`` is a list of dicts with workout keys (date, start, end,
+    apple_type, duration_min, avg_hr, max_hr, min_hr, active_cal,
+    distance_km, source, notes). For ``hl_export`` trackers the avg/max/min
+    HR keys are silently dropped from the sheet (HL never delivers them).
+    Re-running with the same export is a no-op. Sorts DESC by (date,
+    start) on every write.
 
     Returns a list of one summary string for the importer to print.
     """
     if not entries:
         return [f"{WORKOUT_SESSIONS_SHEET_NAME}: 0 sessions written / 0 updated"]
     ws, created = ensure_workout_sessions_sheet(wb)
+    source = _resolve_source(wb)
+    fields = WORKOUT_SESSIONS_FIELDS_BY_SOURCE[source]
 
     existing: dict[tuple, dict] = {}
     for row in ws.iter_rows(min_row=2, values_only=True):
         d, s = ws_locate_date_start(row)
         if d is None:
             continue
-        existing[(d, s)] = {
-            "date": d, "start": s,
-            "end":          row[2]  if len(row) > 2  else None,
-            "apple_type":   row[3]  if len(row) > 3  else None,
-            "duration_min": row[4]  if len(row) > 4  else None,
-            "avg_hr":       row[5]  if len(row) > 5  else None,
-            "max_hr":       row[6]  if len(row) > 6  else None,
-            "min_hr":       row[7]  if len(row) > 7  else None,
-            "active_cal":   row[8]  if len(row) > 8  else None,
-            "distance_km":  row[9]  if len(row) > 9  else None,
-            "source":       row[10] if len(row) > 10 else None,
-            "notes":        row[11] if len(row) > 11 else None,
-        }
+        rec = {"date": d, "start": s}
+        # Cell column N (1-based) = fields[N-2] for N >= 2 (col 1 is Date,
+        # col 2 onwards is Start, End, …). Walk per-source so HL trackers
+        # don't try to read non-existent HR columns.
+        for i, key in enumerate(fields, start=1):
+            rec[key] = row[i] if len(row) > i else None
+        existing[(d, s)] = rec
 
     written = 0
     updated = 0
@@ -675,19 +792,11 @@ def upsert_workout_sessions(wb, entries):
         if not d or s is None:
             continue
         key = (d, str(s))
-        new_rec = {
-            "date": d, "start": str(s),
-            "end":          e.get("end"),
-            "apple_type":   e.get("apple_type"),
-            "duration_min": e.get("duration_min"),
-            "avg_hr":       e.get("avg_hr"),
-            "max_hr":       e.get("max_hr"),
-            "min_hr":       e.get("min_hr"),
-            "active_cal":   e.get("active_cal"),
-            "distance_km":  e.get("distance_km"),
-            "source":       e.get("source"),
-            "notes":        e.get("notes"),
-        }
+        new_rec = {"date": d, "start": str(s)}
+        # Only persist fields the active source supports — HL writes drop
+        # avg_hr / max_hr / min_hr automatically.
+        for k in fields:
+            new_rec[k] = e.get(k)
         if (e.get("notes") or "").lower().startswith("incidental"):
             incidental += 1
         if key in existing:
@@ -706,20 +815,12 @@ def upsert_workout_sessions(wb, entries):
     sorted_keys = sorted(existing.keys(), reverse=True)
     for i, key in enumerate(sorted_keys, start=2):
         rec = existing[key]
-        ws.cell(row=i, column=1,  value=rec["date"])
-        ws.cell(row=i, column=2,  value=rec["start"])
-        ws.cell(row=i, column=3,  value=rec["end"])
-        ws.cell(row=i, column=4,  value=rec["apple_type"])
-        ws.cell(row=i, column=5,  value=rec["duration_min"])
-        ws.cell(row=i, column=6,  value=rec["avg_hr"])
-        ws.cell(row=i, column=7,  value=rec["max_hr"])
-        ws.cell(row=i, column=8,  value=rec["min_hr"])
-        ws.cell(row=i, column=9,  value=rec["active_cal"])
-        ws.cell(row=i, column=10, value=rec["distance_km"])
-        ws.cell(row=i, column=11, value=rec["source"])
-        ws.cell(row=i, column=12, value=rec["notes"])
+        ws.cell(row=i, column=1, value=rec["date"])
+        # ``start`` is already in fields[0]; iterate fields to fill 2..N.
+        for col_idx, k in enumerate(fields, start=2):
+            ws.cell(row=i, column=col_idx, value=rec.get(k))
 
-    style_workout_sessions_sheet(ws)
+    style_workout_sessions_sheet(ws, source=source)
 
     tag = " (new sheet)" if created else ""
     return [
@@ -742,15 +843,18 @@ PROFILE_LEFT_COLS = {"B"}
 # appear on disk. Adding a new key here + giving it a default in
 # ``ensure_profile_sheet`` is the whole change required to ship a new
 # capability flag.
-PROFILE_KEYS = ("source", "auto_cardio", "notes")
+PROFILE_KEYS = ("source", "auto_cardio", "auto_cardio_since", "notes")
 
 # Default values applied when ``ensure_profile_sheet`` creates the sheet
 # from scratch. ``source`` left None so the caller can inject ``xml`` or
 # ``hl_export`` based on the file extension that triggered the import.
+# ``auto_cardio_since`` defaults to None — importers fall back to the start
+# of the current calendar month when not set.
 PROFILE_DEFAULTS = {
-    "source":      None,
-    "auto_cardio": False,
-    "notes":       None,
+    "source":            None,
+    "auto_cardio":       False,
+    "auto_cardio_since": None,
+    "notes":             None,
 }
 
 
@@ -807,6 +911,15 @@ def read_profile(wb) -> dict:
             b = _coerce_bool(val)
             if b is not None:
                 out["auto_cardio"] = b
+        elif k == "auto_cardio_since":
+            if val is None or val == "":
+                continue
+            s = str(val).strip()[:10]
+            # Permissive: accept any YYYY-MM-DD-shaped string. Bad shapes
+            # fall through to None (caller applies the current-month-start
+            # default).
+            if len(s) == 10 and s[4] == "-" and s[7] == "-":
+                out["auto_cardio_since"] = s
         elif k == "notes":
             out["notes"] = str(val).strip() if val not in (None, "") else None
     return out
@@ -928,6 +1041,76 @@ def write_profile(wb, **updates) -> None:
 
 
 # ================================================== Auto-cardio: monthly append
+_MONTH_RE_STR = r"^\d{4}\.\d{2}$"
+
+
+def _is_monthly_sheet(name: str) -> bool:
+    import re as _re
+    return bool(_re.match(_MONTH_RE_STR, name))
+
+
+def canonicalize_sheet_order(wb) -> None:
+    """Re-order sheets to the canonical layout. Idempotent.
+
+    Order: Exercises Database, Profile, Bodyweight (if present), Health
+    Metrics, Workout Sessions, monthly sheets newest → oldest, anything
+    else last. Used by every writer that may create a new sheet
+    (``upsert_monthly_cardio``, ``append_workout``, the importers' bootstrap
+    paths) so the tab strip stays canonical without waiting for ``/maintain``.
+    """
+    names = list(wb.sheetnames)
+    db = [n for n in names if n == "Exercises Database"]
+    pf = [n for n in names if n == PROFILE_SHEET_NAME]
+    bw = [n for n in names if n == "Bodyweight"]
+    hm = [n for n in names if n == HEALTH_METRICS_SHEET_NAME]
+    ws = [n for n in names if n == WORKOUT_SESSIONS_SHEET_NAME]
+    months = sorted((n for n in names if _is_monthly_sheet(n)), reverse=True)
+    fixed = set(db + pf + bw + hm + ws + months)
+    other = [n for n in names if n not in fixed]
+    desired = db + pf + bw + hm + ws + months + other
+
+    for target_idx, name in enumerate(desired):
+        sheet_obj = wb[name]
+        cur_idx = wb.sheetnames.index(name)
+        if cur_idx != target_idx:
+            wb.move_sheet(sheet_obj, offset=target_idx - cur_idx)
+
+
+def _format_duration_mmss(duration_min) -> str | None:
+    """Coerce a numeric or MM:SS duration to a canonical ``MM:SS`` string.
+
+    - ``None`` / ``""`` → None
+    - already a ``MM:SS`` string → returned verbatim (after a defensive
+      sanity check that minutes are non-negative)
+    - any numeric value (or numeric-looking string, incl. European comma) →
+      formatted as ``MM:SS``
+    Auto-cardio rows previously wrote raw float minutes (e.g. ``60.6``);
+    this helper unifies them with manual-log MM:SS strings.
+    """
+    if duration_min in (None, ""):
+        return None
+    if isinstance(duration_min, str):
+        s = duration_min.strip()
+        if ":" in s:
+            return s if s else None
+        try:
+            duration_min = float(s.replace(",", "."))
+        except ValueError:
+            return None
+    try:
+        f = float(duration_min)
+    except (TypeError, ValueError):
+        return None
+    if f <= 0:
+        return None
+    whole = int(f)
+    secs = int(round((f - whole) * 60))
+    if secs == 60:
+        whole += 1
+        secs = 0
+    return f"{whole}:{secs:02d}"
+
+
 def _format_pace_min_per_km(duration_min: float | None,
                             distance_km: float | None) -> str | None:
     """Return a ``MM:SS`` per-km pace string, or None if not computable.
@@ -957,6 +1140,71 @@ def _format_pace_min_per_km(duration_min: float | None,
 CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN = 1.0
 
 AUTO_IMPORT_NOTE = "auto-imported from Apple"
+
+# When elapsed and active duration differ by less than this many minutes the
+# elapsed-time field is dropped from the auto-cardio note (no meaningful pause
+# happened, so showing both adds noise). Threshold matches the human eye —
+# 1 min of stop time on a 30-min run isn't worth surfacing.
+ELAPSED_TIME_MIN_DELTA = 1.0
+
+
+def _format_elapsed_hms(elapsed_min: float | None) -> str | None:
+    """Render elapsed minutes as ``H:MM:SS`` for long activities, else ``MM:SS``.
+
+    Used by the auto-cardio note builder. Returns None on missing/zero input
+    so the caller can omit the field entirely.
+    """
+    if elapsed_min in (None, "") or not isinstance(elapsed_min, (int, float)):
+        return None
+    if elapsed_min <= 0:
+        return None
+    total_seconds = int(round(elapsed_min * 60))
+    hours, rem = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
+def build_auto_cardio_note(
+    *,
+    active_cal: float | None = None,
+    total_cal: float | None = None,
+    elevation_m: float | None = None,
+    duration_min: float | None = None,
+    elapsed_min: float | None = None,
+) -> str:
+    """Build the structured Notes string for an auto-imported cardio row.
+
+    Format: ``auto-imported from Apple | active 753 kcal | total 1041 kcal |
+    elevation 73 m | elapsed 3:53:23``
+
+    Each ``| field value`` is dropped when the source value is None or
+    zero. ``elapsed`` is dropped when it differs from ``duration_min`` by
+    less than ``ELAPSED_TIME_MIN_DELTA`` minutes (no meaningful pauses).
+    Single source of truth — both importers and the backfill script call
+    this helper so the format stays consistent.
+    """
+    parts: list[str] = [AUTO_IMPORT_NOTE]
+
+    if active_cal not in (None, 0, 0.0):
+        parts.append(f"active {int(round(active_cal))} kcal")
+    if total_cal not in (None, 0, 0.0):
+        # Skip the total field if it's not meaningfully larger than active —
+        # otherwise we'd emit identical-looking active/total values.
+        if active_cal is None or total_cal - active_cal >= 1:
+            parts.append(f"total {int(round(total_cal))} kcal")
+    if elevation_m not in (None, 0, 0.0):
+        parts.append(f"elevation {int(round(elevation_m))} m")
+
+    if elapsed_min not in (None, 0, 0.0):
+        delta = abs(elapsed_min - (duration_min or 0))
+        if duration_min is None or delta >= ELAPSED_TIME_MIN_DELTA:
+            elapsed_str = _format_elapsed_hms(elapsed_min)
+            if elapsed_str:
+                parts.append(f"elapsed {elapsed_str}")
+
+    return " | ".join(parts)
 
 
 def _parse_duration_minutes(v):
@@ -1119,17 +1367,36 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
             avg_hr = r.get("avg_hr")
             pace = _format_pace_min_per_km(dur_f, distance)
 
+            # Compute the next free per-date # for this exercise. Manual
+            # rows usually have a #; cardio is typically solo-per-day so
+            # this lands at 1, but reuses an existing day's exercise count
+            # if the user logged strength earlier the same date.
+            existing_nums = []
+            for er in range(2, ws.max_row + 1):
+                if date_str(ws.cell(row=er, column=2).value) == d:
+                    n = ws.cell(row=er, column=3).value
+                    if isinstance(n, (int, float)):
+                        existing_nums.append(int(n))
+            next_num = (max(existing_nums) + 1) if existing_nums else 1
+
             ws.cell(row=write_row, column=1, value=None)        # SESSION (styler fills)
             ws.cell(row=write_row, column=2, value=d)
-            ws.cell(row=write_row, column=3, value=None)        # # (styler fills)
+            ws.cell(row=write_row, column=3, value=next_num)
             ws.cell(row=write_row, column=4, value=ex)
             ws.cell(row=write_row, column=5, value=1)           # Set
             ws.cell(row=write_row, column=6, value=None)        # Reps (cardio: blank)
             ws.cell(row=write_row, column=7, value=None)        # kg
             ws.cell(row=write_row, column=8, value=f"=F{write_row}*G{write_row}")
-            ws.cell(row=write_row, column=9, value=AUTO_IMPORT_NOTE)
+            note = build_auto_cardio_note(
+                active_cal=r.get("active_cal"),
+                total_cal=r.get("total_cal"),
+                elevation_m=r.get("elevation_m"),
+                duration_min=dur_f,
+                elapsed_min=r.get("elapsed_min"),
+            )
+            ws.cell(row=write_row, column=9, value=note)
             ws.cell(row=write_row, column=10, value=_numeric_cell(distance))
-            ws.cell(row=write_row, column=11, value=_numeric_cell(dur_f))
+            ws.cell(row=write_row, column=11, value=_format_duration_mmss(dur_f))
             ws.cell(row=write_row, column=12, value=pace)
             ws.cell(row=write_row, column=13, value=_numeric_cell(avg_hr))
 
@@ -1150,6 +1417,11 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
             f"{month_key}{tag}: {appended} cardio rows appended, "
             f"{skipped_dup} skipped (already present)"
         )
+
+    # Re-canonicalize tab order so newly-created month sheets land in the
+    # correct position (newest first, after Workout Sessions). Without this,
+    # a fresh month sits at the right end of the strip until /maintain runs.
+    canonicalize_sheet_order(wb)
 
     summaries.append(
         f"Auto-cardio total: {total_appended} appended, "

@@ -322,6 +322,35 @@ def bw_locate_date(row):
     return None, None
 
 
+def _classify_session_rows(rows: list[dict]) -> tuple[list[str], bool]:
+    """Classify a session's rows by kind, returning ``(kinds, is_strength)``.
+
+    Per-row classification (preserves the convention used across both the
+    monthly-sheet styler and downstream readers):
+    - ``strength``: ``kg * reps > 0`` (user lifted weight).
+    - ``cardio``:   ``distance > 0`` (Run / Cycle / Hike / Swim — has GPS).
+    - ``other``:    no kg*reps and no distance (warmup, HIIT, yoga,
+      bodyweight squat, etc.).
+
+    ``is_strength`` is true when any row classifies as ``strength`` — used
+    by the styler to decide whether to emit a TOTAL row and whether to
+    blank session-level metadata cells on non-cardio rows.
+    """
+    kinds: list[str] = []
+    for rd in rows:
+        kg_v = _to_num(rd.get("kg"))
+        reps_v = _to_num(rd.get("reps"))
+        if kg_v * reps_v > 0:
+            kinds.append("strength")
+            continue
+        dist_v = _to_num(rd.get("distance"))
+        if dist_v > 0:
+            kinds.append("cardio")
+            continue
+        kinds.append("other")
+    return kinds, ("strength" in kinds)
+
+
 def _numeric_cell(v):
     """Coerce stringified numbers (incl. European comma decimals like ``"67,5"``)
     to int or float. Returns the original value for anything that isn't purely
@@ -348,6 +377,7 @@ def _numeric_cell(v):
     return int(f) if f.is_integer() else f
 
 
+# ============================================================ Monthly sheet
 def style_monthly_sheet(ws):
     """Apply canonical styling to a YYYY.MM workout log sheet.
 
@@ -470,17 +500,7 @@ def style_monthly_sheet(ws):
     for session_num, sess in enumerate(sessions, start=1):
         first_row = write_row
 
-        # Strength session if any row contributes non-zero kg*reps volume.
-        is_strength = any(
-            _to_num(r["kg"]) * _to_num(r["reps"]) > 0 for r in sess["rows"]
-        )
-
-        # Per-row classification:
-        # - **strength**: kg * reps > 0 (user lifted weight)
-        # - **cardio**: distance > 0 (Run / Cycle / Hike / Swim — has GPS)
-        # - **other**: no kg*reps, no distance (warmup, HIIT, yoga,
-        #   bodyweight squat, etc.).
-        #
+        # Per-row + per-session classification via the shared helper.
         # Cols 11 (Duration), 13 (Avg HR), 14-17 placement:
         # - **Strength session**: session metadata lives on the TOTAL row
         #   only. All non-cardio rows (warmup + working sets) have those
@@ -488,17 +508,7 @@ def style_monthly_sheet(ws):
         #   own per-row metadata (each Apple-recorded ride is independent).
         # - **Pure cardio session** (no strength rows): no TOTAL row;
         #   every row keeps its own per-row metadata.
-        def _row_kind(rd):
-            kg_v = _to_num(rd.get("kg"))
-            reps_v = _to_num(rd.get("reps"))
-            if kg_v * reps_v > 0:
-                return "strength"
-            dist_v = _to_num(rd.get("distance"))
-            if dist_v > 0:
-                return "cardio"
-            return "other"
-
-        kinds = [_row_kind(rd) for rd in sess["rows"]]
+        kinds, is_strength = _classify_session_rows(sess["rows"])
 
         # Hoist candidates for TOTAL row metadata. Priority order:
         #   1. The TOTAL row's existing values (canonical post-migration).
@@ -646,6 +656,7 @@ def style_monthly_sheet(ws):
     ws.freeze_panes = "A2"
 
 
+# ============================================================ Bodyweight sheet
 def style_bodyweight_sheet(ws):
     """Apply canonical styling to the Bodyweight sheet.
 
@@ -693,6 +704,7 @@ def style_bodyweight_sheet(ws):
     ws.freeze_panes = "A2"
 
 
+# ============================================================ Health Metrics sheet
 def hm_locate_date(row):
     """Find the date in a Health Metrics row, return ``(date, date_idx)``.
 
@@ -762,6 +774,7 @@ def style_health_metrics_sheet(ws, source: str = "xml"):
     ws.freeze_panes = "A2"
 
 
+# ============================================================ Workout Sessions sheet
 def ws_locate_date_start(row):
     """Find the (date, start) dedupe key in a Workout Sessions row.
 
@@ -819,6 +832,7 @@ def style_workout_sessions_sheet(ws, source: str = "xml"):
     ws.freeze_panes = "A2"
 
 
+# ============================================================ Upserts (HM + WS)
 def ensure_health_metrics_sheet(wb):
     """Ensure the Health Metrics sheet exists with the per-source headers.
 
@@ -1825,6 +1839,7 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
 STRENGTH_METADATA_DRIFT_THRESHOLD = 0.05
 
 
+# ================================================== Strength upsert (monthly)
 def _strength_metadata_drifts(existing, incoming) -> bool:
     """Return True if the two values disagree by >= 5% (manual-wins guard).
 
@@ -1986,6 +2001,7 @@ def upsert_monthly_strength_session(wb, sessions: list[dict]) -> list[str]:
     return summaries
 
 
+# ============================================================ Exercises Database sheet
 def style_db_sheet(ws):
     """Reapply header + column widths on the Exercises Database.
 

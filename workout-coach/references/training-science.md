@@ -23,7 +23,9 @@
 | Regional coverage within a muscle  | §17 Exercise Variation |
 | Recovery / HRV / wrist temp / sleep | §18 Recovery Signals |
 | Per-session HR interpretation       | §19 Per-Session HR |
-| Planning workouts / programming    | §1-§11, §14-§19 combined |
+| Daily activity / NEAT context       | §20 Daily Activity |
+| Sleep depth and consistency         | §21 Sleep Depth & Consistency |
+| Planning workouts / programming    | §1-§11, §14-§21 combined |
 
 ---
 
@@ -291,3 +293,41 @@ Apple emits per-workout HR statistics (avg / max / min) on every `Workout` recor
 - Intervals: avg HR is meaningless for intervals — read max HR (should hit 165+ during work blocks).
 
 **What NOT to do:** match a stretching session's low HR to "low effort" (different stimulus type), compare across activity types, or react to a single high-HR session without a 4-session window. Sleep/caffeine/heat affect HR substantially day-to-day.
+
+## §20 Daily Activity (NEAT)
+
+NEAT — non-exercise activity thermogenesis — captures everything that isn't a logged workout: walking, errands, climbing stairs, fidgeting, standing desk work. For someone training 4x/week, NEAT is often the larger contributor to daily energy expenditure and the larger contributor to baseline aerobic conditioning.
+
+**Why it matters for the coach.** Two users with identical workout volume can have very different aerobic-load pictures. A user who walks 90 min/day to and from the gym is already getting Zone-1-to-2 stimulus from those walks; prescribing 3x weekly Zone 2 sessions on top doubles down on what they have. A user who drives to the gym and works at a desk gets zero passive aerobic load — for them, the §10 cardio targets are the floor, not the ceiling.
+
+**Apple's `exercise_min` is the canonical NEAT signal** when available. It counts minutes of brisk movement (heart rate elevated above resting), which is roughly the same threshold as Apple's Exercise Ring. Apple's recommended baseline is 30 min/day; 45+ min/day is "active". When `exercise_min` is unavailable (HL trackers), `walking_minutes_28d / 28` is a reasonable NEAT proxy — daily walking is the dominant non-exercise movement signal and HL imports walking workouts.
+
+**Assessment thresholds** (from `daily_activity_28d.assessment`):
+- `low` (<15 min/day) — sedentary baseline. Cardio prescription becomes more important, not less. Add at least one Zone 2 session even if 28d cardio targets are nominally met.
+- `moderate` (15-45 min/day) — typical desk worker who walks. Standard §10 rules apply.
+- `high` (≥45 min/day) — active baseline. If VO2max is also trending up, the user is already getting aerobic load passively; cardio prescription can be light. Prefer one interval session for the VO2max stimulus over multiple Z2 sessions.
+
+**Programming consequences:**
+- A `low` assessment with VO2max trending down is a stronger deload-flag signal than the same VO2max trend at `high` baseline activity. The high-baseline user can absorb more session load without their aerobic ceiling drifting.
+- A `high` assessment combined with under-MAV strength volume often points to the user being chronically under-fed (body composition drifting because energy out > energy in). Bodyweight trend is the cross-check.
+
+**What NOT to do:** treat one high-NEAT week as durable — the assessment is a 28-day rollup so day-to-day fluctuation is already smoothed; reduce strength volume because passive activity is high (passive activity doesn't substitute for resistance stimulus, only for aerobic conditioning); recommend "walk more" without a number — cite the band and the threshold.
+
+## §21 Sleep Depth & Consistency
+
+Total sleep hours is the headline metric, but two users sleeping 7h/night can have very different recovery quality if one of them gets 18% deep sleep and the other gets 8%. Sleep depth is where physical recovery happens — growth hormone secretion, glymphatic clearance, glycogen restocking. REM sleep is where neuromotor consolidation happens — skill retention, technique cementation.
+
+**Healthy ranges** (Walker 2017, AASM consensus):
+- Deep sleep: 13-23% of total. <13% sustained across 5+ nights is a recovery deficit even at adequate total hours. >23% is rare and usually signals deep-recovery rebound after an under-slept stretch.
+- REM sleep: 20-25% of total. <20% sustained signals neuromotor recovery is short. Alcohol, late caffeine, late carbs all suppress REM disproportionately.
+
+**Sleep consistency** is its own signal. Stdev of nightly totals over a 7-night window: <1.0h is regular, 1.0-1.5h is acceptable, >1.5h is irregular and stressful regardless of average. The body adapts to consistent timing — a 6h/6h/6h/6h/6h/9h/9h week is worse than 6.5h/6.5h/6.5h/6.5h/6.5h/6.5h/6.5h despite the same total.
+
+**Source dependency.** Apple's XML export carries deep / REM / core / awake breakdowns from watch-side sleep staging (calibrated against PSG). HLExport surfaces total sleep only — stages aren't part of the text dump. The capability gate `sleep_stages` in `read_tracker.py` short-circuits the deep/REM drivers for HL trackers; sleep_total_h and sleep consistency still apply on both sources.
+
+**Programming consequences** (applied by `recovery_score`):
+- `sleep_deep_pct < 13%` and persisting → -0.4 contribution to recovery score. Combined with low total hours, prefer a deload window.
+- `sleep_rem_pct < 20%` and persisting → -0.4 contribution. Less impact on strength sessions; bigger impact on technical-skill work and complex compounds.
+- `sleep_consistency_7d_stdev_h > 1.5h` → -0.4 contribution. The fix is bedtime regularity, not more total hours.
+
+**What NOT to do:** weight a single night's poor depth heavily (1-2 bad nights are normal); recommend "sleep more" when consistency is the actual issue; ask HL users to "track sleep stages better" — that's a source limitation, not a tracking gap.

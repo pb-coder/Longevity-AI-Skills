@@ -91,18 +91,34 @@ workout-logger/       # /log — append a parsed workout to the tracker.
 workout-coach/        # /coach — read tracker, report, plan next workout.
   SKILL.md
   scripts/
-    read_tracker.py   # Emits one JSON blob with the data_source +
-                      # capabilities surfaced from the Profile sheet,
-                      # progression summary, weekly volume per muscle,
-                      # e1RM (history capped at 3, dropped for noise),
-                      # stale/unknown exercises, bodyweight trend, cardio
-                      # summary, Apple Health roll-ups (HRV / VO2max / RHR /
-                      # sleep / wrist temp / per-workout HR — gated on
-                      # capabilities so HL users get null where unsupported).
-                      # Compact JSON by default (~83% smaller than indent=2);
-                      # --pretty for human inspection; --include-rows to add
-                      # the flat per-set list back. Null keys are dropped
-                      # via _compact for token efficiency.
+    read_tracker.py   # Emits one JSON blob organised around session-level
+                      # signals, not raw arrays. Top blocks:
+                      #   - data_source / capabilities / estimated_max_hr +
+                      #     estimated_rest_hr (used by all HRR / TRIMP math)
+                      #   - monthly_sessions: canonical per-session record
+                      #     incl. TRIMP, load_band (light/moderate/hard/red-line),
+                      #     intensity_pct, max_hr, volume, is_deload — folds
+                      #     in the TOTAL row's metadata + Apple's per-workout
+                      #     max_hr; obsoletes the old session_totals dict and
+                      #     the workout_sessions_last_28d list.
+                      #   - weekly_volume_per_muscle, estimated_1rm,
+                      #     progression_summary, stale_exercises (top 5),
+                      #     unknown_exercises, deloads, auto_deload_candidates
+                      #   - cardio_last_28d + cardio_hr_zones_28d (HRR-based
+                      #     time-in-zone using Karvonen)
+                      #   - recovery: 0-10 score from HRV / RHR / sleep /
+                      #     wrist temp deviations, with named drivers.
+                      #     training_load: CTL/ATL/TSB rolling EWMA from per-
+                      #     session TRIMP. hr_at_volume_divergence: per-muscle
+                      #     fatigue flag from HR creep at constant volume.
+                      #   - bodyweight_latest + trend
+                      #   - health_metrics_weekly (4-week aggregates; raw
+                      #     daily behind --include-daily-health)
+                      #   - vo2max_latest / vo2max_trend_per_4w
+                      # Compact JSON by default; --pretty for human inspection;
+                      # --include-rows / --include-1rm-history /
+                      # --include-daily-health to opt in to debug-only payloads.
+                      # Null keys are dropped via _compact for token efficiency.
   references/training-science.md
 
 workout-tracker-maintenance/   # /maintain — end-of-month cleanup.

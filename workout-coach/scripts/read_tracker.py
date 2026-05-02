@@ -493,7 +493,9 @@ def _is_flagged_nonfasted(entry: dict) -> bool:
 
 
 def build_monthly_sessions(rows: list[dict],
-                            session_summaries: dict[str, dict] | None = None
+                            session_summaries: dict[str, dict] | None = None,
+                            session_totals: dict[str, float] | None = None,
+                            apple_sessions: list[dict] | None = None,
                             ) -> list[dict]:
     """Aggregate per-set rows into one entry per session-date.
 
@@ -502,9 +504,32 @@ def build_monthly_sessions(rows: list[dict],
     Elapsed, Avg HR, Duration). Cardio-only sessions don't have a TOTAL
     row, so their metadata is read directly from the cardio rows.
 
+    Folds in:
+    - ``volume`` for strength sessions from ``session_totals`` (so the
+      caller doesn't need to ship ``session_totals`` separately).
+    - ``max_hr`` per session from ``apple_sessions`` (Apple's per-workout
+      max HR — only present for XML; HL surfaces None and the field is
+      stripped by ``_compact``).
+
     Returns a list sorted by date ascending.
     """
     summaries = session_summaries or {}
+    totals = session_totals or {}
+    apple = apple_sessions or []
+
+    # date → max_hr lookup. Apple may record multiple workouts per date
+    # (Core + Functional + cardio rides); we keep the largest max_hr seen
+    # across all of them as the session's peak. We deliberately don't
+    # surface ``apple_type`` here because it conflates strength and
+    # cardio for mixed days — ``session_kind`` is the authoritative tag.
+    by_date_apple: dict[str, float] = {}
+    for ap in apple:
+        d = ap.get("date")
+        if not d:
+            continue
+        mh = ap.get("max_hr")
+        if mh and mh > by_date_apple.get(d, 0):
+            by_date_apple[d] = mh
 
     by_date: dict[str, dict] = {}
     for r in rows:
@@ -573,15 +598,33 @@ def build_monthly_sessions(rows: list[dict],
             "cardio" if s.pop("_has_cardio") else "other")
         s.pop("_has_cardio", None)
         s["session_kind"] = kind
+        # Fold in volume (strength only) and Apple max_hr.
+        if kind == "strength" and d in totals:
+            s["volume"] = totals[d]
+        max_hr = by_date_apple.get(d)
+        if max_hr:
+            s["max_hr"] = max_hr
         out.append(s)
     return out
 
 
-def cardio_last_14d(rows: list[dict], today_d: date) -> dict:
-    cutoff = today_d - timedelta(days=14)
+def cardio_last_28d(rows: list[dict], today_d: date) -> dict:
+    """4-week cardio rollup: total distance, total minutes, total cal, and
+    a coarse intervals-vs-zone2 split.
+
+    Now uses a 28d window (was 14d) to align with the strength-side
+    weekly_volume window. Cardio rows are identified by distance or
+    duration > 0; intervals are flagged from Notes keywords or avg_hr
+    >= 165 (a rough ceiling that catches Z4+ work without the user
+    having to annotate).
+    """
+    cutoff = today_d - timedelta(days=28)
     zone2_min = 0.0
     intervals = 0
     distance = 0.0
+    total_min = 0.0
+    total_cal = 0.0
+    sessions = 0
     for r in rows:
         try:
             d = datetime.strptime(r["date"], "%Y-%m-%d").date()
@@ -589,12 +632,15 @@ def cardio_last_14d(rows: list[dict], today_d: date) -> dict:
             continue
         if d < cutoff:
             continue
-        # Cardio rows have non-zero distance or duration.
         dur = r.get("duration_min") or 0
         dist = r.get("distance_km") or 0
         if dur == 0 and dist == 0:
             continue
+        sessions += 1
         distance += dist
+        total_min += dur
+        cal = r.get("active_cal") or 0
+        total_cal += cal
         note = (r.get("notes") or "").lower()
         hr = r.get("avg_hr") or 0
         is_intervals = any(k in note for k in ("interval", "zone 4", "zone 5", "z4", "z5")) or hr >= 165
@@ -603,9 +649,12 @@ def cardio_last_14d(rows: list[dict], today_d: date) -> dict:
         else:
             zone2_min += dur
     return {
-        "zone2_minutes": round(zone2_min, 1),
-        "interval_sessions": intervals,
+        "sessions":          sessions,
+        "total_minutes":     round(total_min, 1),
         "total_distance_km": round(distance, 2),
+        "total_active_cal":  int(round(total_cal)) if total_cal else 0,
+        "zone2_minutes":     round(zone2_min, 1),
+        "interval_sessions": intervals,
     }
 
 
@@ -1034,7 +1083,9 @@ def weekly_volume_per_muscle(
 E1RM_HISTORY_LIMIT = 3
 
 
-def estimated_1rm(rows: list[dict], deload_dates: list[str] | None = None) -> dict:
+def estimated_1rm(rows: list[dict],
+                  deload_dates: list[str] | None = None,
+                  include_history: bool = False) -> dict:
     """Epley 1RM projection per exercise, with trajectory and confidence.
 
     For each exercise, take the heaviest projected e1RM per date (over all
@@ -1161,10 +1212,11 @@ def estimated_1rm(rows: list[dict], deload_dates: list[str] | None = None) -> di
             else:
                 break
 
-        # Drop e1rm_history entirely when the signal is noise: low confidence
-        # AND no slope (fewer than 3 sessions). The summary fields already
-        # convey the state; the history is just pad in this case.
-        emit_history = not (confidence == "low" and slope is None)
+        # Drop e1rm_history entirely unless explicitly opted in. The
+        # summary fields (current/prev/best, slope, confidence,
+        # stalled_sessions) cover every coaching decision; the per-session
+        # history is debug-only and added ~10 KB to the default output.
+        emit_history = include_history and not (confidence == "low" and slope is None)
 
         out[canonical_name[key]] = {
             "current_e1rm_kg":  round(current, 1),
@@ -1223,6 +1275,525 @@ def stale_exercises(
     return out
 
 
+# ============================================================================
+# Derived metrics — turn raw session/health data into actionable signals.
+# ============================================================================
+#
+# Everything below is pre-computed in Python so the coach LLM consumes
+# decisions, not raw arrays. Each function returns ``None`` (or the
+# closest empty form) when the source data is too sparse.
+
+# Karvonen / HR-zone definitions (% of HRR — heart rate reserve).
+HR_ZONES_PCT = [
+    ("z1", 0.50, 0.60),
+    ("z2", 0.60, 0.70),
+    ("z3", 0.70, 0.80),
+    ("z4", 0.80, 0.90),
+    ("z5", 0.90, 1.00),
+]
+
+
+def _percentile(values: list[float], pct: float) -> float | None:
+    """Return the ``pct`` percentile (0-100) of a numeric list, linear-interp."""
+    if not values:
+        return None
+    s = sorted(values)
+    if len(s) == 1:
+        return s[0]
+    k = (pct / 100.0) * (len(s) - 1)
+    lo = int(k)
+    hi = min(lo + 1, len(s) - 1)
+    frac = k - lo
+    return s[lo] * (1 - frac) + s[hi] * frac
+
+
+def estimate_max_hr(workout_sessions_all: list[dict],
+                    health_all: list[dict] | None = None,
+                    fallback_age: int = 30) -> float | None:
+    """Estimate the user's peak HR.
+
+    Priority:
+    1. Highest observed ``max_hr`` across all Apple workouts — Apple's
+       per-workout max is conservative (it reflects what the watch saw,
+       not theoretical max), so the absolute observed peak is a sound
+       lower-bound estimate of true max.
+    2. Fallback formula 208 − 0.7×age. Without a Profile age field we use
+       ``fallback_age`` (30 — close enough for both Nihad and Fabian).
+
+    Returns ``None`` only when neither path can produce a number.
+    """
+    observed = [
+        s.get("max_hr") for s in (workout_sessions_all or [])
+        if s.get("max_hr") and s.get("max_hr") >= 140
+    ]
+    if observed:
+        return float(max(observed))
+    return float(208 - 0.7 * fallback_age)
+
+
+def health_metrics_weekly(health_all: list[dict],
+                          today_d: date, weeks: int = 4) -> list[dict]:
+    """Per-week aggregates of Health Metrics for the last N weeks.
+
+    Replaces the 8 KB raw daily dump with a compact 4-week snapshot. Each
+    entry is the mean of available daily values that landed in that ISO
+    week (Mon-Sun). Only fields with at least one value in the window are
+    emitted; sources that structurally can't provide a metric (HL slim
+    schema) yield None for that key, which ``_compact`` strips.
+    """
+    if not health_all:
+        return []
+    cutoff = today_d - timedelta(days=weeks * 7)
+    keys = [
+        "vo2max", "resting_hr", "hrv_sdnn", "walking_hr",
+        "hr_recovery_1min", "sleep_total_h", "sleep_deep_h", "sleep_rem_h",
+        "resp_rate", "wrist_temp_c", "exercise_min",
+    ]
+    by_week: dict[tuple[int, int], dict[str, list[float]]] = {}
+    for e in health_all:
+        try:
+            d = datetime.strptime(e["date"], "%Y-%m-%d").date()
+        except (ValueError, KeyError):
+            continue
+        if d < cutoff:
+            continue
+        iso = d.isocalendar()
+        wk = (iso.year, iso.week)
+        bucket = by_week.setdefault(wk, {})
+        for k in keys:
+            v = e.get(k)
+            if v is None:
+                continue
+            bucket.setdefault(k, []).append(float(v))
+
+    out: list[dict] = []
+    for wk in sorted(by_week.keys()):
+        # Monday of the ISO week — readable anchor for the LLM.
+        monday = datetime.fromisocalendar(wk[0], wk[1], 1).date()
+        entry: dict = {"week_start": monday.strftime("%Y-%m-%d"),
+                       "n_days": max(len(v) for v in by_week[wk].values())}
+        for k in keys:
+            vals = by_week[wk].get(k)
+            if not vals:
+                entry[k] = None
+                continue
+            entry[k] = round(sum(vals) / len(vals), 2)
+        out.append(entry)
+    return out
+
+
+def recovery_score(health_all: list[dict], today_d: date,
+                   capabilities: dict) -> dict:
+    """Compute a 0-10 recovery score from HRV, RHR, sleep, wrist temp.
+
+    Each signal contributes a clamped delta to a baseline of 5; the final
+    score is clamped to [0, 10]. Drivers list shows which signals
+    dominated so the coach can explain *why*.
+    Returns ``{"score": float, "drivers": list[dict], "confidence": str}``.
+    """
+    drivers: list[dict] = []
+    score = 5.0
+    sample_count = 0
+
+    # HRV: reading vs personal 60d baseline. ±10% baseline = ±2 score swing.
+    if capabilities.get("hrv"):
+        recent = _values_in_window(health_all, "hrv_sdnn", today_d, 7)
+        baseline = baseline_60d(health_all, "hrv_sdnn", today_d)
+        if recent and baseline and baseline > 0:
+            recent_avg = sum(recent) / len(recent)
+            delta = (recent_avg - baseline) / baseline
+            contrib = max(-2.0, min(2.0, delta / 0.05))  # ±5% baseline → ±1
+            score += contrib
+            sample_count += 1
+            drivers.append({
+                "metric":     "hrv_sdnn",
+                "recent_avg": round(recent_avg, 1),
+                "baseline":   round(baseline, 1),
+                "delta_pct":  round(delta * 100, 1),
+                "contrib":    round(contrib, 2),
+            })
+
+    # Resting HR: lower is better. ±5 bpm vs 28d typical → ±2 swing.
+    rhr_recent = _values_in_window(health_all, "resting_hr", today_d, 7)
+    rhr_typical = _values_in_window(health_all, "resting_hr", today_d, 28)
+    if rhr_recent and rhr_typical:
+        recent_avg = sum(rhr_recent) / len(rhr_recent)
+        typical_avg = sum(rhr_typical) / len(rhr_typical)
+        delta = recent_avg - typical_avg
+        contrib = max(-2.0, min(2.0, -delta / 2.5))  # +2.5 bpm → -1
+        score += contrib
+        sample_count += 1
+        drivers.append({
+            "metric":      "resting_hr",
+            "recent_avg":  round(recent_avg, 1),
+            "typical_avg": round(typical_avg, 1),
+            "delta_bpm":   round(delta, 1),
+            "contrib":     round(contrib, 2),
+        })
+
+    # Sleep: 7h target. ±1h → ±1 swing (clamped ±2).
+    sleep = _values_in_window(health_all, "sleep_total_h", today_d, 7)
+    if sleep:
+        recent_avg = sum(sleep) / len(sleep)
+        delta = recent_avg - 7.0
+        contrib = max(-2.0, min(2.0, delta))
+        score += contrib
+        sample_count += 1
+        drivers.append({
+            "metric":     "sleep_total_h",
+            "recent_avg": round(recent_avg, 2),
+            "target":     7.0,
+            "delta_h":    round(delta, 2),
+            "contrib":    round(contrib, 2),
+        })
+
+    # Wrist temp: deviation from 60d baseline. >+0.3°C is a stress/illness
+    # signal; weight modestly (max ±1.5).
+    if capabilities.get("wrist_temp"):
+        wt_recent = _values_in_window(health_all, "wrist_temp_c", today_d, 3)
+        wt_base = baseline_60d(health_all, "wrist_temp_c", today_d)
+        if wt_recent and wt_base:
+            recent_avg = sum(wt_recent) / len(wt_recent)
+            delta = recent_avg - wt_base
+            contrib = max(-1.5, min(1.5, -delta / 0.2))
+            score += contrib
+            sample_count += 1
+            drivers.append({
+                "metric":     "wrist_temp_c",
+                "recent_avg": round(recent_avg, 2),
+                "baseline":   round(wt_base, 2),
+                "delta_c":    round(delta, 2),
+                "contrib":    round(contrib, 2),
+            })
+
+    score = max(0.0, min(10.0, score))
+    confidence = "high" if sample_count >= 3 else ("medium" if sample_count == 2 else "low")
+    return {
+        "score":      round(score, 1),
+        "confidence": confidence,
+        "drivers":    drivers,
+    }
+
+
+def _trimp(duration_min: float, avg_hr: float,
+           rest_hr: float, max_hr: float) -> float:
+    """Banister TRIMP. ``duration_min × HRr × 0.64 × e^(1.92×HRr)`` (men).
+
+    Only positive when HR is above resting. Uses HRR (heart rate
+    reserve) normalisation so the same TRIMP score means the same
+    relative effort across users.
+    """
+    import math
+    if not duration_min or not avg_hr or not max_hr or not rest_hr:
+        return 0.0
+    if max_hr <= rest_hr:
+        return 0.0
+    hrr = (avg_hr - rest_hr) / (max_hr - rest_hr)
+    if hrr <= 0:
+        return 0.0
+    hrr = min(hrr, 1.0)
+    return round(duration_min * hrr * 0.64 * math.exp(1.92 * hrr), 1)
+
+
+def trimp_per_session(monthly_sessions: list[dict],
+                      max_hr: float | None,
+                      rest_hr: float | None) -> list[dict]:
+    """Compute TRIMP for every session that has both avg_hr and duration.
+
+    Returns one entry per session with ``date, kind, trimp, intensity_pct``
+    (HRR percent), plus a ``load_band`` classification: light <50,
+    moderate 50-100, hard 100-150, red-line >150.
+    """
+    if not max_hr or not rest_hr or max_hr <= rest_hr:
+        return []
+    out: list[dict] = []
+    for s in monthly_sessions:
+        avg_hr = s.get("avg_hr")
+        dur = s.get("duration_min")
+        if not avg_hr or not dur:
+            continue
+        try:
+            avg_hr_f = float(avg_hr)
+            dur_f = float(dur)
+        except (TypeError, ValueError):
+            continue
+        trimp = _trimp(dur_f, avg_hr_f, rest_hr, max_hr)
+        if trimp == 0:
+            continue
+        hrr_pct = (avg_hr_f - rest_hr) / (max_hr - rest_hr)
+        hrr_pct = max(0.0, min(1.0, hrr_pct))
+        if trimp < 50:
+            band = "light"
+        elif trimp < 100:
+            band = "moderate"
+        elif trimp < 150:
+            band = "hard"
+        else:
+            band = "red-line"
+        out.append({
+            "date":          s["date"],
+            "kind":          s.get("session_kind", "other"),
+            "trimp":         trimp,
+            "intensity_pct": round(hrr_pct * 100, 1),
+            "load_band":     band,
+        })
+    out.sort(key=lambda e: e["date"])
+    return out
+
+
+def training_load_summary(trimps: list[dict], today_d: date) -> dict:
+    """CTL (chronic, 42d EWMA), ATL (acute, 7d EWMA), TSB (form = CTL−ATL).
+
+    Standard TrainingPeaks formulas. CTL ≈ fitness, ATL ≈ fatigue, TSB
+    positive = peaked, negative = under load. Computed by walking each
+    day from the earliest TRIMP to today and decaying yesterday's value.
+    Returns the values *as of today_d*.
+    """
+    if not trimps:
+        return {"ctl": None, "atl": None, "tsb": None, "trend_7d": None}
+    # Convert to a date→trimp dict (sum if multiple sessions same day).
+    by_date: dict[date, float] = {}
+    for t in trimps:
+        try:
+            d = datetime.strptime(t["date"], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        by_date[d] = by_date.get(d, 0.0) + t["trimp"]
+    if not by_date:
+        return {"ctl": None, "atl": None, "tsb": None, "trend_7d": None}
+    start = min(by_date.keys())
+    ctl_alpha = 1.0 / 42.0  # ~time constant 42d
+    atl_alpha = 1.0 / 7.0
+    ctl = atl = 0.0
+    history: list[tuple[date, float, float]] = []
+    cur = start
+    while cur <= today_d:
+        load = by_date.get(cur, 0.0)
+        ctl = ctl + ctl_alpha * (load - ctl)
+        atl = atl + atl_alpha * (load - atl)
+        history.append((cur, ctl, atl))
+        cur += timedelta(days=1)
+    today_ctl, today_atl = ctl, atl
+    week_ago_ctl = next(
+        (h[1] for h in reversed(history)
+         if h[0] <= today_d - timedelta(days=7)),
+        today_ctl
+    )
+    return {
+        "ctl":      round(today_ctl, 1),
+        "atl":      round(today_atl, 1),
+        "tsb":      round(today_ctl - today_atl, 1),
+        "trend_7d": round(today_ctl - week_ago_ctl, 1),
+    }
+
+
+def hr_at_volume_divergence(rows: list[dict],
+                             monthly_sessions: list[dict],
+                             db: dict, today_d: date,
+                             window_weeks: int = 8) -> dict:
+    """Per-muscle-group HR-creep signal at constant volume.
+
+    For each muscle group, regress ``session_avg_hr`` against time over
+    the last ``window_weeks`` weeks of strength sessions, weighting by
+    that session's volume into the muscle. Positive slope (HR rising at
+    same volume) suggests fatigue; negative slope is improving
+    conditioning. Returns ``{muscle: {slope_bpm_per_4w, n_sessions, hint}}``.
+    """
+    if not monthly_sessions:
+        return {}
+    cutoff = today_d - timedelta(days=window_weeks * 7)
+    # Build date → strength session avg_hr lookup.
+    strength_hr: dict[str, float] = {}
+    for s in monthly_sessions:
+        if s.get("session_kind") != "strength":
+            continue
+        if s.get("avg_hr") in (None, 0):
+            continue
+        try:
+            d = datetime.strptime(s["date"], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d < cutoff:
+            continue
+        strength_hr[s["date"]] = float(s["avg_hr"])
+    if len(strength_hr) < 4:
+        return {}
+
+    # Roll up rows by (date, muscle) → volume.
+    per_date_muscle: dict[tuple[str, str], float] = {}
+    for r in rows:
+        if not _is_working_set(r):
+            continue
+        if r["date"] not in strength_hr:
+            continue
+        muscles = db.get(r["exercise"].lower())
+        if not muscles:
+            continue
+        primary = muscles.get("primary") if isinstance(muscles, dict) else None
+        if not primary:
+            continue
+        vol = (r.get("volume") or 0)
+        per_date_muscle[(r["date"], primary)] = (
+            per_date_muscle.get((r["date"], primary), 0.0) + vol
+        )
+
+    by_muscle: dict[str, list[tuple[date, float, float]]] = {}
+    for (d_str, muscle), vol in per_date_muscle.items():
+        if vol <= 0:
+            continue
+        try:
+            d = datetime.strptime(d_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        by_muscle.setdefault(muscle, []).append((d, strength_hr[d_str], vol))
+
+    out: dict[str, dict] = {}
+    for muscle, points in by_muscle.items():
+        if len(points) < 4:
+            continue
+        points.sort(key=lambda p: p[0])
+        base = points[0][0]
+        xs = [(p[0] - base).days for p in points]
+        ys = [p[1] for p in points]
+        ws = [p[2] for p in points]
+        sum_w = sum(ws)
+        if sum_w <= 0:
+            continue
+        mx = sum(xs[i] * ws[i] for i in range(len(xs))) / sum_w
+        my = sum(ys[i] * ws[i] for i in range(len(ys))) / sum_w
+        num = sum(ws[i] * (xs[i] - mx) * (ys[i] - my) for i in range(len(xs)))
+        den = sum(ws[i] * (xs[i] - mx) ** 2 for i in range(len(xs)))
+        if den <= 0:
+            continue
+        slope_per_day = num / den
+        slope_per_4w = slope_per_day * 28
+        if slope_per_4w >= 3:
+            hint = "rising HR at constant volume — fatigue or under-recovery"
+        elif slope_per_4w <= -3:
+            hint = "falling HR at constant volume — improving conditioning"
+        else:
+            hint = "stable"
+        out[muscle] = {
+            "slope_bpm_per_4w": round(slope_per_4w, 2),
+            "n_sessions":       len(points),
+            "hint":             hint,
+        }
+    return out
+
+
+def cardio_hr_zones(monthly_sessions: list[dict],
+                    today_d: date,
+                    max_hr: float | None,
+                    rest_hr: float | None,
+                    window_days: int = 28) -> dict:
+    """Polarized-vs-pyramidal HR distribution across cardio sessions.
+
+    Without per-second HR data we can't compute true time-in-zone, so we
+    place each session entirely in the zone its avg_hr falls into.
+    Coarse but useful for trend (has the user been doing too much Z3
+    grey-zone work?). Returns ``{z1..z5: minutes, total_minutes,
+    polarized_pct, pyramidal_pct, threshold_pct}``.
+    """
+    if not max_hr or not rest_hr or max_hr <= rest_hr:
+        return {}
+    cutoff = today_d - timedelta(days=window_days)
+    zone_min: dict[str, float] = {z[0]: 0.0 for z in HR_ZONES_PCT}
+    total = 0.0
+    for s in monthly_sessions:
+        if s.get("session_kind") != "cardio":
+            continue
+        try:
+            d = datetime.strptime(s["date"], "%Y-%m-%d").date()
+        except (ValueError, KeyError):
+            continue
+        if d < cutoff:
+            continue
+        avg_hr = s.get("avg_hr")
+        dur = s.get("duration_min")
+        if not avg_hr or not dur:
+            continue
+        hrr = (float(avg_hr) - rest_hr) / (max_hr - rest_hr)
+        hrr = max(0.0, min(1.0, hrr))
+        for label, lo, hi in HR_ZONES_PCT:
+            if hrr < hi or label == "z5":
+                zone_min[label] += float(dur)
+                total += float(dur)
+                break
+    if total <= 0:
+        return {}
+    z1 = round(zone_min["z1"], 1)
+    z2 = round(zone_min["z2"], 1)
+    z3 = round(zone_min["z3"], 1)
+    z4 = round(zone_min["z4"], 1)
+    z5 = round(zone_min["z5"], 1)
+    return {
+        "window_days":    window_days,
+        "total_minutes":  round(total, 1),
+        "z1": z1, "z2": z2, "z3": z3, "z4": z4, "z5": z5,
+        "z2_pct": round((z2 / total) * 100, 1),
+        "z3_pct": round((z3 / total) * 100, 1),
+        "z4_z5_pct": round(((z4 + z5) / total) * 100, 1),
+    }
+
+
+def auto_deload_candidates(monthly_sessions: list[dict],
+                           deloads_logged: list[str],
+                           today_d: date,
+                           window_weeks: int = 8) -> list[str]:
+    """Detect strength-session weeks where volume + HR both dropped enough
+    to look like a deload that the user didn't mark.
+
+    Heuristic per week:
+    - Median session volume ≤ 0.65 × prior 4-week median.
+    - AND median session avg_hr ≤ prior_4wk_median - 8 bpm.
+    - AND not already in ``deloads_logged``.
+
+    Conservative — designed to surface candidates the user likely forgot
+    to flag, not to second-guess intent.
+    """
+    cutoff = today_d - timedelta(days=window_weeks * 7)
+    strength = []
+    for s in monthly_sessions:
+        if s.get("session_kind") != "strength":
+            continue
+        try:
+            d = datetime.strptime(s["date"], "%Y-%m-%d").date()
+        except (ValueError, KeyError):
+            continue
+        if d < cutoff:
+            continue
+        vol = s.get("volume")
+        hr = s.get("avg_hr")
+        if not vol or not hr:
+            continue
+        strength.append((d, float(vol), float(hr)))
+    if len(strength) < 6:
+        return []
+    strength.sort(key=lambda p: p[0])
+
+    def median(xs):
+        s = sorted(xs)
+        n = len(s)
+        return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+    candidates: list[str] = []
+    for i, (d, vol, hr) in enumerate(strength):
+        prior = [p for p in strength[:i]
+                 if (d - p[0]).days <= 28 and (d - p[0]).days > 0]
+        if len(prior) < 4:
+            continue
+        prior_vol = median([p[1] for p in prior])
+        prior_hr = median([p[2] for p in prior])
+        if prior_vol <= 0:
+            continue
+        date_str_form = d.strftime("%Y-%m-%d")
+        if date_str_form in deloads_logged:
+            continue
+        if vol <= 0.65 * prior_vol and hr <= prior_hr - 8:
+            candidates.append(date_str_form)
+    return candidates
+
+
 # ---------- main ----------
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -1232,9 +1803,16 @@ def main() -> int:
                          "all roll-ups regardless of --include-rows.")
     ap.add_argument("--today", default=None, help="Override today's date (YYYY-MM-DD) for testing")
     ap.add_argument("--include-rows", action="store_true",
-                    help="Include the flat `rows` array (~63%% of payload) in the JSON. Off by default — the "
-                         "coach already exposes pre-aggregated `progression_summary`, `session_totals`, "
-                         "`weekly_volume_per_muscle`, and `estimated_1rm`. Pass this only for debug deep-dives.")
+                    help="Include the flat `rows` array in the JSON. Off by default — the coach already exposes "
+                         "pre-aggregated `monthly_sessions`, `progression_summary`, `weekly_volume_per_muscle`, "
+                         "and `estimated_1rm`. Pass this only for debug deep-dives.")
+    ap.add_argument("--include-1rm-history", action="store_true",
+                    help="Include the per-exercise `e1rm_history` list (last 3 sessions). Off by default — "
+                         "`current_e1rm_kg`, `slope_kg_per_4w`, `confidence`, and `stalled_sessions` cover the "
+                         "coaching decision; the history is debug-only.")
+    ap.add_argument("--include-daily-health", action="store_true",
+                    help="Include the raw daily `health_metrics_recent` (~30 rows × 13 fields). Off by default — "
+                         "the coach reads weekly aggregates from `health_metrics_weekly` instead.")
     ap.add_argument("--pretty", action="store_true",
                     help="Pretty-print the JSON (indent=2). Off by default — compact form saves ~20%% of "
                          "tokens for the LLM consumer. Use for human inspection.")
@@ -1302,8 +1880,12 @@ def main() -> int:
 
     unknown_set: set[str] = set()
     weekly_volume = weekly_volume_per_muscle(rows, db, today_d, 28, unknown_set)
-    e1rm = estimated_1rm(rows, deloads)
-    stale = stale_exercises(rows, db, today_d, 28)
+    e1rm = estimated_1rm(rows, deloads,
+                         include_history=args.include_1rm_history)
+    stale_full = stale_exercises(rows, db, today_d, 28)
+    # Cap stale_exercises to top 5 by weeks_since (already DESC-sorted by
+    # the helper). Beyond 5 the coach rarely uses them in plan generation.
+    stale = stale_full[:5]
 
     # Surface any logged exercise across the full loaded window that doesn't
     # match an entry in the database — not just the 28-day volume window.
@@ -1315,46 +1897,67 @@ def main() -> int:
         if r["exercise"].lower() not in db:
             unknown_set.add(r["exercise"])
 
+    # ---- Derived metrics ----
+    monthly_sessions = build_monthly_sessions(
+        rows, session_summaries,
+        session_totals=session_totals,
+        apple_sessions=workout_sessions_all,
+    )
+    max_hr = estimate_max_hr(workout_sessions_all, health_all)
+    rest_hr = _mean_or_none(_values_in_window(health_all, "resting_hr", today_d, 28))
+    if rest_hr is None and capabilities.get("resting_hr_daily") is False:
+        # HL fallback: typical adult RHR if the source can't supply it.
+        rest_hr = 60.0
+
+    recovery = recovery_score(health_all, today_d, capabilities)
+    trimps = trimp_per_session(monthly_sessions, max_hr, rest_hr)
+    training_load = training_load_summary(trimps, today_d)
+    # Fold TRIMP load_band back onto each monthly_session for the LLM.
+    trimp_by_date: dict[str, dict] = {t["date"]: t for t in trimps}
+    for s in monthly_sessions:
+        t = trimp_by_date.get(s.get("date"))
+        if t:
+            s["trimp"] = t["trimp"]
+            s["load_band"] = t["load_band"]
+            s["intensity_pct"] = t["intensity_pct"]
+
+    hr_volume_div = hr_at_volume_divergence(rows, monthly_sessions, db, today_d)
+    cardio_zones = cardio_hr_zones(monthly_sessions, today_d, max_hr, rest_hr)
+    auto_deloads = auto_deload_candidates(monthly_sessions, deloads, today_d)
+    weekly_health = health_metrics_weekly(health_all, today_d, weeks=4)
+
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
         "data_source": data_source,
         "capabilities": capabilities,
         "auto_cardio_enabled": bool(profile.get("auto_cardio")),
-        "last_session_date": last_session,
-        "days_since_last_session": days_since,
-        "deloads": deloads,
-        "weeks_since_last_deload": weeks_since_deload,
-        "cardio_last_14d": cardio_last_14d(rows, today_d),
-        "monthly_sessions": build_monthly_sessions(rows, session_summaries),
-        "bodyweight_latest": bw_latest,
-        "bodyweight_trend_kg_per_week": bodyweight_trend_kg_per_week(bw_all),
-        "bodyweight_recent": bw_recent,
-        "progression_summary": progression_summary(rows),
-        "session_totals": session_totals,
+        # ---- Strength + cardio sessions (canonical session-level view) ----
+        "monthly_sessions": monthly_sessions,
         "weekly_volume_per_muscle": weekly_volume,
         "estimated_1rm": e1rm,
+        "progression_summary": progression_summary(rows),
         "stale_exercises": stale,
         "unknown_exercises": sorted(unknown_set),
-        # ---- Apple Health: recovery + cardio outcomes -------------------
-        "health_metrics_recent": health_recent,
+        "deloads": deloads,
+        "auto_deload_candidates": auto_deloads,
+        # ---- Cardio rollup ----
+        "cardio_last_28d": cardio_last_28d(rows, today_d),
+        "cardio_hr_zones_28d": cardio_zones,
+        # ---- Recovery + training load (Python-derived, not raw metrics) ----
+        "recovery": recovery,
+        "training_load": training_load,
+        "hr_at_volume_divergence": hr_volume_div,
+        "estimated_max_hr": max_hr,
+        "estimated_rest_hr": round(rest_hr, 1) if rest_hr else None,
+        # ---- Bodyweight ----
+        "bodyweight_latest": bw_latest,
+        "bodyweight_trend_kg_per_week": bodyweight_trend_kg_per_week(bw_all),
+        # ---- Apple Health weekly aggregates (raw daily behind a flag) ----
+        "health_metrics_weekly": weekly_health,
+        "health_metrics_recent": health_recent if args.include_daily_health else None,
         "vo2max_latest": latest_metric(health_all, "vo2max"),
         "vo2max_trend_per_4w": metric_trend_per_4w(health_all, "vo2max"),
-        "resting_hr_recent_avg": _mean_or_none(_values_in_window(health_all, "resting_hr", today_d, 7)),
-        "resting_hr_trend_per_4w": metric_trend_per_4w(health_all, "resting_hr"),
-        "hrv_recent_avg": _mean_or_none(_values_in_window(health_all, "hrv_sdnn", today_d, 7)),
-        "hrv_trend_per_4w": metric_trend_per_4w(health_all, "hrv_sdnn"),
-        "hrv_baseline_60d": baseline_60d(health_all, "hrv_sdnn", today_d),
-        "sleep_avg_last_7d": _mean_or_none(_values_in_window(health_all, "sleep_total_h", today_d, 7)),
-        "sleep_avg_last_28d": _mean_or_none(_values_in_window(health_all, "sleep_total_h", today_d, 28)),
-        "wrist_temp_baseline_60d": baseline_60d(health_all, "wrist_temp_c", today_d),
-        "wrist_temp_recent_avg": _mean_or_none(_values_in_window(health_all, "wrist_temp_c", today_d, 3)),
-        "hr_recovery_recent_avg": _mean_or_none(
-            [v for v in (e.get("hr_recovery_1min") for e in health_all[-5:]) if v is not None]
-        ),
-        "workout_sessions_last_28d": sessions_28d,
-        "strength_session_avg_hr_trend": strength_session_avg_hr_trend(workout_sessions_all, strength_dates),
-        # ``rows`` is the flat per-set list. Off by default — see --include-rows.
-        # _compact will drop the key entirely when value is None.
+        # ---- Debug deep-dive: flat per-set list (--include-rows). ----
         "rows": rows if args.include_rows else None,
     }
     if args.pretty:

@@ -98,9 +98,27 @@ workout-logger/       # /log — append a parsed workout to the tracker.
 
 workout-coach/        # /coach — read tracker, report, plan next workout.
   SKILL.md
+  lib/                # Internal analytics modules (not directly invoked).
+                      # Each is a flat top-level script, sys.path-importable
+                      # both from the entry point and in isolation.
+                      #   constants.py — capabilities, landmarks, aliases.
+                      #   parsing.py   — coercions + _parse_iso_date + _compact.
+                      #   extract.py   — sheet readers, exercises-DB parser,
+                      #                  age + max-HR helpers (touches xlsx).
+                      #   sessions.py  — build_monthly_sessions + bodyweight
+                      #                  trend + progression_summary.
+                      #   strength.py  — volume, e1RM, stale, HR-at-volume
+                      #                  divergence, strength-session HR trend.
+                      #   cardio.py    — cardio rollups, HR zones, TRIMP,
+                      #                  CTL/ATL/TSB, daily activity (NEAT),
+                      #                  auto_deload_candidates.
+                      #   health.py    — health time-series helpers (window,
+                      #                  baseline, trend), weekly aggregates,
+                      #                  recovery_score (composes ~9 drivers).
   scripts/
-    read_tracker.py   # Emits one JSON blob organised around session-level
-                      # signals, not raw arrays. Top blocks:
+    read_tracker.py   # CLI + main(). Imports the lib/ modules and orchestrates
+                      # the JSON output. Emits one JSON blob organised around
+                      # session-level signals, not raw arrays. Top blocks:
                       #   - data_source / capabilities / estimated_max_hr +
                       #     estimated_rest_hr (used by all HRR / TRIMP math)
                       #   - monthly_sessions: canonical per-session record
@@ -139,10 +157,17 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
 ## Conventions
 
 - **Python scripts** live under `scripts/` per skill and are invoked by the
-  agent via Bash.
+  agent via Bash. Per-skill internal modules (when a skill outgrows a
+  single file) live under `<skill>/lib/` as flat top-level scripts —
+  see `workout-coach/lib/` for the canonical example. Each lib module
+  self-bootstraps its sibling lib dir onto `sys.path` so it can be
+  imported in isolation (REPL, ad-hoc tests).
 - **Shared imports**: consumers add `shared/` to `sys.path` via
   `sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))`
-  and import from `tracker_sheet`.
+  and import from `tracker_sheet`. Skills that have a `lib/` add their
+  own dir alongside it via
+  `sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))`
+  and then `from <module> import …` flat (no package namespace).
 - **Styler is canonical**: `style_monthly_sheet` is the single source of
   truth for monthly-sheet layout (column widths, fonts, fills, merges,
   SESSION numbering, TOTAL row placement, chronological row order).

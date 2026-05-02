@@ -59,6 +59,7 @@ The file structure:
 
 ## Report
 ### The verdict
+### Last 28 days at a glance
 ### What's working
 ### What needs fixing
 ### Are you getting stronger?
@@ -124,6 +125,9 @@ What the JSON contains:
 - `cardio_last_28d`: `{sessions, total_minutes, total_distance_km, total_active_cal, zone2_minutes, interval_sessions}`. Coarse intervals/Z2 split via Notes keywords + avg_hr ≥165 heuristic.
 - `cardio_hr_zones_28d`: time in HR zones using HRR (Karvonen). `{window_days: 28, total_minutes, z1, z2, z3, z4, z5, z2_pct, z3_pct, z4_z5_pct}`. **High z3_pct = grey-zone trap** (too much moderate work, too little easy or hard). Polarized = z2_pct + z4_z5_pct dominant; pyramidal = z2 > z3 > z4_z5 cleanly stepping down.
 
+**Daily activity (NEAT — non-exercise activity thermogenesis):**
+- `daily_activity_28d`: `{exercise_min_daily_avg, walking_workouts_count, walking_minutes_28d, walking_distance_km_28d, incidental_walks_count, assessment}`. Exercise minutes are Apple's brisk-activity tally (XML only — HL gets None). Walking workouts include both intentional walks and short flagged-incidental walks. **`assessment`** is the band the coach acts on: `low` (<15 min/day basis), `moderate` (15-45), `high` (≥45). Basis is `exercise_min_daily_avg` when present, else `walking_minutes_28d / 28` as a NEAT proxy. Use this to distinguish "sedentary then trains" from "active all day and trains" — the cardio prescription differs.
+
 **Recovery + training load (Python-derived signals — use these instead of eyeballing raw metrics):**
 - `recovery`: `{score: 0-10, confidence: low|medium|high, drivers: [{metric, recent_avg, baseline, delta, contrib}]}`. Score sums clamped contributions from HRV vs 60d baseline (±2), RHR vs 28d typical (±2), sleep vs 7h target (±2), wrist temp vs 60d baseline (±1.5). **Use the score directly in §18-style "should I train hard today?" decisions**; cite the dominant negative driver(s) by name.
 - `training_load`: `{ctl, atl, tsb, trend_7d}`. CTL = chronic load (42-day EWMA of TRIMP), ATL = acute (7-day EWMA), TSB = CTL−ATL ("form": positive = peaked, negative = under load, ≤−10 = high fatigue risk). `trend_7d` = ΔCTL over the last 7 days (positive = building fitness).
@@ -156,6 +160,28 @@ What the JSON contains:
 - **Most recent session** → `monthly_sessions[-1]`. The TRIMP / load_band / intensity_pct on each session lets you summarize "last session was 'hard' — TRIMP 130, 78% HRR" in one line.
 - **Deload triage** → `deloads` (user-marked) vs `auto_deload_candidates` (Python-detected). If `auto_deload_candidates` is non-empty, ask the user: "Did you deload on {date}? The data looks like it (volume −X%, HR −Y bpm)."
 - **Apple-Watch metabolic load** → `monthly_sessions[*].active_cal` and `total_cal` give per-session calorie expenditure. Useful for surgery/illness recovery tracking and bodyweight-vs-output cross-checks.
+
+**Anti-patterns (don't write these):**
+
+```
+❌ "Recovery score is moderate (4.5/10) with all four signals close to baseline, no anomaly."
+   → Lists no specific driver. Coach is naming the score and bailing.
+✅ "Recovery 4.5/10 — moderate. Wrist temp +0.11°C (contrib -0.57) and sleep -28 min vs target (contrib -0.47) are the two soft signals; HRV and RHR sit baseline-positive."
+
+❌ "Eight muscle groups show rising HR at constant volume — don't push loads."
+   → Generic. Doesn't name the muscles or quantify the slopes.
+✅ "Calves +5.2 bpm/4w, glutes +6.6 bpm/4w (limit ≥5 → flagged) — cut a working set on each. Other 6 muscles stable."
+
+❌ "Cardio: 60 min Z2, target 600. Add a session."
+   → Misses the daily-activity context.
+✅ "Cardio 60 min Z2 vs 600 target. But daily activity 124 min/day exercise minutes (high) — base aerobic load is fine. Add 1 interval session for the VO2max stimulus, not 4 Z2."
+
+❌ "TSB is fine, push hard."
+   → Numbers, not adjectives. And "fine" misses bands.
+✅ "TSB +3.2 (balanced) → normal load progression; finish rep ranges before bumping."
+```
+
+The pattern: every claim about training state cites a specific numeric value from the JSON. If you find yourself writing an adjective ("fine", "moderate", "high"), check whether you also wrote the number. If not, add it.
 
 **Default vs opt-in flags:**
 - `--include-rows`: raw per-set list (~6× JSON growth). For unusual cross-sectional questions only.
@@ -200,6 +226,29 @@ Keep the report tight. The user is an established trainee who has been coached b
 ### The verdict
 2-3 sentences. What's the state of their training right now? Honest. Compute days-since-last-session from `monthly_sessions[-1].date` vs `today` and include the context — "last trained 2 days ago, normal cadence" or "9 days since last session, longer break than usual".
 
+### Last 28 days at a glance
+
+**REQUIRED.** This subsection is a hard template populated directly from JSON keys. Numbers only — no narrative interpretation. Anything you want to say *about* these numbers goes in **What's working** / **What needs fixing**.
+
+```
+| Metric | Value |
+|---|---|
+| Strength sessions | {N} (avg TRIMP {X}, distribution: {N1} light / {N2} moderate / {N3} hard / {N4} red-line) |
+| Cardio sessions | {N} ({Z2_min} min Z2, {Z3_min} min Z3, {Z4Z5_min} min Z4–5) |
+| Daily activity | {exercise_min_daily_avg} min/day Apple exercise minutes ({assessment}); {walking_workouts_count} walking workouts totalling {walking_distance_km_28d} km |
+| Training load | CTL {ctl} / ATL {atl} / TSB {tsb} ({state}) |
+| Recovery score | {score}/10 ({confidence} confidence; trend ↑/↓/→ vs prior 4w from health_metrics_weekly) |
+```
+
+Where `{state}` is `well rested` (TSB > +5), `balanced` (−5 to +5), `carrying load` (−10 to −5), `fatigued` (−15 to −10), or `high fatigue` (≤ −15).
+
+How to compute the values:
+- **Strength sessions**: count `monthly_sessions[*]` with `session_kind == "strength"` AND `date` within the last 28d. Average TRIMP = mean of their `trimp` values (rounded to nearest int). Distribution buckets group by `load_band`. If TRIMP and load_band are null on every session in the window (HL trackers — no per-session HR to derive TRIMP from), drop the parenthetical entirely and write only the count: `| Strength sessions | 4 |`. Don't explain the absence; the row stays source-honest without lecturing the user about their data source.
+- **Cardio sessions**: count strands with `session_kind == "cardio"`. Z2/Z3/Z4–5 minutes come from `cardio_hr_zones_28d.z2`, `.z3`, `.z4 + .z5`.
+- **Daily activity row**: read `daily_activity_28d` directly. If `exercise_min_daily_avg` is null (HL trackers), substitute `{walking_minutes_28d / 28} min/day walking ({assessment})` and drop the "Apple exercise minutes" wording — same row shape, source-honest.
+- **Training load**: read `training_load.ctl`, `.atl`, `.tsb`. Pick the `state` band from the table above.
+- **Recovery score**: `recovery.score` and `recovery.confidence`. The trend arrow comes from comparing the most recent 1-2 weeks of `health_metrics_weekly` against the earlier weeks' aggregates — pick the dominant direction across HRV / RHR / sleep_total_h / wrist_temp.
+
 ### What's working
 Bullet points. Plain language. What they're doing well with specific exercises and numbers. 3-5 items max.
 
@@ -218,6 +267,23 @@ Pull the values from `estimated_1rm[exercise]`:
 - `stalled_sessions ≥ 2` without a deload in the window: call out the stall explicitly. Suggest one of: bump volume, change variation, or schedule a deload (let Phase 2 decide which).
 
 A negative `delta_vs_prev_kg` and a flat-or-negative `slope_kg_per_4w` together on a main lift without a deload around it is a real flag. A negative delta with a positive slope is one bad session — don't over-react.
+
+**REQUIRED per-session TRIMP commentary.** For each major lift you cover (compound or anchor isolation), append one line that uses session-level data from `monthly_sessions[*]`. Pull the most recent strength session that contains this exercise; cite `trimp`, `load_band`, and `intensity_pct`. Compare the TRIMP to the 28d strength-session distribution.
+
+Format:
+
+```
+**Barbell Back Squat:** 70kg × 8 → 70kg × 8, e1RM 88.7kg → 88.7kg (+2.65kg / 4w) — getting stronger.
+Last session TRIMP 87 (moderate, 64% HRR) — within the 28d session-load median; no carryover signal.
+```
+
+If TRIMP for the most recent session is in the top 20% of the 28d strength distribution AND the next-day recovery score dropped, surface the carryover explicitly:
+
+```
+Last session TRIMP 142 (hard, 79% HRR) — top quartile for this block. Recovery score the next morning was 3.8 → cut bench frequency this week, not load.
+```
+
+Skip the TRIMP line entirely when `capabilities.per_workout_hr` is False (HL users — no per-workout HR means the TRIMP score is None/zero). Don't write `Last session TRIMP None`. Drop the line cleanly.
 
 **Optional session-HR line.** Skip entirely when `capabilities.per_workout_hr` is False — HL users don't get per-workout HR. When the capability is present, the strength session's `avg_hr` is on `monthly_sessions[*]` directly. Use it to append a session HR comment — but only when it adds signal. Look up §19 for the bands. Examples:
 
@@ -253,37 +319,75 @@ List **fixable** gaps the tracker doesn't capture that would help you coach bett
 If `unknown_exercises` is non-empty, list those names and suggest the user either fix the typo in their log or add the exercise to `shared/exercises-database.md` — until they do, those sets silently count as zero volume. Likewise, consider surfacing 1-2 entries from `stale_exercises` that seem worth reintroducing or retiring (not the whole list — just ones the user was making real progress on or clearly dropped by accident).
 
 ### Deload status
-One line. Compute weeks-since-last-deload from `deloads[-1]` and `today` (in days, /7). Then:
+
+**REQUIRED.** Two lines minimum: cadence + auto-detection status. The auto-detection line is always written, even when empty.
+
+Cadence line — compute weeks-since-last-deload from `deloads[-1]` and `today` (in days, /7):
 - < 4 weeks: "On track — last deload was N weeks ago."
 - 4-6 weeks: "Deload window open — consider one in the next 1-2 weeks."
 - > 6 weeks: "Deload overdue — prescribing one this block."
 - empty `deloads`: "No deload on record in the last 3 months — prescribing one."
 
-If `auto_deload_candidates` is non-empty, lead with a question instead: "Did you deload on {date}? The data looks like it (volume drop + HR drop vs prior 4w)." Don't assert it's a deload until the user confirms.
+Auto-detection line — read `auto_deload_candidates`:
+- empty: "No auto-detected deload candidates outside your marked deloads."
+- non-empty: "Auto-detected candidate: {date} (volume drop + HR drop vs prior 4w) — was this a deload? If yes, mark it via /log {date} deload."
+
+When `auto_deload_candidates` is non-empty, treat the date as a question, not a claim — don't assert it's a deload until the user confirms.
 
 ### Recovery state
-**Lead with `recovery.score`** (0–10). The whole subsection rides on this:
 
-- `recovery.score ≥ 6.5`: "Recovery 7.2/10 — green light." One line per non-trivial driver below.
-- `recovery.score 4–6.5`: "Recovery 5.0/10 — moderate. {dominant negative driver}." Hold load this block, no PR attempts.
-- `recovery.score < 4`: "Recovery 3.5/10 — under-recovered. {dominant negative driver}." Cut session intensity, recommend an easy / active-recovery day if the user trained yesterday or today (compute from `monthly_sessions[-1].date` vs `today`).
-- `recovery.confidence == "low"`: append a clause explaining the gap, e.g. "(score driven by sleep alone — HL doesn't supply HRV / wrist temp)".
+**REQUIRED.** Lead with `recovery.score` (0–10), then list **every driver** in `recovery.drivers` — sorted by `|contrib|` descending. No driver is dropped on a contribution-magnitude threshold; small contributions are signal too. The agent picks the human-readable label and renders deltas with units.
 
-Then list the non-trivial drivers (any with |contrib| ≥ 0.4) one per line, picking the relevant facts from `recovery.drivers[*]`:
+Hard template:
 
 ```
-HRV 62ms vs 58ms baseline (+7%) — improving.
-RHR 58 bpm vs 60 typical (-2 bpm) — improving.
-Sleep 6h32m / night vs 7h target (-28 min) — soft.
-Wrist temp +0.11°C vs baseline — normal.
+Recovery {score}/10 — {green / moderate / under-recovered} ({confidence} confidence).
+
+Drivers (sorted by |contrib| descending):
+- {metric_label}: {value} vs {baseline} ({delta_human}, contrib {contrib})
+- (repeat for every driver in recovery.drivers; never drop one)
 ```
 
-Drop drivers with `|contrib| < 0.4` (signal-noise floor). Pull weekly trends from `health_metrics_weekly` if you want to back up "improving" / "drifting" with a slope number.
+Score-band labels:
+- `recovery.score ≥ 6.5` → `green`. Normal session.
+- `recovery.score 4–6.5` → `moderate`. Hold load, no PR attempts.
+- `recovery.score < 4` → `under-recovered`. Cut session intensity. If `monthly_sessions[-1].date` is today or yesterday, prescribe an easy / active-recovery day.
 
-If `recovery.confidence == "low"` because HL doesn't supply HRV / wrist temp, **don't** ask the user to "track HRV better" — that's a source limitation, not a tracking gap.
+Metric label mapping (use these strings exactly):
+- `hrv_sdnn` → "HRV"
+- `resting_hr` → "RHR"
+- `sleep_total_h` → "Sleep"
+- `sleep_deep_pct` → "Sleep depth (deep)"
+- `sleep_rem_pct` → "Sleep depth (REM)"
+- `sleep_consistency_7d_stdev_h` → "Sleep consistency"
+- `wrist_temp_c` → "Wrist temp"
+- `hr_recovery_1min` → "HR Recovery"
+- `vo2max_trend_per_4w` → "VO2max trend"
+
+Examples of how a driver line should read:
+
+```
+HRV: 43.6ms vs 42.8ms baseline (+1.9%, contrib +0.38)
+RHR: 65.3bpm vs 65.8 typical (-0.5bpm, contrib +0.19)
+Sleep: 6h32m / night vs 7h target (-28min, contrib -0.47)
+Sleep depth (deep): 17.7% (healthy 13-23%, contrib 0.0)
+Sleep depth (REM): 20.4% (healthy 20-25%, contrib 0.0)
+Sleep consistency: 0.76h stdev (threshold 1.5, contrib 0.0)
+Wrist temp: +0.11°C vs baseline (contrib -0.57)
+HR Recovery: 35.5bpm vs 37.4 typical (-1.8bpm, contrib -0.27)
+VO2max trend: +1.02 / 4w (contrib +0.38)
+```
+
+When `recovery.confidence == "low"` (e.g. HL trackers without HRV / wrist temp / sleep stages), **do not** ask the user to "track HRV better" — that's a source limitation, not a tracking gap. Skip the gap explanation entirely; just print the drivers the source provides.
 
 ### Cardio check
 Compare `cardio_last_28d` against §10 targets (150 min Zone 2 + ~20 min intervals per week, so roughly 600 min Zone 2 + 4 interval sessions over 28 days). Flag shortfall in plain numbers: "Zone 2: 60 min logged, target ~600 min. Intervals: 0 sessions, target 4."
+
+**REQUIRED daily-activity gate.** Cross-check the shortfall against `daily_activity_28d.assessment` before prescribing cardio. State the call explicitly with the value and band, e.g. "Daily activity 124 min/day (high). Cardio prescription: hold Z2, add 1 interval session for VO2max." Rules:
+- `assessment: high` (≥45 min/day basis) AND VO2max trending up → keep cardio prescription minimal; the user is already getting aerobic load passively.
+- `assessment: low` (<15 min/day basis) → add a Zone 2 session even if 28d cardio targets are met. The base activity dose is too low.
+- `assessment: moderate` (15–45) → standard rule (prescribe to hit §10 targets).
+- `assessment: null` → state "Daily activity unknown — using cardio targets only" and fall through to the standard rule.
 
 If `cardio_hr_zones_28d` is populated (XML trackers with per-workout HR), call out distribution problems explicitly:
 
@@ -330,7 +434,16 @@ Use Layer 1 analysis plus the training science reference. The reference contains
   - `recovery.confidence == "low"` (HL trackers without HRV / wrist temp): the score's available signals are still trustworthy, but soften any rule that would otherwise override the deload window. Don't invent triggers from data the source doesn't provide.
   - When `recovery.score < 4` AND `recovery.drivers` has the negative signal persisting (e.g. wrist temp +0.4°C on a multi-week stretch in `health_metrics_weekly`) → flag deload as urgent regardless of `deloads` cadence. Override the standard 4-6 / 6+ week thresholds.
 - **Per-muscle fatigue from HR creep (§19):** read `hr_at_volume_divergence`. For any muscle whose `hint == "rising HR at constant volume — fatigue or under-recovery"`, hold or cut volume on that group this block — don't add sets. Surface in the table's Notes column: `Holding {muscle} volume — HR rising at constant load.` For muscles with `hint == "improving conditioning"` you can add a working set if it's also under MAV. Skip this rule entirely on HL trackers (no per-workout HR → `hr_at_volume_divergence` empty).
-- **Training-load gate (§19, supplementary):** read `training_load.tsb`. If TSB ≤ −15 (heavy fatigue), prefer a deload regardless of weeks-since-last-deload. If TSB > +10 (well rested / detrained), small load bumps on anchor compounds are safer than usual.
+- **Training-load gate (§19, REQUIRED):** read `training_load.tsb` and apply the band's rule. The band MUST be cited by name in "Why this plan" — e.g. "TSB −5.4 → balanced/carrying load boundary; this block holds loads."
+
+  | TSB | State | Plan rule |
+  |---|---|---|
+  | > +10 | Well rested / detrained | Bump anchor compounds 2.5kg even if rep range isn't fully completed. State why in the table Notes. |
+  | +5 to +10 | Well rested | Normal load progression rules apply. PR attempts allowed if rep ranges are met. |
+  | −5 to +5 | Balanced | Hold loads, finish rep ranges first (current default). |
+  | −10 to −5 | Carrying load | No PR attempts. Cut top set's RIR target to 2-3 (was 1-2). |
+  | −15 to −10 | Fatigued | Drop one working set per compound across the board. |
+  | ≤ −15 | High fatigue | Deload regardless of weeks-since-last-deload cadence. State this is a deload in "Why this plan". |
 - **Cardio (§10):** read the Cardio check numbers from the Report. If behind target, add cardio sessions to the plan after the strength sessions. Default weekly target: 3× Zone 2 @ 30-45min + 1× intervals @ 20min. Cap total cardio additions at 4 sessions per `/coach` run — if the user is very behind, note the shortfall and prescribe the max. User can override with `/coach no-cardio` to skip this entirely.
 
 **Core training:** Build strong, developed abs. Program 1-2 core exercises per session, aim for 3-4 sessions/week with core. Prefer weighted core (kneeling cable crunch, cable woodchop, captain's chair knee raise) alongside bodyweight (leg raises, dead bugs, hollow body holds). Vary patterns across sessions: flexion, anti-extension, rotation, isometric. Visibility is a body fat question, not a training question.
@@ -425,7 +538,23 @@ Written as their own sections after the strength workouts, not mixed in. Two sha
 If the user is on target (`Cardio check` in the report shows no shortfall), don't add cardio sessions to the plan. Don't over-prescribe — cap at 4 cardio sessions total per `/coach` run.
 
 ### Why this plan
-One short paragraph at the end of the file — 3-4 sentences. What the overall block prioritizes and why these sessions are structured this way. If the block is a deload, say so explicitly.
+
+**REQUIRED templated rationale.** Not a free-form paragraph — a numbered three-signal list, each citing specific values. If the block is a deload, state it explicitly.
+
+```
+## Why this plan
+This block is paced from three signals:
+1. **Training load**: {TSB band citation, e.g. "TSB −5.4 (balanced)"} → {what changed in load progression rules}.
+2. **Recovery**: {dominant negative driver name + value, e.g. "Wrist temp +0.11°C, contrib -0.57"} → {what changed in volume / RPE}.
+3. **HR-at-volume**: {N flagged muscles from hr_at_volume_divergence with hint "rising HR..."} → {which muscles got volume cut}.
+
+Plus standard rotation: {1-2 rotation decisions from progression / stale_exercises / hr_at_volume_divergence}.
+```
+
+Source-honesty rules:
+- If `hr_at_volume_divergence` is empty (HL trackers — no per-workout HR), drop line 3. Don't fabricate it; don't tell the user the data is missing. The other two lines remain mandatory.
+- If `recovery.drivers` is short (HL — only sleep + HR Recovery + VO2max trend), still pick the dominant negative driver. There's always one.
+- TSB citation is mandatory on both sources — every tracker has TRIMP from session duration + max HR estimate.
 
 ## Common Mistakes
 

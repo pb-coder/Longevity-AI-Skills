@@ -140,7 +140,7 @@ Targets by sex/age (Cooper Institute / FitnessGram bands, M30s):
 Expected response to consistent Zone 2 + intervals: 1-3 ml/kg/min over 6-12 weeks for an early-intermediate trainee. Faster gains usually mean the baseline measurement was low, not that the user is responding extraordinarily.
 
 Interpretation rules:
-- VO2max flat (slope per 4w near 0) AND `cardio_last_14d` shows targets met → cardio is maintaining, not progressing. Suggest adding intensity (more intervals, faster Zone 2 splits) before adding volume.
+- VO2max flat (slope per 4w near 0) AND `cardio_last_28d` shows targets met → cardio is maintaining, not progressing. Suggest adding intensity (more intervals, faster Zone 2 splits) before adding volume.
 - VO2max declining AND cardio targets met → check sleep/HRV first; chronic under-recovery suppresses VO2max.
 - VO2max declining AND cardio targets missed → it's a dose problem. Don't over-interpret. Restore the prescribed cardio.
 - VO2max climbing → keep doing what's working. Don't change the program for "variety."
@@ -151,7 +151,7 @@ Single-reading caveat: Apple emits VO2max episodically (post-walk, post-run). On
 
 Every 4-6 weeks: reduce volume 40-50%, maintain load. Not optional. Accumulated fatigue without deload increases tendon risk (§7) and masks strength.
 
-**Tracker convention:** the user marks deload sessions by writing `Deload Workout` in the Notes column of the first row of the session. `scripts/read_tracker.py` surfaces `deloads` (list of dates) and `weeks_since_last_deload`. Use those directly — don't infer deloads from volume patterns.
+**Tracker convention:** the user marks deload sessions by writing `Deload Workout` in the Notes column of any row of the session; the styler hoists the marker to the session's TOTAL row Notes. `scripts/read_tracker.py` surfaces `deloads` (list of dates) and `auto_deload_candidates` (Python-detected, unmarked candidates the user might have forgotten to flag). Compute weeks-since-last-deload from `deloads[-1]` and `today`; don't infer deloads from volume patterns directly — the auto-detector already does that conservatively.
 
 ## §12 User Context
 
@@ -240,37 +240,43 @@ Different exercises grow different regions of the same muscle. Running the same 
 
 ## §18 Recovery Signals
 
-**Source dependency.** This section requires Apple's native zipped XML export. Users on HLExport (the lightweight text-event export) don't have HRV, wrist temperature, sleep stages, or Apple's daily resting-HR / walking-HR aggregates — those rely on watch-side aggregation that HLExport doesn't replicate. The capability gate in `read_tracker.py` (`capabilities.hrv` and `capabilities.wrist_temp`) short-circuits this section's prescriptions for them; the standard re-entry / deload heuristics (`weeks_since_last_deload`, `days_since_last_session`) still apply.
+**Source dependency.** This section's HRV, wrist-temperature, and per-workout-HR levers require Apple's native zipped XML export. HLExport users get a `recovery.score` driven by sleep + HR Recovery + VO2max only — accurate within its scope, but lower confidence; the score's `confidence` field surfaces this. Standard re-entry / deload heuristics still apply on either source.
 
-Apple Health provides four daily signals that materially change the recovery picture: HRV (SDNN), resting HR, total sleep, and wrist temperature. Single-day values are noisy. Use 7-day windows for "what's happening now" and 60-day baselines for "what's normal for this person."
+Apple Health provides six daily signals that materially change the recovery picture: HRV (SDNN), resting HR, total sleep, wrist temperature, HR Recovery 1-min, and VO2max trend. Single-day values are noisy; the score below uses 7-day means against 60-day baselines (or 28-day for RHR).
 
-`scripts/read_tracker.py` exposes:
-- `hrv_recent_avg` (7d) and `hrv_baseline_60d`
-- `resting_hr_recent_avg` (7d) and `resting_hr_trend_per_4w`
-- `sleep_avg_last_7d` and `sleep_avg_last_28d`
-- `wrist_temp_recent_avg` (3d) and `wrist_temp_baseline_60d`
-- `health_metrics_recent` for per-day inspection (anomaly persistence checks)
+**`recovery` is the primary read.** `scripts/read_tracker.py` returns:
 
-**HRV (SDNN).** Lower means more sympathetic activation — accumulated training fatigue, illness, sleep debt, alcohol, stress. Apple's SDNN is sampled in short windows multiple times per day; treat the daily mean as the unit of measurement, the 7-day mean as the trend, and the 60-day mean as baseline. Trigger threshold: `hrv_recent_avg ≤ 0.9 × hrv_baseline_60d` (10% below baseline) for **3+ consecutive days**. One bad night is not a signal (Flatt 2021 SMD = 0.50 was on rolling averages, not single-day reads).
+```
+recovery: {score: 0-10, confidence: low|medium|high, drivers: [...]}
+```
 
-**Resting HR.** Lower is better — improving cardio fitness shows up as a falling RHR. A negative `resting_hr_trend_per_4w` is improvement. Sudden upward shift (5+ bpm above baseline for 3+ days) usually means under-recovery or onset of illness; cross-check HRV.
+The score sums clamped contributions from each driver against a baseline of 5. Drivers, weights, and triggers:
 
-**Sleep total.** 7-day mean below 7h with 28-day mean ≥ 7h means recent acute deficit; below on both means chronic. A heavy training week into chronic deficit is the classic recipe for stalled progression.
+| Signal | Comparison | Max swing | Reading |
+|---|---|---|---|
+| HRV (SDNN) | recent (7d) vs 60d baseline | ±2 | Higher = more parasympathetic / recovered. ±5% baseline = ±1 contribution. |
+| Resting HR | recent (7d) vs 28d typical | ±2 | Lower is better. ±2.5 bpm = ±1 contribution. |
+| Sleep total | recent (7d) vs 7h target | ±2 | ±1h = ±1 contribution. Caps at ±2. |
+| Wrist temp | recent (3d) vs 60d baseline | ±1.5 | Higher = stress / illness signal. ±0.2°C = ±1 contribution. |
+| HR Recovery 1-min | recent (5d) vs 28d typical | ±0.75 | Higher = recovered. ±5 bpm drop = ±0.75. |
+| VO2max trend | per-4w slope | ±0.75 | Positive = building fitness. ±2 ml/kg/min over 4w = ±0.75. |
 
-**Wrist temperature.** Apple's nightly reading is a strong illness/overreach signal. Threshold: `wrist_temp_recent_avg > wrist_temp_baseline_60d + 0.3°C` for **2+ consecutive days**. Combined with HRV drop, very specific for upcoming illness or systemic overreach.
+Maximum positive: ~9.0; maximum negative: ~1.0; clamped to [0, 10]. `confidence`: high (≥4 signals available), medium (3), low (≤2). HL trackers max out at medium when all four core signals available.
 
-**Programming consequences (applied by SKILL.md "Recovery-aware adjustments"):**
-- 1 anomaly trigger → next session is re-entry: drop 1 working set per compound, prescribe "leave 3-4 reps in the tank" instead of 1-2.
-- Persisting 7+ days → urgent deload regardless of `weeks_since_last_deload`.
+**Programming consequences** (applied by SKILL.md "Recovery-aware adjustments"):
+- `recovery.score < 4` → next session is re-entry (drop a working set, "leave 3-4 reps in tank"); lead with the dominant negative driver in "Why this plan".
+- `recovery.score 4–6.5` → hold loads, normal volume, no PR attempts.
+- `recovery.score ≥ 6.5` → green light.
+- A negative driver persisting across multiple `health_metrics_weekly` entries → flag deload as urgent regardless of cadence.
 - Always surface the reason in "Why this plan" — the user should know why the prescription is conservative.
 
-**What NOT to do:** infer overreaching from one bad night, react to a single high wrist-temp reading without a second day to confirm, or prescribe a deload purely on a baseline-comparison without checking persistence in `health_metrics_recent`. The signals are reliable in aggregate, noisy in isolation.
+**What NOT to do:** infer overreaching from one bad night (the score already smooths over 7 days), recommend the user "track HRV better" when `capabilities.hrv` is False (it's a source limitation, not a tracking gap), or react to a single high wrist-temp reading without a second day to confirm.
 
 ## §19 Per-Session HR
 
 **Source dependency.** This section requires Apple's native zipped XML export. HLExport workouts carry duration / calories / distance only — the avg/max/min HR statistics that Apple computes inside the watch aren't included in the text dump. The capability gate in `read_tracker.py` (`capabilities.per_workout_hr`) short-circuits the cross-check for HL users; the standard load-progression rules (rep-range completion, perceived exertion) still drive their plans.
 
-Apple emits per-workout HR statistics (avg / max / min) on every `Workout` record. The importer matches these to logged training by date. `read_tracker.py` exposes them via `workout_sessions_last_28d` and `strength_session_avg_hr_trend`.
+Apple emits per-workout HR statistics (avg / max / min) on every `Workout` record. The importer matches these to logged training by date. `read_tracker.py` folds avg_hr + max_hr onto each `monthly_sessions[*]` entry and exposes per-muscle HR-creep flags via `hr_at_volume_divergence`.
 
 **Strength sessions, avg HR bands:**
 - 130-150 bpm avg = normal hypertrophy stimulus. Don't comment.
@@ -278,7 +284,7 @@ Apple emits per-workout HR statistics (avg / max / min) on every `Workout` recor
 - >160 bpm sustained = under-recovered or excessive density. Investigate before progressing anything.
 - <110 bpm avg = effort too light. The user is leaving stimulus on the table — push reps before adding load.
 
-**Trend matters more than absolute.** A user with a low resting HR and good cardiac fitness can run a session at 125-135 bpm and hit failure on every set; another can sit at 145 bpm with the same effort. The 4-week trend (`strength_session_avg_hr_trend`) on the same load is the cleanest signal for fatigue accumulating: positive slope without a load change means the body is working harder for the same output. Hold load, finish the block, then deload.
+**Trend matters more than absolute.** A user with a low resting HR and good cardiac fitness can run a session at 125-135 bpm and hit failure on every set; another can sit at 145 bpm with the same effort. The cleanest fatigue signal is **per-muscle HR creep at constant volume** — `hr_at_volume_divergence[muscle].slope_bpm_per_4w` controls for volume changes that would otherwise confound the read. `hint == "rising HR at constant volume"` (slope ≥ +5 bpm/4w with ≥6 sessions) means the body is working harder for the same output. Hold load on that muscle group, finish the block, then deload.
 
 **Cardio sessions, avg HR bands** (for Apple workouts of type Running / Cycling / Walking / Outdoor* / Indoor*):
 - Zone 2: 65-75% of max HR. For a 25M with HR_max ~195, that's ~127-146 bpm. The avg should sit firmly in this band; if it drifts above 150, the session was tempo, not Zone 2.

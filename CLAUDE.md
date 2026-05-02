@@ -17,12 +17,20 @@ shared/               # Code + docs imported by multiple skills
                       #   style_workout_sessions_sheet, style_profile_sheet),
                       #   and the upsert helpers used by the importers
                       #   (upsert_health_metrics, upsert_workout_sessions,
-                      #   upsert_monthly_cardio with manual-wins dedupe).
+                      #   upsert_monthly_cardio with manual-wins dedupe +
+                      #   tombstone honoring, upsert_monthly_strength_session).
                       #   Profile helpers (read_profile / write_profile /
-                      #   ensure_profile_sheet) live here too. Idempotent.
-                      #   style_monthly_sheet auto-sorts sessions by date
-                      #   ascending and merges non-contiguous same-date blocks
-                      #   on every pass.
+                      #   ensure_profile_sheet) and Tombstones helpers
+                      #   (read_tombstones / add_tombstone) live here too.
+                      #   Profile schema: source, auto_cardio, auto_cardio_since,
+                      #   birthday (YYYY-MM-DD — used by /coach for dynamic
+                      #   max-HR estimation). Tombstones sheet records
+                      #   (date, exercise, reason) that the cardio writer
+                      #   filters out — Apple data is immutable, so deletions
+                      #   need this tombstone mechanism to stick.
+                      #   Idempotent. style_monthly_sheet auto-sorts sessions
+                      #   by date ascending and merges non-contiguous same-date
+                      #   blocks on every pass.
   exercises-database.md  # Canonical exercise catalog (muscle → pattern →
                          # exercises). Source of truth — the xlsx "Exercises
                          # Database" tab is mirrored from this via
@@ -162,7 +170,7 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
   CARDIO section (Hike, Swim, Walk, Outdoor Run, Outdoor Cycling, HIIT
   + indoor machines) and a WELLNESS section (Yoga, Stretching). These
   entries have no muscle tags, so they're logged and counted toward
-  `cardio_last_14d` (where applicable) without contributing to the
+  `cardio_last_28d` (where applicable) without contributing to the
   weekly hard-set volume model.
 - **Multi-source Apple Health**: each tracker xlsx pins a `Profile`
   sheet with `source` (`xml` / `hl_export`) and `auto_cardio` (bool).

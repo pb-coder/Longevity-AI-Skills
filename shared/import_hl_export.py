@@ -1,0 +1,539 @@
+"""Import an HLExport plain-text health export into the tracker xlsx.
+
+HLExport (`https://apps.apple.com/.../hl-export-app/`) is the lightweight
+alternative to Apple's native zipped XML export — much smaller, much
+faster, but lossier: no HRV, no sleep stages, no per-workout HR, no wrist
+temp. It produces a single text file shaped as one daily block per date:
+
+    2026-04-25
+    ----------
+    HH:MM:SS <Metric Name>: <value> <unit>
+    HH:MM:SS Workouts: HKWorkoutActivityType(rawValue: N), X min, Y kcal[, Z km]
+    ...
+
+This importer mirrors ``import_apple_health.py``'s CLI and writes through
+the same upsert helpers (``upsert_health_metrics`` / ``upsert_workout_sessions``
+/ ``upsert_monthly_cardio``) — only the parser front-end differs. Sparse-
+merge protects existing values on re-runs; idempotent.
+
+The capability matrix is fixed in code: when the per-person ``Profile`` sheet
+says ``source = hl_export``, the coach's read layer skips HRV / wrist temp /
+sleep-stage analyses because this importer can't fill them. Resting HR,
+walking HR, and Apple's exercise-minute aggregate are **not** derived from
+raw samples here — Apple's published values use proprietary aggregation
+methods that we can't replicate. Surfacing a derived approximation alongside
+Nihad's Apple-aggregate values would create misleading mixed trend lines.
+
+Usage:
+    python3 import_hl_export.py \\
+        --txt "./health_export_*.txt" \\
+        --tracker "Workout Tracker - Fabian.xlsx" \\
+        [--since YYYY-MM-DD]      # default: 6 months back from today
+        [--also-bodyweight]
+        [--dry-run]
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import re
+import sys
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+import openpyxl
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tracker_sheet import (  # noqa: E402
+    ensure_profile_sheet,
+    read_profile,
+    upsert_health_metrics,
+    upsert_monthly_cardio,
+    upsert_workout_sessions,
+)
+from apple_workout_types import (  # noqa: E402
+    APPLE_TO_TRACKER_EXERCISE,
+    CARDIO_AUTOLOG_TYPES,
+    rawvalue_name,
+)
+
+# ---------------------------------------------------- HLExport line patterns
+DATE_HEADER_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\s*$")
+SEPARATOR_RE = re.compile(r"^-{3,}\s*$")
+EVENT_RE = re.compile(r"^(\d{2}):(\d{2}):(\d{2})\s+([^:]+):\s*(.+?)\s*$")
+WORKOUT_RE = re.compile(
+    r"^HKWorkoutActivityType\(rawValue:\s*(\d+)\),"
+    r"\s*([\d.]+)\s*min"
+    r"(?:,\s*([\d.]+)\s*kcal)?"
+    r"(?:,\s*([\d.]+)\s*km)?"
+    r"\s*$"
+)
+
+# Bare-duration cardio (HIIT, indoor cycling without distance) gets the
+# same incidental-walk treatment as the XML path: short walks logged as
+# walking workouts are flagged so the coach filters them out of cardio
+# totals.
+INCIDENTAL_WALK_MAX_MIN = 15.0
+
+# Sleep-block stitching: a gap longer than this between consecutive sleep
+# events ends the current sleep block. 30 minutes covers brief wakes and
+# bathroom trips without merging two genuinely separate sleeps.
+SLEEP_BLOCK_GAP_MIN = 30.0
+
+
+def to_float(v) -> float | None:
+    if v in (None, ""):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def default_since() -> date:
+    return date.today() - timedelta(days=183)
+
+
+# --------------------------------------------------------- per-day collector
+class DayAggregator:
+    """Per-date HL metrics + sleep-block reconstruction.
+
+    HRV / wrist temp / Apple aggregate RHR / Apple exercise-minute / sleep
+    stages are absent from HL by design — corresponding fields stay None.
+    Resting HR is left None even though raw heart-rate samples are present
+    (Apple's daily aggregate uses a proprietary algorithm we don't replicate).
+    """
+
+    def __init__(self) -> None:
+        self.vo2max: dict[str, tuple[datetime, float]] = {}     # date -> (latest_ts, value)
+        self.hr_recovery_1min: dict[str, float] = defaultdict(float)  # max of day
+        self.resp_rate_acc: dict[str, list[float]] = defaultdict(lambda: [0.0, 0])
+        self.bodyweight_kg: dict[str, tuple[datetime, float]] = {}
+        # Sleep events: per-date list of (datetime, value) where value is
+        # ``Asleep`` or ``Awake``. Stitched into segments at emit time.
+        self.sleep_events: dict[str, list[tuple[datetime, str]]] = defaultdict(list)
+        # Sleep totals per wake-up date, populated at emit time from the
+        # stitched events.
+        self.sleep_total_min: dict[str, float] = {}
+
+        # Dispatch table: metric name → bound handler. Replaces the
+        # previous if/elif chain. Each handler signature is
+        # ``(d: str, ts: datetime, raw_value: str) -> None``. Metrics not
+        # in this dict are silently ignored — the coach can't use raw HR
+        # samples without proprietary RHR aggregation, so surfacing a
+        # derived value would diverge from Apple and create misleading
+        # mixed trend lines.
+        self._handlers = {
+            "Cardio Fitness (VO2 Max)": self._h_vo2max,
+            "Heart Rate Recovery":      self._h_hr_recovery,
+            "Respiratory Rate":         self._h_resp_rate,
+            "Weight":                   self._h_weight,
+            "Sleep":                    self._h_sleep,
+        }
+
+    @staticmethod
+    def _set_latest(store: dict, d: str, ts: datetime, value: float) -> None:
+        cur = store.get(d)
+        if cur is None or ts > cur[0]:
+            store[d] = (ts, value)
+
+    def add_event(self, d: str, ts: datetime, metric: str, raw_value: str) -> None:
+        """Route a single parsed event line into the right bucket."""
+        handler = self._handlers.get(metric)
+        if handler is not None:
+            handler(d, ts, raw_value)
+
+    # ---- handlers (pull the leading numeric/string field from raw_value) ----
+    def _h_vo2max(self, d, ts, raw_value):
+        v = to_float(raw_value.split()[0])
+        if v is not None:
+            self._set_latest(self.vo2max, d, ts, v)
+
+    def _h_hr_recovery(self, d, _ts, raw_value):
+        v = to_float(raw_value.split()[0])
+        if v is not None and v > self.hr_recovery_1min.get(d, 0.0):
+            self.hr_recovery_1min[d] = v
+
+    def _h_resp_rate(self, d, _ts, raw_value):
+        v = to_float(raw_value.split()[0])
+        if v is not None:
+            acc = self.resp_rate_acc[d]
+            acc[0] += v
+            acc[1] += 1
+
+    def _h_weight(self, d, ts, raw_value):
+        v = to_float(raw_value.split()[0])
+        if v is not None:
+            self._set_latest(self.bodyweight_kg, d, ts, v)
+
+    def _h_sleep(self, d, ts, raw_value):
+        tag = raw_value.strip()
+        if tag in ("Asleep", "Awake"):
+            self.sleep_events[d].append((ts, tag))
+
+    def stitch_sleep(self) -> None:
+        """Walk per-date sleep events, build segments, bucket by wake-up date.
+
+        Algorithm: events come in ascending time order within a date; we
+        iterate across all dates' events as one global stream so a sleep
+        block crossing midnight is handled cleanly. Each ``Asleep`` event
+        starts (or extends) the current sleep block; the block ends at
+        the next ``Awake`` event, the next ``Asleep`` event that's more
+        than ``SLEEP_BLOCK_GAP_MIN`` later than the previous one, or the
+        end of the data. The block's wake-up date (date of the final
+        event) is the bucket.
+        """
+        # Flatten into one ascending stream.
+        flat: list[tuple[datetime, str]] = []
+        for events in self.sleep_events.values():
+            flat.extend(events)
+        flat.sort(key=lambda e: e[0])
+
+        if not flat:
+            return
+
+        block_start: datetime | None = None
+        block_last: datetime | None = None
+        for ts, tag in flat:
+            if tag == "Asleep":
+                if block_start is None:
+                    block_start = ts
+                    block_last = ts
+                else:
+                    # Continuation: if the gap is too big, close the prior
+                    # block and start a new one.
+                    gap_min = (ts - block_last).total_seconds() / 60.0  # type: ignore[operator]
+                    if gap_min > SLEEP_BLOCK_GAP_MIN:
+                        self._commit_sleep_block(block_start, block_last)  # type: ignore[arg-type]
+                        block_start = ts
+                    block_last = ts
+            else:  # Awake
+                if block_start is not None:
+                    # Awake closes the current block at the awake timestamp.
+                    self._commit_sleep_block(block_start, ts)
+                    block_start = None
+                    block_last = None
+
+        # Trailing open block — close at the last seen Asleep timestamp.
+        if block_start is not None and block_last is not None:
+            self._commit_sleep_block(block_start, block_last)
+
+    def _commit_sleep_block(self, start: datetime, end: datetime) -> None:
+        minutes = (end - start).total_seconds() / 60.0
+        if minutes <= 0:
+            return
+        # Wake-up date — date of the block's end. A 22:00 → 06:00 sleep
+        # belongs to the wake-up morning's recovery, matching the XML path.
+        bucket = end.date().isoformat()
+        self.sleep_total_min[bucket] = self.sleep_total_min.get(bucket, 0.0) + minutes
+
+    def emit(self, since_date: date | None) -> list[dict]:
+        """Yield per-date Health Metrics dicts (one per date with any data)."""
+        self.stitch_sleep()
+
+        all_dates: set[str] = set()
+        all_dates.update(self.vo2max.keys())
+        all_dates.update(self.hr_recovery_1min.keys())
+        all_dates.update(self.resp_rate_acc.keys())
+        all_dates.update(self.bodyweight_kg.keys())
+        all_dates.update(self.sleep_total_min.keys())
+
+        cutoff = since_date.isoformat() if since_date else None
+        out: list[dict] = []
+        for d in sorted(all_dates):
+            if cutoff and d < cutoff:
+                continue
+
+            def lat(store: dict, key: str = d) -> float | None:
+                tup = store.get(key)
+                return tup[1] if tup else None
+
+            vo2 = lat(self.vo2max)
+            bw = lat(self.bodyweight_kg)
+            rr_sum, rr_n = self.resp_rate_acc.get(d, [0.0, 0])
+            rr = round(rr_sum / rr_n, 2) if rr_n else None
+            sleep_min = self.sleep_total_min.get(d, 0.0)
+            hr_rec = self.hr_recovery_1min.get(d)
+
+            out.append({
+                "date":              d,
+                "bodyweight_kg":     round(bw, 2) if bw is not None else None,
+                "vo2max":            round(vo2, 2) if vo2 is not None else None,
+                # Fields HL can't supply — left None so sparse-merge protects
+                # any pre-existing XML-derived value.
+                "resting_hr":        None,
+                "hrv_sdnn":          None,
+                "walking_hr":        None,
+                "hr_recovery_1min":  round(hr_rec, 1) if hr_rec else None,
+                "sleep_total_h":     round(sleep_min / 60.0, 2) if sleep_min else None,
+                "sleep_deep_h":      None,
+                "sleep_rem_h":       None,
+                "resp_rate":         rr,
+                "wrist_temp_c":      None,
+                "sleep_breath_dist": None,
+                "exercise_min":      None,
+            })
+        return out
+
+
+# ---------------------------------------------------------- workout extractor
+def extract_hl_workout(d: str, ts: datetime, raw: str) -> dict | None:
+    """Build one Workout Sessions row from an HLExport workout line.
+
+    HL emits the timestamp at workout end (more precisely: when the
+    record was written). We compute start as ``end - duration``; all HL
+    workouts have null avg/max/min HR by design.
+    """
+    m = WORKOUT_RE.match(raw.strip())
+    if not m:
+        return None
+    raw_int = int(m.group(1))
+    duration = to_float(m.group(2))
+    cal = to_float(m.group(3))
+    distance = to_float(m.group(4))
+
+    apple_type = rawvalue_name(raw_int)
+
+    end_dt = ts
+    start_dt = end_dt - timedelta(minutes=duration) if duration else end_dt
+
+    notes = None
+    if "Walking" in apple_type and duration is not None and duration < INCIDENTAL_WALK_MAX_MIN:
+        notes = "incidental walk"
+
+    return {
+        "date":         start_dt.date().isoformat(),
+        "start":        start_dt.strftime("%H:%M:%S"),
+        "end":          end_dt.strftime("%H:%M:%S"),
+        "apple_type":   apple_type,
+        "duration_min": round(duration, 1) if duration is not None else None,
+        "avg_hr":       None,
+        "max_hr":       None,
+        "min_hr":       None,
+        "active_cal":   round(cal, 1) if cal is not None else None,
+        "distance_km":  round(distance, 2) if distance is not None else None,
+        "source":       "HLExport",
+        "notes":        notes,
+    }
+
+
+# ---------------------------------------------------------- streaming parser
+def stream_hl_export(path: Path):
+    """Yield ``(kind, payload)`` pairs by streaming the text file.
+
+    kind == ``"event"``: ``payload`` = ``(date_str, datetime, metric, value_str)``.
+    kind == ``"workout"``: ``payload`` = workout row dict (raw — caller filters
+    by ``--since``).
+    """
+    current_date: str | None = None
+    current_ymd: tuple[int, int, int] | None = None
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            # Strip trailing CR/LF without an extra .strip() pass — common
+            # case is a clean newline. Skip empty lines via length check.
+            if line.endswith("\n"):
+                line = line[:-1]
+            if line.endswith("\r"):
+                line = line[:-1]
+            if not line:
+                continue
+
+            # Hot path: event lines start with two ASCII digits + ':'. Almost
+            # every line in a real export matches this shape, so try the
+            # event regex first and only fall through to date / separator
+            # detection on a miss. Saves two doomed regex calls per event.
+            if (len(line) > 2 and line[0].isdigit() and line[1].isdigit()
+                    and line[2] == ":"):
+                m_ev = EVENT_RE.match(line)
+                if m_ev is not None:
+                    if current_date is None or current_ymd is None:
+                        continue
+                    hh, mm, ss, metric, raw = m_ev.groups()
+                    try:
+                        ts = datetime(
+                            current_ymd[0], current_ymd[1], current_ymd[2],
+                            int(hh), int(mm), int(ss),
+                        )
+                    except ValueError:
+                        continue
+                    metric_clean = metric.strip()
+                    if metric_clean == "Workouts":
+                        row = extract_hl_workout(current_date, ts, raw)
+                        if row is not None:
+                            yield "workout", row
+                    else:
+                        yield "event", (current_date, ts, metric_clean, raw)
+                    continue
+
+            # Cold path: date headers ("YYYY-MM-DD") and separators ("------").
+            m_date = DATE_HEADER_RE.match(line)
+            if m_date is not None:
+                y, mo, da = m_date.group(1), m_date.group(2), m_date.group(3)
+                current_date = f"{y}-{mo}-{da}"
+                current_ymd = (int(y), int(mo), int(da))
+                continue
+            # Separator line is the only other expected non-event shape.
+            # Anything else (blank lines after rstrip, malformed rows) is
+            # silently skipped.
+
+
+# ----------------------------------------------------------------------- CLI
+def parse_since(s: str | None) -> date | None:
+    if s is None:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"--since must be YYYY-MM-DD ({e})")
+
+
+def resolve_txt(pattern: str) -> Path | None:
+    """Resolve ``--txt`` to a single concrete file.
+
+    Accepts a literal path or a glob like ``./health_export_*.txt``. With a
+    glob, picks the most recent by mtime (the user typically drops one fresh
+    export at a time).
+    """
+    candidates = sorted(
+        (Path(p) for p in glob.glob(pattern)),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        return candidates[0]
+    p = Path(pattern)
+    return p if p.exists() else None
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("--txt", required=True, type=str,
+                    help="Path or glob to HLExport text file (latest mtime wins on glob).")
+    ap.add_argument("--tracker", required=True, type=Path,
+                    help="Path to Workout Tracker xlsx.")
+    ap.add_argument("--since", default=None, type=parse_since,
+                    help="Cutoff date (YYYY-MM-DD). Default: 6 months back.")
+    ap.add_argument("--also-bodyweight", action="store_true",
+                    help="Mirror the parsed bodyweight series into the Bodyweight sheet.")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Parse and aggregate; do not write the workbook.")
+    args = ap.parse_args()
+
+    txt_path = resolve_txt(args.txt)
+    if txt_path is None:
+        print(f"ERROR: HLExport file not found: {args.txt}", file=sys.stderr)
+        return 1
+    if not args.tracker.exists():
+        print(f"ERROR: tracker not found: {args.tracker}", file=sys.stderr)
+        return 1
+
+    since = args.since or default_since()
+    since_iso = since.isoformat()
+
+    aggregator = DayAggregator()
+    workout_rows: list[dict] = []
+
+    for kind, payload in stream_hl_export(txt_path):
+        if kind == "event":
+            d, ts, metric, raw = payload
+            if d < since_iso and metric != "Sleep":
+                # Sleep events near the boundary may belong to a wake-up
+                # date that's in-window; let them through.
+                continue
+            aggregator.add_event(d, ts, metric, raw)
+        else:  # workout
+            row = payload
+            if row.get("date", "") < since_iso:
+                continue
+            workout_rows.append(row)
+
+    metric_entries = aggregator.emit(since)
+
+    bodyweight_entries: list[dict] = []
+    if args.also_bodyweight:
+        for entry in metric_entries:
+            bw = entry.get("bodyweight_kg")
+            if bw is None:
+                continue
+            bodyweight_entries.append({
+                "date": entry["date"],
+                "kg": bw,
+                "notes": "from HLExport",
+            })
+
+    if args.dry_run:
+        print(
+            f"HLExport file: {txt_path.name}\n"
+            f"Health Metrics: {len(metric_entries)} dates would be written "
+            f"(range "
+            f"{metric_entries[0]['date'] if metric_entries else '-'} → "
+            f"{metric_entries[-1]['date'] if metric_entries else '-'})"
+        )
+        incidental = sum(1 for r in workout_rows
+                         if (r.get('notes') or '').startswith('incidental'))
+        print(f"Workout Sessions: {len(workout_rows)} sessions would be written "
+              f"({incidental} walks flagged incidental)")
+        if args.also_bodyweight:
+            print(f"Bodyweight: {len(bodyweight_entries)} entries would be mirrored")
+        else:
+            print("Bodyweight: skipped (no --also-bodyweight)")
+        return 0
+
+    wb = openpyxl.load_workbook(args.tracker)
+
+    # Bootstrap the Profile sheet for HL on first run (auto_cardio defaults
+    # to False per the plan — Fabian opts in later once he's confident in
+    # the workout records).
+    _, profile_created = ensure_profile_sheet(
+        wb, default_source="hl_export", default_auto_cardio=False,
+    )
+    profile = read_profile(wb)
+
+    out_lines: list[str] = []
+    if profile_created:
+        out_lines.append("Profile: created (source=hl_export, auto_cardio=false)")
+
+    out_lines.extend(upsert_health_metrics(wb, metric_entries))
+    out_lines.extend(upsert_workout_sessions(wb, workout_rows))
+
+    if profile.get("auto_cardio"):
+        cardio_payload: list[dict] = []
+        for w in workout_rows:
+            apple_type = w.get("apple_type") or ""
+            if apple_type not in CARDIO_AUTOLOG_TYPES:
+                continue
+            tracker_name = APPLE_TO_TRACKER_EXERCISE.get(apple_type)
+            if not tracker_name:
+                continue
+            cardio_payload.append({
+                "date":         w.get("date"),
+                "exercise":     tracker_name,
+                "duration_min": w.get("duration_min"),
+                "distance_km":  w.get("distance_km"),
+                "avg_hr":       w.get("avg_hr"),
+            })
+        out_lines.extend(upsert_monthly_cardio(wb, cardio_payload))
+    else:
+        out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")
+
+    if args.also_bodyweight:
+        # Reuse the logger's idempotent bodyweight upsert — same dedupe-by-date
+        # rules apply whether the source is /log, XML, or HL.
+        logger_scripts = Path(__file__).resolve().parents[1] / "workout-logger" / "scripts"
+        sys.path.insert(0, str(logger_scripts))
+        from append_workout import upsert_bodyweight  # noqa: E402
+        out_lines.extend(upsert_bodyweight(wb, bodyweight_entries))
+    else:
+        out_lines.append("Bodyweight: skipped (no --also-bodyweight)")
+
+    wb.save(args.tracker)
+    for line in out_lines:
+        print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

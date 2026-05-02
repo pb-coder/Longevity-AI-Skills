@@ -36,7 +36,11 @@ Pass the resolved path to the script. The sidecar `workout_plan.md` follows the 
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
 2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis.
-3. Run `scripts/read_tracker.py "./Workout Tracker - <Person>.xlsx"` from the current working directory (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script returns one JSON blob with everything: flat row list (last 3 months), progression summary, deload dates, days since last session, cardio totals for the last 14 days, and bodyweight series (`bodyweight_latest`, `bodyweight_trend_kg_per_week`, `bodyweight_recent`). If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
+3. Run `scripts/read_tracker.py "./Workout Tracker - <Person>.xlsx"` from the current working directory (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script returns one JSON blob with progression summary, deload dates, days since last session, cardio totals for the last 14 days, bodyweight series (`bodyweight_latest`, `bodyweight_trend_kg_per_week`, `bodyweight_recent`), Apple Health roll-ups, and a pre-computed muscle-volume model. If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
+
+   **Output is compact (no indentation) by default** — saves ~20% of tokens vs pretty-printed. Pass `--pretty` for human inspection.
+
+   **`rows` (the flat per-set list) is off by default** — the script's pre-aggregated keys (`progression_summary`, `session_totals`, `weekly_volume_per_muscle`, `estimated_1rm`, `cardio_last_14d`) cover every coaching use. Pass `--include-rows` only when you genuinely need to dig into individual sets for debugging or unusual cross-sectional questions; expect the JSON to grow ~6x in size.
 
 Each row = one set. Columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`. SESSION is a per-month number merged across rows of the same date; the sheet closes each strength session with a `TOTAL` row carrying the session's total volume (`read_tracker.py` exposes these as `session_totals`, so don't sum yourself).
 
@@ -90,8 +94,11 @@ Write the file in one pass at the end. Don't stream sections to chat while think
 `scripts/read_tracker.py` handles all the quirks (date normalization, empty-row streaks, case-insensitive grouping, numeric casting, deload detection, cardio categorization) and emits a single JSON blob. Call it once at the start of `/coach`. Don't re-read the xlsx inline unless you're debugging something the script can't see.
 
 What the JSON contains:
+- `data_source`: one of `xml` (Apple's zipped XML export) or `hl_export` (HLExport text). Determines which recovery / per-session-HR sections you can write at all. Don't override based on what fields are populated — read this string and trust it.
+- `capabilities`: per-data-source feature map. Keys: `hrv`, `wrist_temp`, `resting_hr_daily`, `walking_hr`, `sleep_stages`, `sleep_breath_dist`, `exercise_min_daily`, `per_workout_hr`. **False means structurally unsupported**, not "not yet collected." Use this — not the presence of nulls — to decide whether a section should appear in the report at all.
+- `auto_cardio_enabled`: bool. True = Apple-recorded runs / hikes / HIIT auto-flow into the monthly `YYYY.MM` sheets. Cosmetic for the coach; the volume model already counts the rows.
 - `today`, `last_session_date`, `days_since_last_session`
-- `rows`: every set from the last 3 months (default window; override with `--months N`)
+- `rows`: every set from the last 3 months (default window; override with `--months N`). **Only present when `--include-rows` was passed** — otherwise the key is omitted to keep the payload small.
 - `progression_summary`: last vs. previous best working set per exercise, case-insensitive, warmups excluded
 - `deloads`: list of dates where the session's first row had Notes `Deload Workout`
 - `weeks_since_last_deload`: float (null if no deload on record)
@@ -102,19 +109,35 @@ What the JSON contains:
 - `session_totals`: `{YYYY-MM-DD: total_volume_kg}` — one entry per strength session, populated from the sheet's TOTAL rows. Use this for weekly/recent volume reporting instead of summing `rows` yourself.
 - `weekly_volume_per_muscle`: `{window_days: 28, current: {muscle: sets}, landmarks: {muscle: {mv, mev, mav, mrv}}}`. Fractional hard-set count per muscle over the last 28 days, pre-computed via the `exercises-database.md` primary/synergist rules (compound = 1 set primary + 0.5 per synergist). Don't re-derive — read `current[muscle]`, compare to `landmarks[muscle]`, name the band (MEV/MAV/MRV) explicitly in the report.
 - `estimated_1rm`: `{ExerciseName: {current_e1rm_kg, prev_e1rm_kg, best_e1rm_kg, last_date, delta_vs_prev_kg, e1rm_history, slope_kg_per_4w, confidence, stalled_sessions}}`. Epley projection (`kg × (1 + reps/30)`) on the heaviest working set per session, one entry per exercise with logged working weight. Emitted for every exercise, not only the five major compounds — the coach decides which to surface.
-  - `e1rm_history`: last 6 sessions newest-first, each `{date, e1rm_kg, top_set_reps, top_set_kg}`. Use it when raw delta_vs_prev_kg looks ambiguous and you need to see the trajectory.
+  - `e1rm_history`: last 3 sessions newest-first, each `{date, e1rm_kg, top_set_reps, top_set_kg}`. (The slope is still computed over 6 sessions internally — only the emitted list is capped.) Use it when raw delta_vs_prev_kg looks ambiguous and you need to see the trajectory. **Omitted entirely** when `confidence == "low"` AND `slope_kg_per_4w` is null — those entries are pure noise and the summary fields convey what's known.
   - `slope_kg_per_4w`: OLS slope over those sessions, scaled to a 4-week window. Null if fewer than 3 sessions logged. Treat this — not the last-vs-prev delta — as the primary "is this lift trending up?" signal.
   - `confidence`: `high` (last 3 top sets all 3-8 reps), `medium` (mixed), `low` (any top set ≥13 reps or only one session). Epley is calibrated for low-rep work; a high-rep e1RM is noisy. When `confidence == low`, soften the trend language and surface the noise to the user.
   - `stalled_sessions`: count of consecutive most-recent sessions where |Δe1RM| ≤ 0.5kg, broken by any deload that fell in the window. ≥2 means a real stall, not a one-off bad day.
 - `stale_exercises`: list of exercises not logged in ≥28 days, sorted newest-stale first. Each entry: `{exercise, last_date, weeks_since, sessions_logged}`. Warmup and cardio sections are pre-filtered. Use for rotation decisions (retire, reintroduce, or fold back into the plan).
 - `unknown_exercises`: logged exercise names across the full loaded window that don't match the database. Surface these in **Missing from your tracking** so the user can fix typos or add missing entries — untracked names silently under-count volume.
+- `health_metrics_recent`: last 30 daily rows from the `Health Metrics` sheet (Apple Health import). Each row carries `vo2max`, `resting_hr`, `hrv_sdnn`, `walking_hr`, `hr_recovery_1min`, `sleep_total_h`, `sleep_deep_h`, `sleep_rem_h`, `resp_rate`, `wrist_temp_c`, `sleep_breath_dist`, `exercise_min`. Any field can be null on any given date — sparse-merge upserts protect existing values. (Bodyweight is intentionally NOT in this list — read `bodyweight_recent` / `bodyweight_latest` instead.)
+- `vo2max_latest`: `{date, value}` of the most recent VO2max reading, or null. Use directly in the Cardio check line.
+- `vo2max_trend_per_4w`: OLS slope per 4 weeks across all logged VO2max readings. Null until ≥4 readings spanning 21+ days.
+- `resting_hr_recent_avg`: 7-day mean. Lower is better.
+- `resting_hr_trend_per_4w`: 4-week slope. **Negative** = improving (resting HR dropping = better cardio fitness). Null below the data threshold.
+- `hrv_recent_avg`: 7-day mean SDNN.
+- `hrv_trend_per_4w`: 4-week slope. **Positive** = improving.
+- `hrv_baseline_60d`: 60-day mean. Use to decide if recent HRV is anomalously low (`hrv_recent_avg ≤ 0.9 × baseline` is the §18 threshold).
+- `sleep_avg_last_7d`, `sleep_avg_last_28d`: total hours asleep per night, averaged. The 28-day window is the "normal for you" reference; the 7-day window is what's happening now.
+- `wrist_temp_baseline_60d`, `wrist_temp_recent_avg`: 60-day baseline and 3-day recent mean of Apple's nightly wrist temperature reading. Recent > baseline + 0.3°C for 2+ days = illness/overreach signal (§18).
+- `hr_recovery_recent_avg`: mean of the last 5 logged HR Recovery 1-min readings (count/min drop in HR one minute after exercise). Higher is better.
+- `workout_sessions_last_28d`: list of Apple `Workout` rows (last 28 days, incidental walks excluded). Each entry: `{date, type, duration, avg_hr, max_hr, cal}`. Match by date to logged training to surface session-level HR for strength sessions.
+- `strength_session_avg_hr_trend`: 4-week slope of avg HR across the last 8 strength sessions (Apple workouts on dates that were logged with weight × reps). Positive = HR is creeping up at the same load → fatigue accumulating, hold load.
 
-Apply the standard filters on top of `rows`:
-- Volume analysis (report): use `weekly_volume_per_muscle.current[muscle]` directly and name the landmark band (e.g. "chest: 12 sets, MAV"). Don't sum `rows` yourself and don't re-apply the fractional model in your reasoning — both are already baked in.
+Apply the standard filters on top of the pre-aggregated keys (no need to read `rows` for these):
+- Volume analysis (report): use `weekly_volume_per_muscle.current[muscle]` directly and name the landmark band (e.g. "chest: 12 sets, MAV"). The fractional model is already baked in.
 - Session-level volume: `session_totals`.
-- Progression trends (report): use `progression_summary` directly for major compounds (bench, squat, deadlift, OHP, row); filter `rows` if you need deeper history.
-- Workout planning: last 2 weeks.
-- Most recent session: filter to the max date.
+- Progression trends (report): use `progression_summary` directly for major compounds (bench, squat, deadlift, OHP, row).
+- Deeper progression: `estimated_1rm[exercise]` carries the trajectory plus a 3-session history.
+- Workout planning: rely on the 28-day windows already computed (`weekly_volume_per_muscle`, `workout_sessions_last_28d`).
+- Most recent session: `last_session_date` plus the matching `progression_summary` entries.
+
+If you genuinely need raw set-level data (e.g. an unusual cross-sectional question), re-run with `--include-rows`. Default runs omit `rows` to save tokens.
 
 **Critical format notes (for the rare case you need to read the xlsx directly):**
 - Dates are usually `'YYYY-MM-DD'` strings, occasionally `datetime`. The script normalizes; if you bypass it, normalize yourself.
@@ -173,6 +196,14 @@ Pull the values from `estimated_1rm[exercise]`:
 
 A negative `delta_vs_prev_kg` and a flat-or-negative `slope_kg_per_4w` together on a main lift without a deload around it is a real flag. A negative delta with a positive slope is one bad session — don't over-react.
 
+**Optional session-HR line.** Skip entirely when `capabilities.per_workout_hr` is False — HL users don't get per-workout HR, so the line would always be empty. When the capability is present and `workout_sessions_last_28d` has Apple workouts matching a major lift's recent dates, you can append a session HR comment — but only when it adds signal. Look up §19 for the bands. Examples:
+
+- HR sits in the normal hypertrophy band (130-150 bpm avg) → don't write the line. It's not informative.
+- HR is creeping above 150 bpm avg on the same load → write `Session avg HR 152 bpm (last 4 sessions) — running hot, hold load this block.`
+- HR is below 110 bpm avg on a working set → write `Session avg HR 105 bpm — effort too light, push reps before adding load.`
+
+Skip the line entirely when there's no Apple HR data for the strength-session dates. Don't fabricate a band.
+
 If data is too limited to judge (history < 2 entries), say that in one sentence.
 
 **Bodyweight line.** Add one line at the bottom of this section using `bodyweight_latest` and `bodyweight_trend_kg_per_week`:
@@ -192,7 +223,9 @@ Cross-reference `references/training-science.md` for the numbers. Don't cite §5
 - Bodyweight trend: null from `read_tracker.py` → "not enough data for a trend yet." Don't fabricate a direction.
 
 ### Missing from your tracking
-List what the tracker doesn't capture that would help you coach better. One line each. (This draws from §13 internally but don't cite it.) Bodyweight is captured on the `Bodyweight` sheet by the morning /log prompt; don't flag it as missing.
+List **fixable** gaps the tracker doesn't capture that would help you coach better. One line each. (This draws from §13 internally but don't cite it.) Bodyweight is captured on the `Bodyweight` sheet by the morning /log prompt; don't flag it as missing.
+
+**Do not** list metrics the data source structurally can't provide. Read `capabilities` first: any key that's False is configured-out, not forgotten. For HL users, that means HRV / wrist temp / sleep stages / per-workout HR / Apple-aggregate RHR / walking HR / exercise-min are off-limits as suggestions — they belong in the source's docs, not in a user-facing to-do list. The user can't go "track HRV better" without switching export tools, and a recommendation that hides the dependency is misleading.
 
 If `unknown_exercises` is non-empty, list those names and suggest the user either fix the typo in their log or add the exercise to `shared/exercises-database.md` — until they do, those sets silently count as zero volume. Likewise, consider surfacing 1-2 entries from `stale_exercises` that seem worth reintroducing or retiring (not the whole list — just ones the user was making real progress on or clearly dropped by accident).
 
@@ -203,8 +236,41 @@ One line. Compute from `weeks_since_last_deload`:
 - > 6 weeks: "Deload overdue — prescribing one this block."
 - null (no deloads on record): "No deload on record in the last 3 months — prescribing one."
 
+### Recovery state
+**Hard gate first.** If `capabilities.hrv` is False AND `capabilities.wrist_temp` is False, skip the entire subsection — don't write the heading. The data source can't answer "how recovered are you" the way XML can; pretending it can is misleading. (HL users: this is the expected path.)
+
+If at least one of those is True, insert this subsection only when any recovery signal is populated. Skip it (don't write the heading) when the user hasn't run an Apple Health import yet — `hrv_recent_avg`, `resting_hr_recent_avg`, `sleep_avg_last_7d` will all be null in that case.
+
+Standard format when data is present:
+
+```
+HRV 62ms (7d avg), trend +3.1ms / 4 weeks — improving.
+RHR 58 bpm, -2 / 4 weeks — improving.
+Sleep 7h12m / night (7d avg), 7h05m (28d).
+Wrist temp baseline-normal.
+```
+
+Per-line rules:
+- Trend line: skip the trend chunk and just print the average if the trend value is null (data threshold not met yet).
+- Wrist temp: print "baseline-normal" if `wrist_temp_recent_avg ≤ wrist_temp_baseline_60d + 0.3`. Print "↑ 0.4°C above 60-day baseline" if above the threshold.
+- HRV anomaly: if `hrv_recent_avg ≤ 0.9 × hrv_baseline_60d` for 3+ consecutive days (check `health_metrics_recent`), or wrist temp is above threshold for 2+ days, **lead with that** at the top of the section instead of the standard format. Example:
+
+```
+Wrist temp +0.4°C above 60-day baseline AND HRV down 12% for 3 days — possible illness or overreach. Pulling intensity this week, pushing the heavy lower day back.
+```
+
+The reasoning surfaces here so the user knows why the plan is conservative. Phase 2 then reduces volume per the recovery-aware rule below.
+
 ### Cardio check
 Compare `cardio_last_14d` against §10 targets (150 min Zone 2 + ~20 min intervals per week, so roughly 300 min Zone 2 + 2 interval sessions over 14 days). Flag shortfall in plain numbers: "Zone 2: 60 min logged, target ~300 min. Intervals: 0 sessions, target 2."
+
+When `vo2max_latest` is populated, append the VO2max line:
+
+```
+VO2max: 48.0 ml/kg/min (2026-04-30), +1.2 / 4 weeks — trending up.
+```
+
+If `vo2max_trend_per_4w` is null (fewer than 4 readings over 21+ days), drop the trend chunk: `VO2max: 48.0 ml/kg/min (2026-04-30) — not enough history for a trend yet.`
 
 ## Phase 2: Planning (into workout_plan.md `## Plan`)
 
@@ -230,6 +296,12 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 - Maintain exercises the user is already progressing on.
 - **Deload handling (§11):** if `weeks_since_last_deload > 6` or null, the prescribed block IS a deload: reduce each exercise's working-set count to ~50% and keep loads at the last working weight (maintain intensity, cut volume). Tell the user explicitly in "Why this plan" that this block is a deload. In the 4-6 week window, don't force a deload but flag it in the report and offer to plan one if the user asks.
 - **Re-entry after long break:** if `days_since_last_session > 5` and no deload on record in that gap, treat the first prescribed session as a re-entry — drop one working set per compound, prescribe "leave 2-3 reps in the tank" instead of 1-2. Tendon adapts slower than muscle (§7), so under-load the first session back.
+- **Recovery-aware adjustments (§18):** **Gate first** — if `capabilities.hrv` and `capabilities.wrist_temp` are both False, this rule does not apply. Don't invent triggers from data the source doesn't provide; the user gets normal programming with the standard re-entry / deload heuristics from `weeks_since_last_deload` and `days_since_last_session`. When at least one is True, read `hrv_recent_avg` vs. `hrv_baseline_60d`, and `wrist_temp_recent_avg` vs. `wrist_temp_baseline_60d`, plus the per-day `health_metrics_recent` series for anomaly persistence. Triggers:
+  - `hrv_recent_avg ≤ 0.9 × hrv_baseline_60d` for 3+ consecutive days → next session is re-entry: drop one working set per compound, prescribe "leave 3-4 reps in the tank" instead of 1-2.
+  - `wrist_temp_recent_avg > wrist_temp_baseline_60d + 0.3°C` for 2+ consecutive days → same re-entry treatment (illness/overreach signal).
+  - Either persisting 7+ days → flag deload as urgent regardless of `weeks_since_last_deload`. Override the standard 4-6 / 6+ week thresholds.
+  - Surface the reason in "Why this plan" so the user understands the call.
+- **Session-HR cross-check on load progression (§19):** Skip entirely when `capabilities.per_workout_hr` is False — HL users have no per-session HR to read. Otherwise, when load-progressing a compound (e.g., bumping squat from 75 → 80kg), peek at the most recent matched Apple session's avg HR for that movement's date. If `strength_session_avg_hr_trend > 0` AND the recent avg HR is already above 150 bpm, skip the load bump this block — the user is grinding the existing load. Surface in the table's Notes column: `Holding load — session HR ramping up.`
 - **Cardio (§10):** read the Cardio check numbers from the Report. If behind target, add cardio sessions to the plan after the strength sessions. Default weekly target: 3× Zone 2 @ 30-45min + 1× intervals @ 20min. Cap total cardio additions at 4 sessions per `/coach` run — if the user is very behind, note the shortfall and prescribe the max. User can override with `/coach no-cardio` to skip this entirely.
 
 **Core training:** Build strong, developed abs. Program 1-2 core exercises per session, aim for 3-4 sessions/week with core. Prefer weighted core (kneeling cable crunch, cable woodchop, captain's chair knee raise) alongside bodyweight (leg raises, dead bugs, hollow body holds). Vary patterns across sessions: flexion, anti-extension, rotation, isometric. Visibility is a body fat question, not a training question.
@@ -353,6 +425,13 @@ One short paragraph at the end of the file — 3-4 sentences. What the overall b
 | Writing the report or plan inline in chat | Conversation gets flooded; plan is hard to find later | All report + plan content goes into `./workout_plan - <Person>.md`. Chat gets one verdict line + the file pointer. |
 | Writing one person's plan over the other | `workout_plan - Nihad.md` overwritten with Fabian's plan, or vice versa | Always resolve the person first and write to `./workout_plan - <Person>.md`. Never a bare `workout_plan.md`. |
 | Partial file writes | Streaming sections and forgetting to complete | Build the whole file in memory, then write once. |
+| Inventing recovery trends on <4 readings | "HRV improving" called from 2 data points | The `_trend_per_4w` keys are null until ≥4 entries spanning 21+ days. Drop the trend chunk; print the average alone. |
+| Reading single-day HRV as signal | One bad night triggers a deload | Compare `hrv_recent_avg` (7d) to `hrv_baseline_60d` AND require 3+ consecutive days below threshold via `health_metrics_recent` before reacting. |
+| Treating Apple `Walking` workouts as training | Counts a 5-min stroll as a session | The importer flags walks under 15 min as `incidental walk` in Notes. `workout_sessions_last_28d` already filters them; don't re-add them when reading the sheet directly. |
+| Bumping load when session HR is creeping up | User over-reaches | Hold load when `strength_session_avg_hr_trend > 0` and recent avg HR sits above 150 bpm. Note "Holding load — session HR ramping up." |
+| Treating an HL user's missing HRV as "not enough data yet" | Implies the user just needs to log more, but the source can't provide HRV at all | Read `capabilities.hrv`. If False, omit the metric (and its sections) entirely. Distinct from "trend is null because <4 readings collected so far". |
+| Listing structurally-unsupported metrics in **Missing from your tracking** | User sees a fake to-do list of things to "track" that the data source can't supply | The section is for *fixable* gaps (typos in `unknown_exercises`, dropped exercises, manual notes). Anything False in `capabilities` belongs in source docs, not the user-facing report. |
+| Treating auto-cardio rows as duplicates of manually-logged runs | Both /log and the importer write the same run; coach can't tell them apart | Auto-cardio dedupe runs in the importer by (date, exercise, duration ±1 min). Manual entries always win. If you see two rows for the same run on the same date, flag it — the dedupe missed something. |
 
 ## Rules
 

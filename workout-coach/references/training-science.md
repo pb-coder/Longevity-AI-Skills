@@ -21,7 +21,9 @@
 | Week-to-week progression within a block | §15 Mesocycle Structure |
 | Pairing exercises / supersets      | §16 Exercise Pairing |
 | Regional coverage within a muscle  | §17 Exercise Variation |
-| Planning workouts / programming    | §1-§11, §14-§17 combined |
+| Recovery / HRV / wrist temp / sleep | §18 Recovery Signals |
+| Per-session HR interpretation       | §19 Per-Session HR |
+| Planning workouts / programming    | §1-§11, §14-§19 combined |
 
 ---
 
@@ -125,6 +127,26 @@ User: 1x/week is below every recommendation. Target: 3x30-45min Zone 2 + 1x/week
 
 Interference: cycling < running for interference. Separate from legs by 6-24h.
 
+### §10.1 VO2max interpretation
+
+The Apple Watch VO2max estimate (`vo2max_latest` in `read_tracker.py`) is a regression model fit on outdoor walking/running with HR. It tracks real changes well; absolute calibration is approximate. Use trend more than the single number.
+
+Targets by sex/age (Cooper Institute / FitnessGram bands, M30s):
+- Below average: <43 ml/kg/min
+- Average: 43-46
+- Above average: 47-55
+- Elite: 55+
+
+Expected response to consistent Zone 2 + intervals: 1-3 ml/kg/min over 6-12 weeks for an early-intermediate trainee. Faster gains usually mean the baseline measurement was low, not that the user is responding extraordinarily.
+
+Interpretation rules:
+- VO2max flat (slope per 4w near 0) AND `cardio_last_14d` shows targets met → cardio is maintaining, not progressing. Suggest adding intensity (more intervals, faster Zone 2 splits) before adding volume.
+- VO2max declining AND cardio targets met → check sleep/HRV first; chronic under-recovery suppresses VO2max.
+- VO2max declining AND cardio targets missed → it's a dose problem. Don't over-interpret. Restore the prescribed cardio.
+- VO2max climbing → keep doing what's working. Don't change the program for "variety."
+
+Single-reading caveat: Apple emits VO2max episodically (post-walk, post-run). One number after a hot or under-slept day can swing ±2 ml/kg/min. The 4-week slope is the signal.
+
 ## §11 Deload
 
 Every 4-6 weeks: reduce volume 40-50%, maintain load. Not optional. Accumulated fatigue without deload increases tendon risk (§7) and masks strength.
@@ -215,3 +237,51 @@ Different exercises grow different regions of the same muscle. Running the same 
 - **Don't over-rotate.** Every swapped exercise costs progression data. Keep at least one stable reference per muscle so trends remain legible. Variety that shreds progression tracking is self-defeating.
 
 **Database hooks:** `exercises-database.md` already tags variants (`◆` lengthened-position, plus angle and grip modifiers). Use those tags when picking a second variant for a muscle. Prefer variants already in the database over inventing new ones for variety's sake.
+
+## §18 Recovery Signals
+
+**Source dependency.** This section requires Apple's native zipped XML export. Users on HLExport (the lightweight text-event export) don't have HRV, wrist temperature, sleep stages, or Apple's daily resting-HR / walking-HR aggregates — those rely on watch-side aggregation that HLExport doesn't replicate. The capability gate in `read_tracker.py` (`capabilities.hrv` and `capabilities.wrist_temp`) short-circuits this section's prescriptions for them; the standard re-entry / deload heuristics (`weeks_since_last_deload`, `days_since_last_session`) still apply.
+
+Apple Health provides four daily signals that materially change the recovery picture: HRV (SDNN), resting HR, total sleep, and wrist temperature. Single-day values are noisy. Use 7-day windows for "what's happening now" and 60-day baselines for "what's normal for this person."
+
+`scripts/read_tracker.py` exposes:
+- `hrv_recent_avg` (7d) and `hrv_baseline_60d`
+- `resting_hr_recent_avg` (7d) and `resting_hr_trend_per_4w`
+- `sleep_avg_last_7d` and `sleep_avg_last_28d`
+- `wrist_temp_recent_avg` (3d) and `wrist_temp_baseline_60d`
+- `health_metrics_recent` for per-day inspection (anomaly persistence checks)
+
+**HRV (SDNN).** Lower means more sympathetic activation — accumulated training fatigue, illness, sleep debt, alcohol, stress. Apple's SDNN is sampled in short windows multiple times per day; treat the daily mean as the unit of measurement, the 7-day mean as the trend, and the 60-day mean as baseline. Trigger threshold: `hrv_recent_avg ≤ 0.9 × hrv_baseline_60d` (10% below baseline) for **3+ consecutive days**. One bad night is not a signal (Flatt 2021 SMD = 0.50 was on rolling averages, not single-day reads).
+
+**Resting HR.** Lower is better — improving cardio fitness shows up as a falling RHR. A negative `resting_hr_trend_per_4w` is improvement. Sudden upward shift (5+ bpm above baseline for 3+ days) usually means under-recovery or onset of illness; cross-check HRV.
+
+**Sleep total.** 7-day mean below 7h with 28-day mean ≥ 7h means recent acute deficit; below on both means chronic. A heavy training week into chronic deficit is the classic recipe for stalled progression.
+
+**Wrist temperature.** Apple's nightly reading is a strong illness/overreach signal. Threshold: `wrist_temp_recent_avg > wrist_temp_baseline_60d + 0.3°C` for **2+ consecutive days**. Combined with HRV drop, very specific for upcoming illness or systemic overreach.
+
+**Programming consequences (applied by SKILL.md "Recovery-aware adjustments"):**
+- 1 anomaly trigger → next session is re-entry: drop 1 working set per compound, prescribe "leave 3-4 reps in the tank" instead of 1-2.
+- Persisting 7+ days → urgent deload regardless of `weeks_since_last_deload`.
+- Always surface the reason in "Why this plan" — the user should know why the prescription is conservative.
+
+**What NOT to do:** infer overreaching from one bad night, react to a single high wrist-temp reading without a second day to confirm, or prescribe a deload purely on a baseline-comparison without checking persistence in `health_metrics_recent`. The signals are reliable in aggregate, noisy in isolation.
+
+## §19 Per-Session HR
+
+**Source dependency.** This section requires Apple's native zipped XML export. HLExport workouts carry duration / calories / distance only — the avg/max/min HR statistics that Apple computes inside the watch aren't included in the text dump. The capability gate in `read_tracker.py` (`capabilities.per_workout_hr`) short-circuits the cross-check for HL users; the standard load-progression rules (rep-range completion, perceived exertion) still drive their plans.
+
+Apple emits per-workout HR statistics (avg / max / min) on every `Workout` record. The importer matches these to logged training by date. `read_tracker.py` exposes them via `workout_sessions_last_28d` and `strength_session_avg_hr_trend`.
+
+**Strength sessions, avg HR bands:**
+- 130-150 bpm avg = normal hypertrophy stimulus. Don't comment.
+- 150-160 bpm avg = running hot. Either rest periods are too short, accessory volume is too high, or the user is under-recovered. Hold load this block; tighten rest periods or trim accessory sets.
+- >160 bpm sustained = under-recovered or excessive density. Investigate before progressing anything.
+- <110 bpm avg = effort too light. The user is leaving stimulus on the table — push reps before adding load.
+
+**Trend matters more than absolute.** A user with a low resting HR and good cardiac fitness can run a session at 125-135 bpm and hit failure on every set; another can sit at 145 bpm with the same effort. The 4-week trend (`strength_session_avg_hr_trend`) on the same load is the cleanest signal for fatigue accumulating: positive slope without a load change means the body is working harder for the same output. Hold load, finish the block, then deload.
+
+**Cardio sessions, avg HR bands** (for Apple workouts of type Running / Cycling / Walking / Outdoor* / Indoor*):
+- Zone 2: 65-75% of max HR. For a 25M with HR_max ~195, that's ~127-146 bpm. The avg should sit firmly in this band; if it drifts above 150, the session was tempo, not Zone 2.
+- Intervals: avg HR is meaningless for intervals — read max HR (should hit 165+ during work blocks).
+
+**What NOT to do:** match a stretching session's low HR to "low effort" (different stimulus type), compare across activity types, or react to a single high-HR session without a 4-session window. Sleep/caffeine/heat affect HR substantially day-to-day.

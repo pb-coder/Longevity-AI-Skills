@@ -24,10 +24,18 @@ from tracker_sheet import (  # noqa: E402
     MONTHLY_COLS,
     DB_COLS,
     BODYWEIGHT_COLS,
+    HEALTH_METRICS_COLS,
+    HEALTH_METRICS_SHEET_NAME,
+    PROFILE_SHEET_NAME,
+    WORKOUT_SESSIONS_COLS,
+    WORKOUT_SESSIONS_SHEET_NAME,
     find_last_data_cell,
     style_monthly_sheet,
     style_db_sheet,
     style_bodyweight_sheet,
+    style_health_metrics_sheet,
+    style_profile_sheet,
+    style_workout_sessions_sheet,
 )
 
 # Row buffer policy when trimming empty rows.
@@ -35,10 +43,17 @@ from tracker_sheet import (  # noqa: E402
 # Past-month sheets: 2 blank rows.
 # Exercises Database: 0 (static-ish lookup table).
 # Bodyweight: 10 (small buffer for upcoming entries).
+# Health Metrics + Workout Sessions: 30 (Apple emits daily, fills fast).
 CURRENT_MONTH_BUFFER = 50
 PAST_MONTH_BUFFER = 2
 DB_BUFFER = 0
 BODYWEIGHT_BUFFER = 10
+HEALTH_METRICS_BUFFER = 30
+WORKOUT_SESSIONS_BUFFER = 30
+# Profile holds a fixed set of key/value rows; no buffer needed because the
+# sheet is configuration, not a growing log.
+PROFILE_BUFFER = 0
+PROFILE_COLS = 2
 
 
 # ------------------------------------------------------------------ helpers
@@ -67,13 +82,18 @@ def trim_sheet(ws, buffer: int, target_cols: int):
 
 # ------------------------------------------------------------------ reorder
 def reorder_sheets(wb):
-    """Order: Exercises Database, Bodyweight, monthly sheets newest → oldest, then the rest."""
+    """Order: Exercises Database, Profile, Bodyweight, Health Metrics, Workout Sessions,
+    monthly sheets newest → oldest, then anything else."""
     names = list(wb.sheetnames)
     db = [n for n in names if n == "Exercises Database"]
+    pf = [n for n in names if n == PROFILE_SHEET_NAME]
     bw = [n for n in names if n == "Bodyweight"]
+    hm = [n for n in names if n == HEALTH_METRICS_SHEET_NAME]
+    ws = [n for n in names if n == WORKOUT_SESSIONS_SHEET_NAME]
     months = sorted((n for n in names if is_monthly(n)), reverse=True)
-    other = [n for n in names if n not in db and n not in bw and n not in months]
-    desired = db + bw + months + other
+    fixed = set(db + pf + bw + hm + ws + months)
+    other = [n for n in names if n not in fixed]
+    desired = db + pf + bw + hm + ws + months + other
 
     # Use move_sheet: openpyxl needs the sheet object and an index.
     for target_idx, name in enumerate(desired):
@@ -116,9 +136,18 @@ def run(path: Path, dry_run: bool = False) -> int:
         if name == "Exercises Database":
             style_db_sheet(ws)
             trim_sheet(ws, buffer=DB_BUFFER, target_cols=DB_COLS)
+        elif name == PROFILE_SHEET_NAME:
+            style_profile_sheet(ws)
+            trim_sheet(ws, buffer=PROFILE_BUFFER, target_cols=PROFILE_COLS)
         elif name == "Bodyweight":
             style_bodyweight_sheet(ws)
             trim_sheet(ws, buffer=BODYWEIGHT_BUFFER, target_cols=BODYWEIGHT_COLS)
+        elif name == HEALTH_METRICS_SHEET_NAME:
+            style_health_metrics_sheet(ws)
+            trim_sheet(ws, buffer=HEALTH_METRICS_BUFFER, target_cols=HEALTH_METRICS_COLS)
+        elif name == WORKOUT_SESSIONS_SHEET_NAME:
+            style_workout_sessions_sheet(ws)
+            trim_sheet(ws, buffer=WORKOUT_SESSIONS_BUFFER, target_cols=WORKOUT_SESSIONS_COLS)
         elif is_monthly(name):
             style_monthly_sheet(ws)
             buf = CURRENT_MONTH_BUFFER if name == current else PAST_MONTH_BUFFER

@@ -31,7 +31,52 @@ from pathlib import Path
 import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from tracker_sheet import bw_locate_date, date_str  # noqa: E402
+from tracker_sheet import (  # noqa: E402
+    HEALTH_METRICS_FIELDS,
+    HEALTH_METRICS_SHEET_NAME,
+    WORKOUT_SESSIONS_SHEET_NAME,
+    bw_locate_date,
+    date_str,
+    hm_locate_date,
+    read_profile,
+    ws_locate_date_start,
+)
+
+# Per-source capability map. The coach reads this to decide which sections of
+# the report to write. ``xml`` is Apple's native zipped export (Nihad);
+# ``hl_export`` is the HLExport text dump (Fabian) — much lighter, but no HRV,
+# no wrist temp, no per-workout HR, no sleep stages, no Apple-aggregate RHR /
+# walking HR / exercise-minute. The coach should distinguish ``unsupported``
+# (data source can't provide it) from ``not yet collected`` (data source can,
+# but the user hasn't logged enough yet).
+SOURCE_CAPABILITIES = {
+    "xml": {
+        "hrv":                True,
+        "wrist_temp":         True,
+        "resting_hr_daily":   True,
+        "walking_hr":         True,
+        "sleep_stages":       True,
+        "sleep_breath_dist":  True,
+        "exercise_min_daily": True,
+        "per_workout_hr":     True,
+    },
+    "hl_export": {
+        "hrv":                False,
+        "wrist_temp":         False,
+        "resting_hr_daily":   False,
+        "walking_hr":         False,
+        "sleep_stages":       False,
+        "sleep_breath_dist":  False,
+        "exercise_min_daily": False,
+        "per_workout_hr":     False,
+    },
+}
+
+# Applied when the Profile sheet is missing or unset — treat the data as
+# coming from XML so existing Nihad trackers (created before the Profile
+# sheet existed) keep their full capability surface. New Fabian trackers
+# get bootstrapped to ``hl_export`` by ``import_hl_export.py``.
+DEFAULT_DATA_SOURCE = "xml"
 
 MONTHLY_RE = re.compile(r"^\d{4}\.\d{2}$")
 DELOAD_MARKER = "deload workout"
@@ -433,6 +478,218 @@ def cardio_last_14d(rows: list[dict], today_d: date) -> dict:
     }
 
 
+# ---------- health metrics ----------
+def read_health_metrics(wb) -> list[dict]:
+    """Return all Health Metrics rows sorted ascending by date.
+
+    Each entry: ``{"date": "YYYY-MM-DD", <field>: <value>|None, ...}``,
+    with one key per ``HEALTH_METRICS_FIELDS`` plus ``notes`` from the
+    sheet's manual Notes column. Returns ``[]`` if the sheet is missing
+    or empty.
+
+    The sheet stores newest-first (the importer writes DESC); this
+    function re-sorts ascending so trend/rolling helpers see a stable
+    chronological order.
+    """
+    if HEALTH_METRICS_SHEET_NAME not in wb.sheetnames:
+        return []
+    ws = wb[HEALTH_METRICS_SHEET_NAME]
+    out: list[dict] = []
+    for raw in ws.iter_rows(min_row=2, values_only=True):
+        if not raw:
+            continue
+        d, _ = hm_locate_date(raw)
+        if d is None:
+            continue
+        entry = {"date": d}
+        for i, key in enumerate(HEALTH_METRICS_FIELDS, start=1):
+            v = raw[i] if len(raw) > i else None
+            if v in (None, ""):
+                entry[key] = None
+            else:
+                try:
+                    entry[key] = float(v)
+                except (TypeError, ValueError):
+                    entry[key] = None
+        notes = raw[14] if len(raw) > 14 else None
+        entry["notes"] = (str(notes).strip() if notes else None)
+        out.append(entry)
+    out.sort(key=lambda e: e["date"])
+    return out
+
+
+def read_workout_sessions(wb) -> list[dict]:
+    """Return all Workout Sessions rows sorted ascending by date+start.
+
+    Each entry has the 12 columns of the sheet. Returns ``[]`` if the
+    sheet is missing.
+    """
+    if WORKOUT_SESSIONS_SHEET_NAME not in wb.sheetnames:
+        return []
+    ws = wb[WORKOUT_SESSIONS_SHEET_NAME]
+    out: list[dict] = []
+    for raw in ws.iter_rows(min_row=2, values_only=True):
+        d, s = ws_locate_date_start(raw)
+        if d is None:
+            continue
+        out.append({
+            "date":         d,
+            "start":        s,
+            "end":          raw[2]  if len(raw) > 2  else None,
+            "apple_type":   raw[3]  if len(raw) > 3  else None,
+            "duration_min": to_float(raw[4]) if len(raw) > 4 else 0.0,
+            "avg_hr":       to_float(raw[5]) if len(raw) > 5 else 0.0,
+            "max_hr":       to_int_or_none(raw[6]) if len(raw) > 6 else None,
+            "min_hr":       to_int_or_none(raw[7]) if len(raw) > 7 else None,
+            "active_cal":   to_float(raw[8]) if len(raw) > 8 else 0.0,
+            "distance_km":  to_float(raw[9]) if len(raw) > 9 else 0.0,
+            "source":       raw[10] if len(raw) > 10 else None,
+            "notes":        (str(raw[11]).strip() if len(raw) > 11 and raw[11] else None),
+        })
+    out.sort(key=lambda e: (e["date"], e["start"] or ""))
+    return out
+
+
+def _values_in_window(entries: list[dict], key: str, today_d: date, days: int) -> list[float]:
+    cutoff = today_d - timedelta(days=days)
+    out = []
+    for e in entries:
+        v = e.get(key)
+        if v is None:
+            continue
+        try:
+            d = datetime.strptime(e["date"], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d < cutoff:
+            continue
+        out.append(float(v))
+    return out
+
+
+def _mean_or_none(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 2)
+
+
+def metric_trend_per_4w(entries: list[dict], key: str) -> float | None:
+    """OLS slope of ``key`` over time, scaled to a 4-week window.
+
+    Returns None unless there are ≥4 non-null entries spanning ≥21 days.
+    Used for HRV / RHR / VO2max / sleep trends. Negative is improving for
+    RHR (lower resting HR = better cardio fitness); positive is improving
+    for HRV and VO2max.
+    """
+    pts: list[tuple[date, float]] = []
+    for e in entries:
+        v = e.get(key)
+        if v is None:
+            continue
+        try:
+            d = datetime.strptime(e["date"], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        pts.append((d, float(v)))
+    if len(pts) < 4:
+        return None
+    pts.sort(key=lambda p: p[0])
+    span_days = (pts[-1][0] - pts[0][0]).days
+    if span_days < 21:
+        return None
+    base = pts[0][0]
+    xs = [(p[0] - base).days for p in pts]
+    ys = [p[1] for p in pts]
+    n = len(xs)
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    num = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+    den = sum((xs[i] - mx) ** 2 for i in range(n))
+    if den <= 0:
+        return None
+    return round((num / den) * 28.0, 2)
+
+
+def latest_metric(entries: list[dict], key: str) -> dict | None:
+    """Most recent (date, value) pair for ``key``, or None if absent."""
+    for e in reversed(entries):
+        v = e.get(key)
+        if v is not None:
+            return {"date": e["date"], "value": round(float(v), 2)}
+    return None
+
+
+def baseline_60d(entries: list[dict], key: str, today_d: date) -> float | None:
+    """Mean of ``key`` over the last 60 days. Used as anomaly baseline."""
+    return _mean_or_none(_values_in_window(entries, key, today_d, 60))
+
+
+def workout_sessions_in_window(sessions: list[dict], today_d: date, days: int) -> list[dict]:
+    cutoff = today_d - timedelta(days=days)
+    out = []
+    for s in sessions:
+        try:
+            d = datetime.strptime(s["date"], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d < cutoff:
+            continue
+        # Filter out incidental walks — those aren't training.
+        if (s.get("notes") or "").lower().startswith("incidental"):
+            continue
+        out.append({
+            "date":         s["date"],
+            "type":         s.get("apple_type"),
+            "duration":     s.get("duration_min"),
+            "avg_hr":       s.get("avg_hr"),
+            "max_hr":       s.get("max_hr"),
+            "cal":          s.get("active_cal"),
+        })
+    return out
+
+
+def strength_session_avg_hr_trend(
+    sessions: list[dict],
+    strength_dates: set[str],
+) -> float | None:
+    """Slope per 4 weeks of avg HR over the last 8 strength sessions.
+
+    Matches Apple workouts to logged strength sessions by date. A rising
+    avg HR on a stable load is a fatigue signal; the planning rule uses
+    this to hold load when HR is creeping up.
+    """
+    matched: list[tuple[date, float]] = []
+    for s in sessions:
+        if s.get("date") not in strength_dates:
+            continue
+        avg = s.get("avg_hr")
+        if avg in (None, 0):
+            continue
+        try:
+            d = datetime.strptime(s["date"], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        matched.append((d, float(avg)))
+    if len(matched) < 4:
+        return None
+    matched.sort(key=lambda p: p[0])
+    matched = matched[-8:]
+    span_days = (matched[-1][0] - matched[0][0]).days
+    if span_days < 21:
+        return None
+    base = matched[0][0]
+    xs = [(p[0] - base).days for p in matched]
+    ys = [p[1] for p in matched]
+    n = len(xs)
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    num = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+    den = sum((xs[i] - mx) ** 2 for i in range(n))
+    if den <= 0:
+        return None
+    return round((num / den) * 28.0, 2)
+
+
 # ---------- exercises database ----------
 _BULLET_RE = re.compile(
     r"^\s*-\s+"
@@ -609,6 +866,13 @@ def weekly_volume_per_muscle(
     }
 
 
+# History length cap for ``estimated_1rm[exercise].e1rm_history``. The slope
+# field already summarises the trajectory; the LLM rarely needs more than the
+# top of the list to spot-check confidence and grain. Cutting from 6 → 3
+# entries removes ~50% of the per-exercise payload.
+E1RM_HISTORY_LIMIT = 3
+
+
 def estimated_1rm(rows: list[dict], deload_dates: list[str] | None = None) -> dict:
     """Epley 1RM projection per exercise, with trajectory and confidence.
 
@@ -663,21 +927,28 @@ def estimated_1rm(rows: list[dict], deload_dates: list[str] | None = None) -> di
         prev = per_date[dates_desc[1]]["e1rm"] if len(dates_desc) >= 2 else None
         best = max(d["e1rm"] for d in per_date.values())
 
-        history = [
+        # Slope is computed over the last 6 sessions for stability, even
+        # though the emitted history is capped at E1RM_HISTORY_LIMIT.
+        slope_dates = dates_desc[:6]
+        history_full = [
             {
                 "date":         d,
                 "e1rm_kg":      round(per_date[d]["e1rm"], 1),
                 "top_set_reps": per_date[d]["reps"],
                 "top_set_kg":   per_date[d]["kg"],
             }
-            for d in dates_desc[:6]
+            for d in slope_dates
         ]
+        history = history_full[:E1RM_HISTORY_LIMIT]
 
-        # OLS slope (kg per 28 days) over the last 6 sessions.
+        # OLS slope (kg per 28 days) over the last 6 sessions. Use
+        # ``history_full``, not the emitted ``history`` — the trim is
+        # cosmetic for the JSON output, but the trend should still see all
+        # six sessions to stay stable.
         slope = None
-        if len(history) >= 3:
+        if len(history_full) >= 3:
             pts: list[tuple[date, float]] = []
-            for h in history:
+            for h in history_full:
                 try:
                     pts.append((datetime.strptime(h["date"], "%Y-%m-%d").date(), h["e1rm_kg"]))
                 except ValueError:
@@ -697,8 +968,9 @@ def estimated_1rm(rows: list[dict], deload_dates: list[str] | None = None) -> di
 
         # Confidence from rep ranges of the last 3 sessions' top sets.
         # Epley is calibrated best for low-rep sets; 12+ rep top sets
-        # give a noisy projection.
-        recent_reps = [h["top_set_reps"] for h in history[:3]]
+        # give a noisy projection. Pulled from the un-capped history so
+        # confidence is consistent regardless of the emitted limit.
+        recent_reps = [h["top_set_reps"] for h in history_full[:3]]
         if len(recent_reps) < 2:
             confidence = "low"
         elif any(r >= 13 for r in recent_reps):
@@ -728,13 +1000,18 @@ def estimated_1rm(rows: list[dict], deload_dates: list[str] | None = None) -> di
             else:
                 break
 
+        # Drop e1rm_history entirely when the signal is noise: low confidence
+        # AND no slope (fewer than 3 sessions). The summary fields already
+        # convey the state; the history is just pad in this case.
+        emit_history = not (confidence == "low" and slope is None)
+
         out[canonical_name[key]] = {
             "current_e1rm_kg":  round(current, 1),
             "prev_e1rm_kg":     round(prev, 1) if prev is not None else None,
             "best_e1rm_kg":     round(best, 1),
             "last_date":        dates_desc[0],
             "delta_vs_prev_kg": (round(current - prev, 1) if prev is not None else None),
-            "e1rm_history":     history,
+            "e1rm_history":     history if emit_history else None,
             "slope_kg_per_4w":  slope,
             "confidence":       confidence,
             "stalled_sessions": stalled,
@@ -789,8 +1066,17 @@ def stale_exercises(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("tracker", type=Path)
-    ap.add_argument("--months", type=int, default=3, help="How many months back to include in rows")
+    ap.add_argument("--months", type=int, default=3,
+                    help="How many months back to load from monthly sheets. The data is used internally for "
+                         "all roll-ups regardless of --include-rows.")
     ap.add_argument("--today", default=None, help="Override today's date (YYYY-MM-DD) for testing")
+    ap.add_argument("--include-rows", action="store_true",
+                    help="Include the flat `rows` array (~63%% of payload) in the JSON. Off by default — the "
+                         "coach already exposes pre-aggregated `progression_summary`, `session_totals`, "
+                         "`weekly_volume_per_muscle`, and `estimated_1rm`. Pass this only for debug deep-dives.")
+    ap.add_argument("--pretty", action="store_true",
+                    help="Pretty-print the JSON (indent=2). Off by default — compact form saves ~20%% of "
+                         "tokens for the LLM consumer. Use for human inspection.")
     args = ap.parse_args()
 
     if not args.tracker.exists():
@@ -805,6 +1091,10 @@ def main() -> int:
     rows, session_totals = extract_rows(wb, args.months, today_d)
     deloads = find_deloads(wb)
 
+    profile = read_profile(wb)
+    data_source = profile.get("source") or DEFAULT_DATA_SOURCE
+    capabilities = SOURCE_CAPABILITIES.get(data_source, SOURCE_CAPABILITIES[DEFAULT_DATA_SOURCE])
+
     last_session = max((r["date"] for r in rows), default=None)
     days_since = None
     if last_session:
@@ -815,6 +1105,28 @@ def main() -> int:
     if deloads:
         d = datetime.strptime(deloads[-1], "%Y-%m-%d").date()
         weeks_since_deload = round((today_d - d).days / 7.0, 1)
+
+    health_all = read_health_metrics(wb)
+    # Per-day rows go into health_metrics_recent. ``bodyweight_kg`` is dropped
+    # because it duplicates the dedicated ``bodyweight_recent`` series — the
+    # coach reads daily metrics for HRV / VO2max / sleep / wrist temp, not
+    # weight. Keeping it here costs ~600 bytes for no signal.
+    health_recent = [
+        {k: v for k, v in entry.items() if k != "bodyweight_kg"}
+        for entry in health_all[-30:]
+    ]
+
+    workout_sessions_all = read_workout_sessions(wb)
+    sessions_28d = workout_sessions_in_window(workout_sessions_all, today_d, 28)
+
+    # Strength session dates: any logged date with at least one working set
+    # carrying weight × reps. Used to match Apple workouts back to training.
+    strength_dates: set[str] = set()
+    for r in rows:
+        if not _is_working_set(r):
+            continue
+        if (r.get("kg") or 0) > 0 and (r.get("reps") or 0) > 0:
+            strength_dates.add(r["date"])
 
     bw_all = read_bodyweight(wb)
     bw_recent = bw_all[-12:]
@@ -844,6 +1156,9 @@ def main() -> int:
 
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
+        "data_source": data_source,
+        "capabilities": capabilities,
+        "auto_cardio_enabled": bool(profile.get("auto_cardio")),
         "last_session_date": last_session,
         "days_since_last_session": days_since,
         "deloads": deloads,
@@ -858,9 +1173,36 @@ def main() -> int:
         "estimated_1rm": e1rm,
         "stale_exercises": stale,
         "unknown_exercises": sorted(unknown_set),
-        "rows": rows,
+        # ---- Apple Health: recovery + cardio outcomes -------------------
+        "health_metrics_recent": health_recent,
+        "vo2max_latest": latest_metric(health_all, "vo2max"),
+        "vo2max_trend_per_4w": metric_trend_per_4w(health_all, "vo2max"),
+        "resting_hr_recent_avg": _mean_or_none(_values_in_window(health_all, "resting_hr", today_d, 7)),
+        "resting_hr_trend_per_4w": metric_trend_per_4w(health_all, "resting_hr"),
+        "hrv_recent_avg": _mean_or_none(_values_in_window(health_all, "hrv_sdnn", today_d, 7)),
+        "hrv_trend_per_4w": metric_trend_per_4w(health_all, "hrv_sdnn"),
+        "hrv_baseline_60d": baseline_60d(health_all, "hrv_sdnn", today_d),
+        "sleep_avg_last_7d": _mean_or_none(_values_in_window(health_all, "sleep_total_h", today_d, 7)),
+        "sleep_avg_last_28d": _mean_or_none(_values_in_window(health_all, "sleep_total_h", today_d, 28)),
+        "wrist_temp_baseline_60d": baseline_60d(health_all, "wrist_temp_c", today_d),
+        "wrist_temp_recent_avg": _mean_or_none(_values_in_window(health_all, "wrist_temp_c", today_d, 3)),
+        "hr_recovery_recent_avg": _mean_or_none(
+            [v for v in (e.get("hr_recovery_1min") for e in health_all[-5:]) if v is not None]
+        ),
+        "workout_sessions_last_28d": sessions_28d,
+        "strength_session_avg_hr_trend": strength_session_avg_hr_trend(workout_sessions_all, strength_dates),
+        # ``rows`` is the flat per-set list. Off by default — see --include-rows.
+        # _compact will drop the key entirely when value is None.
+        "rows": rows if args.include_rows else None,
     }
-    json.dump(_compact(out), sys.stdout, ensure_ascii=False, indent=2)
+    if args.pretty:
+        json.dump(_compact(out), sys.stdout, ensure_ascii=False, indent=2)
+    else:
+        # Compact form: no whitespace between separators. Saves ~20% of
+        # bytes vs indent=2 for an LLM consumer that doesn't render the
+        # whitespace anyway.
+        json.dump(_compact(out), sys.stdout, ensure_ascii=False,
+                  separators=(",", ":"))
     return 0
 
 

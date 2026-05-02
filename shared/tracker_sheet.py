@@ -55,13 +55,53 @@ no_border = Border()
 MONTHLY_HEADERS = [
     "SESSION", "Date", "#", "Exercise", "Set", "Reps", "kg", "Volume", "Notes",
     "Distance (km)", "Duration (min)", "Pace (min/km)", "Avg HR",
+    "Active Cal", "Total Cal", "Elevation (m)", "Elapsed",
 ]
+
+# Deload marker text — case-sensitive on write (canonical form), but
+# substring-matched case-insensitively on read so user-edited variants
+# ("deload workout", "DELOAD WORKOUT") still register. Lives on the
+# TOTAL row's Notes column for strength sessions.
+DELOAD_MARKER_TEXT = "Deload Workout"
+
+
+def _extract_deload_marker(notes) -> tuple[bool, str | None]:
+    """Inspect a Notes cell value and split out the Deload Workout marker.
+
+    Returns ``(deload_present, remaining_notes)``:
+    - ``deload_present``: True if ``DELOAD_MARKER_TEXT`` appears (case-insensitive).
+    - ``remaining_notes``: the input minus the marker token, with empty
+      separator detritus (``"; "``, ``" |"``) tidied. ``None`` if nothing
+      meaningful remains.
+
+    Used during the strength-session-metadata-to-TOTAL migration: the
+    styler hoists the deload flag to the TOTAL row's Notes while
+    preserving any user-written warmup comment on the original row.
+    """
+    if notes in (None, ""):
+        return False, None
+    s = str(notes)
+    lower = s.lower()
+    marker = DELOAD_MARKER_TEXT.lower()
+    if marker not in lower:
+        return False, s.strip() or None
+    # Strip every occurrence + the separator that joined it to user text.
+    import re
+    pattern = re.compile(re.escape(DELOAD_MARKER_TEXT), re.IGNORECASE)
+    cleaned = pattern.sub("", s)
+    # Tidy joining separators around the now-removed token.
+    cleaned = re.sub(r"\s*;\s*;\s*", "; ", cleaned)
+    cleaned = re.sub(r"^\s*[;|,]\s*", "", cleaned)
+    cleaned = re.sub(r"\s*[;|,]\s*$", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return True, cleaned or None
 MONTHLY_WIDTHS = {
     "A": 8,  "B": 12, "C": 5,  "D": 28, "E": 5,  "F": 6, "G": 6,
     "H": 9,  "I": 24, "J": 13, "K": 14, "L": 13, "M": 9,
+    "N": 11, "O": 11, "P": 13, "Q": 11,
 }
 MONTHLY_LEFT_COLS = {"I"}
-MONTHLY_COLS = 13
+MONTHLY_COLS = 17
 TOTAL_LABEL = "TOTAL"
 
 # Exercises Database: 5 columns (Exercise | Type | Primary Muscle | Equipment | Variations).
@@ -331,6 +371,10 @@ def style_monthly_sheet(ws):
         ws.unmerge_cells(str(mr))
 
     # ---- Pass 1: read all data rows into memory, grouped by contiguous date.
+    # TOTAL rows are not appended to the session's data rows (they get
+    # rebuilt) but their metadata + Notes are captured into the session's
+    # ``total_meta`` dict — this is the canonical source for session-level
+    # metadata after the move from warmup-row.
     last_r, _ = find_last_data_cell(ws)
     sessions: list[dict] = []
     current: dict | None = None
@@ -338,8 +382,21 @@ def style_monthly_sheet(ws):
         date_val = date_str(ws.cell(row=r, column=2).value)
         ex_val = ws.cell(row=r, column=4).value
 
-        # Drop pre-existing TOTAL rows; we'll rebuild them.
+        # TOTAL row: harvest session-level metadata for the most recent
+        # session before discarding the row. The TOTAL row's date may be
+        # blank on legacy data; fall back to ``current["date"]``.
         if ex_val == TOTAL_LABEL:
+            if current is not None:
+                current["total_meta"] = {
+                    "date":         date_val or current.get("date"),
+                    "notes":        ws.cell(row=r, column=9).value,
+                    "duration":     ws.cell(row=r, column=11).value,
+                    "avg_hr":       ws.cell(row=r, column=13).value,
+                    "active_cal":   ws.cell(row=r, column=14).value,
+                    "total_cal":    ws.cell(row=r, column=15).value,
+                    "elevation_m": ws.cell(row=r, column=16).value,
+                    "elapsed":      ws.cell(row=r, column=17).value,
+                }
             continue
         # Drop fully-empty rows.
         if date_val in (None, "") and ex_val in (None, ""):
@@ -357,10 +414,14 @@ def style_monthly_sheet(ws):
             "duration":  ws.cell(row=r, column=11).value,
             "pace":      ws.cell(row=r, column=12).value,
             "avg_hr":    ws.cell(row=r, column=13).value,
+            "active_cal":  ws.cell(row=r, column=14).value,
+            "total_cal":   ws.cell(row=r, column=15).value,
+            "elevation_m": ws.cell(row=r, column=16).value,
+            "elapsed":     ws.cell(row=r, column=17).value,
         }
 
         if current is None or date_val != current["date"]:
-            current = {"date": date_val, "rows": []}
+            current = {"date": date_val, "rows": [], "total_meta": {}}
             sessions.append(current)
         current["rows"].append(row_data)
 
@@ -373,7 +434,13 @@ def style_monthly_sheet(ws):
     merged: dict = {}
     for sess in sessions:
         date = sess["date"]
-        merged.setdefault(date, {"date": date, "rows": []})["rows"].extend(sess["rows"])
+        slot = merged.setdefault(date, {"date": date, "rows": [], "total_meta": {}})
+        slot["rows"].extend(sess["rows"])
+        # If two same-date blocks each had a TOTAL row, prefer non-None
+        # values from either (same merge semantics as the row-level data).
+        for k, v in (sess.get("total_meta") or {}).items():
+            if v not in (None, "") and slot["total_meta"].get(k) in (None, ""):
+                slot["total_meta"][k] = v
     sessions = sorted(
         merged.values(),
         key=lambda s: (s["date"] is None, s["date"] or ""),
@@ -397,7 +464,73 @@ def style_monthly_sheet(ws):
             _to_num(r["kg"]) * _to_num(r["reps"]) > 0 for r in sess["rows"]
         )
 
-        for rd in sess["rows"]:
+        # Per-row classification:
+        # - **strength**: kg * reps > 0 (user lifted weight)
+        # - **cardio**: distance > 0 (Run / Cycle / Hike / Swim — has GPS)
+        # - **other**: no kg*reps, no distance (warmup, HIIT, yoga,
+        #   bodyweight squat, etc.).
+        #
+        # Cols 11 (Duration), 13 (Avg HR), 14-17 placement:
+        # - **Strength session**: session metadata lives on the TOTAL row
+        #   only. All non-cardio rows (warmup + working sets) have those
+        #   cells blank. Cardio rows mixed into a strength day keep their
+        #   own per-row metadata (each Apple-recorded ride is independent).
+        # - **Pure cardio session** (no strength rows): no TOTAL row;
+        #   every row keeps its own per-row metadata.
+        def _row_kind(rd):
+            kg_v = _to_num(rd.get("kg"))
+            reps_v = _to_num(rd.get("reps"))
+            if kg_v * reps_v > 0:
+                return "strength"
+            dist_v = _to_num(rd.get("distance"))
+            if dist_v > 0:
+                return "cardio"
+            return "other"
+
+        kinds = [_row_kind(rd) for rd in sess["rows"]]
+
+        # Hoist candidates for TOTAL row metadata. Priority order:
+        #   1. The TOTAL row's existing values (canonical post-migration).
+        #   2. Any non-cardio data row's value (legacy migration path,
+        #      taken from the warmup row before this change).
+        total_meta_in = sess.get("total_meta") or {}
+        hoist_duration = total_meta_in.get("duration")
+        hoist_avg_hr = total_meta_in.get("avg_hr")
+        hoist_active = total_meta_in.get("active_cal")
+        hoist_total = total_meta_in.get("total_cal")
+        hoist_elev = total_meta_in.get("elevation_m")
+        hoist_elapsed = total_meta_in.get("elapsed")
+        # Hoisted Notes from TOTAL: split off the Deload Workout marker
+        # so it survives independently of any user-added text on TOTAL.
+        total_notes_in = total_meta_in.get("notes")
+        deload_present, total_notes_remainder = _extract_deload_marker(total_notes_in)
+
+        if is_strength:
+            for i, rd in enumerate(sess["rows"]):
+                if kinds[i] == "cardio":
+                    continue
+                if hoist_duration in (None, "") and rd.get("duration") not in (None, ""):
+                    hoist_duration = rd["duration"]
+                if hoist_avg_hr in (None, "") and rd.get("avg_hr") not in (None, ""):
+                    hoist_avg_hr = _numeric_cell(rd["avg_hr"])
+                if hoist_active in (None, "") and rd.get("active_cal") not in (None, ""):
+                    hoist_active = _numeric_cell(rd["active_cal"])
+                if hoist_total in (None, "") and rd.get("total_cal") not in (None, ""):
+                    hoist_total = _numeric_cell(rd["total_cal"])
+                if hoist_elev in (None, "") and rd.get("elevation_m") not in (None, ""):
+                    hoist_elev = _numeric_cell(rd["elevation_m"])
+                if hoist_elapsed in (None, "") and rd.get("elapsed") not in (None, ""):
+                    hoist_elapsed = rd["elapsed"]
+                # Inspect this row's Notes for any deload marker —
+                # legacy /log convention put it on the warmup row. Strip
+                # it out so only the user's per-exercise text remains;
+                # raise the deload flag for the TOTAL row.
+                row_deload, row_notes_remainder = _extract_deload_marker(rd.get("notes"))
+                if row_deload:
+                    deload_present = True
+                    rd["notes"] = row_notes_remainder
+
+        for idx, rd in enumerate(sess["rows"]):
             ws.cell(row=write_row, column=1, value=session_num)
             ws.cell(row=write_row, column=2, value=rd["date"])
             ws.cell(row=write_row, column=3, value=_numeric_cell(rd["num"]))
@@ -408,16 +541,59 @@ def style_monthly_sheet(ws):
             ws.cell(row=write_row, column=8, value=f"=F{write_row}*G{write_row}")
             ws.cell(row=write_row, column=9, value=rd["notes"])
             ws.cell(row=write_row, column=10, value=_numeric_cell(rd["distance"]))
-            ws.cell(row=write_row, column=11, value=rd["duration"])
             ws.cell(row=write_row, column=12, value=rd["pace"])
-            ws.cell(row=write_row, column=13, value=_numeric_cell(rd["avg_hr"]))
+            if is_strength and kinds[idx] == "cardio":
+                # Cardio row inside a mixed-session day — keep its own
+                # per-row Duration / Avg HR / cols 14-17.
+                ws.cell(row=write_row, column=11, value=rd["duration"])
+                ws.cell(row=write_row, column=13, value=_numeric_cell(rd["avg_hr"]))
+                ws.cell(row=write_row, column=14,
+                        value=_numeric_cell(rd.get("active_cal")))
+                ws.cell(row=write_row, column=15,
+                        value=_numeric_cell(rd.get("total_cal")))
+                ws.cell(row=write_row, column=16,
+                        value=_numeric_cell(rd.get("elevation_m")))
+                ws.cell(row=write_row, column=17, value=rd.get("elapsed"))
+            elif is_strength:
+                # Strength/other row — session metadata moved to TOTAL,
+                # cells stay blank.
+                ws.cell(row=write_row, column=11).value = None
+                ws.cell(row=write_row, column=13).value = None
+                ws.cell(row=write_row, column=14).value = None
+                ws.cell(row=write_row, column=15).value = None
+                ws.cell(row=write_row, column=16).value = None
+                ws.cell(row=write_row, column=17).value = None
+            else:
+                # Pure cardio session — each row keeps its own metadata.
+                ws.cell(row=write_row, column=11, value=rd["duration"])
+                ws.cell(row=write_row, column=13, value=_numeric_cell(rd["avg_hr"]))
+                ws.cell(row=write_row, column=14,
+                        value=_numeric_cell(rd.get("active_cal")))
+                ws.cell(row=write_row, column=15,
+                        value=_numeric_cell(rd.get("total_cal")))
+                ws.cell(row=write_row, column=16,
+                        value=_numeric_cell(rd.get("elevation_m")))
+                ws.cell(row=write_row, column=17, value=rd.get("elapsed"))
             write_row += 1
         last_set_row = write_row - 1
 
         if is_strength:
+            # TOTAL row: Date, Volume formula, all session-level metadata,
+            # and the Deload Workout marker on Notes when present. Merge
+            # the SESSION column (col 1) through this row alongside the
+            # data rows below.
             ws.cell(row=write_row, column=1, value=session_num)
+            ws.cell(row=write_row, column=2, value=sess["date"])
             ws.cell(row=write_row, column=4, value=TOTAL_LABEL)
             ws.cell(row=write_row, column=8, value=f"=SUM(H{first_row}:H{last_set_row})")
+            ws.cell(row=write_row, column=9,
+                    value=DELOAD_MARKER_TEXT if deload_present else None)
+            ws.cell(row=write_row, column=11, value=hoist_duration)
+            ws.cell(row=write_row, column=13, value=hoist_avg_hr)
+            ws.cell(row=write_row, column=14, value=hoist_active)
+            ws.cell(row=write_row, column=15, value=hoist_total)
+            ws.cell(row=write_row, column=16, value=hoist_elev)
+            ws.cell(row=write_row, column=17, value=hoist_elapsed)
             merge_last = write_row
             write_row += 1
         else:
@@ -843,7 +1019,7 @@ PROFILE_LEFT_COLS = {"B"}
 # appear on disk. Adding a new key here + giving it a default in
 # ``ensure_profile_sheet`` is the whole change required to ship a new
 # capability flag.
-PROFILE_KEYS = ("source", "auto_cardio", "auto_cardio_since", "notes")
+PROFILE_KEYS = ("source", "auto_cardio", "auto_cardio_since")
 
 # Default values applied when ``ensure_profile_sheet`` creates the sheet
 # from scratch. ``source`` left None so the caller can inject ``xml`` or
@@ -854,7 +1030,6 @@ PROFILE_DEFAULTS = {
     "source":            None,
     "auto_cardio":       False,
     "auto_cardio_since": None,
-    "notes":             None,
 }
 
 
@@ -920,24 +1095,44 @@ def read_profile(wb) -> dict:
             # default).
             if len(s) == 10 and s[4] == "-" and s[7] == "-":
                 out["auto_cardio_since"] = s
-        elif k == "notes":
-            out["notes"] = str(val).strip() if val not in (None, "") else None
     return out
 
 
 def style_profile_sheet(ws):
     """Apply canonical styling to the Profile sheet. Idempotent.
 
-    Two-column key/value layout. Header row, then one row per known key.
-    Re-running this function reasserts header cells, widths, and freeze
-    pane without disturbing the values.
+    Two-column key/value layout. Header row, then one row per known key
+    in ``PROFILE_KEYS`` order. Re-running rebuilds the sheet from the
+    in-memory key/value snapshot — drops legacy keys (e.g. ``notes``)
+    that were removed from the schema, and trims any stale rows or
+    columns left behind.
     """
     for merged_range in list(ws.merged_cells.ranges):
         ws.unmerge_cells(str(merged_range))
 
+    # Snapshot existing key/value pairs so a re-style preserves user
+    # edits while dropping deprecated keys / blank trailing rows.
+    existing: dict[str, object] = {}
+    for r in range(2, ws.max_row + 1):
+        k = ws.cell(row=r, column=1).value
+        v = ws.cell(row=r, column=2).value
+        if k in (None, ""):
+            continue
+        key_norm = str(k).strip().lower()
+        if key_norm in PROFILE_KEYS:
+            existing[key_norm] = v
+
+    # Trim columns beyond 2.
     if ws.max_column > 2:
         ws.delete_cols(3, ws.max_column - 2)
 
+    # Trim rows beyond the canonical layout (1 header + len(PROFILE_KEYS)).
+    target_rows = 1 + len(PROFILE_KEYS)
+    if ws.max_row > target_rows:
+        ws.delete_rows(target_rows + 1, ws.max_row - target_rows)
+
+    # Rewrite header and key column from canonical PROFILE_KEYS so
+    # legacy keys disappear on next re-style.
     for c, label in enumerate(PROFILE_HEADERS, 1):
         cell = ws.cell(row=1, column=c, value=label)
         cell.font = font_header
@@ -945,8 +1140,20 @@ def style_profile_sheet(ws):
         cell.alignment = align_center
         cell.border = no_border
 
-    last_data_row, _ = find_last_data_cell(ws)
-    for r in range(2, last_data_row + 1):
+    for r, key in enumerate(PROFILE_KEYS, start=2):
+        ws.cell(row=r, column=1).value = key
+        # Preserve existing value or re-apply default. Booleans stay as
+        # "true"/"false" strings.
+        if key in existing:
+            ws.cell(row=r, column=2).value = existing[key]
+        else:
+            default = PROFILE_DEFAULTS.get(key)
+            if isinstance(default, bool):
+                ws.cell(row=r, column=2).value = "true" if default else "false"
+            else:
+                ws.cell(row=r, column=2).value = default
+
+    for r in range(2, target_rows + 1):
         for c in range(1, 3):
             cell = ws.cell(row=r, column=c)
             cell.font = font_data
@@ -1295,8 +1502,9 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
             sheet_created = True
 
         # Snapshot existing rows for dedupe lookup. Index by
-        # (date, lowercased exercise) → list of (duration_min, is_auto)
-        # so the manual-wins rule has every match available.
+        # (date, lowercased exercise) → list of (row_index, duration_min,
+        # is_auto) so the manual-wins rule and the sparse-merge metadata
+        # update both have access to the source row.
         existing_index: dict[tuple, list[tuple]] = {}
         last_r, _ = find_last_data_cell(ws)
         for r in range(2, last_r + 1):
@@ -1309,12 +1517,20 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
                 continue
             dur_f = _parse_duration_minutes(ws.cell(row=r, column=11).value)
             notes_v = ws.cell(row=r, column=9).value
-            is_auto = AUTO_IMPORT_NOTE in str(notes_v or "").lower()
+            # Case-insensitive substring check — both sides lowered.
+            is_auto = AUTO_IMPORT_NOTE.lower() in str(notes_v or "").lower()
             key = (date_v, ex_str.lower())
-            existing_index.setdefault(key, []).append((dur_f, is_auto))
+            existing_index.setdefault(key, []).append((r, dur_f, is_auto))
 
         appended = 0
         skipped_dup = 0
+        refreshed = 0
+        # Track which existing rows have already been claimed by an input
+        # workout so two near-duration Apple workouts can't both match the
+        # same tracker row. Without this, fuzzy ±1-min matching causes
+        # oscillation when Apple has more workouts than the tracker rows
+        # for a date (e.g. 5 cycling segments vs 4 rows).
+        claimed_rows: set = set()
 
         # Determine where to start writing — append after the last data row
         # the styler will sort+merge afterwards anyway. But if the sheet
@@ -1347,19 +1563,61 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
             #     idempotency path. Re-imports of the same export must
             #     produce zero appends.
             matches = existing_index.get((d, ex_lower), [])
-            has_manual_match = any(not is_auto for _dur, is_auto in matches)
-            has_auto_dup = False
+            has_manual_match = any(
+                (not is_auto) and (er not in claimed_rows)
+                for er, _dur, is_auto in matches
+            )
+            matched_auto_row = None
             if not has_manual_match:
-                for existing_dur, is_auto in matches:
-                    if not is_auto:
+                # Pick the unclaimed auto row with the smallest duration
+                # difference within tolerance — stable across re-runs and
+                # prevents two near-duration Apple workouts from claiming
+                # the same row.
+                best = None
+                best_diff = None
+                for er, existing_dur, is_auto in matches:
+                    if not is_auto or er in claimed_rows:
                         continue
                     if existing_dur is None or dur_f is None:
-                        has_auto_dup = True
-                        break
-                    if abs(existing_dur - dur_f) <= CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN:
-                        has_auto_dup = True
-                        break
-            if has_manual_match or has_auto_dup:
+                        diff = 0.0
+                    else:
+                        diff = abs(existing_dur - dur_f)
+                        if diff > CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN:
+                            continue
+                    if best_diff is None or diff < best_diff:
+                        best, best_diff = er, diff
+                matched_auto_row = best
+            if matched_auto_row is not None:
+                claimed_rows.add(matched_auto_row)
+                # Existing auto row — refresh stale cols 14-17 in place.
+                # Historical importer bug copied the same Notes string to
+                # every cardio row of a date; this sparse-merge corrects
+                # those values from per-workout Apple data. Only updates
+                # cells that are empty OR diverge from incoming by >=5%
+                # (the manual-wins / drift threshold from Q6).
+                incoming_meta = {
+                    14: int(round(r.get("active_cal"))) if isinstance(r.get("active_cal"), (int, float)) and r.get("active_cal") else None,
+                    15: int(round(r.get("total_cal"))) if isinstance(r.get("total_cal"), (int, float)) and r.get("total_cal") else None,
+                    16: int(round(r.get("elevation_m"))) if isinstance(r.get("elevation_m"), (int, float)) and r.get("elevation_m") else None,
+                    17: _format_elapsed_hms(r.get("elapsed_min")),
+                }
+                row_changed = False
+                for col, new_val in incoming_meta.items():
+                    if new_val in (None, ""):
+                        continue
+                    existing = ws.cell(row=matched_auto_row, column=col).value
+                    if existing in (None, ""):
+                        ws.cell(row=matched_auto_row, column=col).value = new_val
+                        row_changed = True
+                    elif _strength_metadata_drifts(existing, new_val):
+                        ws.cell(row=matched_auto_row, column=col).value = new_val
+                        row_changed = True
+                if row_changed:
+                    refreshed += 1
+                else:
+                    skipped_dup += 1
+                continue
+            if has_manual_match:
                 skipped_dup += 1
                 continue
 
@@ -1387,35 +1645,42 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
             ws.cell(row=write_row, column=6, value=None)        # Reps (cardio: blank)
             ws.cell(row=write_row, column=7, value=None)        # kg
             ws.cell(row=write_row, column=8, value=f"=F{write_row}*G{write_row}")
-            note = build_auto_cardio_note(
-                active_cal=r.get("active_cal"),
-                total_cal=r.get("total_cal"),
-                elevation_m=r.get("elevation_m"),
-                duration_min=dur_f,
-                elapsed_min=r.get("elapsed_min"),
-            )
-            ws.cell(row=write_row, column=9, value=note)
+            ws.cell(row=write_row, column=9, value=AUTO_IMPORT_NOTE)
             ws.cell(row=write_row, column=10, value=_numeric_cell(distance))
             ws.cell(row=write_row, column=11, value=_format_duration_mmss(dur_f))
             ws.cell(row=write_row, column=12, value=pace)
             ws.cell(row=write_row, column=13, value=_numeric_cell(avg_hr))
+            # Apple-watch session metadata in cols 14-17 (single-row cardio
+            # session — same row carries the metadata and the workout data).
+            ac = r.get("active_cal")
+            tc = r.get("total_cal")
+            el = r.get("elevation_m")
+            ws.cell(row=write_row, column=14,
+                    value=int(round(ac)) if isinstance(ac, (int, float)) and ac else None)
+            ws.cell(row=write_row, column=15,
+                    value=int(round(tc)) if isinstance(tc, (int, float)) and tc else None)
+            ws.cell(row=write_row, column=16,
+                    value=int(round(el)) if isinstance(el, (int, float)) and el else None)
+            ws.cell(row=write_row, column=17,
+                    value=_format_elapsed_hms(r.get("elapsed_min")))
 
             # Track the new row in the dedupe index too so subsequent input
             # rows don't double-add for the same date.
-            existing_index.setdefault((d, ex_lower), []).append((dur_f, True))
+            existing_index.setdefault((d, ex_lower), []).append((write_row, dur_f, True))
 
             write_row += 1
             appended += 1
 
-        if appended:
+        if appended or refreshed:
             style_monthly_sheet(ws)
 
         total_appended += appended
         total_skipped += skipped_dup
         tag = " (new sheet)" if sheet_created else ""
+        refreshed_tag = f", {refreshed} refreshed" if refreshed else ""
         summaries.append(
             f"{month_key}{tag}: {appended} cardio rows appended, "
-            f"{skipped_dup} skipped (already present)"
+            f"{skipped_dup} skipped (already present){refreshed_tag}"
         )
 
     # Re-canonicalize tab order so newly-created month sheets land in the
@@ -1427,6 +1692,175 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
         f"Auto-cardio total: {total_appended} appended, "
         f"{total_skipped} skipped across {len(by_month)} month(s)"
     )
+    return summaries
+
+
+# Threshold for the manual-wins / sparse-update rule on strength session
+# metadata cells. If an existing cell value differs from the incoming Apple
+# value by < 5%, treat them as the same (idempotency / Apple jitter). If
+# the difference is >= 5%, the existing value is treated as user-edited and
+# the importer skips with a warning rather than overwriting.
+STRENGTH_METADATA_DRIFT_THRESHOLD = 0.05
+
+
+def _strength_metadata_drifts(existing, incoming) -> bool:
+    """Return True if the two values disagree by >= 5% (manual-wins guard).
+
+    Both arguments are numeric (int / float) or Elapsed strings. Strings
+    are compared by re-parsing back to minutes via ``_parse_duration_minutes``
+    so ``"1:29:18"`` and ``"1:29:20"`` don't trip on the second-level noise.
+    None/blank existing → never drifts (fill it in). Equal values → no drift.
+    """
+    if existing in (None, ""):
+        return False
+    if incoming in (None, ""):
+        return False
+    if isinstance(existing, str) or isinstance(incoming, str):
+        e_min = _parse_duration_minutes(existing)
+        i_min = _parse_duration_minutes(incoming)
+        if e_min is None or i_min is None:
+            return str(existing).strip() != str(incoming).strip()
+        existing_f, incoming_f = e_min, i_min
+    else:
+        try:
+            existing_f = float(existing)
+            incoming_f = float(incoming)
+        except (TypeError, ValueError):
+            return existing != incoming
+    if existing_f == 0 and incoming_f == 0:
+        return False
+    denom = max(abs(existing_f), abs(incoming_f), 1e-9)
+    return abs(existing_f - incoming_f) / denom >= STRENGTH_METADATA_DRIFT_THRESHOLD
+
+
+def upsert_monthly_strength_session(wb, sessions: list[dict]) -> list[str]:
+    """Write Apple-watch session metadata onto the first row of each
+    matching strength session in the monthly sheets.
+
+    ``sessions`` is a list of dicts:
+
+      ``date`` (YYYY-MM-DD), ``active_cal``, ``total_cal``, ``elevation_m``
+      (usually None for indoor strength), ``elapsed_min`` (numeric minutes;
+      formatted to ``H:MM:SS`` or ``MM:SS`` on write), ``avg_hr`` (per-cluster
+      duration-weighted average heart rate; XML only — HL doesn't carry
+      per-workout HR).
+
+    Behavior per session:
+    - Locate the YYYY.MM sheet for the date. If missing, skip (the user
+      hasn't logged this strength session yet — Apple ahead of manual).
+    - Find the first non-TOTAL data row whose Date matches.
+    - For each of the 4 metadata cells, apply the manual-wins / drift rule:
+      * empty cell → fill with incoming value
+      * existing value within 5% of incoming → no-op (idempotency)
+      * existing value diverges >= 5% → skip that cell with a warning
+    - After touching any cell, re-style the sheet via ``style_monthly_sheet``
+      so the convention is enforced uniformly.
+
+    Returns a list of human-readable summary lines, including any
+    drift warnings, so the importer can surface them.
+    """
+    if not sessions:
+        return ["Strength sessions: 0 considered"]
+
+    summaries: list[str] = []
+    written = 0
+    skipped_no_match = 0
+    skipped_no_change = 0
+    drift_warnings: list[str] = []
+
+    touched_sheets: set = set()
+
+    for sess in sessions:
+        d = str(sess.get("date") or "")[:10]
+        if not d or len(d) != 10:
+            continue
+        month_key = f"{d[:4]}.{d[5:7]}"
+        if month_key not in wb.sheetnames:
+            skipped_no_match += 1
+            continue
+        ws = wb[month_key]
+
+        # Locate the TOTAL row for this date. The styler emits a TOTAL
+        # row for every strength session (any kg*reps>0 row); session
+        # metadata lives there. The TOTAL row's Date (col 2) was added
+        # in this migration; legacy rows may still have a blank Date,
+        # so fall back to the row directly above when the date matches.
+        target_row = None
+        last_r, _ = find_last_data_cell(ws)
+        date_seen_above = False
+        for r in range(2, last_r + 1):
+            row_date = date_str(ws.cell(row=r, column=2).value)
+            ex_val = ws.cell(row=r, column=4).value
+            ex_str = str(ex_val).strip() if ex_val else ""
+            if ex_str.upper() == TOTAL_LABEL:
+                if row_date == d or (row_date in (None, "") and date_seen_above):
+                    target_row = r
+                    break
+                date_seen_above = False
+                continue
+            if row_date == d:
+                date_seen_above = True
+            elif row_date not in (None, ""):
+                date_seen_above = False
+
+        if target_row is None:
+            # No TOTAL row for this date — either the user hasn't logged
+            # the strength session yet (Apple ahead of /log), or the
+            # session has no kg*reps>0 row (the styler skipped TOTAL).
+            skipped_no_match += 1
+            continue
+
+        ac = sess.get("active_cal")
+        tc = sess.get("total_cal")
+        el = sess.get("elevation_m")
+        em = sess.get("elapsed_min")
+        ah = sess.get("avg_hr")
+        dur = sess.get("duration_min")
+
+        incoming = {
+            11: _format_duration_mmss(dur),  # Duration (col K) — active workout time, MM:SS
+            13: round(float(ah), 1) if isinstance(ah, (int, float)) and ah else None,
+            14: int(round(ac)) if isinstance(ac, (int, float)) and ac else None,
+            15: int(round(tc)) if isinstance(tc, (int, float)) and tc else None,
+            16: int(round(el)) if isinstance(el, (int, float)) and el else None,
+            17: _format_elapsed_hms(em),
+        }
+
+        any_change = False
+        for col, new_val in incoming.items():
+            if new_val in (None, ""):
+                continue
+            existing = ws.cell(row=target_row, column=col).value
+            if existing in (None, ""):
+                ws.cell(row=target_row, column=col, value=new_val)
+                any_change = True
+            elif _strength_metadata_drifts(existing, new_val):
+                drift_warnings.append(
+                    f"  - {d} col {col}: kept manual value {existing!r} "
+                    f"(Apple reports {new_val!r}, differs >=5%)"
+                )
+            # else: within tolerance → no-op (idempotency)
+
+        if any_change:
+            written += 1
+            touched_sheets.add(month_key)
+        else:
+            skipped_no_change += 1
+
+    for sheet_name in sorted(touched_sheets):
+        style_monthly_sheet(wb[sheet_name])
+
+    summaries.append(
+        f"Strength sessions: {written} written, "
+        f"{skipped_no_change} no-op (already up to date), "
+        f"{skipped_no_match} skipped (no matching session row)"
+    )
+    if drift_warnings:
+        summaries.append(
+            f"Strength sessions: {len(drift_warnings)} manual-wins warnings:"
+        )
+        summaries.extend(drift_warnings)
+
     return summaries
 
 

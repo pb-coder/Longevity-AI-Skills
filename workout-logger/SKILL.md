@@ -134,7 +134,7 @@ To back-fill many historical weights at once, call `append_workout.py` with a pa
 - `/log deload 22.04`
 - `/log 22.04 (deload)`
 
-When set, put the exact string `Deload Workout` in the `notes` field of the **first row** of that session. Subsequent rows for that session are unchanged. If the user also wrote a parenthetical note on the first exercise, merge both: `"Deload Workout; warmup"`.
+When set, put the exact string `Deload Workout` in the `notes` field of any row of that session. The styler hoists the marker onto the session's `TOTAL` row Notes column alongside the other session-level metadata (Avg HR, Active Cal, Duration, etc.) — that's the canonical home. Don't merge it with per-exercise warmup comments; user notes (like "felt strong" on the warmup row) stay on their own row, and the deload marker rides on TOTAL. The warmup row's Notes stays free for the user.
 
 Multi-date `/log` messages: the `deload` keyword applies per session. The user must mark each date they want flagged.
 

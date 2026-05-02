@@ -119,6 +119,14 @@ def row_values(r: dict):
         r.get("duration_min"),  # MM:SS string — not arithmetic
         r.get("pace"),           # MM:SS string — not arithmetic
         _numeric_cell(r.get("avg_hr")),
+        # Cols 14-17: Apple-Watch session metadata. Manual /log payloads
+        # don't supply these — the importers fill them on the first row
+        # of the matching session via upsert_monthly_strength_session /
+        # upsert_monthly_cardio.
+        None,  # Active Cal
+        None,  # Total Cal
+        None,  # Elevation (m)
+        None,  # Elapsed
     ]
 
 

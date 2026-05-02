@@ -11,7 +11,7 @@
 - **kg**: 0 if no weight. `k` = `kg`. `lbs` or `lb` → divide by 2.205, round to nearest 0.5.
 - **Volume**: Reps × kg
 - **Reps**: 0 for carries, walks, holds, isometric positions. Put the duration in the `duration_min` field (accepts `MM:SS` or decimal minutes) so the coach can read it structurally. Put distance in `distance_km` when the exercise tracks distance (farmer walks, loaded carries). Use Notes only for qualitative detail like "per hand" or "beltless".
-- **Notes**: Only from parenthetical input like `(felt heavy)`. Never invent notes. Exception: `Deload Workout` on the first row of a session when the header line contains the `deload` keyword (see "Session-level flags" below).
+- **Notes**: Only from parenthetical input like `(felt heavy)`. Never invent notes. Exception: `Deload Workout` on any row of the session when the header line contains the `deload` keyword — the styler hoists it to the session's TOTAL row (see "Session-level flags" below).
 
 ## Multi-Set Separator
 
@@ -40,7 +40,7 @@ Never invent exercise names. Fuzzy match only picks from the canonical list.
 
 ## Session-level flags
 
-If the word `deload` appears anywhere on the `/log` header line (before the first exercise bullet), set the first row of that session's `notes` to `Deload Workout`. The coach reads this marker to drive mesocycle analysis — it's the one piece of Notes the coach actually parses.
+If the word `deload` appears anywhere on the `/log` header line (before the first exercise bullet), put `Deload Workout` in the `notes` field of any row of that session. The styler relocates the marker onto the session's `TOTAL` row Notes column (alongside Avg HR, Active Cal, Duration, etc.) — that's where the coach reads it from. Don't try to merge with per-exercise warmup notes; user comments stay on their row, the deload marker rides on TOTAL.
 
 ## Cardio
 

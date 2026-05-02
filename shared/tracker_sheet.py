@@ -244,16 +244,22 @@ WORKOUT_SESSIONS_WIDTHS    = WORKOUT_SESSIONS_WIDTHS_BY_SOURCE["xml"]
 WORKOUT_SESSIONS_LEFT_COLS = WORKOUT_SESSIONS_LEFT_COLS_BY_SOURCE["xml"]
 WORKOUT_SESSIONS_COLS      = WORKOUT_SESSIONS_COLS_BY_SOURCE["xml"]
 
-# Tombstones sheet: records (Date, Exercise) pairs that the user has
-# explicitly deleted from a monthly sheet and never wants the auto-cardio
-# importer to re-create. Apple's data is immutable — without a tombstone
-# sheet, every re-import would resurrect deletions. Matched
-# case-insensitively on exercise name; date is exact YYYY-MM-DD.
-TOMBSTONES_SHEET_NAME = "Tombstones"
-TOMBSTONES_HEADERS = ["Date", "Exercise", "Reason"]
-TOMBSTONES_WIDTHS = {"A": 12, "B": 24, "C": 32}
-TOMBSTONES_LEFT_COLS = {"B", "C"}
-TOMBSTONES_COLS = 3
+# Tombstones removed in 2026-05. The importers are now scoped to the
+# current calendar month only — see ``_current_month_key`` plus the
+# month-gate in ``upsert_monthly_cardio`` / ``upsert_monthly_strength_session``.
+# Past months are never re-scanned, so a deleted row stays deleted
+# without needing a separate tombstone record.
+
+
+def _current_month_key(today_d: date | None = None) -> str:
+    """Return ``YYYY.MM`` for the current calendar month.
+
+    Single source of truth for the month-gate that bounds where the
+    importers can write. ``today_d`` is overridable for tests; production
+    callers leave it ``None`` and ``date.today()`` is used.
+    """
+    d = today_d or date.today()
+    return f"{d.year:04d}.{d.month:02d}"
 
 
 # ------------------------------------------------------------------ helpers
@@ -1044,20 +1050,24 @@ PROFILE_LEFT_COLS = {"B"}
 # appear on disk. Adding a new key here + giving it a default in
 # ``ensure_profile_sheet`` is the whole change required to ship a new
 # capability flag.
-PROFILE_KEYS = ("source", "auto_cardio", "auto_cardio_since", "birthday")
+#
+# ``auto_cardio_since`` was removed in 2026-05 alongside the Tombstones
+# sheet — the importer is now scoped to the current calendar month, so a
+# date cutoff is implicit and doesn't need a profile cell. Existing
+# trackers that still have an ``auto_cardio_since`` row get cleaned up
+# the next time ``style_profile_sheet`` runs (it drops keys not in
+# PROFILE_KEYS).
+PROFILE_KEYS = ("source", "auto_cardio", "birthday")
 
 # Default values applied when ``ensure_profile_sheet`` creates the sheet
 # from scratch. ``source`` left None so the caller can inject ``xml`` or
 # ``hl_export`` based on the file extension that triggered the import.
-# ``auto_cardio_since`` defaults to None — importers fall back to the start
-# of the current calendar month when not set.
 # ``birthday`` (YYYY-MM-DD) lets the coach compute age dynamically for the
 # max-HR fallback formula (208 − 0.7×age) when Apple per-workout HR isn't
 # available. None → caller falls back to a generic age.
 PROFILE_DEFAULTS = {
     "source":            None,
     "auto_cardio":       False,
-    "auto_cardio_since": None,
     "birthday":          None,
 }
 
@@ -1115,15 +1125,6 @@ def read_profile(wb) -> dict:
             b = _coerce_bool(val)
             if b is not None:
                 out["auto_cardio"] = b
-        elif k == "auto_cardio_since":
-            if val is None or val == "":
-                continue
-            s = str(val).strip()[:10]
-            # Permissive: accept any YYYY-MM-DD-shaped string. Bad shapes
-            # fall through to None (caller applies the current-month-start
-            # default).
-            if len(s) == 10 and s[4] == "-" and s[7] == "-":
-                out["auto_cardio_since"] = s
         elif k == "birthday":
             if val is None or val == "":
                 continue
@@ -1282,92 +1283,6 @@ def write_profile(wb, **updates) -> None:
     style_profile_sheet(ws)
 
 
-# ============================================================= Tombstones
-def read_tombstones(wb) -> set:
-    """Return the set of ``(date_str, exercise_lower)`` pairs that should
-    never be re-imported as auto-cardio rows.
-
-    Returns an empty set when the sheet doesn't exist (no tombstones
-    configured) — backward-compatible with trackers that pre-date this
-    feature. The pair is the dedupe key; ``Reason`` is human-only context.
-    """
-    if TOMBSTONES_SHEET_NAME not in wb.sheetnames:
-        return set()
-    ws = wb[TOMBSTONES_SHEET_NAME]
-    out: set = set()
-    for r in range(2, ws.max_row + 1):
-        d = date_str(ws.cell(row=r, column=1).value)
-        ex = ws.cell(row=r, column=2).value
-        if not d or not ex:
-            continue
-        out.add((d, str(ex).strip().lower()))
-    return out
-
-
-def add_tombstone(wb, date_value: str, exercise: str,
-                  reason: str | None = None) -> bool:
-    """Append a (date, exercise) tombstone if not already present.
-
-    Returns True when a new row was added, False when the pair was already
-    tombstoned. Idempotent. Creates the sheet on first call.
-    """
-    if TOMBSTONES_SHEET_NAME in wb.sheetnames:
-        ws = wb[TOMBSTONES_SHEET_NAME]
-    else:
-        ws = wb.create_sheet(title=TOMBSTONES_SHEET_NAME)
-        for c, label in enumerate(TOMBSTONES_HEADERS, start=1):
-            ws.cell(row=1, column=c, value=label)
-
-    d = date_str(date_value)
-    if not d:
-        return False
-    ex_lower = str(exercise).strip().lower()
-    for r in range(2, ws.max_row + 1):
-        existing_d = date_str(ws.cell(row=r, column=1).value)
-        existing_ex = ws.cell(row=r, column=2).value
-        if existing_d == d and (
-            existing_ex and str(existing_ex).strip().lower() == ex_lower
-        ):
-            return False
-
-    new_row = ws.max_row + 1 if ws.max_row > 1 else 2
-    ws.cell(row=new_row, column=1, value=d)
-    ws.cell(row=new_row, column=2, value=str(exercise).strip())
-    if reason:
-        ws.cell(row=new_row, column=3, value=reason)
-    style_tombstones_sheet(ws)
-    return True
-
-
-def style_tombstones_sheet(ws):
-    """Apply canonical styling to the Tombstones sheet. Idempotent."""
-    for merged_range in list(ws.merged_cells.ranges):
-        ws.unmerge_cells(str(merged_range))
-    if ws.max_column > TOMBSTONES_COLS:
-        ws.delete_cols(TOMBSTONES_COLS + 1, ws.max_column - TOMBSTONES_COLS)
-
-    for c, label in enumerate(TOMBSTONES_HEADERS, 1):
-        cell = ws.cell(row=1, column=c, value=label)
-        cell.font = font_header
-        cell.fill = fill_header
-        cell.alignment = align_center
-        cell.border = no_border
-
-    last_data_row, _ = find_last_data_cell(ws)
-    for r in range(2, last_data_row + 1):
-        for c in range(1, TOMBSTONES_COLS + 1):
-            cell = ws.cell(row=r, column=c)
-            cell.font = font_data
-            cell.fill = fill_data
-            col = get_column_letter(c)
-            cell.alignment = align_left if col in TOMBSTONES_LEFT_COLS else align_center
-            cell.border = no_border
-
-    for col, w in TOMBSTONES_WIDTHS.items():
-        ws.column_dimensions[col].width = w
-    ws.freeze_panes = "A2"
-
-
 # ================================================== Auto-cardio: monthly append
 _MONTH_RE_STR = r"^\d{4}\.\d{2}$"
 
@@ -1392,11 +1307,10 @@ def canonicalize_sheet_order(wb) -> None:
     bw = [n for n in names if n == "Bodyweight"]
     hm = [n for n in names if n == HEALTH_METRICS_SHEET_NAME]
     ws = [n for n in names if n == WORKOUT_SESSIONS_SHEET_NAME]
-    tomb = [n for n in names if n == TOMBSTONES_SHEET_NAME]
     months = sorted((n for n in names if _is_monthly_sheet(n)), reverse=True)
-    fixed = set(db + pf + bw + hm + ws + tomb + months)
+    fixed = set(db + pf + bw + hm + ws + months)
     other = [n for n in names if n not in fixed]
-    desired = db + pf + bw + hm + ws + tomb + months + other
+    desired = db + pf + bw + hm + ws + months + other
 
     for target_idx, name in enumerate(desired):
         sheet_obj = wb[name]
@@ -1597,24 +1511,31 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
     # Bucket incoming rows by ``YYYY.MM`` once so we touch each sheet exactly
     # once (read existing → append new → restyle), regardless of how rows
     # were ordered.
-    # Tombstones — (date, exercise.lower()) pairs the user explicitly
-    # deleted and never wants re-imported. Filter input rows up front so
-    # they never reach the dedupe / append path.
-    tombstones = read_tombstones(wb)
-    skipped_tombstoned = 0
+    #
+    # Current-month gate: importers only ever write into the current
+    # calendar month's monthly sheet. Past months are "finished" and are
+    # never re-scanned, so a row the user deleted from 2026.02 stays
+    # deleted on the next import without needing a tombstone. This is the
+    # whole reason the Tombstones sheet was removed in 2026-05.
+    current_month = _current_month_key()
+    skipped_past_month = 0
     by_month: dict[str, list[dict]] = {}
     for r in rows:
         d = str(r.get("date") or "")[:10]
         if not d or len(d) != 10:
             continue
-        ex = str(r.get("exercise") or "").strip().lower()
-        if (d, ex) in tombstones:
-            skipped_tombstoned += 1
-            continue
         key = f"{d[:4]}.{d[5:7]}"
+        if key != current_month:
+            skipped_past_month += 1
+            continue
         by_month.setdefault(key, []).append(r)
 
     if not by_month:
+        if skipped_past_month:
+            return [
+                f"Auto-cardio: 0 rows considered "
+                f"({skipped_past_month} skipped — past months are not re-scanned)"
+            ]
         return ["Auto-cardio: 0 rows considered (no valid dates)"]
 
     summaries: list[str] = []
@@ -1823,10 +1744,10 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
         f"Auto-cardio total: {total_appended} appended, "
         f"{total_skipped} skipped across {len(by_month)} month(s)"
     )
-    if skipped_tombstoned:
+    if skipped_past_month:
         summaries.append(
-            f"Auto-cardio: {skipped_tombstoned} input rows skipped "
-            f"(tombstoned in {TOMBSTONES_SHEET_NAME} sheet)"
+            f"Auto-cardio: {skipped_past_month} input rows skipped "
+            f"(dated outside the current month {current_month})"
         )
     return summaries
 
@@ -1903,15 +1824,24 @@ def upsert_monthly_strength_session(wb, sessions: list[dict]) -> list[str]:
     written = 0
     skipped_no_match = 0
     skipped_no_change = 0
+    skipped_past_month = 0
     drift_warnings: list[str] = []
 
     touched_sheets: set = set()
+
+    # Current-month gate: the importer never writes session metadata
+    # into past-month sheets. A session logged in 2026.04 stays at
+    # whatever metadata the user logged manually; April is "finished".
+    current_month = _current_month_key()
 
     for sess in sessions:
         d = str(sess.get("date") or "")[:10]
         if not d or len(d) != 10:
             continue
         month_key = f"{d[:4]}.{d[5:7]}"
+        if month_key != current_month:
+            skipped_past_month += 1
+            continue
         if month_key not in wb.sheetnames:
             skipped_no_match += 1
             continue
@@ -1992,6 +1922,11 @@ def upsert_monthly_strength_session(wb, sessions: list[dict]) -> list[str]:
         f"{skipped_no_change} no-op (already up to date), "
         f"{skipped_no_match} skipped (no matching session row)"
     )
+    if skipped_past_month:
+        summaries.append(
+            f"Strength sessions: {skipped_past_month} dated outside the "
+            f"current month {current_month} — past months are not re-scanned"
+        )
     if drift_warnings:
         summaries.append(
             f"Strength sessions: {len(drift_warnings)} manual-wins warnings:"

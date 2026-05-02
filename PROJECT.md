@@ -21,7 +21,6 @@ Each tracker xlsx has a `Profile` sheet (key/value layout) that pins three thing
 |---|---|---|
 | `source` | `xml` (Apple zipped XML) or `hl_export` (HLExport text) | inferred from the first import's file extension |
 | `auto_cardio` | If true, Apple-recorded cardio workouts (Run / Hike / Cycle / Swim / HIIT) auto-flow into the matching `YYYY.MM` monthly sheet | `true` for XML, `false` for HL |
-| `auto_cardio_since` | YYYY-MM-DD cutoff for auto-cardio appends. Auto-cardio workouts older than this are skipped on import (workouts still land in `Workout Sessions` regardless) | unset → start of current calendar month |
 | `birthday` | YYYY-MM-DD of birth. Used by `/coach` to compute age dynamically for the max-HR fallback formula (Tanaka 208 − 0.7×age) when Apple per-workout HR isn't observable | unset → coach uses age 30 fallback |
 
 `/coach` reads `Profile.source` to decide which sections of its report to write — HRV / wrist temp / per-workout-HR sections are gated on the matching capability flags. For HL users, the coach skips those sections entirely rather than printing "not enough data yet." The profile is bootstrapped on first import; manual override is supported by editing `Profile!B2` directly.
@@ -30,7 +29,7 @@ Each tracker xlsx has a `Profile` sheet (key/value layout) that pins three thing
 
 When `Profile.auto_cardio` is true, every Apple-recorded workout in `CARDIO_AUTOLOG_TYPES` (Running, Hiking, Cycling, Swimming, HighIntensityIntervalTraining) gets appended to the matching `YYYY.MM` monthly sheet as a cardio row tagged `auto-imported from Apple`. Walks and indoor strength sessions are excluded — incidental walks would dominate, and Apple doesn't capture sets for strength. **Manual entries always win**: a cardio row with the same `(date, exercise, duration ±1 min)` as an existing manual row is never duplicated, and a previously auto-imported row is a no-op on re-runs (idempotent).
 
-**Tombstones** prevent specific `(date, exercise)` pairs from ever being re-imported. The `Tombstones` sheet (created on first use, columns `Date | Exercise | Reason`) is consulted by `upsert_monthly_cardio` before any append; matching input rows are dropped and counted in the importer summary. Use this for cardio rows the user explicitly deleted and never wants to see again — Apple's data is immutable, so without a tombstone every re-import would resurrect the deletion. Add a tombstone in code via `tracker_sheet.add_tombstone(wb, date, exercise, reason)`.
+**Current-month gate.** The importers only ever write into the current calendar month's `YYYY.MM` sheet. Past months are "finished" and never re-scanned, so a cardio row the user deletes from `2026.02` stays deleted on the next import — no separate tombstone bookkeeping needed. The strength-session metadata writer follows the same rule: workouts dated outside the current month are silently skipped. (This replaced a previous `Tombstones` sheet + `auto_cardio_since` profile cell in 2026-05; both are now gone.)
 
 Per-person sidecars produced by the skills follow the same `<base> - <Person>.<ext>` pattern:
 

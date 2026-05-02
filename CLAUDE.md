@@ -18,19 +18,19 @@ shared/               # Code + docs imported by multiple skills
                       #   and the upsert helpers used by the importers
                       #   (upsert_health_metrics, upsert_workout_sessions,
                       #   upsert_monthly_cardio with manual-wins dedupe +
-                      #   tombstone honoring, upsert_monthly_strength_session).
-                      #   Profile helpers (read_profile / write_profile /
-                      #   ensure_profile_sheet) and Tombstones helpers
-                      #   (read_tombstones / add_tombstone) live here too.
-                      #   Profile schema: source, auto_cardio, auto_cardio_since,
-                      #   birthday (YYYY-MM-DD — used by /coach for dynamic
-                      #   max-HR estimation). Tombstones sheet records
-                      #   (date, exercise, reason) that the cardio writer
-                      #   filters out — Apple data is immutable, so deletions
-                      #   need this tombstone mechanism to stick.
-                      #   Idempotent. style_monthly_sheet auto-sorts sessions
-                      #   by date ascending and merges non-contiguous same-date
-                      #   blocks on every pass.
+                      #   current-month gate, upsert_monthly_strength_session
+                      #   with the same gate). Profile helpers (read_profile /
+                      #   write_profile / ensure_profile_sheet) live here too.
+                      #   Profile schema: source, auto_cardio, birthday
+                      #   (YYYY-MM-DD — used by /coach for dynamic max-HR
+                      #   estimation). The current-month gate
+                      #   (_current_month_key) means importers only ever write
+                      #   into the YYYY.MM sheet matching today; past months
+                      #   are "finished" and never re-scanned, so deleted
+                      #   rows stay deleted without a Tombstones bookkeeping
+                      #   sheet. Idempotent. style_monthly_sheet auto-sorts
+                      #   sessions by date ascending and merges non-contiguous
+                      #   same-date blocks on every pass.
   exercises-database.md  # Canonical exercise catalog (muscle → pattern →
                          # exercises). Source of truth — the xlsx "Exercises
                          # Database" tab is mirrored from this via

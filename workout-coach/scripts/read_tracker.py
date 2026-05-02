@@ -1,22 +1,57 @@
 """Read the given tracker xlsx for /coach analysis.
 
-Emits one JSON blob on stdout with everything the coach needs:
-  - today, days_since_last_session, last_session_date
-  - rows: flat list of every set from the last N months (default 3)
-  - progression_summary: last vs. previous working set per exercise
-  - deloads: dates whose first row has Notes 'Deload Workout'
-  - weeks_since_last_deload: float, or null if no deload on record
-  - cardio_last_14d: zone2_minutes, interval_sessions, total_distance_km
-  - bodyweight_recent: last 12 weigh-ins from the Bodyweight sheet
-  - bodyweight_trend_kg_per_week: slope over the last 8 entries, or null
-  - bodyweight_latest: {date, kg} of the most recent entry, or null
+Emits one JSON blob on stdout organised around session-level signals
+(decisions, not raw arrays). Top blocks:
+
+  Source + capabilities:
+  - today, data_source, capabilities, auto_cardio_enabled
+  - estimated_max_hr, estimated_rest_hr — derived once at the top from
+    Apple max-HR observations (XML) or 208 − 0.7×age (HL fallback;
+    age is computed from Profile.birthday). Drives all HRR / TRIMP /
+    Karvonen-zone math below.
+
+  Strength + cardio sessions:
+  - monthly_sessions: canonical per-session record incl. TRIMP /
+    load_band (light/moderate/hard/red-line) / intensity_pct / max_hr /
+    volume / is_deload, sourced from the TOTAL row's metadata + Apple
+    per-workout max_hr. Replaces session_totals + workout_sessions_last_28d.
+  - weekly_volume_per_muscle, estimated_1rm, progression_summary
+  - stale_exercises (top 5), unknown_exercises
+  - deloads (user-marked), auto_deload_candidates (Python-detected)
+
+  Cardio rollup:
+  - cardio_last_28d (sessions, minutes, distance, kcal)
+  - cardio_hr_zones_28d (HRR-based time-in-zone via Karvonen)
+
+  Recovery + training load (Python-derived):
+  - recovery: 0-10 score with named drivers (HRV, RHR, sleep, wrist temp,
+    HR Recovery 1-min, VO2max trend) + confidence
+  - training_load: CTL/ATL/TSB rolling EWMA from per-session TRIMP
+  - hr_at_volume_divergence: per-muscle slope of strength avg HR vs time
+
+  Bodyweight:
+  - bodyweight_latest, bodyweight_trend_kg_per_week
+
+  Apple Health:
+  - health_metrics_weekly (4-week aggregates; raw daily behind
+    --include-daily-health)
+  - vo2max_latest, vo2max_trend_per_4w
+
+  Debug deep-dive (off by default):
+  - rows: flat per-set list (--include-rows)
+  - estimated_1rm.e1rm_history (--include-1rm-history)
 
 Usage:
     python3 read_tracker.py "<tracker path>" [--months 3] [--today YYYY-MM-DD]
+        [--include-rows] [--include-1rm-history] [--include-daily-health]
+        [--pretty]
 
-Keeping the model out of the weeds on format quirks (string vs datetime dates,
-stringified numbers, casing inconsistency, empty-row streaks) is the whole
-point — the skill body points at this script instead of redoing it each run.
+Keeping the model out of the weeds on format quirks (string vs datetime
+dates, stringified numbers, casing inconsistency, empty-row streaks) is
+the whole point — and going further, this script also computes the
+training-science derivatives (TRIMP, recovery score, load bands, HR-at-
+volume divergence) so the coach LLM consumes structured signals rather
+than re-deriving them each run.
 """
 from __future__ import annotations
 
@@ -1307,8 +1342,23 @@ def _percentile(values: list[float], pct: float) -> float | None:
     return s[lo] * (1 - frac) + s[hi] * frac
 
 
+def _age_from_birthday(birthday_str: str | None, today_d: date) -> int | None:
+    """Return integer age in years from a YYYY-MM-DD birthday + today, or None."""
+    if not birthday_str:
+        return None
+    try:
+        bd = datetime.strptime(birthday_str, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    age = today_d.year - bd.year - ((today_d.month, today_d.day) < (bd.month, bd.day))
+    if age < 5 or age > 100:
+        return None
+    return age
+
+
 def estimate_max_hr(workout_sessions_all: list[dict],
-                    health_all: list[dict] | None = None,
+                    today_d: date,
+                    profile: dict | None = None,
                     fallback_age: int = 30) -> float | None:
     """Estimate the user's peak HR.
 
@@ -1317,8 +1367,9 @@ def estimate_max_hr(workout_sessions_all: list[dict],
        per-workout max is conservative (it reflects what the watch saw,
        not theoretical max), so the absolute observed peak is a sound
        lower-bound estimate of true max.
-    2. Fallback formula 208 − 0.7×age. Without a Profile age field we use
-       ``fallback_age`` (30 — close enough for both Nihad and Fabian).
+    2. Tanaka formula 208 − 0.7×age, with age computed dynamically from
+       ``profile.birthday`` and ``today_d``. Falls back to ``fallback_age``
+       (30) when birthday is missing or malformed.
 
     Returns ``None`` only when neither path can produce a number.
     """
@@ -1328,7 +1379,10 @@ def estimate_max_hr(workout_sessions_all: list[dict],
     ]
     if observed:
         return float(max(observed))
-    return float(208 - 0.7 * fallback_age)
+    age = _age_from_birthday((profile or {}).get("birthday"), today_d)
+    if age is None:
+        age = fallback_age
+    return float(round(208 - 0.7 * age, 1))
 
 
 def health_metrics_weekly(health_all: list[dict],
@@ -1384,7 +1438,8 @@ def health_metrics_weekly(health_all: list[dict],
 
 def recovery_score(health_all: list[dict], today_d: date,
                    capabilities: dict) -> dict:
-    """Compute a 0-10 recovery score from HRV, RHR, sleep, wrist temp.
+    """Compute a 0-10 recovery score from HRV, RHR, sleep, wrist temp,
+    HR Recovery 1-min, and VO2max trend.
 
     Each signal contributes a clamped delta to a baseline of 5; the final
     score is clamped to [0, 10]. Drivers list shows which signals
@@ -1465,6 +1520,40 @@ def recovery_score(health_all: list[dict], today_d: date,
                 "delta_c":    round(delta, 2),
                 "contrib":    round(contrib, 2),
             })
+
+    # HR Recovery 1-min (count/min HR drop after exercise). Higher is
+    # better — parasympathetic re-activation. Weight ±0.75. Compare
+    # recent (5d) vs 28d typical; ±5 bpm = ±0.75.
+    hrr_recent = _values_in_window(health_all, "hr_recovery_1min", today_d, 5)
+    hrr_typical = _values_in_window(health_all, "hr_recovery_1min", today_d, 28)
+    if hrr_recent and hrr_typical:
+        recent_avg = sum(hrr_recent) / len(hrr_recent)
+        typical_avg = sum(hrr_typical) / len(hrr_typical)
+        delta = recent_avg - typical_avg
+        contrib = max(-0.75, min(0.75, delta / 6.7))  # +5 bpm → +0.75
+        score += contrib
+        sample_count += 1
+        drivers.append({
+            "metric":      "hr_recovery_1min",
+            "recent_avg":  round(recent_avg, 1),
+            "typical_avg": round(typical_avg, 1),
+            "delta_bpm":   round(delta, 1),
+            "contrib":     round(contrib, 2),
+        })
+
+    # VO2max trend per 4 weeks. Slow-moving signal — folding it in gives
+    # credit for fitness improvements / penalises drift. Weight ±0.75;
+    # ±2 ml/kg/min over 4w → ±0.75.
+    vo2_slope = metric_trend_per_4w(health_all, "vo2max")
+    if vo2_slope is not None:
+        contrib = max(-0.75, min(0.75, vo2_slope / 2.7))
+        score += contrib
+        sample_count += 1
+        drivers.append({
+            "metric":      "vo2max_trend_per_4w",
+            "slope":       round(vo2_slope, 2),
+            "contrib":     round(contrib, 2),
+        })
 
     score = max(0.0, min(10.0, score))
     confidence = "high" if sample_count >= 3 else ("medium" if sample_count == 2 else "low")
@@ -1649,7 +1738,10 @@ def hr_at_volume_divergence(rows: list[dict],
 
     out: dict[str, dict] = {}
     for muscle, points in by_muscle.items():
-        if len(points) < 4:
+        # Require at least 6 sessions before a slope is published —
+        # smaller samples have too much variance for the ±5 bpm/4w
+        # threshold to mean anything.
+        if len(points) < 6:
             continue
         points.sort(key=lambda p: p[0])
         base = points[0][0]
@@ -1667,9 +1759,12 @@ def hr_at_volume_divergence(rows: list[dict],
             continue
         slope_per_day = num / den
         slope_per_4w = slope_per_day * 28
-        if slope_per_4w >= 3:
+        # ±5 bpm/4w is the magnitude that's clearly above noise floor for
+        # a 6-12 session window. Below that, call it stable to avoid
+        # crying wolf on every minor drift.
+        if slope_per_4w >= 5:
             hint = "rising HR at constant volume — fatigue or under-recovery"
-        elif slope_per_4w <= -3:
+        elif slope_per_4w <= -5:
             hint = "falling HR at constant volume — improving conditioning"
         else:
             hint = "stable"
@@ -1903,7 +1998,8 @@ def main() -> int:
         session_totals=session_totals,
         apple_sessions=workout_sessions_all,
     )
-    max_hr = estimate_max_hr(workout_sessions_all, health_all)
+    max_hr = estimate_max_hr(workout_sessions_all, today_d, profile=profile)
+    age_years = _age_from_birthday(profile.get("birthday"), today_d)
     rest_hr = _mean_or_none(_values_in_window(health_all, "resting_hr", today_d, 28))
     if rest_hr is None and capabilities.get("resting_hr_daily") is False:
         # HL fallback: typical adult RHR if the source can't supply it.
@@ -1947,6 +2043,7 @@ def main() -> int:
         "recovery": recovery,
         "training_load": training_load,
         "hr_at_volume_divergence": hr_volume_div,
+        "age_years": age_years,
         "estimated_max_hr": max_hr,
         "estimated_rest_hr": round(rest_hr, 1) if rest_hr else None,
         # ---- Bodyweight ----

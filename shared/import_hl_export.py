@@ -50,6 +50,7 @@ from tracker_sheet import (  # noqa: E402
     read_profile,
     upsert_health_metrics,
     upsert_monthly_cardio,
+    upsert_monthly_strength_session,
     upsert_workout_sessions,
 )
 from apple_workout_types import (  # noqa: E402
@@ -514,6 +515,78 @@ def main() -> int:
 
     out_lines.extend(upsert_health_metrics(wb, metric_entries))
     out_lines.extend(upsert_workout_sessions(wb, workout_rows))
+
+    # Strength session metadata: HL provides Active Cal and Duration per
+    # strength workout (no Avg HR, no basal/elevation, no separate elapsed).
+    # Cluster same-day strength workouts within 90 min of each other (matches
+    # the XML importer's logic) and annotate the matching manual-log session
+    # with Active Cal. Independent of the auto_cardio gate — this only
+    # annotates existing rows; never appends new ones.
+    strength_apple_types = {
+        "TraditionalStrengthTraining",
+        "FunctionalStrengthTraining",
+        "CoreTraining",
+    }
+    strength_workouts = [
+        w for w in workout_rows
+        if (w.get("apple_type") or "") in strength_apple_types
+    ]
+    by_date_str: dict[str, list[dict]] = {}
+    for w in strength_workouts:
+        d = str(w.get("date") or "")[:10]
+        if not d:
+            continue
+        by_date_str.setdefault(d, []).append(w)
+
+    strength_sessions: list[dict] = []
+    strength_warnings: list[str] = []
+    for d in sorted(by_date_str.keys()):
+        ws_list = by_date_str[d]
+
+        def _start_dt(w):
+            t = w.get("start") or "00:00:00"
+            try:
+                return datetime.strptime(f"{d} {t[:8]}", "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return datetime.strptime(d, "%Y-%m-%d")
+
+        decorated = sorted(((_start_dt(w), w) for w in ws_list), key=lambda x: x[0])
+        clusters: list[list[tuple]] = []
+        for dt_w, w in decorated:
+            if clusters and (dt_w - clusters[-1][-1][0]).total_seconds() / 60.0 <= 90.0:
+                clusters[-1].append((dt_w, w))
+            else:
+                clusters.append([(dt_w, w)])
+        clusters.sort(
+            key=lambda c: sum((wk.get("duration_min") or 0.0) for _, wk in c),
+            reverse=True,
+        )
+        chosen = clusters[0]
+        for skipped in clusters[1:]:
+            total_min = sum((wk.get("duration_min") or 0.0) for _, wk in skipped)
+            strength_warnings.append(
+                f"  - {d}: skipping {len(skipped)} additional strength "
+                f"workout(s) outside 90-min cluster ({total_min:.0f} min) — "
+                f"used longest cluster"
+            )
+        active = sum((w.get("active_cal") or 0.0) for _, w in chosen)
+        duration = sum((w.get("duration_min") or 0.0) for _, w in chosen)
+        strength_sessions.append({
+            "date": d,
+            "active_cal": active if active > 0 else None,
+            "duration_min": duration if duration > 0 else None,
+            # HL doesn't carry basal/elevation/per-workout HR, and its
+            # elapsed equals duration (no pause detection). Leave the
+            # other 4 columns blank for Fabian.
+            "total_cal": None,
+            "elevation_m": None,
+            "elapsed_min": None,
+            "avg_hr": None,
+        })
+    if strength_warnings:
+        out_lines.append("Strength clustering warnings:")
+        out_lines.extend(strength_warnings)
+    out_lines.extend(upsert_monthly_strength_session(wb, strength_sessions))
 
     if profile.get("auto_cardio"):
         # Resolve auto-cardio cutoff: CLI override > Profile cell > default

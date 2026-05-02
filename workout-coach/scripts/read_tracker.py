@@ -81,6 +81,8 @@ SOURCE_CAPABILITIES = {
 DEFAULT_DATA_SOURCE = "xml"
 
 MONTHLY_RE = re.compile(r"^\d{4}\.\d{2}$")
+# Deload marker now lives on the TOTAL row's Notes column (col 9). The
+# marker text is canonical "Deload Workout"; matching is case-insensitive.
 DELOAD_MARKER = "deload workout"
 EMPTY_STREAK_STOP = 10
 TOTAL_LABEL = "TOTAL"
@@ -223,16 +225,23 @@ def parse_distance_km(raw) -> float:
 
 
 # ---------- extraction ----------
-def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict]:
-    """Return (rows, session_totals).
+def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict, dict]:
+    """Return (rows, session_totals, session_summaries).
 
     ``rows`` excludes TOTAL summary rows — one entry per logged set. Keys:
     ``session, date, num, exercise, set, reps, kg, volume, notes,
-    distance_km, duration_min, pace, avg_hr``.
+    distance_km, duration_min, pace, avg_hr, active_cal, total_cal,
+    elevation_m, elapsed``.
 
     ``session_totals`` maps ``YYYY-MM-DD`` → total volume lifted that session,
-    populated from the sheet's TOTAL rows (formula-driven). The coach should
-    use this instead of summing ``rows`` per date.
+    populated from the sheet's TOTAL rows (formula-driven).
+
+    ``session_summaries`` maps ``YYYY-MM-DD`` → dict of session-level
+    metadata harvested from the TOTAL row: ``volume`` (=session_totals
+    value), ``notes`` (deload marker if present), ``duration_min``,
+    ``avg_hr``, ``active_cal``, ``total_cal``, ``elevation_m``,
+    ``elapsed``, ``is_deload`` (bool). Cardio-only dates (no TOTAL row)
+    are absent from this dict.
     """
     cutoff = today_d - timedelta(days=months_back * 31)
     data_sheets = sorted(
@@ -242,6 +251,7 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict]
 
     rows: list[dict] = []
     session_totals: dict[str, float] = {}
+    session_summaries: dict[str, dict] = {}
     for name in data_sheets:
         # Quick filter: sheet YYYY.MM vs cutoff
         y, m = name.split(".")
@@ -254,9 +264,10 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict]
         empty_streak = 0
 
         for raw in ws.iter_rows(min_row=2, values_only=True):
+            padded = list(raw) + [None] * 17
             (session, date_val, num, exercise, set_n, reps, kg, volume,
-             notes, *rest) = (list(raw) + [None] * 13)[:13]
-            distance, duration, pace, avg_hr = rest[:4] if len(rest) >= 4 else (None, None, None, None)
+             notes, distance, duration, pace, avg_hr,
+             active_cal, total_cal, elevation_m, elapsed) = padded[:17]
 
             if date_val is None and exercise is None:
                 empty_streak += 1
@@ -268,13 +279,37 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict]
             if date_val is not None:
                 current_date = date_str(date_val)
 
-            # TOTAL rows carry the session's total volume. Capture it, skip the row.
-            # Note: openpyxl with data_only=True returns None for formula cells
-            # whose cached value hasn't been written by Excel yet. We fall back
-            # to summing row volumes below if the cached TOTAL is missing.
+            # TOTAL rows now carry the session's full summary record:
+            # Date (col 2 may be set), Volume (col 8), Notes (col 9 —
+            # carries the Deload Workout marker), Duration (col 11),
+            # Avg HR (col 13), Active/Total Cal (cols 14-15), Elevation
+            # (col 16), Elapsed (col 17). Harvest those into
+            # session_summaries keyed by date.
             if isinstance(exercise, str) and exercise.strip().upper() == TOTAL_LABEL:
-                if current_date is not None and volume not in (None, ""):
-                    session_totals[current_date] = to_float(volume)
+                # Prefer the TOTAL row's own Date if set; fall back to
+                # current_date from the preceding non-TOTAL rows for
+                # legacy data.
+                total_date = current_date
+                if date_val is not None:
+                    parsed = date_str(date_val)
+                    if parsed:
+                        total_date = parsed
+                if total_date is not None:
+                    if volume not in (None, ""):
+                        session_totals[total_date] = to_float(volume)
+                    notes_str = str(notes).strip() if notes else None
+                    is_deload = bool(notes_str and DELOAD_MARKER in notes_str.lower())
+                    session_summaries[total_date] = {
+                        "volume":       session_totals.get(total_date),
+                        "notes":        notes_str,
+                        "is_deload":    is_deload,
+                        "duration_min": parse_duration_minutes(duration) if duration else None,
+                        "avg_hr":       to_float(avg_hr) if avg_hr is not None else None,
+                        "active_cal":   to_float(active_cal) if active_cal not in (None, "") else None,
+                        "total_cal":    to_float(total_cal) if total_cal not in (None, "") else None,
+                        "elevation_m":  to_float(elevation_m) if elevation_m not in (None, "") else None,
+                        "elapsed":      str(elapsed).strip() if elapsed not in (None, "") else None,
+                    }
                 continue
 
             if exercise is None or current_date is None:
@@ -303,6 +338,10 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict]
                 "duration_min": parse_duration_minutes(duration) if duration else None,
                 "pace": str(pace).strip() if pace else None,
                 "avg_hr": to_int_or_none(avg_hr),
+                "active_cal":  to_float(active_cal) if active_cal not in (None, "") else None,
+                "total_cal":   to_float(total_cal) if total_cal not in (None, "") else None,
+                "elevation_m": to_float(elevation_m) if elevation_m not in (None, "") else None,
+                "elapsed":     str(elapsed).strip() if elapsed not in (None, "") else None,
             })
 
     rows.sort(key=lambda r: (r["date"], r["num"] or 0, r["set"] or 0))
@@ -316,7 +355,7 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict]
             continue
         session_totals[r["date"]] = session_totals.get(r["date"], 0.0) + r["volume"]
 
-    return rows, session_totals
+    return rows, session_totals, session_summaries
 
 
 def progression_summary(rows: list[dict]) -> list[dict]:
@@ -354,18 +393,22 @@ def progression_summary(rows: list[dict]) -> list[dict]:
 
 
 def find_deloads(wb) -> list[str]:
-    """Dates whose first populated row has Notes containing 'Deload Workout'."""
+    """Dates whose strength session's TOTAL row has Notes containing 'Deload Workout'.
+
+    Deload marker now lives on the TOTAL row's Notes column (col 9),
+    consistent with the other session-level metadata. The TOTAL row's
+    Date (col 2) is the canonical date; fall back to ``current_date``
+    from preceding rows for legacy data.
+    """
     deloads: set[str] = set()
     for name in wb.sheetnames:
         if not MONTHLY_RE.match(name):
             continue
         ws = wb[name]
         current_date: str | None = None
-        seen_dates: set[str] = set()
         empty_streak = 0
         for raw in ws.iter_rows(min_row=2, values_only=True):
             vals = list(raw) + [None] * 13
-            # SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | ...
             _session, date_val, _num, exercise, _set_n, _reps, _kg, _vol, notes = vals[:9]
             if date_val is None and exercise is None:
                 empty_streak += 1
@@ -374,18 +417,19 @@ def find_deloads(wb) -> list[str]:
                 continue
             empty_streak = 0
             if date_val is not None:
-                current_date = date_str(date_val)
-            if current_date is None or exercise is None:
+                parsed = date_str(date_val)
+                if parsed:
+                    current_date = parsed
+            if exercise is None:
                 continue
-            # TOTAL rows never carry a deload marker; skip without consuming "first row".
             if isinstance(exercise, str) and exercise.strip().upper() == TOTAL_LABEL:
-                continue
-            # Only the first row of a date can mark the session as a deload.
-            if current_date in seen_dates:
-                continue
-            seen_dates.add(current_date)
-            if notes and DELOAD_MARKER in str(notes).lower():
-                deloads.add(current_date)
+                target_date = current_date
+                if date_val is not None:
+                    parsed = date_str(date_val)
+                    if parsed:
+                        target_date = parsed
+                if target_date and notes and DELOAD_MARKER in str(notes).lower():
+                    deloads.add(target_date)
     return sorted(deloads)
 
 
@@ -446,6 +490,91 @@ def bodyweight_trend_kg_per_week(entries: list[dict]) -> float | None:
 def _is_flagged_nonfasted(entry: dict) -> bool:
     notes = (entry.get("notes") or "").lower()
     return any(k in notes for k in ("not fasted", "evening", "after", "post-meal"))
+
+
+def build_monthly_sessions(rows: list[dict],
+                            session_summaries: dict[str, dict] | None = None
+                            ) -> list[dict]:
+    """Aggregate per-set rows into one entry per session-date.
+
+    Strength sessions: metadata sourced from the TOTAL row's summary
+    record in ``session_summaries`` (Active Cal, Total Cal, Elevation,
+    Elapsed, Avg HR, Duration). Cardio-only sessions don't have a TOTAL
+    row, so their metadata is read directly from the cardio rows.
+
+    Returns a list sorted by date ascending.
+    """
+    summaries = session_summaries or {}
+
+    by_date: dict[str, dict] = {}
+    for r in rows:
+        d = r.get("date")
+        if not d:
+            continue
+        is_strength_row = (r.get("kg") or 0) * (r.get("reps") or 0) > 0
+        is_cardio_row = (r.get("distance_km") or 0) > 0 or (r.get("duration_min") or 0) > 0
+
+        s = by_date.get(d)
+        if s is None:
+            s = {
+                "date": d,
+                "exercise_first": r.get("exercise"),
+                "active_cal":  None,
+                "total_cal":   None,
+                "elevation_m": None,
+                "elapsed":     None,
+                "avg_hr":      None,
+                "duration_min": None,
+                "_has_strength": is_strength_row,
+                "_has_cardio":   is_cardio_row,
+            }
+            by_date[d] = s
+        else:
+            if is_strength_row:
+                s["_has_strength"] = True
+            if is_cardio_row:
+                s["_has_cardio"] = True
+
+        # For cardio-only sessions: fill metadata from each cardio row.
+        # For mixed/strength sessions, the TOTAL row summary is canonical
+        # and is folded in below.
+        if is_cardio_row and not is_strength_row:
+            for k in ("active_cal", "total_cal", "elevation_m", "elapsed", "avg_hr"):
+                if s.get(k) in (None, "") and r.get(k) not in (None, ""):
+                    s[k] = r.get(k)
+            if s.get("duration_min") in (None, "") and r.get("duration_min"):
+                s["duration_min"] = r.get("duration_min")
+
+    # Fold TOTAL-row session summaries (strength sessions only — TOTAL
+    # rows are not emitted for pure cardio).
+    for d, summary in summaries.items():
+        s = by_date.get(d)
+        if s is None:
+            continue
+        if summary.get("active_cal") is not None:
+            s["active_cal"] = summary["active_cal"]
+        if summary.get("total_cal") is not None:
+            s["total_cal"] = summary["total_cal"]
+        if summary.get("elevation_m") is not None:
+            s["elevation_m"] = summary["elevation_m"]
+        if summary.get("elapsed"):
+            s["elapsed"] = summary["elapsed"]
+        if summary.get("avg_hr") is not None:
+            s["avg_hr"] = summary["avg_hr"]
+        if summary.get("duration_min") is not None:
+            s["duration_min"] = summary["duration_min"]
+        if summary.get("is_deload"):
+            s["is_deload"] = True
+
+    out: list[dict] = []
+    for d in sorted(by_date.keys()):
+        s = by_date[d]
+        kind = "strength" if s.pop("_has_strength") else (
+            "cardio" if s.pop("_has_cardio") else "other")
+        s.pop("_has_cardio", None)
+        s["session_kind"] = kind
+        out.append(s)
+    return out
 
 
 def cardio_last_14d(rows: list[dict], today_d: date) -> dict:
@@ -1120,7 +1249,7 @@ def main() -> int:
     )
 
     wb = openpyxl.load_workbook(args.tracker, data_only=True, read_only=True)
-    rows, session_totals = extract_rows(wb, args.months, today_d)
+    rows, session_totals, session_summaries = extract_rows(wb, args.months, today_d)
     deloads = find_deloads(wb)
 
     profile = read_profile(wb)
@@ -1196,6 +1325,7 @@ def main() -> int:
         "deloads": deloads,
         "weeks_since_last_deload": weeks_since_deload,
         "cardio_last_14d": cardio_last_14d(rows, today_d),
+        "monthly_sessions": build_monthly_sessions(rows, session_summaries),
         "bodyweight_latest": bw_latest,
         "bodyweight_trend_kg_per_week": bodyweight_trend_kg_per_week(bw_all),
         "bodyweight_recent": bw_recent,

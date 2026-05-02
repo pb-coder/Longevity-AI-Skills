@@ -37,6 +37,7 @@ from tracker_sheet import (  # noqa: E402
     read_profile,
     upsert_health_metrics,
     upsert_monthly_cardio,
+    upsert_monthly_strength_session,
     upsert_workout_sessions,
 )
 from apple_workout_types import (  # noqa: E402
@@ -522,6 +523,110 @@ def default_since():
     return today - timedelta(days=183)
 
 
+# Apple-Watch strength session bucketing for the monthly-sheet metadata
+# columns. Apple often splits one human strength session into a short
+# CoreTraining (warm-up/abs) followed by a longer Functional/Traditional
+# block. Workouts that share a date and start within this window are
+# treated as one session and summed.
+STRENGTH_APPLE_TYPES: frozenset[str] = frozenset({
+    "TraditionalStrengthTraining",
+    "FunctionalStrengthTraining",
+    "CoreTraining",
+})
+STRENGTH_CLUSTER_WINDOW_MIN = 90.0
+
+
+def cluster_strength_sessions(workout_rows: list[dict]) -> tuple[list[dict], list[str]]:
+    """Group same-day strength workouts into one session per cluster.
+
+    Two workouts join the same cluster when their start times are within
+    ``STRENGTH_CLUSTER_WINDOW_MIN`` of each other (chained transitively).
+    For each date we pick the longest-duration cluster as the canonical
+    session — distant secondary clusters (a separate evening workout) are
+    surfaced as warnings rather than merged.
+
+    Returns ``(sessions, warnings)``.
+    """
+    by_date: dict[str, list[dict]] = {}
+    for w in workout_rows:
+        if (w.get("apple_type") or "") not in STRENGTH_APPLE_TYPES:
+            continue
+        d = str(w.get("date") or "")[:10]
+        if not d:
+            continue
+        by_date.setdefault(d, []).append(w)
+
+    sessions: list[dict] = []
+    warnings: list[str] = []
+
+    for d in sorted(by_date.keys()):
+        ws_list = by_date[d]
+        decorated: list[tuple] = []
+        for w in ws_list:
+            t = w.get("start") or "00:00"
+            try:
+                dt_w = datetime.strptime(f"{d} {t}", "%Y-%m-%d %H:%M")
+            except ValueError:
+                dt_w = datetime.strptime(d, "%Y-%m-%d")
+            decorated.append((dt_w, w))
+        decorated.sort(key=lambda x: x[0])
+
+        clusters: list[list[tuple]] = []
+        for dt_w, w in decorated:
+            if clusters and (dt_w - clusters[-1][-1][0]).total_seconds() / 60.0 \
+                    <= STRENGTH_CLUSTER_WINDOW_MIN:
+                clusters[-1].append((dt_w, w))
+            else:
+                clusters.append([(dt_w, w)])
+
+        def cluster_total_min(c):
+            return sum((wk.get("duration_min") or 0.0) for _, wk in c)
+
+        clusters.sort(key=cluster_total_min, reverse=True)
+        chosen = clusters[0]
+        for skipped in clusters[1:]:
+            warnings.append(
+                f"  - {d}: skipping {len(skipped)} additional strength "
+                f"workout(s) outside 90-min cluster "
+                f"({cluster_total_min(skipped):.0f} min total) — used longest cluster"
+            )
+
+        active = sum((w.get("active_cal") or 0.0) for _, w in chosen)
+        basal = sum((w.get("basal_cal") or 0.0) for _, w in chosen)
+        elapsed = sum((w.get("elapsed_min") or 0.0) for _, w in chosen)
+        duration = sum((w.get("duration_min") or 0.0) for _, w in chosen)
+        active_v = active if active > 0 else None
+        total_v = (active + basal) if (active > 0 and basal > 0) else None
+        elapsed_v = elapsed if elapsed > 0 else None
+        duration_v = duration if duration > 0 else None
+
+        # Duration-weighted avg HR across the cluster. Heavier-weighted
+        # workouts (the long FunctionalStrength block) dominate the
+        # short CoreTraining warm-up.
+        weighted_sum = 0.0
+        weight_total = 0.0
+        for _, w in chosen:
+            ahr = w.get("avg_hr")
+            dur = w.get("duration_min") or 0.0
+            if ahr is None or dur <= 0:
+                continue
+            weighted_sum += float(ahr) * dur
+            weight_total += dur
+        avg_hr_v = (weighted_sum / weight_total) if weight_total > 0 else None
+
+        sessions.append({
+            "date": d,
+            "active_cal": active_v,
+            "total_cal": total_v,
+            "elevation_m": None,   # strength is indoor; elevation rarely meaningful
+            "elapsed_min": elapsed_v,
+            "avg_hr": avg_hr_v,
+            "duration_min": duration_v,
+        })
+
+    return sessions, warnings
+
+
 def default_auto_cardio_since() -> date:
     """First day of the current calendar month.
 
@@ -655,6 +760,21 @@ def main():
         out_lines.extend(upsert_monthly_cardio(wb, cardio_payload))
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")
+
+    # Strength session metadata: cluster same-day strength workouts
+    # within a 90-min start window and write Active/Total Cal / Elevation
+    # / Elapsed / Avg HR onto the first row of the matching session in the
+    # YYYY.MM sheet. Independent of the auto_cardio gate — this only
+    # annotates existing manual-log rows; it never appends new rows.
+    strength_in_window = [
+        w for w in workout_rows
+        if (w.get("apple_type") or "") in STRENGTH_APPLE_TYPES
+    ]
+    strength_sessions, strength_warnings = cluster_strength_sessions(strength_in_window)
+    if strength_warnings:
+        out_lines.append("Strength clustering warnings:")
+        out_lines.extend(strength_warnings)
+    out_lines.extend(upsert_monthly_strength_session(wb, strength_sessions))
 
     if args.also_bodyweight:
         # Reach into the logger's append_workout.upsert_bodyweight so the

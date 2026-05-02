@@ -51,6 +51,7 @@ from tracker_sheet import (  # noqa: E402
     TOTAL_LABEL,
     _numeric_cell,
     bw_locate_date,
+    canonicalize_sheet_order,
     style_bodyweight_sheet,
     style_monthly_sheet,
 )
@@ -223,6 +224,10 @@ def write_payload(tracker_path: Path, rows: list[dict], bodyweight: list[dict]) 
             )
 
     status.extend(upsert_bodyweight(wb, bodyweight))
+
+    # Re-canonicalize sheet order so any newly-created month or Bodyweight
+    # sheet lands in the right tab position without waiting for /maintain.
+    canonicalize_sheet_order(wb)
 
     wb.save(tracker_path)
     return status

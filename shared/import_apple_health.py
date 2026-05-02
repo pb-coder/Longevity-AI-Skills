@@ -87,6 +87,7 @@ WORKOUT_TYPE_PREFIX = "HKWorkoutActivityType"
 # Tags we recognize on per-workout HR statistics so we can set avg/max/min.
 HR_TYPE = "HKQuantityTypeIdentifierHeartRate"
 ACTIVE_ENERGY_TYPE = "HKQuantityTypeIdentifierActiveEnergyBurned"
+BASAL_ENERGY_TYPE = "HKQuantityTypeIdentifierBasalEnergyBurned"
 DISTANCE_WR_TYPE = "HKQuantityTypeIdentifierDistanceWalkingRunning"
 DISTANCE_CYCLE_TYPE = "HKQuantityTypeIdentifierDistanceCycling"
 DISTANCE_SWIM_TYPE = "HKQuantityTypeIdentifierDistanceSwimming"
@@ -363,8 +364,27 @@ def extract_workout(elem, since_date):
     raw_type = attrib.get("workoutActivityType", "")
     apple_type = raw_type[len(WORKOUT_TYPE_PREFIX):] if raw_type.startswith(WORKOUT_TYPE_PREFIX) else raw_type
 
-    avg_hr = max_hr = min_hr = active_cal = distance_km = None
+    avg_hr = max_hr = min_hr = active_cal = basal_cal = distance_km = None
+    elevation_m: float | None = None
+    indoor = False
     for child in elem:
+        if child.tag == "MetadataEntry":
+            # Apple uses the same activity-type enum for indoor + outdoor
+            # variants of running / cycling / walking; the
+            # ``HKIndoorWorkout`` metadata flag is the only disambiguator.
+            # Read it here so the canonical name can be specialised below.
+            key = child.attrib.get("key")
+            val = child.attrib.get("value")
+            if key == "HKIndoorWorkout":
+                indoor = val == "1"
+            elif key == "HKElevationAscended" and val is not None:
+                # Apple reports elevation in cm with a unit suffix (e.g.
+                # "11589 cm"). Strip the unit and convert to metres.
+                token = val.split()[0] if isinstance(val, str) else val
+                cm = to_float(token)
+                if cm is not None:
+                    elevation_m = cm / 100.0
+            continue
         if child.tag != "WorkoutStatistics":
             continue
         a = child.attrib
@@ -375,6 +395,8 @@ def extract_workout(elem, since_date):
             min_hr = to_float(a.get("minimum"))
         elif ctype == ACTIVE_ENERGY_TYPE:
             active_cal = to_float(a.get("sum"))
+        elif ctype == BASAL_ENERGY_TYPE:
+            basal_cal = to_float(a.get("sum"))
         elif ctype in (DISTANCE_WR_TYPE, DISTANCE_CYCLE_TYPE, DISTANCE_SWIM_TYPE):
             # Use whichever distance type matches the activity (Apple
             # records the right one per workout). If multiple, the last
@@ -383,9 +405,28 @@ def extract_workout(elem, since_date):
             if v is not None:
                 distance_km = v
 
+    # Specialise the canonical name for indoor variants. Only the three
+    # types Apple records both ways are renamed; everything else (Hiking,
+    # Swimming, Strength, HIIT, etc.) keeps its base name.
+    if indoor and apple_type in ("Running", "Cycling", "Walking"):
+        apple_type = "Indoor" + apple_type
+
     notes = None
     if "Walking" in apple_type and duration is not None and duration < INCIDENTAL_WALK_MAX_MIN:
         notes = "incidental walk"
+
+    # Elapsed time (wall clock) = endDate - startDate. ``duration`` is
+    # Apple's "Workout Time" — active movement only, paused intervals
+    # excluded. The two differ when the user paused or auto-pause was on.
+    elapsed_min: float | None = None
+    if dt_start is not None and dt_end is not None:
+        delta = (dt_end - dt_start).total_seconds() / 60.0
+        if delta > 0:
+            elapsed_min = round(delta, 1)
+
+    total_cal = None
+    if active_cal is not None and basal_cal is not None:
+        total_cal = round(active_cal + basal_cal, 1)
 
     return {
         "date":         d_start,
@@ -397,6 +438,10 @@ def extract_workout(elem, since_date):
         "max_hr":       int(round(max_hr)) if max_hr is not None else None,
         "min_hr":       int(round(min_hr)) if min_hr is not None else None,
         "active_cal":   round(active_cal, 1) if active_cal is not None else None,
+        "basal_cal":    round(basal_cal, 1) if basal_cal is not None else None,
+        "total_cal":    total_cal,
+        "elevation_m":  round(elevation_m, 1) if elevation_m is not None else None,
+        "elapsed_min":  elapsed_min,
         "distance_km":  round(distance_km, 2) if distance_km is not None else None,
         "source":       attrib.get("sourceName"),
         "notes":        notes,
@@ -477,12 +522,29 @@ def default_since():
     return today - timedelta(days=183)
 
 
+def default_auto_cardio_since() -> date:
+    """First day of the current calendar month.
+
+    Tighter default than ``--since`` so the importer doesn't backfill
+    cardio rows into months the user already manually-logged. Override
+    via ``--auto-cardio-since`` or the per-tracker ``Profile.auto_cardio_since``
+    cell.
+    """
+    today = date.today()
+    return today.replace(day=1)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--zip", required=True, type=Path, help="Path to Apple Health export zip")
     ap.add_argument("--tracker", required=True, type=Path, help="Path to Workout Tracker xlsx")
     ap.add_argument("--since", default=None, type=parse_since,
                     help="Cutoff date (YYYY-MM-DD). Default: 6 months back.")
+    ap.add_argument("--auto-cardio-since", default=None, type=parse_since,
+                    help="Cutoff date for auto-cardio appends (YYYY-MM-DD). "
+                         "Default: start of the current calendar month, or "
+                         "Profile.auto_cardio_since if set. Health Metrics + "
+                         "Workout Sessions still ingest the full --since window.")
     ap.add_argument("--also-bodyweight", action="store_true",
                     help="Mirror Apple BodyMass into the Bodyweight sheet.")
     ap.add_argument("--dry-run", action="store_true",
@@ -550,7 +612,17 @@ def main():
     out_lines.extend(upsert_workout_sessions(wb, workout_rows))
 
     if profile.get("auto_cardio"):
+        # Resolve the auto-cardio cutoff: CLI override > Profile cell > default
+        # (start of current month). Workouts older than the cutoff are kept
+        # in Workout Sessions but skipped for monthly-sheet append.
+        ac_since: date = (
+            args.auto_cardio_since
+            or parse_since(profile.get("auto_cardio_since"))
+            or default_auto_cardio_since()
+        )
+        ac_cutoff = ac_since.isoformat()
         cardio_payload: list[dict] = []
+        skipped_old = 0
         for w in workout_rows:
             apple_type = w.get("apple_type") or ""
             if apple_type not in CARDIO_AUTOLOG_TYPES:
@@ -558,13 +630,28 @@ def main():
             tracker_name = APPLE_TO_TRACKER_EXERCISE.get(apple_type)
             if not tracker_name:
                 continue
+            d = str(w.get("date") or "")[:10]
+            if d < ac_cutoff:
+                skipped_old += 1
+                continue
             cardio_payload.append({
                 "date":         w.get("date"),
                 "exercise":     tracker_name,
                 "duration_min": w.get("duration_min"),
                 "distance_km":  w.get("distance_km"),
                 "avg_hr":       w.get("avg_hr"),
+                # Pass through the metadata extras for the structured note
+                # builder. None-safe on the consumer side; XML always fills
+                # active/basal/elapsed when present.
+                "active_cal":   w.get("active_cal"),
+                "total_cal":    w.get("total_cal"),
+                "elevation_m":  w.get("elevation_m"),
+                "elapsed_min":  w.get("elapsed_min"),
             })
+        out_lines.append(
+            f"Auto-cardio cutoff: {ac_cutoff} "
+            f"({skipped_old} eligible workouts older than cutoff skipped)"
+        )
         out_lines.extend(upsert_monthly_cardio(wb, cardio_payload))
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")

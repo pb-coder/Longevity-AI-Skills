@@ -67,22 +67,29 @@ def rawvalue_name(raw: int | str | None) -> str:
 # in later by editing this set).
 CARDIO_AUTOLOG_TYPES: frozenset[str] = frozenset({
     "Running",
+    "IndoorRunning",
     "Hiking",
     "Cycling",
+    "IndoorCycling",
     "Swimming",
     "HighIntensityIntervalTraining",
 })
 
 
 # ------------------------------------ canonical name → tracker exercise name
-# These five names exist in ``shared/exercises-database.md`` under ``## CARDIO``.
-# When the autolog set grows, the corresponding exercise must already exist in
-# the database — otherwise the monthly row will get flagged as
-# "(not in database)" by the coach's volume model.
+# Apple uses the same activity-type enum for indoor + outdoor running /
+# cycling / walking; the XML importer specialises the canonical name to
+# ``IndoorRunning`` / ``IndoorCycling`` / ``IndoorWalking`` when
+# ``HKIndoorWorkout=1`` metadata is present (HL .txt export doesn't carry
+# this flag). Each name below must exist in ``shared/exercises-database.md``
+# under ``## CARDIO``; otherwise the coach flags the monthly row as
+# "(not in database)".
 APPLE_TO_TRACKER_EXERCISE: dict[str, str] = {
     "Running":                       "Outdoor Run",
+    "IndoorRunning":                 "Treadmill Run",
     "Hiking":                        "Hike",
     "Cycling":                       "Outdoor Cycling",
+    "IndoorCycling":                 "Indoor Cycling",
     "Swimming":                      "Swim",
     "HighIntensityIntervalTraining": "HIIT",
 }

@@ -21,7 +21,7 @@ Each tracker xlsx has a `Profile` sheet (key/value layout) that pins three thing
 |---|---|---|
 | `source` | `xml` (Apple zipped XML) or `hl_export` (HLExport text) | inferred from the first import's file extension |
 | `auto_cardio` | If true, Apple-recorded cardio workouts (Run / Hike / Cycle / Swim / HIIT) auto-flow into the matching `YYYY.MM` monthly sheet | `true` for XML, `false` for HL |
-| `notes` | Free text | None |
+| `auto_cardio_since` | YYYY-MM-DD cutoff for auto-cardio appends. Auto-cardio workouts older than this are skipped on import (workouts still land in `Workout Sessions` regardless) | unset → start of current calendar month |
 
 `/coach` reads `Profile.source` to decide which sections of its report to write — HRV / wrist temp / per-workout-HR sections are gated on the matching capability flags. For HL users, the coach skips those sections entirely rather than printing "not enough data yet." The profile is bootstrapped on first import; manual override is supported by editing `Profile!B2` directly.
 
@@ -46,11 +46,25 @@ Never mix data across trackers in a single skill run.
 
 ## Monthly sheet format
 
-Columns (A–M): `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`.
+Columns (A–Q, 17 cols): `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed`.
 
-Each set is one row. Date, #, and Exercise are populated on every row (no carry-forward shorthand). `#` restarts at 1 per date and is shared by all sets of the same exercise. Cardio rows use the last four columns; strength rows leave them blank.
+Each set is one row. Date, #, and Exercise are populated on every row (no carry-forward shorthand). `#` restarts at 1 per date and is shared by all sets of the same exercise. Cardio rows use the cardio columns (Distance through Elapsed); strength rows leave them blank.
 
-`SESSION` is a per-month session number (1, 2, 3…) merged vertically across every row of the same date — including that session's trailing TOTAL row. It's populated by the styler, not by hand. Each strength session ends with a `TOTAL` row whose Volume cell holds `=SUM(...)` over that session's set rows; cardio-only days have no TOTAL row. Every set row's Volume cell is the formula `=reps*kg` — don't write numeric volumes.
+`SESSION` is a per-month session number (1, 2, 3…) merged vertically across every row of the same date — including that session's trailing TOTAL row. It's populated by the styler, not by hand.
+
+**TOTAL row carries the strength session's full session-level summary.** Each strength session ends with a `TOTAL` row that holds:
+- `Date` (col 2) — the session date.
+- `Volume` (col 8) — `=SUM(H{first}:H{last})` formula over the set rows.
+- `Notes` (col 9) — `Deload Workout` marker when applicable. Hoisted there by the styler from any data row that had the marker (legacy /log convention put it on the warmup row).
+- `Duration (min)` (col 11) — strength block's total active minutes (MM:SS).
+- `Avg HR` (col 13) — duration-weighted across the strength workout cluster.
+- `Active Cal` / `Total Cal` (cols 14–15) — sum across the strength cluster.
+- `Elevation (m)` (col 16) — usually blank for indoor strength.
+- `Elapsed` (col 17) — wall-clock time (H:MM:SS or MM:SS).
+
+The session's data rows (warmup + working sets) hold per-set data only; their cols 11/13/14-17 are blank. Cardio-only days have no TOTAL row — each cardio row carries its own per-row metadata directly. Apple-Watch session metadata is written to the TOTAL row by `import_apple_health.upsert_monthly_strength_session` (XML, full payload) and `import_hl_export` (HL, Active Cal + Duration only). Manual `/log` doesn't write the metadata fields — the importers fill them post-hoc on the matching session.
+
+Every set row's Volume cell is the formula `=reps*kg` — don't write numeric volumes.
 
 ## Skills
 

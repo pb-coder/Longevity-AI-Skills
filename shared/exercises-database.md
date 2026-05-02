@@ -352,6 +352,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Walk [Outdoor]
 - Outdoor Run [Outdoor]
 - Outdoor Cycling [Outdoor]
+- HIIT [Various]
 
 ---
 

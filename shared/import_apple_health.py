@@ -627,29 +627,16 @@ def cluster_strength_sessions(workout_rows: list[dict]) -> tuple[list[dict], lis
     return sessions, warnings
 
 
-def default_auto_cardio_since() -> date:
-    """First day of the current calendar month.
-
-    Tighter default than ``--since`` so the importer doesn't backfill
-    cardio rows into months the user already manually-logged. Override
-    via ``--auto-cardio-since`` or the per-tracker ``Profile.auto_cardio_since``
-    cell.
-    """
-    today = date.today()
-    return today.replace(day=1)
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--zip", required=True, type=Path, help="Path to Apple Health export zip")
     ap.add_argument("--tracker", required=True, type=Path, help="Path to Workout Tracker xlsx")
     ap.add_argument("--since", default=None, type=parse_since,
-                    help="Cutoff date (YYYY-MM-DD). Default: 6 months back.")
-    ap.add_argument("--auto-cardio-since", default=None, type=parse_since,
-                    help="Cutoff date for auto-cardio appends (YYYY-MM-DD). "
-                         "Default: start of the current calendar month, or "
-                         "Profile.auto_cardio_since if set. Health Metrics + "
-                         "Workout Sessions still ingest the full --since window.")
+                    help="Cutoff date (YYYY-MM-DD) for Health Metrics + "
+                         "Workout Sessions ingest. Default: 6 months back. "
+                         "Auto-cardio appends are scoped to the current "
+                         "calendar month regardless — past months are not "
+                         "re-scanned (see upsert_monthly_cardio).")
     ap.add_argument("--also-bodyweight", action="store_true",
                     help="Mirror Apple BodyMass into the Bodyweight sheet.")
     ap.add_argument("--dry-run", action="store_true",
@@ -717,27 +704,17 @@ def main():
     out_lines.extend(upsert_workout_sessions(wb, workout_rows))
 
     if profile.get("auto_cardio"):
-        # Resolve the auto-cardio cutoff: CLI override > Profile cell > default
-        # (start of current month). Workouts older than the cutoff are kept
-        # in Workout Sessions but skipped for monthly-sheet append.
-        ac_since: date = (
-            args.auto_cardio_since
-            or parse_since(profile.get("auto_cardio_since"))
-            or default_auto_cardio_since()
-        )
-        ac_cutoff = ac_since.isoformat()
+        # The current-month gate lives inside ``upsert_monthly_cardio`` —
+        # we hand it every eligible Apple workout in the --since window
+        # and the helper drops anything outside the current calendar
+        # month. Past months are "finished" and never re-scanned.
         cardio_payload: list[dict] = []
-        skipped_old = 0
         for w in workout_rows:
             apple_type = w.get("apple_type") or ""
             if apple_type not in CARDIO_AUTOLOG_TYPES:
                 continue
             tracker_name = APPLE_TO_TRACKER_EXERCISE.get(apple_type)
             if not tracker_name:
-                continue
-            d = str(w.get("date") or "")[:10]
-            if d < ac_cutoff:
-                skipped_old += 1
                 continue
             cardio_payload.append({
                 "date":         w.get("date"),
@@ -753,10 +730,6 @@ def main():
                 "elevation_m":  w.get("elevation_m"),
                 "elapsed_min":  w.get("elapsed_min"),
             })
-        out_lines.append(
-            f"Auto-cardio cutoff: {ac_cutoff} "
-            f"({skipped_old} eligible workouts older than cutoff skipped)"
-        )
         out_lines.extend(upsert_monthly_cardio(wb, cardio_payload))
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")

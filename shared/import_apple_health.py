@@ -639,6 +639,10 @@ def main():
                          "re-scanned (see upsert_monthly_cardio).")
     ap.add_argument("--also-bodyweight", action="store_true",
                     help="Mirror Apple BodyMass into the Bodyweight sheet.")
+    ap.add_argument("--allow-past-months", action="store_true",
+                    help="Bypass the current-month auto-cardio gate so rows "
+                         "flow into prior YYYY.MM sheets too. One-off backfill "
+                         "switch — past months are normally treated as finished.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Parse and aggregate; do not write the workbook.")
     args = ap.parse_args()
@@ -730,7 +734,9 @@ def main():
                 "elevation_m":  w.get("elevation_m"),
                 "elapsed_min":  w.get("elapsed_min"),
             })
-        out_lines.extend(upsert_monthly_cardio(wb, cardio_payload))
+        out_lines.extend(upsert_monthly_cardio(
+            wb, cardio_payload, allow_past_months=args.allow_past_months,
+        ))
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")
 

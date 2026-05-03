@@ -1478,7 +1478,7 @@ def _parse_duration_minutes(v):
         return None
 
 
-def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
+def upsert_monthly_cardio(wb, rows: list[dict], allow_past_months: bool = False) -> list[str]:
     """Append cardio rows to ``YYYY.MM`` sheets with dedupe + restyle.
 
     ``rows`` is a list of dicts with keys:
@@ -1502,6 +1502,12 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
       ``=F*G`` Volume formula. The note column carries
       ``"auto-imported from Apple"`` so the manual-wins rule can find it.
 
+    ``allow_past_months`` (default False) bypasses the current-month gate
+    and lets rows flow into prior YYYY.MM sheets too. Use sparingly — the
+    gate is the whole reason past months are immune to re-scan drift.
+    Intended for one-off backfills (e.g. enabling auto-cardio retroactively
+    for a tracker that had it off).
+
     Returns one summary string per touched sheet, plus a roll-up. Empty
     input returns a no-op summary.
     """
@@ -1517,6 +1523,7 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
     # never re-scanned, so a row the user deleted from 2026.02 stays
     # deleted on the next import without needing a tombstone. This is the
     # whole reason the Tombstones sheet was removed in 2026-05.
+    # ``allow_past_months=True`` opts out for one-off backfills.
     current_month = _current_month_key()
     skipped_past_month = 0
     by_month: dict[str, list[dict]] = {}
@@ -1525,7 +1532,7 @@ def upsert_monthly_cardio(wb, rows: list[dict]) -> list[str]:
         if not d or len(d) != 10:
             continue
         key = f"{d[:4]}.{d[5:7]}"
-        if key != current_month:
+        if not allow_past_months and key != current_month:
             skipped_past_month += 1
             continue
         by_month.setdefault(key, []).append(r)

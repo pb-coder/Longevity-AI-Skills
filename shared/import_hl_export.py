@@ -437,6 +437,10 @@ def main() -> int:
                          "re-scanned (see upsert_monthly_cardio).")
     ap.add_argument("--also-bodyweight", action="store_true",
                     help="Mirror the parsed bodyweight series into the Bodyweight sheet.")
+    ap.add_argument("--allow-past-months", action="store_true",
+                    help="Bypass the current-month auto-cardio gate so rows "
+                         "flow into prior YYYY.MM sheets too. One-off backfill "
+                         "switch — past months are normally treated as finished.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Parse and aggregate; do not write the workbook.")
     args = ap.parse_args()
@@ -503,17 +507,19 @@ def main() -> int:
 
     wb = openpyxl.load_workbook(args.tracker)
 
-    # Bootstrap the Profile sheet for HL on first run (auto_cardio defaults
-    # to False per the plan — Fabian opts in later once he's confident in
-    # the workout records).
+    # Bootstrap the Profile sheet for HL on first run. Auto-cardio defaults
+    # to True — HL workout records (Hike / Outdoor Run / Outdoor Cycling /
+    # Swim / HIIT) have proven reliable in practice, so the conservative
+    # opt-in default has been retired. Flip the flag to False on a per-
+    # tracker basis if a specific user wants manual-only logging.
     _, profile_created = ensure_profile_sheet(
-        wb, default_source="hl_export", default_auto_cardio=False,
+        wb, default_source="hl_export", default_auto_cardio=True,
     )
     profile = read_profile(wb)
 
     out_lines: list[str] = []
     if profile_created:
-        out_lines.append("Profile: created (source=hl_export, auto_cardio=false)")
+        out_lines.append("Profile: created (source=hl_export, auto_cardio=true)")
 
     out_lines.extend(upsert_health_metrics(wb, metric_entries))
     out_lines.extend(upsert_workout_sessions(wb, workout_rows))
@@ -616,7 +622,9 @@ def main() -> int:
                 "elevation_m":  w.get("elevation_m"),
                 "elapsed_min":  w.get("elapsed_min"),
             })
-        out_lines.extend(upsert_monthly_cardio(wb, cardio_payload))
+        out_lines.extend(upsert_monthly_cardio(
+            wb, cardio_payload, allow_past_months=args.allow_past_months,
+        ))
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")
 

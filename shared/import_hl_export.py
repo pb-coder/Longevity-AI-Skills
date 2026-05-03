@@ -78,9 +78,12 @@ WORKOUT_RE = re.compile(
 INCIDENTAL_WALK_MAX_MIN = 15.0
 
 # Sleep-block stitching: a gap longer than this between consecutive sleep
-# events ends the current sleep block. 30 minutes covers brief wakes and
-# bathroom trips without merging two genuinely separate sleeps.
-SLEEP_BLOCK_GAP_MIN = 30.0
+# events ends the current sleep block. Apple Watch can leave 60-90 min gaps
+# between consecutive ``Sleep: Asleep`` stamps during deep sleep, so a 30-min
+# threshold fragments continuous nights into many tiny blocks; 120 sits past
+# the cadence plateau where the totals stabilise. ``Sleep: Awake`` events
+# still close blocks, so brief mid-night wakings remain excluded.
+SLEEP_BLOCK_GAP_MIN = 120.0
 
 
 def to_float(v) -> float | None:

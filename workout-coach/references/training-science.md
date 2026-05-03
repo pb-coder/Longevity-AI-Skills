@@ -276,7 +276,7 @@ Maximum positive: ~9.0; maximum negative: ~1.0; clamped to [0, 10]. `confidence`
 
 ## §19 Per-Session HR
 
-**Source dependency.** This section requires Apple's native zipped XML export. HLExport workouts carry duration / calories / distance only — the avg/max/min HR statistics that Apple computes inside the watch aren't included in the text dump. The capability gate in `read_tracker.py` (`capabilities.per_workout_hr`) short-circuits the cross-check for HL users; the standard load-progression rules (rep-range completion, perceived exertion) still drive their plans.
+**Source dependency.** This section requires Apple's native zipped XML export for strength rows. HLExport strength workouts carry duration / calories / distance only — the avg/max/min HR statistics Apple computes inside the watch aren't included in the text dump for strength sessions. The capability gate in `read_tracker.py` (`capabilities.per_workout_hr_strength`) short-circuits the cross-check for HL users on strength; the standard load-progression rules (rep-range completion, perceived exertion) still drive their plans. Cardio rows on HL trackers do carry avg_hr from HL's workout extractor, so per-cardio-session TRIMP and intensity_pct render normally.
 
 Apple emits per-workout HR statistics (avg / max / min) on every `Workout` record. The importer matches these to logged training by date. `read_tracker.py` folds avg_hr + max_hr onto each `monthly_sessions[*]` entry and exposes per-muscle HR-creep flags via `hr_at_volume_divergence`.
 

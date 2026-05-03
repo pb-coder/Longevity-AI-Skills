@@ -263,33 +263,44 @@ def read_bodyweight(wb) -> list[dict]:
     """Return all Bodyweight entries sorted ascending by date.
 
     Each entry: {"date": "YYYY-MM-DD", "kg": float, "notes": str|None}.
-    Returns [] if the sheet is missing. The sheet stores newest-first with
-    a per-year merge on column A, but this function re-sorts ascending so
-    the trend/recent helpers see a stable chronological order.
+    Falls back to Health Metrics' ``bodyweight_kg`` column when no
+    dedicated Bodyweight sheet is present (or it is empty) so trackers
+    that only receive bodyweight via the Apple importer still surface a
+    series for /coach.
     """
-    if "Bodyweight" not in wb.sheetnames:
-        return []
-    ws = wb["Bodyweight"]
     out: list[dict] = []
-    for raw in ws.iter_rows(min_row=2, values_only=True):
-        if not raw:
-            continue
-        d, date_idx = bw_locate_date(raw)
-        if d is None:
-            continue
-        kg_raw = raw[date_idx + 1] if len(raw) > date_idx + 1 else None
-        try:
-            kg = float(kg_raw) if kg_raw not in (None, "") else None
-        except (TypeError, ValueError):
-            continue
+    if "Bodyweight" in wb.sheetnames:
+        ws = wb["Bodyweight"]
+        for raw in ws.iter_rows(min_row=2, values_only=True):
+            if not raw:
+                continue
+            d, date_idx = bw_locate_date(raw)
+            if d is None:
+                continue
+            kg_raw = raw[date_idx + 1] if len(raw) > date_idx + 1 else None
+            try:
+                kg = float(kg_raw) if kg_raw not in (None, "") else None
+            except (TypeError, ValueError):
+                continue
+            if kg is None:
+                continue
+            notes = raw[date_idx + 2] if len(raw) > date_idx + 2 else None
+            out.append({
+                "date": d,
+                "kg": kg,
+                "notes": (str(notes).strip() if notes else None),
+            })
+    if out:
+        out.sort(key=lambda e: e["date"])
+        return out
+    # Fallback: pull from Health Metrics' bodyweight_kg column. Notes on
+    # Health Metrics describe the day overall, not the weigh-in, so leave
+    # the bodyweight notes None.
+    for entry in read_health_metrics(wb):
+        kg = entry.get("bodyweight_kg")
         if kg is None:
             continue
-        notes = raw[date_idx + 2] if len(raw) > date_idx + 2 else None
-        out.append({
-            "date": d,
-            "kg": kg,
-            "notes": (str(notes).strip() if notes else None),
-        })
+        out.append({"date": entry["date"], "kg": kg, "notes": None})
     out.sort(key=lambda e: e["date"])
     return out
 

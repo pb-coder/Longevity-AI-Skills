@@ -20,6 +20,7 @@
 | Yoga | Yoga | — |
 | Stretch, Stretching, Mobility | Stretching | — |
 | Outdoor Cycling, Bike Ride, Cycling | Outdoor Cycling | — |
+| Romain Chair Sit-Up, Romain Chair | Roman Chair Sit-Up | — |
 
 ## Modifier Handling
 

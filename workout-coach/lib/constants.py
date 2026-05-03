@@ -37,7 +37,7 @@ SOURCE_CAPABILITIES = {
         "sleep_stages":       True,
         "sleep_breath_dist":  True,
         "exercise_min_daily": True,
-        "per_workout_hr":     True,
+        "per_workout_hr_strength": True,
     },
     "hl_export": {
         "hrv":                False,
@@ -47,7 +47,7 @@ SOURCE_CAPABILITIES = {
         "sleep_stages":       False,
         "sleep_breath_dist":  False,
         "exercise_min_daily": False,
-        "per_workout_hr":     False,
+        "per_workout_hr_strength": False,
     },
 }
 
@@ -86,6 +86,7 @@ VOLUME_LANDMARKS = {
     "core":         {"mv": 0,  "mev": 4,  "mav": 16, "mrv": 25},
     "erectors":     {"mv": 2,  "mev": 4,  "mav": 10, "mrv": 16},
     "traps":        {"mv": 2,  "mev": 4,  "mav": 10, "mrv": 16},
+    "external_rotators": {"mv": 0,  "mev": 2,  "mav": 6,  "mrv": 12},
     "adductors":    {"mv": 0,  "mev": 2,  "mav": 8,  "mrv": 12},
     "neck":         {"mv": 0,  "mev": 2,  "mav": 6,  "mrv": 12},
 }

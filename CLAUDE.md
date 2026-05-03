@@ -74,8 +74,11 @@ shared/               # Code + docs imported by multiple skills
                           # HR, or sleep stages — those depend on Apple
                           # watch-side aggregation HL doesn't replicate.
                           # Bootstraps Profile with source=hl_export,
-                          # auto_cardio=false (flip later via the Profile
-                          # sheet once HL workout records are reliable).
+                          # auto_cardio=true. HL workout records (Hike,
+                          # Outdoor Run, Outdoor Cycling, Swim, HIIT) have
+                          # proven reliable; flip auto_cardio=false on a
+                          # per-tracker basis if manual-only logging is
+                          # preferred.
                           # Usage: python3 shared/import_hl_export.py
                           #          --txt "./health_export_*.txt"
                           #          --tracker "<tracker>.xlsx"
@@ -204,9 +207,10 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
   app). The /log skill dispatches by extension; /coach gates report
   sections on `capabilities` so HL users don't see "not enough HRV
   data yet" prompts for metrics their source structurally can't
-  provide. When `auto_cardio` is true, eligible Apple workouts also
-  flow into the matching `YYYY.MM` monthly sheet, with manual-wins
-  dedupe (date + exercise, ±1min duration tolerance).
+  provide. `auto_cardio` defaults to true on both sources (XML and
+  HL); when on, eligible Apple workouts (Running / Hiking / Cycling /
+  Swimming / HIIT) flow into the matching `YYYY.MM` monthly sheet,
+  with manual-wins dedupe (date + exercise, ±1min duration tolerance).
 - **Coach plan output includes a per-workout DATE placeholder**: every
   strength workout heading is followed by `**Date:** ___________` on its
   own line so the user can fill in the date when they actually train and

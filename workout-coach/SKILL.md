@@ -100,7 +100,7 @@ What the JSON contains:
 
 **Source + capabilities (read first to gate sections):**
 - `data_source`: `xml` (Apple's zipped XML — Nihad) or `hl_export` (HLExport text — Fabian). Trust this string; don't override based on populated fields.
-- `capabilities`: per-source feature map (`hrv`, `wrist_temp`, `resting_hr_daily`, `walking_hr`, `sleep_stages`, `sleep_breath_dist`, `exercise_min_daily`, `per_workout_hr`). **False = structurally unsupported.** Gate report sections on this, not on null fields.
+- `capabilities`: per-source feature map (`hrv`, `wrist_temp`, `resting_hr_daily`, `walking_hr`, `sleep_stages`, `sleep_breath_dist`, `exercise_min_daily`, `per_workout_hr_strength`). **False = structurally unsupported.** Gate report sections on this, not on null fields. `per_workout_hr_strength` only describes strength-session HR — HL trackers still carry per-workout HR for cardio rows (hikes / runs), so cardio TRIMP and intensity_pct render normally on those.
 - `auto_cardio_enabled`: bool. True = Apple-recorded runs / hikes / HIIT auto-flow into the monthly sheets.
 - `today`: ISO date.
 - `estimated_max_hr`, `estimated_rest_hr`: derived once at the top. `max_hr` is the largest observed Apple max-HR (or 208 − 0.7×age fallback for HL). `rest_hr` is the 28-day mean of `resting_hr` (or 60 fallback for HL). Used by all HR-zone / TRIMP / load-band math below.
@@ -122,14 +122,14 @@ What the JSON contains:
 - `auto_deload_candidates`: dates where the heuristic detected a deload-like week (≥35% volume drop AND ≥8 bpm avg-HR drop vs prior 4w) that the user **didn't** mark. Surface as a question, not a claim.
 
 **Cardio rollup (28-day window):**
-- `cardio_last_28d`: `{sessions, total_minutes, total_distance_km, total_active_cal, zone2_minutes, interval_sessions}`. Coarse intervals/Z2 split via Notes keywords + avg_hr ≥165 heuristic.
-- `cardio_hr_zones_28d`: time in HR zones using HRR (Karvonen). `{window_days: 28, total_minutes, z1, z2, z3, z4, z5, z2_pct, z3_pct, z4_z5_pct}`. **High z3_pct = grey-zone trap** (too much moderate work, too little easy or hard). Polarized = z2_pct + z4_z5_pct dominant; pyramidal = z2 > z3 > z4_z5 cleanly stepping down.
+- `cardio_last_28d`: `{sessions, total_minutes, total_distance_km, total_active_cal, non_interval_minutes, interval_sessions}`. Coarse intervals-vs-non-interval split via Notes keywords + avg_hr ≥165 heuristic. **`non_interval_minutes` is NOT a true Zone-2 measurement** — a 3h hike at avg_hr 110 (Z1) lands in the same bucket as a 45min Z2 ride. Treat it as a coarse fallback, not a Z2 number.
+- `cardio_hr_zones_28d`: time in HR zones using HRR (Karvonen). `{window_days: 28, total_minutes, z1, z2, z3, z4, z5, z2_pct, z3_pct, z4_z5_pct}`. **This is the canonical source for true Zone-2 minutes** (HRR-based, requires per-workout `avg_hr` on cardio sessions). **High z3_pct = grey-zone trap** (too much moderate work, too little easy or hard). Polarized = z2_pct + z4_z5_pct dominant; pyramidal = z2 > z3 > z4_z5 cleanly stepping down.
 
 **Daily activity (NEAT — non-exercise activity thermogenesis):**
 - `daily_activity_28d`: `{exercise_min_daily_avg, walking_workouts_count, walking_minutes_28d, walking_distance_km_28d, incidental_walks_count, assessment}`. Exercise minutes are Apple's brisk-activity tally (XML only — HL gets None). Walking workouts include both intentional walks and short flagged-incidental walks. **`assessment`** is the band the coach acts on: `low` (<15 min/day basis), `moderate` (15-45), `high` (≥45). Basis is `exercise_min_daily_avg` when present, else `walking_minutes_28d / 28` as a NEAT proxy. Use this to distinguish "sedentary then trains" from "active all day and trains" — the cardio prescription differs.
 
 **Recovery + training load (Python-derived signals — use these instead of eyeballing raw metrics):**
-- `recovery`: `{score: 0-10, confidence: low|medium|high, drivers: [{metric, recent_avg, baseline, delta, contrib}]}`. Score sums clamped contributions from HRV vs 60d baseline (±2), RHR vs 28d typical (±2), sleep vs 7h target (±2), wrist temp vs 60d baseline (±1.5). **Use the score directly in §18-style "should I train hard today?" decisions**; cite the dominant negative driver(s) by name.
+- `recovery`: `{score: 0-10|null, confidence: low|medium|high, drivers: [...]}`. Score is a **renormalized weighted average of per-signal personal z-scores**, mapped to [0, 10]. Each signal: z-score against rolling personal baseline + stdev (clamped ±2σ), then `component = 5.0 + z × 2.5`. Composite = weighted average over signals with sufficient sample (≥7 readings in baseline window), weights renormalized to sum to 1.0 over present signals. **5.0 means "average for this user across whatever signals are available"** — *not* "base 5 minus what's missing", so HL trackers with fewer signals aren't structurally biased downward. Signals + raw weights (renormalized at runtime): HRV 0.30 (cap-gated), RHR 0.15 (inverted), sleep total 0.20, sleep deep h 0.05 (cap-gated), sleep REM h 0.05 (cap-gated), wrist temp 0.10 (cap-gated, inverted), HR Recovery 0.10, sleep consistency 0.05 (penalty-only). VO2max trend is **not** in the score (chronic fitness signal — see `vo2max_latest` / `vo2max_trend_per_4w` for the fitness check). Each driver entry: `{metric, component_score (0-10), weight (renormalized), z, recent_avg, baseline_mean, baseline_stdev, n_recent, n_baseline}` for z-scored signals; `{metric, component_score, weight, stdev, threshold, n_recent}` for sleep consistency. Drivers sorted by `|component_score - 5|` descending. `score: null` only when zero signals had sufficient sample. **Use the score directly in §18-style "should I train hard today?" decisions**; cite the most-deviating driver(s) by name (the first ones in the list).
 - `training_load`: `{ctl, atl, tsb, trend_7d}`. CTL = chronic load (42-day EWMA of TRIMP), ATL = acute (7-day EWMA), TSB = CTL−ATL ("form": positive = peaked, negative = under load, ≤−10 = high fatigue risk). `trend_7d` = ΔCTL over the last 7 days (positive = building fitness).
 - `hr_at_volume_divergence`: `{muscle: {slope_bpm_per_4w, n_sessions, hint}}`. Volume-weighted regression of strength-session avg HR vs time over 8 weeks, per primary muscle group. Slope ≥+3 bpm/4w = **fatigue or under-recovery** (HR creeping at same load); ≤−3 = improving conditioning. Use to call out specific muscle groups where volume should be held or cut.
 
@@ -237,7 +237,7 @@ Keep the report tight. The user is an established trainee who has been coached b
 | Cardio sessions | {N} ({Z2_min} min Z2, {Z3_min} min Z3, {Z4Z5_min} min Z4–5) |
 | Daily activity | {exercise_min_daily_avg} min/day Apple exercise minutes ({assessment}); {walking_workouts_count} walking workouts totalling {walking_distance_km_28d} km |
 | Training load | CTL {ctl} / ATL {atl} / TSB {tsb} ({state}) |
-| Recovery score | {score}/10 ({confidence} confidence; trend ↑/↓/→ vs prior 4w from health_metrics_weekly) |
+| Recovery score | {score}/10 ({confidence} confidence; {improving / drifting / mixed} vs prior 4w) |
 ```
 
 Where `{state}` is `well rested` (TSB > +5), `balanced` (−5 to +5), `carrying load` (−10 to −5), `fatigued` (−15 to −10), or `high fatigue` (≤ −15).
@@ -247,7 +247,12 @@ How to compute the values:
 - **Cardio sessions**: count strands with `session_kind == "cardio"`. Z2/Z3/Z4–5 minutes come from `cardio_hr_zones_28d.z2`, `.z3`, `.z4 + .z5`.
 - **Daily activity row**: read `daily_activity_28d` directly. If `exercise_min_daily_avg` is null (HL trackers), substitute `{walking_minutes_28d / 28} min/day walking ({assessment})` and drop the "Apple exercise minutes" wording — same row shape, source-honest.
 - **Training load**: read `training_load.ctl`, `.atl`, `.tsb`. Pick the `state` band from the table above.
-- **Recovery score**: `recovery.score` and `recovery.confidence`. The trend arrow comes from comparing the most recent 1-2 weeks of `health_metrics_weekly` against the earlier weeks' aggregates — pick the dominant direction across HRV / RHR / sleep_total_h / wrist_temp.
+- **Recovery score**: `recovery.score` and `recovery.confidence`. **Trend descriptor (deterministic procedure — replaces the old `↑/↓/→` arrow):**
+  1. Walk `health_metrics_weekly`. For each of HRV / RHR (inverted: lower is better) / sleep_total_h / wrist_temp_c (inverted) / hr_recovery_1min / vo2max, compare the most-recent week's value to the mean of the prior 3 weeks.
+  2. Score +1 for "better than prior" (delta exceeds 5% relative magnitude in the favorable direction), −1 for "worse" (5% in the unfavorable direction), 0 when |delta| < 5% relative.
+  3. Sum across available metrics. Skip metrics that are null on the source (HL trackers won't score HRV / wrist temp).
+  4. Sum ≥ +2 → write `improving`. Sum ≤ −2 → write `drifting`. Otherwise → write `mixed`.
+  Always commit to one of the three words. Never write `→` or "flat" or "stable" — the descriptor must be one of `improving / drifting / mixed`.
 
 ### What's working
 Bullet points. Plain language. What they're doing well with specific exercises and numbers. 3-5 items max.
@@ -256,44 +261,57 @@ Bullet points. Plain language. What they're doing well with specific exercises a
 Bullet points. Prioritized by impact. Each item: what's wrong, why it matters for them, what to do. 3-5 items max. No technical justification beyond one sentence.
 
 ### Are you getting stronger?
-For each major exercise with enough data, combine the raw top-set line with the e1RM trajectory:
+For each major exercise with enough data, write **one bulleted line per lift** using the format below. No bold-name paragraphs — bullets only. The substantive rules (slope as primary signal, confidence handling, stalled-sessions surfacing, capability-gated TRIMP commentary) all stay; only the visual shape changes.
 
-`Exercise Name: Xkg × Y reps → Xkg × Y reps, e1RM Akg → Bkg (+Ckg / 4 weeks) — getting stronger / stuck / going backwards`
+```
+- **Exercise Name** — Xkg × Y → Xkg × Y, e1RM Akg → Bkg (+Ckg / 4w), {getting stronger / stuck / going backwards}.
+  - Last session TRIMP {N} ({band}, {pct}% HRR) — {context vs 28d distribution} (skip when capabilities.per_workout_hr_strength is False for strength rows).
+  - Session HR / stall / confidence / annotated-context note when relevant (one sub-bullet, optional).
+```
 
 Pull the values from `estimated_1rm[exercise]`:
 - `prev_e1rm_kg → current_e1rm_kg` for the immediate delta.
-- `slope_kg_per_4w` for the trajectory line (`+Ckg / 4 weeks`). Use this as the primary signal — it sees through one-off noise that a last-vs-prev delta can't. If it's null (fewer than 3 sessions), drop the trend chunk and rely on the raw delta only.
-- `confidence`: when `low` (high-rep top sets), append a clause like "e1RM is noisy at 12+ reps — push one heavier set to get a cleaner read." Don't claim a trend with confidence on a noisy signal.
-- `stalled_sessions ≥ 2` without a deload in the window: call out the stall explicitly. Suggest one of: bump volume, change variation, or schedule a deload (let Phase 2 decide which).
+- `slope_kg_per_4w` for the trajectory line (`+Ckg / 4w`). Use this as the **primary signal** — it sees through one-off noise that a last-vs-prev delta can't. If it's null (fewer than 3 sessions), drop the trend chunk and rely on the raw delta only.
+- `confidence`: when `low` (high-rep top sets), append a sub-bullet like "e1RM is noisy at 12+ reps — push one heavier set to get a cleaner read." Don't claim a trend with confidence on a noisy signal.
+- `stalled_sessions ≥ 2` without a deload in the window: surface the stall as a sub-bullet. Suggest one of: bump volume, change variation, or schedule a deload (let Phase 2 decide which).
 
 A negative `delta_vs_prev_kg` and a flat-or-negative `slope_kg_per_4w` together on a main lift without a deload around it is a real flag. A negative delta with a positive slope is one bad session — don't over-react.
 
-**REQUIRED per-session TRIMP commentary.** For each major lift you cover (compound or anchor isolation), append one line that uses session-level data from `monthly_sessions[*]`. Pull the most recent strength session that contains this exercise; cite `trimp`, `load_band`, and `intensity_pct`. Compare the TRIMP to the 28d strength-session distribution.
-
-Format:
+**Respect user-provided context on outlier rows.** Before flagging a session as a "logging error" / "log typo" / "drop is suspicious", check `progression_summary[exercise].last_notes` (and `--include-rows` if you need the full per-set Notes). If the user has explicitly explained the anomaly (gym change, equipment swap, illness, deload, etc.), acknowledge the context in the sub-bullet — don't second-guess the user's own annotation. Example:
 
 ```
-**Barbell Back Squat:** 70kg × 8 → 70kg × 8, e1RM 88.7kg → 88.7kg (+2.65kg / 4w) — getting stronger.
-Last session TRIMP 87 (moderate, 64% HRR) — within the 28d session-load median; no carryover signal.
+- **Cable Lateral Raise** — 15kg × 6 → 4kg × 6, e1RM 18kg → 4.8kg, {context-driven drop, not a stall}.
+  - Per the log note, the 04-29 session was at a different gym with an unusual cable ratio — 4 on the dial felt like ~14kg of effort. Don't read the e1RM dip as a real strength regression.
+```
+
+The e1RM model still counts the row (data integrity stays); confidence may dip; but the narrative respects the user's own annotation rather than calling it a typo.
+
+**REQUIRED per-session TRIMP sub-bullet.** For each major lift you cover (compound or anchor isolation), append one sub-bullet that uses session-level data from `monthly_sessions[*]`. Pull the most recent strength session that contains this exercise; cite `trimp`, `load_band`, and `intensity_pct`. Compare the TRIMP to the 28d strength-session distribution.
+
+Example:
+
+```
+- **Barbell Back Squat** — 70kg × 8 → 70kg × 8, e1RM 88.7kg → 88.7kg (+2.65kg / 4w), getting stronger.
+  - Last session TRIMP 87 (moderate, 64% HRR) — within the 28d session-load median; no carryover signal.
 ```
 
 If TRIMP for the most recent session is in the top 20% of the 28d strength distribution AND the next-day recovery score dropped, surface the carryover explicitly:
 
 ```
-Last session TRIMP 142 (hard, 79% HRR) — top quartile for this block. Recovery score the next morning was 3.8 → cut bench frequency this week, not load.
+  - Last session TRIMP 142 (hard, 79% HRR) — top quartile for this block. Recovery score the next morning was 3.8 → cut bench frequency this week, not load.
 ```
 
-Skip the TRIMP line entirely when `capabilities.per_workout_hr` is False (HL users — no per-workout HR means the TRIMP score is None/zero). Don't write `Last session TRIMP None`. Drop the line cleanly.
+Skip the TRIMP sub-bullet entirely on **strength** sessions when `capabilities.per_workout_hr_strength` is False (HL users — strength rows carry no per-workout HR so TRIMP is None/zero). Don't write `Last session TRIMP None`. Drop the sub-bullet cleanly. The flag is strength-only — cardio sessions on HL still carry avg_hr and TRIMP, so per-session TRIMP commentary on hikes / runs continues to render.
 
-**Optional session-HR line.** Skip entirely when `capabilities.per_workout_hr` is False — HL users don't get per-workout HR. When the capability is present, the strength session's `avg_hr` is on `monthly_sessions[*]` directly. Use it to append a session HR comment — but only when it adds signal. Look up §19 for the bands. Examples:
+**Optional session-HR sub-bullet.** Skip entirely on strength sessions when `capabilities.per_workout_hr_strength` is False — HL users don't get per-workout HR for strength. When the capability is present, the strength session's `avg_hr` is on `monthly_sessions[*]` directly. Use it to append a session-HR comment — but only when it adds signal. Look up §19 for the bands. Examples:
 
-- HR sits in the normal hypertrophy band (130-150 bpm avg) → don't write the line. It's not informative.
-- HR is creeping above 150 bpm avg on the same load → write `Session avg HR 152 bpm (last 4 sessions) — running hot, hold load this block.`
-- HR is below 110 bpm avg on a working set → write `Session avg HR 105 bpm — effort too light, push reps before adding load.`
+- HR sits in the normal hypertrophy band (130-150 bpm avg) → don't write the sub-bullet. It's not informative.
+- HR is creeping above 150 bpm avg on the same load → `Session avg HR 152 bpm (last 4 sessions) — running hot, hold load this block.`
+- HR is below 110 bpm avg on a working set → `Session avg HR 105 bpm — effort too light, push reps before adding load.`
 
 For the per-muscle "is HR rising at constant load" call, use `hr_at_volume_divergence[muscle].hint` — that's the version that controls for volume so it's the right read of fatigue accumulating. Don't fabricate a trend if `monthly_sessions` lacks `avg_hr` on the relevant dates.
 
-If data is too limited to judge (history < 2 entries), say that in one sentence.
+If data is too limited to judge (history < 2 entries), say that in one sentence above the bulleted list rather than as a bullet for that lift.
 
 **Bodyweight line.** Add one line at the bottom of this section using `bodyweight_latest` and `bodyweight_trend_kg_per_week`:
 
@@ -336,52 +354,52 @@ When `auto_deload_candidates` is non-empty, treat the date as a question, not a 
 
 ### Recovery state
 
-**REQUIRED.** Lead with `recovery.score` (0–10), then list **every driver** in `recovery.drivers` — sorted by `|contrib|` descending. No driver is dropped on a contribution-magnitude threshold; small contributions are signal too. The agent picks the human-readable label and renders deltas with units.
+**REQUIRED.** Lead with `recovery.score` (0–10), then list **every driver** in `recovery.drivers` — already sorted by `|component_score - 5|` descending. No driver is dropped on a magnitude threshold; small deviations are signal too. The agent picks the human-readable label and renders the personal-baseline comparison with units.
 
 Hard template:
 
 ```
-Recovery {score}/10 — {green / moderate / under-recovered} ({confidence} confidence).
+Recovery {score}/10 — {green / moderate / under-recovered} ({confidence} confidence; {N} contributors).
 
-Drivers (sorted by |contrib| descending):
-- {metric_label}: {value} vs {baseline} ({delta_human}, contrib {contrib})
+Drivers (sorted by |z| descending; component score is on the same 0–10 scale as the composite, so 5 = personal average):
+- {metric_label}: {recent_value} vs personal baseline {baseline_mean} ± {baseline_stdev} (z {z_signed}, weight {weight}, component {component_score}/10)
 - (repeat for every driver in recovery.drivers; never drop one)
 ```
 
-Score-band labels:
+Score-band labels (unchanged from before — 5/10 still means "average for this user", 4 / 6.5 still mark the hold-loads window):
 - `recovery.score ≥ 6.5` → `green`. Normal session.
 - `recovery.score 4–6.5` → `moderate`. Hold load, no PR attempts.
 - `recovery.score < 4` → `under-recovered`. Cut session intensity. If `monthly_sessions[-1].date` is today or yesterday, prescribe an easy / active-recovery day.
+- `recovery.score == null` → too few signals had baseline coverage to compute. Treat as `low` confidence; rely on TSB and recent session history instead.
 
 Metric label mapping (use these strings exactly):
 - `hrv_sdnn` → "HRV"
 - `resting_hr` → "RHR"
 - `sleep_total_h` → "Sleep"
-- `sleep_deep_pct` → "Sleep depth (deep)"
-- `sleep_rem_pct` → "Sleep depth (REM)"
+- `sleep_deep_h` → "Sleep depth (deep)"
+- `sleep_rem_h` → "Sleep depth (REM)"
 - `sleep_consistency_7d_stdev_h` → "Sleep consistency"
 - `wrist_temp_c` → "Wrist temp"
 - `hr_recovery_1min` → "HR Recovery"
-- `vo2max_trend_per_4w` → "VO2max trend"
+
+Note: `inverted: true` on a driver (RHR, wrist temp) means the z is already sign-flipped — a positive z means the recent value is *lower* than baseline, which is *favorable*. Render the recent vs baseline numbers literally; the z already encodes "is this good or bad".
 
 Examples of how a driver line should read:
 
 ```
-HRV: 43.6ms vs 42.8ms baseline (+1.9%, contrib +0.38)
-RHR: 65.3bpm vs 65.8 typical (-0.5bpm, contrib +0.19)
-Sleep: 6h32m / night vs 7h target (-28min, contrib -0.47)
-Sleep depth (deep): 17.7% (healthy 13-23%, contrib 0.0)
-Sleep depth (REM): 20.4% (healthy 20-25%, contrib 0.0)
-Sleep consistency: 0.76h stdev (threshold 1.5, contrib 0.0)
-Wrist temp: +0.11°C vs baseline (contrib -0.57)
-HR Recovery: 35.5bpm vs 37.4 typical (-1.8bpm, contrib -0.27)
-VO2max trend: +1.02 / 4w (contrib +0.38)
+HR Recovery: 35.5bpm recent vs personal baseline 37.4 ± 1.4 (z -1.35, weight 0.10, component 1.6/10)
+Wrist temp: 36.14°C recent vs personal baseline 35.93 ± 0.17 (z -1.23, weight 0.10, component 1.9/10)
+Sleep: 6.31h recent vs personal baseline 6.55 ± 0.65 (z -0.37, weight 0.20, component 4.1/10)
+HRV: 44.3ms recent vs personal baseline 42.8 ± 6.2 (z +0.25, weight 0.30, component 5.6/10)
+Sleep consistency: 0.58h stdev (threshold 1.5, component 5.0/10)
 ```
 
-When `recovery.confidence == "low"` (e.g. HL trackers without HRV / wrist temp / sleep stages), **do not** ask the user to "track HRV better" — that's a source limitation, not a tracking gap. Skip the gap explanation entirely; just print the drivers the source provides.
+When `recovery.confidence == "low"` (e.g. HL trackers with only 1 contributing signal, or any tracker still building baselines), **do not** ask the user to "track HRV better" — that's a source limitation or a sample-size gap, not a tracking gap. Skip the gap explanation entirely; just print the drivers the source provides and note the contributor count in the headline.
 
 ### Cardio check
-Compare `cardio_last_28d` against §10 targets (150 min Zone 2 + ~20 min intervals per week, so roughly 600 min Zone 2 + 4 interval sessions over 28 days). Flag shortfall in plain numbers: "Zone 2: 60 min logged, target ~600 min. Intervals: 0 sessions, target 4."
+Compare cardio against §10 targets (150 min Zone 2 + ~20 min intervals per week, so roughly 600 min Zone 2 + 4 interval sessions over 28 days). Flag shortfall in plain numbers: "Zone 2: 60 min logged, target ~600 min. Intervals: 0 sessions, target 4."
+
+**Read `cardio_hr_zones_28d.z2` for the Zone-2 number** — that's the true HRR-based Z2 figure when the source supplies per-workout HR on cardio sessions (XML and HL both do). Only fall back to `cardio_last_28d.non_interval_minutes` when `cardio_hr_zones_28d` is empty (no avg_hr available on any cardio row in the window). Never quote `non_interval_minutes` as the Zone-2 number when `cardio_hr_zones_28d.z2` is present; it counts Z1 hike time as if it were Z2 stimulus and inflates the value. Read `cardio_last_28d.interval_sessions` for the interval count; that field is fine. The total minutes / distance / kcal in `cardio_last_28d` are also correct.
 
 **REQUIRED daily-activity gate.** Cross-check the shortfall against `daily_activity_28d.assessment` before prescribing cardio. State the call explicitly with the value and band, e.g. "Daily activity 124 min/day (high). Cardio prescription: hold Z2, add 1 interval session for VO2max." Rules:
 - `assessment: high` (≥45 min/day basis) AND VO2max trending up → keep cardio prescription minimal; the user is already getting aerobic load passively.
@@ -427,9 +445,9 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 - Maintain exercises the user is already progressing on.
 - **Deload handling (§11):** compute weeks-since-last-deload from `deloads[-1]`. If > 6 weeks or `deloads` is empty, the prescribed block IS a deload: reduce each exercise's working-set count to ~50% and keep loads at the last working weight (maintain intensity, cut volume). Tell the user explicitly in "Why this plan" that this block is a deload. In the 4-6 week window, don't force a deload but flag it in the report and offer to plan one if the user asks.
 - **Re-entry after long break:** compute days-since-last-session from `monthly_sessions[-1].date`. If > 5 and no deload on record in that gap, treat the first prescribed session as a re-entry — drop one working set per compound, prescribe "leave 2-3 reps in the tank" instead of 1-2. Tendon adapts slower than muscle (§7), so under-load the first session back.
-- **Recovery-aware adjustments (§18):** **Lead with `recovery.score`** — it already folds HRV, RHR, sleep, wrist temp, HR Recovery, and VO2max trend into one number with named drivers. Apply:
+- **Recovery-aware adjustments (§18):** **Lead with `recovery.score`** — it already folds HRV, RHR, sleep total, sleep stages, sleep consistency, wrist temp, and HR Recovery into one renormalized weighted average of personal z-scores (5 = personal average; VO2max trend is **not** in the score — it lives separately in `vo2max_latest` / `vo2max_trend_per_4w` for the cardio check). Apply:
   - `recovery.score < 4` → next session is re-entry: drop one working set per compound, prescribe "leave 3-4 reps in the tank" instead of 1-2. Lead with the dominant negative driver in "Why this plan".
-  - `recovery.score 4–6.5` → hold loads, no PR attempts, normal volume.
+  - `recovery.score 4–6.5` → hold loads, no PR attempts, normal volume. **"Hold loads" is binding on every prescribed working weight — compounds, accessories, isolation, and core alike. Default behavior: copy last session's load forward and let reps drive progression.** The only legal load *increase* is when the user hit the top of the rep range cleanly on the last session AND the recovery / TSB band still permits it (see the TSB-band rule below — bumps are off the table in `balanced` / `carrying load` / `fatigued` / `high fatigue` bands). No exceptions for "small isolation" or "doesn't matter much".
   - `recovery.score ≥ 6.5` → green light, normal programming.
   - `recovery.confidence == "low"` (HL trackers without HRV / wrist temp): the score's available signals are still trustworthy, but soften any rule that would otherwise override the deload window. Don't invent triggers from data the source doesn't provide.
   - When `recovery.score < 4` AND `recovery.drivers` has the negative signal persisting (e.g. wrist temp +0.4°C on a multi-week stretch in `health_metrics_weekly`) → flag deload as urgent regardless of `deloads` cadence. Override the standard 4-6 / 6+ week thresholds.
@@ -444,11 +462,18 @@ Use Layer 1 analysis plus the training science reference. The reference contains
   | −10 to −5 | Carrying load | No PR attempts. Cut top set's RIR target to 2-3 (was 1-2). |
   | −15 to −10 | Fatigued | Drop one working set per compound across the board. |
   | ≤ −15 | High fatigue | Deload regardless of weeks-since-last-deload cadence. State this is a deload in "Why this plan". |
+
+  **HL caveat:** When `capabilities.per_workout_hr_strength` is False (HL trackers), CTL/ATL/TSB are computed only from cardio TRIMPs — strength load is invisible to this metric. Do **not** apply the TSB-band prescription unilaterally on these trackers; cross-check with `recovery.score` and prefer `recovery.score` as the primary fatigue signal. A negative TSB driven by hike load alone is not a deload trigger — a 200-min hike will always look like fatigue to TSB even if the user is well-rested otherwise. Cite the cross-check in "Why this plan" when overriding the band.
 - **Cardio (§10):** read the Cardio check numbers from the Report. If behind target, add cardio sessions to the plan after the strength sessions. Default weekly target: 3× Zone 2 @ 30-45min + 1× intervals @ 20min. Cap total cardio additions at 4 sessions per `/coach` run — if the user is very behind, note the shortfall and prescribe the max. User can override with `/coach no-cardio` to skip this entirely.
 
 **Core training:** Build strong, developed abs. Program 1-2 core exercises per session, aim for 3-4 sessions/week with core. Prefer weighted core (kneeling cable crunch, cable woodchop, captain's chair knee raise) alongside bodyweight (leg raises, dead bugs, hollow body holds). Vary patterns across sessions: flexion, anti-extension, rotation, isometric. Visibility is a body fat question, not a training question.
 
-**Cable weight granularity:** Cable machines increment in 5kg steps: 5, 10, 15, 20, 25. Never suggest intermediate weights. Always round to the nearest available plate.
+**Equipment increment grid (REQUIRED).** Loads are prescribed on the equipment's increment grid. Never suggest off-grid weights.
+- **Cables:** 5kg steps (5, 10, 15, 20, 25, …). Round to the nearest available plate.
+- **Dumbbells:** 1-2kg pair increments depending on the rack. When in doubt, round to the nearest 2kg.
+- **Plate-loaded machines:** 5kg per plate side. Round prescribed loads to the nearest 5kg unless the gym is known to have half-plates.
+- **Microloading:** for barbells only, and only when the user has explicitly logged microplates before.
+Re-read this block before every load suggestion in the workout tables.
 
 **Exercise ordering:** Compounds first, then isolation, then accessories.
 
@@ -590,6 +615,12 @@ Source-honesty rules:
 | Treating an HL user's missing HRV as "not enough data yet" | Implies the user just needs to log more, but the source can't provide HRV at all | Read `capabilities.hrv`. If False, omit the metric (and its sections) entirely. Distinct from "trend is null because <4 readings collected so far". |
 | Listing structurally-unsupported metrics in **Missing from your tracking** | User sees a fake to-do list of things to "track" that the data source can't supply | The section is for *fixable* gaps (typos in `unknown_exercises`, dropped exercises, manual notes). Anything False in `capabilities` belongs in source docs, not the user-facing report. |
 | Treating auto-cardio rows as duplicates of manually-logged runs | Both /log and the importer write the same run; coach can't tell them apart | Auto-cardio dedupe runs in the importer by (date, exercise, duration ±1 min). Manual entries always win. If you see two rows for the same run on the same date, flag it — the dedupe missed something. |
+| Treating an annotated outlier as a typo | The user wrote in Notes that the row reflects equipment / gym / context change; coach calls it "almost certainly a typo" anyway | Read `progression_summary[exercise].last_notes` (or full Notes via `--include-rows`). If a note exists, treat the row as user-acknowledged context, not as an error. Acknowledge the context in the bullet rather than calling it a logging error. |
+| Suggesting an off-grid load | "Bump to 67.5kg" on a cable that increments in 5kg | Round to the next legal increment for the equipment (cables 5kg, dumbbells 1-2kg pair, plate machines 5kg). Re-read the equipment block in §3 of training-science before each load suggestion. |
+| Bumping non-anchor load in a hold-loads block | Cable Pallof Press 15kg → 20kg in a "hold loads" mesocycle week 1 | The rule applies to every exercise, not just anchor compounds. Copy last session's load forward; only push reps. The only legal increase is when the user hit the top of the rep range cleanly AND the recovery / TSB band still permits it. |
+| Defaulting to `→` on the recovery trend | Recovery row reads `4.2/10 (... trend → vs prior 4w)` even when every metric is moving down | Use the `improving / drifting / mixed` descriptor (deterministic procedure under "Last 28 days at a glance"). The arrow is no longer accepted. |
+| Calling a deload on TSB alone for HL trackers | TSB -10.7 from two big hikes triggers a "fatigued" prescription on Fabian even though strength load is invisible to TSB | When `capabilities.per_workout_hr_strength` is False, CTL/ATL/TSB are computed only from cardio TRIMPs — strength load is invisible. Don't treat a negative TSB as a unilateral deload trigger; cross-check with `recovery.score` and prefer recovery_score as the primary fatigue signal on these trackers. |
+| Citing `non_interval_minutes` as Zone-2 minutes | Cardio check section reports `cardio_last_28d.non_interval_minutes` (which is just "cardio time that wasn't intervals") as if it were a real Z2 measurement — a 3h Z1 hike inflates the number | Read `cardio_hr_zones_28d.z2` for true Zone-2 minutes (HRR-based). Use `cardio_last_28d.non_interval_minutes` only as a fallback when `cardio_hr_zones_28d` is empty (no avg_hr on cardio sessions). |
 
 ## Rules
 

@@ -3,8 +3,9 @@
 The cardio side of the analytics layer:
 
 - ``cardio_last_28d(rows, today_d)`` — 4-week rollup of cardio sessions
-  (distance, minutes, kcal, intervals-vs-zone2 split via Notes keywords
-  + avg_hr ≥165 heuristic).
+  (distance, minutes, kcal, intervals-vs-non-interval split via Notes
+  keywords + avg_hr ≥165 heuristic). Note: ``non_interval_minutes`` is
+  *not* a true Zone-2 measurement — see ``cardio_hr_zones`` for that.
 - ``cardio_hr_zones(monthly_sessions, today_d, max_hr, rest_hr)`` — time
   in HR zones using HRR (Karvonen). Coarse: each session's avg_hr
   determines its zone bucket; per-second HR isn't available.
@@ -47,7 +48,14 @@ HR_ZONES_PCT = [
 
 def cardio_last_28d(rows: list[dict], today_d: date) -> dict:
     """4-week cardio rollup: total distance, total minutes, total cal, and
-    a coarse intervals-vs-zone2 split.
+    a coarse intervals-vs-non-interval split.
+
+    ``non_interval_minutes`` is the residual after subtracting interval
+    sessions; it is *not* a true Zone-2 measurement. A 3h hike at
+    avg_hr 110 (Z1) lands in the same bucket as a 45min Z2 ride. Use
+    ``cardio_hr_zones_28d.z2`` for actual Zone-2 minutes when the
+    source supplies per-workout HR; treat this field as a fallback for
+    sources that don't.
 
     Now uses a 28d window (was 14d) to align with the strength-side
     weekly_volume window. Cardio rows are identified by distance or
@@ -56,7 +64,7 @@ def cardio_last_28d(rows: list[dict], today_d: date) -> dict:
     having to annotate).
     """
     cutoff = today_d - timedelta(days=28)
-    zone2_min = 0.0
+    non_interval_min = 0.0
     intervals = 0
     distance = 0.0
     total_min = 0.0
@@ -83,14 +91,14 @@ def cardio_last_28d(rows: list[dict], today_d: date) -> dict:
         if is_intervals:
             intervals += 1
         else:
-            zone2_min += dur
+            non_interval_min += dur
     return {
-        "sessions":          sessions,
-        "total_minutes":     round(total_min, 1),
-        "total_distance_km": round(distance, 2),
-        "total_active_cal":  int(round(total_cal)) if total_cal else 0,
-        "zone2_minutes":     round(zone2_min, 1),
-        "interval_sessions": intervals,
+        "sessions":             sessions,
+        "total_minutes":        round(total_min, 1),
+        "total_distance_km":    round(distance, 2),
+        "total_active_cal":     int(round(total_cal)) if total_cal else 0,
+        "non_interval_minutes": round(non_interval_min, 1),
+        "interval_sessions":    intervals,
     }
 
 

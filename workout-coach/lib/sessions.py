@@ -56,11 +56,13 @@ def progression_summary(rows: list[dict]) -> list[dict]:
             continue
         last = by_date[dates_desc[0]]
         prev = by_date[dates_desc[1]] if len(dates_desc) >= 2 else None
+        last_notes = last.get("notes")
         summary.append({
             "exercise": last["exercise"],
             "sessions_logged": len(dates_desc),
             "last": f"{dates_desc[0]} → {int(last['kg'])}kg x {last['reps']}",
             "prev": f"{dates_desc[1]} → {int(prev['kg'])}kg x {prev['reps']}" if prev else None,
+            "last_notes": last_notes if last_notes else None,
         })
 
     summary.sort(key=lambda s: s["exercise"].lower())

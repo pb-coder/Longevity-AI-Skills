@@ -176,216 +176,173 @@ def health_metrics_weekly(health_all: list[dict],
     return out
 
 
+def _z_score_signal(health_all: list[dict], key: str, today_d: date,
+                    recent_days: int, baseline_days: int,
+                    invert: bool = False, min_baseline_n: int = 7) -> dict | None:
+    """Personal z-score for one signal: ``(recent_avg − baseline_mean) /
+    baseline_stdev``, clamped to ±2σ. ``invert=True`` for signals where
+    lower is better (RHR, wrist temp). Returns ``None`` when the recent
+    window is empty, the baseline window has fewer than ``min_baseline_n``
+    readings, or baseline stdev is 0 (degenerate)."""
+    recent = _values_in_window(health_all, key, today_d, recent_days)
+    baseline = _values_in_window(health_all, key, today_d, baseline_days)
+    if not recent or len(baseline) < min_baseline_n:
+        return None
+    recent_avg = sum(recent) / len(recent)
+    baseline_mean = sum(baseline) / len(baseline)
+    var = sum((v - baseline_mean) ** 2 for v in baseline) / len(baseline)
+    baseline_stdev = var ** 0.5
+    if baseline_stdev <= 0:
+        return None
+    z = (recent_avg - baseline_mean) / baseline_stdev
+    if invert:
+        z = -z
+    z = max(-2.0, min(2.0, z))
+    return {
+        "recent_avg":     recent_avg,
+        "baseline_mean":  baseline_mean,
+        "baseline_stdev": baseline_stdev,
+        "n_recent":       len(recent),
+        "n_baseline":     len(baseline),
+        "z":              z,
+    }
+
+
 def recovery_score(health_all: list[dict], today_d: date,
                    capabilities: dict) -> dict:
-    """Compute a 0-10 recovery score from HRV, RHR, sleep, wrist temp,
-    HR Recovery 1-min, and VO2max trend.
+    """Renormalized weighted-average composite of per-signal personal
+    z-scores, mapped to [0, 10]. Score = 5 means "average for this user
+    across whatever signals are available", *not* "base 5 minus what's
+    missing" — so trackers with fewer signals (HL) aren't structurally
+    biased downward.
 
-    Each signal contributes a clamped delta to a baseline of 5; the final
-    score is clamped to [0, 10]. Drivers list shows which signals
-    dominated so the coach can explain *why*.
-    Returns ``{"score": float, "drivers": list[dict], "confidence": str}``.
+    Architecture (matches Polar Nightly Recharge / Oura Readiness /
+    HRV4Training conventions):
+      1. Each signal: z-score against rolling personal baseline+stdev,
+         clamped to ±2σ (per Andrew Flatt's HRV monitoring approach —
+         within-individual deviations, not population norms).
+      2. Map each signal's z to a [0, 10] component score:
+         ``component = 5.0 + clamp(z, -2, 2) × 2.5``.
+         So z = 0 → 5, z = +2σ → 10, z = -2σ → 0.
+      3. Composite = weighted average of component scores over signals
+         that have sufficient sample (≥7 readings in baseline window),
+         with weights renormalized to sum to 1.0 over present signals.
+         Missing signals don't pull the score downward — they just leave
+         the remaining ones to vote.
+
+    Signals + raw weights (renormalized at runtime):
+      HRV (rMSSD/SDNN)         0.30   capability-gated
+      Resting HR  (inverted)   0.15
+      Sleep total              0.20
+      Sleep deep h             0.05   capability-gated
+      Sleep REM h              0.05   capability-gated
+      Wrist temp  (inverted)   0.10   capability-gated
+      HR Recovery 1-min        0.10
+      Sleep consistency        0.05   penalty-only
+
+    VO2max trend is **not** a contributor. It's a chronic fitness signal
+    with measurement noise that exceeds plausible week-to-week true
+    change; including it conflates "am I getting fitter" with "should I
+    train hard today" (matches Garmin Training Readiness, WHOOP, Oura,
+    Polar Nightly Recharge — none use VO2max in acute readiness). The
+    coach reads ``vo2max_latest`` / ``vo2max_trend_per_4w`` for the
+    fitness check separately.
+
+    Confidence (from contributor count, ignoring weights):
+      ≥4 contributors → ``high``
+      2-3 contributors → ``medium``
+      <2 contributors → ``low``
+
+    Returns ``{"score": float|None, "confidence": str, "drivers": [...]}``.
+    Each driver entry has ``metric``, ``component_score`` (0-10),
+    ``weight`` (renormalized share, sums to 1.0 across drivers),
+    ``z`` + baseline stats for z-scored signals, or stdev + threshold for
+    sleep consistency. Drivers are sorted by ``|component_score - 5|``
+    descending so the most "interesting" ones surface first.
     """
-    drivers: list[dict] = []
-    score = 5.0
-    sample_count = 0
+    # (signal_key, recent_days, baseline_days, invert, raw_weight, capability_gate)
+    SIGNALS = [
+        ("hrv_sdnn",         7,  60, False, 0.30, "hrv"),
+        ("resting_hr",       7,  28, True,  0.15, None),
+        ("sleep_total_h",    7,  28, False, 0.20, None),
+        ("sleep_deep_h",     7,  28, False, 0.05, "sleep_stages"),
+        ("sleep_rem_h",      7,  28, False, 0.05, "sleep_stages"),
+        ("wrist_temp_c",     3,  60, True,  0.10, "wrist_temp"),
+        ("hr_recovery_1min", 5,  28, False, 0.10, None),
+    ]
 
-    # HRV: reading vs personal 60d baseline. ±10% baseline = ±2 score swing.
-    if capabilities.get("hrv"):
-        recent = _values_in_window(health_all, "hrv_sdnn", today_d, 7)
-        baseline = baseline_60d(health_all, "hrv_sdnn", today_d)
-        if recent and baseline and baseline > 0:
-            recent_avg = sum(recent) / len(recent)
-            delta = (recent_avg - baseline) / baseline
-            contrib = max(-2.0, min(2.0, delta / 0.05))  # ±5% baseline → ±1
-            score += contrib
-            sample_count += 1
-            drivers.append({
-                "metric":     "hrv_sdnn",
-                "recent_avg": round(recent_avg, 1),
-                "baseline":   round(baseline, 1),
-                "delta_pct":  round(delta * 100, 1),
-                "contrib":    round(contrib, 2),
-            })
+    # Each entry: (metric_key, raw_weight, component_score, info_dict, invert)
+    raw_drivers: list[tuple] = []
 
-    # Resting HR: lower is better. ±5 bpm vs 28d typical → ±2 swing.
-    rhr_recent = _values_in_window(health_all, "resting_hr", today_d, 7)
-    rhr_typical = _values_in_window(health_all, "resting_hr", today_d, 28)
-    if rhr_recent and rhr_typical:
-        recent_avg = sum(rhr_recent) / len(rhr_recent)
-        typical_avg = sum(rhr_typical) / len(rhr_typical)
-        delta = recent_avg - typical_avg
-        contrib = max(-2.0, min(2.0, -delta / 2.5))  # +2.5 bpm → -1
-        score += contrib
-        sample_count += 1
-        drivers.append({
-            "metric":      "resting_hr",
-            "recent_avg":  round(recent_avg, 1),
-            "typical_avg": round(typical_avg, 1),
-            "delta_bpm":   round(delta, 1),
-            "contrib":     round(contrib, 2),
-        })
+    for key, recent_d, baseline_d, invert, weight, gate in SIGNALS:
+        if gate and not capabilities.get(gate):
+            continue
+        s = _z_score_signal(health_all, key, today_d, recent_d, baseline_d,
+                            invert=invert)
+        if s is None:
+            continue
+        component_score = 5.0 + s["z"] * 2.5
+        raw_drivers.append((key, weight, component_score, s, invert))
 
-    # Sleep: 7h target. ±1h → ±1 swing (clamped ±2).
-    sleep = _values_in_window(health_all, "sleep_total_h", today_d, 7)
-    if sleep:
-        recent_avg = sum(sleep) / len(sleep)
-        delta = recent_avg - 7.0
-        contrib = max(-2.0, min(2.0, delta))
-        score += contrib
-        sample_count += 1
-        drivers.append({
-            "metric":     "sleep_total_h",
-            "recent_avg": round(recent_avg, 2),
-            "target":     7.0,
-            "delta_h":    round(delta, 2),
-            "contrib":    round(contrib, 2),
-        })
-
-    # Sleep depth: deep + REM percentages of total sleep over the last 7
-    # nights. Deep healthy band 13-23%, REM 20-25% (Walker 2017, AASM).
-    # Capability-gated on ``sleep_stages`` (HL doesn't supply stages and
-    # falls through silently). Weight ±0.4 each — small contributions but
-    # they catch chronic deep-sleep deficits that total hours hide.
-    if capabilities.get("sleep_stages"):
-        deep_vals = _values_in_window(health_all, "sleep_deep_h", today_d, 7)
-        rem_vals  = _values_in_window(health_all, "sleep_rem_h", today_d, 7)
-        # Need matched-day total + stage values for a percentage. Pull
-        # paired entries from the underlying rows directly so a bad night
-        # with missing stage data doesn't poison the average.
-        deep_pcts: list[float] = []
-        rem_pcts:  list[float] = []
-        cutoff = today_d - timedelta(days=7)
-        for e in health_all:
-            d = _parse_iso_date(e.get("date"))
-            if d is None:
-                continue
-            if d < cutoff:
-                continue
-            tot = e.get("sleep_total_h")
-            if not tot or tot <= 0:
-                continue
-            dh = e.get("sleep_deep_h")
-            rh = e.get("sleep_rem_h")
-            if dh is not None:
-                deep_pcts.append(float(dh) / float(tot))
-            if rh is not None:
-                rem_pcts.append(float(rh) / float(tot))
-        if deep_pcts:
-            recent_avg = sum(deep_pcts) / len(deep_pcts)
-            # Healthy 0.13-0.23. <0.13 → negative; >0.23 → small positive.
-            if recent_avg < 0.13:
-                contrib = max(-0.4, (recent_avg - 0.13) / 0.05 * 0.4)
-            elif recent_avg > 0.23:
-                contrib = min(0.4, (recent_avg - 0.23) / 0.05 * 0.4)
-            else:
-                contrib = 0.0
-            score += contrib
-            if abs(contrib) > 0.0:
-                sample_count += 1
-            drivers.append({
-                "metric":      "sleep_deep_pct",
-                "recent_avg":  round(recent_avg, 3),
-                "healthy_min": 0.13,
-                "healthy_max": 0.23,
-                "contrib":     round(contrib, 2),
-            })
-        if rem_pcts:
-            recent_avg = sum(rem_pcts) / len(rem_pcts)
-            # Healthy 0.20-0.25.
-            if recent_avg < 0.20:
-                contrib = max(-0.4, (recent_avg - 0.20) / 0.05 * 0.4)
-            elif recent_avg > 0.25:
-                contrib = min(0.4, (recent_avg - 0.25) / 0.05 * 0.4)
-            else:
-                contrib = 0.0
-            score += contrib
-            if abs(contrib) > 0.0:
-                sample_count += 1
-            drivers.append({
-                "metric":      "sleep_rem_pct",
-                "recent_avg":  round(recent_avg, 3),
-                "healthy_min": 0.20,
-                "healthy_max": 0.25,
-                "contrib":     round(contrib, 2),
-            })
-
-    # Sleep consistency: stdev of nightly totals over the last 7 nights.
-    # >1.5h stdev = irregular sleep is its own stressor regardless of
-    # average. Source-agnostic; HL surfaces sleep_total_h, so this driver
-    # also fires on Fabian-style trackers.
-    if len(sleep) >= 4:
-        mean = sum(sleep) / len(sleep)
-        var = sum((x - mean) ** 2 for x in sleep) / len(sleep)
+    # Sleep consistency: penalty-only contributor (low stdev = neutral 5,
+    # high stdev pulls the score component toward 0). Stays a hard
+    # threshold rather than a personal z-score because everyone wants
+    # consistent sleep — there's no "personal normal of irregular".
+    sleep_7d = _values_in_window(health_all, "sleep_total_h", today_d, 7)
+    if len(sleep_7d) >= 4:
+        mean = sum(sleep_7d) / len(sleep_7d)
+        var = sum((x - mean) ** 2 for x in sleep_7d) / len(sleep_7d)
         stdev = var ** 0.5
-        contrib = 0.0
-        if stdev > 1.5:
-            contrib = max(-0.4, (1.5 - stdev) / 0.5 * 0.4)
-        score += contrib
-        if abs(contrib) > 0.0:
-            sample_count += 1
-        drivers.append({
-            "metric":   "sleep_consistency_7d_stdev_h",
-            "stdev":    round(stdev, 2),
-            "threshold": 1.5,
-            "contrib":  round(contrib, 2),
-        })
+        if stdev <= 1.5:
+            cs = 5.0
+        else:
+            cs = max(0.0, 5.0 - (stdev - 1.5) * 5.0)
+        info = {"stdev": stdev, "threshold": 1.5, "n": len(sleep_7d)}
+        raw_drivers.append(("sleep_consistency_7d_stdev_h", 0.05, cs, info, False))
 
-    # Wrist temp: deviation from 60d baseline. >+0.3°C is a stress/illness
-    # signal; weight modestly (max ±1.5).
-    if capabilities.get("wrist_temp"):
-        wt_recent = _values_in_window(health_all, "wrist_temp_c", today_d, 3)
-        wt_base = baseline_60d(health_all, "wrist_temp_c", today_d)
-        if wt_recent and wt_base:
-            recent_avg = sum(wt_recent) / len(wt_recent)
-            delta = recent_avg - wt_base
-            contrib = max(-1.5, min(1.5, -delta / 0.2))
-            score += contrib
-            sample_count += 1
-            drivers.append({
-                "metric":     "wrist_temp_c",
-                "recent_avg": round(recent_avg, 2),
-                "baseline":   round(wt_base, 2),
-                "delta_c":    round(delta, 2),
-                "contrib":    round(contrib, 2),
-            })
+    if not raw_drivers:
+        return {"score": None, "confidence": "low", "drivers": []}
 
-    # HR Recovery 1-min (count/min HR drop after exercise). Higher is
-    # better — parasympathetic re-activation. Weight ±0.75. Compare
-    # recent (5d) vs 28d typical; ±5 bpm = ±0.75.
-    hrr_recent = _values_in_window(health_all, "hr_recovery_1min", today_d, 5)
-    hrr_typical = _values_in_window(health_all, "hr_recovery_1min", today_d, 28)
-    if hrr_recent and hrr_typical:
-        recent_avg = sum(hrr_recent) / len(hrr_recent)
-        typical_avg = sum(hrr_typical) / len(hrr_typical)
-        delta = recent_avg - typical_avg
-        contrib = max(-0.75, min(0.75, delta / 6.7))  # +5 bpm → +0.75
-        score += contrib
-        sample_count += 1
-        drivers.append({
-            "metric":      "hr_recovery_1min",
-            "recent_avg":  round(recent_avg, 1),
-            "typical_avg": round(typical_avg, 1),
-            "delta_bpm":   round(delta, 1),
-            "contrib":     round(contrib, 2),
-        })
+    weight_sum = sum(w for _, w, _, _, _ in raw_drivers)
+    weighted = sum(w * cs for _, w, cs, _, _ in raw_drivers) / weight_sum
+    score = max(0.0, min(10.0, weighted))
 
-    # VO2max trend per 4 weeks. Slow-moving signal — folding it in gives
-    # credit for fitness improvements / penalises drift. Weight ±0.75;
-    # ±2 ml/kg/min over 4w → ±0.75.
-    vo2_slope = metric_trend_per_4w(health_all, "vo2max")
-    if vo2_slope is not None:
-        contrib = max(-0.75, min(0.75, vo2_slope / 2.7))
-        score += contrib
-        sample_count += 1
-        drivers.append({
-            "metric":      "vo2max_trend_per_4w",
-            "slope":       round(vo2_slope, 2),
-            "contrib":     round(contrib, 2),
-        })
+    drivers: list[dict] = []
+    for key, weight, cs, info, invert in raw_drivers:
+        weight_norm = weight / weight_sum
+        if "z" in info:  # standard z-scored signal
+            d = {
+                "metric":          key,
+                "recent_avg":      round(info["recent_avg"], 2),
+                "baseline_mean":   round(info["baseline_mean"], 2),
+                "baseline_stdev":  round(info["baseline_stdev"], 3),
+                "z":               round(info["z"], 2),
+                "component_score": round(cs, 2),
+                "weight":          round(weight_norm, 3),
+                "n_recent":        info["n_recent"],
+                "n_baseline":      info["n_baseline"],
+            }
+            if invert:
+                d["invert"] = True
+        else:  # sleep consistency penalty
+            d = {
+                "metric":          key,
+                "stdev":           round(info["stdev"], 2),
+                "threshold":       info["threshold"],
+                "component_score": round(cs, 2),
+                "weight":          round(weight_norm, 3),
+                "n_recent":        info["n"],
+            }
+        drivers.append(d)
 
-    score = max(0.0, min(10.0, score))
-    confidence = "high" if sample_count >= 3 else ("medium" if sample_count == 2 else "low")
+    # Most-driving signals first.
+    drivers.sort(key=lambda d: abs(d["component_score"] - 5.0), reverse=True)
+
+    n_contrib = len(drivers)
+    confidence = ("high" if n_contrib >= 4
+                  else "medium" if n_contrib >= 2
+                  else "low")
+
     return {
         "score":      round(score, 1),
         "confidence": confidence,

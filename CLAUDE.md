@@ -6,29 +6,36 @@ Source for the Claude Code skills used by pb-coder. Cloned from
 ## Layout
 
 Per-person directories sit at the workout-tracker root: `Nihad/`,
-`Fabian/`. Each holds the workout xlsx (only the YYYY.MM monthly
-sheets) and a `data/` folder of CSVs for the dense, machine-only data
-(Health Metrics, Workout Sessions, Profile). Apple Health exports drop
-into the root and get **auto-deleted** after a successful import — the
-CSVs are the persistent record.
+`Fabian/`. Each holds a `data/` folder with every CSV the skills read
+or write — there is no xlsx anywhere post-PR3a. Apple Health exports
+drop into the root and get **auto-deleted** after a successful
+import — the CSVs are the persistent record.
 
 ```
 <root>/
 ├── Nihad/
-│   ├── Workout Tracker - Nihad.xlsx     # only YYYY.MM monthly sheets
 │   └── data/
 │       ├── health_metrics.csv           # date-keyed, sparse-merge
 │       ├── workout_sessions.csv         # (date,start)-keyed
-│       └── profile.csv                  # key,value (source, auto_cardio, birthday)
-├── Fabian/                              # same shape
+│       ├── profile.csv                  # key,value (source, auto_cardio, birthday, swim CSS)
+│       ├── monthly/                     # one CSV per YYYY.MM
+│       │   ├── 2026.05.csv              # 18-col schema, ASC by (Date,#,Set)
+│       │   ├── 2026.04.csv
+│       │   └── …                        # canonicalize rebuilds TOTAL rows + computed cells
+│       └── swimming/                    # XML-only; absent on HL trackers
+│           ├── swim_workouts.csv        # per-swim aggregates, (date,start)-keyed
+│           └── swim_laps.csv            # per-lap detail, (date,workout_start,lap_num)-keyed
+├── Fabian/                              # same shape (no swimming/ for HL)
 └── Skills/
     └── shared/
         └── exercises-database.md        # canonical catalog (markdown is truth)
 
 shared/               # Code + docs imported by multiple skills
-  person_paths.py     # Path resolver. tracker_for(person), data_dir(person),
+  person_paths.py     # Path resolver. data_dir(person),
                       # health_metrics_csv(person), workout_sessions_csv(person),
-                      # profile_csv(person). Every script accepts
+                      # profile_csv(person), monthly_dir(person),
+                      # monthly_csv(person, ym), swim_workouts_csv(person),
+                      # swim_laps_csv(person). Every script accepts
                       # `--person <Name>` and resolves the rest from there.
   csv_store.py        # CSV-backed store for the dense data. Same functional
                       # surface as the old xlsx upserts: read_health_metrics,
@@ -38,40 +45,47 @@ shared/               # Code + docs imported by multiple skills
                       # ensure_profile. HEALTH_METRICS_HEADERS_BY_SOURCE and
                       # WORKOUT_SESSIONS_HEADERS_BY_SOURCE are the schema
                       # constants. Atomic writes via tmp + rename.
-  migrate_xlsx_to_csv.py  # One-shot migration: existing xlsx → per-person
-                          # folders + CSVs + .pre-csv-backup.xlsx. Idempotent.
-                          # Usage: python3 shared/migrate_xlsx_to_csv.py
-                          #          --person Nihad [--dry-run] [--force]
-  tracker_sheet.py    # Slimmed authority for the monthly YYYY.MM workout
-                      # sheets only. Layout constants (MONTHLY_HEADERS,
-                      # MONTHLY_WIDTHS, MONTHLY_COLS, TOTAL_LABEL),
-                      # coercions (date_str, _numeric_cell,
-                      # _parse_duration_minutes, _format_pace_min_per_km,
-                      # _format_duration_mmss), the canonical
-                      # style_monthly_sheet, plus the upserts that still
-                      # write to xlsx (upsert_monthly_cardio with
-                      # manual-wins dedupe + Matrix/GymKit overlap
-                      # filtering, upsert_monthly_strength_session for
-                      # session-metadata annotation). The current-month
-                      # gate (_current_month_key) means importers only
-                      # ever write into the YYYY.MM sheet matching today;
-                      # past months are "finished" and never re-scanned.
-                      # Idempotent. style_monthly_sheet auto-sorts sessions
-                      # by date ascending and merges non-contiguous same-
-                      # date blocks on every pass.
+  migrate_xlsx_to_csv.py        # One-shot PR1 migration: dense xlsx sheets
+                                # (Health Metrics / Workout Sessions / Profile)
+                                # → per-person CSVs. Historical artifact;
+                                # already run on every live tracker.
+  migrate_xlsx_monthly_to_csv.py  # One-shot PR3a migration: monthly YYYY.MM
+                                  # xlsx sheets → per-person monthly/ CSVs.
+                                  # Archives the xlsx as
+                                  # *.pre-monthly-csv-backup.xlsx. Idempotent.
+                                  # Usage: python3 shared/migrate_xlsx_monthly_to_csv.py
+                                  #          --person Nihad [--dry-run] [--keep-xlsx]
+  monthly_csv.py      # Per-month CSV reader / writer / canonicalizer.
+                      # Replaces the old tracker_sheet.py xlsx authority.
+                      # MONTHLY_HEADERS / MONTHLY_FIELDS / TOTAL_LABEL /
+                      # DELOAD_MARKER_TEXT constants; coercions (date_str,
+                      # _numeric_cell, _parse_duration_minutes,
+                      # _format_pace_min_per_km, _format_duration_mmss,
+                      # _format_elapsed_hms); read_monthly(person, ym),
+                      # upsert_rows(person, ym, rows),
+                      # upsert_monthly_cardio (manual-wins dedupe +
+                      # Matrix/GymKit overlap filtering),
+                      # upsert_monthly_strength_session (5% drift guard
+                      # on TOTAL-row metadata),
+                      # canonicalize_monthly_csv (sort + recompute Volume
+                      # / Pace / Total Cal / SESSION + rebuild TOTAL rows
+                      # + hoist deload markers — pure-CSV equivalent of
+                      # the old style_monthly_sheet). Current-month gate
+                      # (_current_month_key) bounds where importers can
+                      # write; past months are "finished". Idempotent.
   exercises-database.md  # Canonical exercise catalog (muscle → pattern →
                          # exercises). Source of truth (no xlsx mirror — the
                          # Exercises Database tab was retired in PR1). Read
                          # directly by /log (name lookup) and /coach
                          # (muscle mapping + tag reading).
-  canonicalize_logs.py  # One-shot rename map for past monthly sheets. Fixes
-                        # historical typo'd exercise names ("Deadhang" → "Dead
-                        # Hang", "Dips" → "Dip", "Stomach Press*" →
-                        # "Ab Crunch Machine", etc.) and clears stale
-                        # "(not in database)" Notes once the exercise is
-                        # canonical. Reports ambiguous names (e.g. bare
-                        # "Leg Curl") instead of auto-renaming. Re-runnable.
-                        # Usage: python3 shared/canonicalize_logs.py "<tracker>.xlsx"
+  canonicalize_logs.py  # Rename map for past monthly CSVs. Fixes historical
+                        # typo'd exercise names ("Deadhang" → "Dead Hang",
+                        # "Dips" → "Dip", "Stomach Press*" → "Ab Crunch
+                        # Machine", etc.) and clears stale "(not in
+                        # database)" Notes once the exercise is canonical.
+                        # Reports ambiguous names (e.g. bare "Leg Curl")
+                        # instead of auto-renaming. Re-runnable.
+                        # Usage: python3 shared/canonicalize_logs.py --person Nihad
   import_apple_health.py  # Apple Health zipped XML importer (Nihad). Streams
                           # Export.xml with iterparse, writes per-day Health
                           # Metrics (VO2max, RHR, HRV, sleep stages, wrist
@@ -134,8 +148,8 @@ workout-coach/        # /coach — read tracker, report, plan next workout.
                       # both from the entry point and in isolation.
                       #   constants.py — capabilities, landmarks, aliases.
                       #   parsing.py   — coercions + _parse_iso_date + _compact.
-                      #   extract.py   — sheet readers, exercises-DB parser,
-                      #                  age + max-HR helpers (touches xlsx).
+                      #   extract.py   — CSV readers (monthly + dense + swim),
+                      #                  exercises-DB parser, age + max-HR helpers.
                       #   sessions.py  — build_monthly_sessions + bodyweight
                       #                  trend + progression_summary.
                       #   strength.py  — volume, e1RM, stale, HR-at-volume
@@ -163,6 +177,12 @@ workout-coach/        # /coach — read tracker, report, plan next workout.
                       #     unknown_exercises, deloads, auto_deload_candidates
                       #   - cardio_last_28d + cardio_hr_zones_28d (HRR-based
                       #     time-in-zone using Karvonen)
+                      #   - swim_summary (only when there are swims in the
+                      #     last 28 days; HL trackers omit it entirely):
+                      #     totals, avg pace per 100m, avg SPL, avg SWOLF,
+                      #     SPL/SWOLF trends, per-session CSS-zone
+                      #     classification, stroke-mix outliers, CSS retest
+                      #     prompt, inferred CSS test detection.
                       #   - recovery: 0-10 score from HRV / RHR / sleep /
                       #     wrist temp deviations, with named drivers.
                       #     training_load: CTL/ATL/TSB rolling EWMA from per-
@@ -195,22 +215,30 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
   imported in isolation (REPL, ad-hoc tests).
 - **Shared imports**: consumers add `shared/` to `sys.path` via
   `sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))`
-  and import from `tracker_sheet`. Skills that have a `lib/` add their
-  own dir alongside it via
+  and import from `monthly_csv`, `csv_store`, `person_paths`,
+  `apple_workout_types`. Skills that have a `lib/` add their own dir
+  alongside it via
   `sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))`
   and then `from <module> import …` flat (no package namespace).
-- **Styler is canonical**: `style_monthly_sheet` is the single source of
-  truth for monthly-sheet layout (column widths, fonts, fills, merges,
-  SESSION numbering, TOTAL row placement, chronological row order).
-  Running it twice is a no-op. `/log` calls it post-write; `/maintain`
-  calls it on every sheet. An out-of-order sheet (e.g. after a backfill)
-  self-heals on the next pass. The monthly sheet has 18 columns:
+- **`canonicalize_monthly_csv` is canonical**: the single source of
+  truth for monthly-CSV layout (sort by Date+#+Set, recompute Volume
+  and Pace, rebuild SESSION numbering, rebuild TOTAL rows, hoist
+  deload markers). Running it twice is a no-op. `/log` calls it
+  post-write; `/maintain` calls it on every monthly CSV. An out-of-
+  order CSV (e.g. after a backfill) self-heals on the next pass. The
+  monthly CSV has 18 columns:
   `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes |
   Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal |
-  Total Cal | Elevation (m) | Elapsed | Laps`. The trailing `Laps` column
-  is swim-specific — populated by the Apple importer from
-  `HKWorkoutEventTypeLap` event counts and by `/log` when the user types
-  `<N> laps` / `<N> lengths` / `<N> Bahnen` on a swim row.
+  Total Cal | Elevation (m) | Elapsed | Laps`. The trailing `Laps`
+  column is swim-specific — populated by the Apple importer from
+  `HKWorkoutEventTypeLap` event counts and by `/log` when the user
+  types `<N> laps` / `<N> lengths` / `<N> Bahnen` on a swim row.
+- **Computed cells are pre-evaluated on canonicalize.** `Volume =
+  reps × kg`, `Pace = duration/distance` (MM:SS, blank outside
+  [0.5, 60] min/km), and per-month SESSION counters are written as
+  literal values, not Excel formulas. The user can preview the CSV in
+  macOS Quick Look or Numbers and see the math directly. No xlsx
+  exists post-PR3a; the CSV is the canonical store.
 - **Distance is unit-aware end-to-end.** The Apple Health XML importer
   reads the `unit` attribute on `<WorkoutStatistics>` and converts to km
   before writing. Swims arrive in metres by default (`sum="550"
@@ -228,10 +256,11 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
   glance which rows came from gym telemetry vs Watch estimation.
 - **Historical unit-bug fix.** `python3 maintain.py
   --person <Person> --fix-distance-units [--dry-run]` scans every
-  monthly sheet AND `<Person>/data/workout_sessions.csv` for Swim rows
-  where Distance > 10 km (almost always meters mis-stored as km),
-  divides by 1000, and recomputes pace. Non-swim outliers are flagged
-  for human review but not mutated. Idempotent; safe to re-run.
+  monthly CSV AND `<Person>/data/workout_sessions.csv` AND
+  `<Person>/data/swimming/swim_workouts.csv` for Swim rows where
+  Distance > 10 km (almost always meters mis-stored as km), divides by
+  1000, and recomputes pace. Non-swim outliers are flagged for human
+  review but not mutated. Idempotent; safe to re-run.
 - **Opt-in bodyweight**: `/log` does **not** prompt for morning weight.
   The user includes a line like `weight 76.5` (or `bw 76.5`, `bodyweight:
   76.5`) in the `/log` message when they want to record one. Bulk seeding
@@ -261,18 +290,40 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
   data yet" prompts for metrics their source structurally can't
   provide. `auto_cardio` defaults to true on both sources (XML and
   HL); when on, eligible Apple workouts (Running / Hiking / Cycling /
-  Swimming / HIIT) flow into the matching `YYYY.MM` monthly sheet,
+  Swimming / HIIT) flow into the matching `monthly/YYYY.MM.csv`,
   with manual-wins dedupe (date + exercise, ±1min duration tolerance).
 - **Coach plan output includes a per-workout DATE placeholder**: every
   strength workout heading is followed by `**Date:** ___________` on its
   own line so the user can fill in the date when they actually train and
   not lose track when `/log`-ing later.
+- **Swim metrics live in `<Person>/data/swimming/`.** Per-workout
+  aggregates (Pool Length, Strokes, SPL, Avg SWOLF, Stroke Mix,
+  Location, Water Temp) on `swim_workouts.csv`; per-lap detail
+  (Stroke, Duration, SWOLF) on `swim_laps.csv`. Apple's lap events
+  (`HKWorkoutEventTypeLap`) are the source. The Apple Health XML
+  importer populates both on every run; HL doesn't supply lap data,
+  so HL trackers leave the CSVs absent (and `/coach` skips the swim
+  section). Stroke style enum → string map lives in
+  `apple_workout_types.HK_SWIMMING_STROKE_STYLE` (0=Unknown, 1=Mixed,
+  2=Freestyle, 3=Backstroke, 4=Breaststroke, 5=Butterfly, 6=Kickboard).
+  `csv_store.upsert_swim_laps` is replace-on-match (not sparse-merge):
+  re-exports authoritatively replace stored lap data so a corrected
+  stroke style flows through cleanly.
+- **CSS (Critical Swim Speed)** lives on `profile.csv`:
+  `swim_css_sec_per_100m`, `swim_css_set_at`, plus
+  `swim_pool_length_default` for the rare workout where Apple omits
+  `HKLapLength`. CSS test workflow: log a 400m + 200m TT same-session
+  with `CSS test` on the header line; the logger computes
+  `(t400_sec − t200_sec) / 2` (sec/100m) and writes both fields.
+  `/coach` prompts a retest after 8 weeks. Detection is never
+  automatic — only the explicit `CSS test` keyword writes CSS.
 
 ## Workout Tracker
 
 Each tracker lives in its own per-person folder
-(`<root>/<Person>/Workout Tracker - <Person>.xlsx` plus
-`<root>/<Person>/data/{health_metrics,workout_sessions,profile}.csv`),
+(`<root>/<Person>/data/` containing `health_metrics.csv`,
+`workout_sessions.csv`, `profile.csv`, `monthly/YYYY.MM.csv` per
+month, and `swimming/{swim_workouts,swim_laps}.csv` on XML trackers),
 one level above this Skills repo. The skills resolve which person a
 request is about (see each `SKILL.md`'s "Who is this for?" section)
 and pass `--person <Name>` to their scripts; path resolution lives in

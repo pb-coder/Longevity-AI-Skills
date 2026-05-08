@@ -1,4 +1,4 @@
-"""Import an HLExport plain-text health export into the tracker xlsx.
+"""Import an HLExport plain-text health export into the tracker CSV store.
 
 HLExport (`https://apps.apple.com/.../hl-export-app/`) is the lightweight
 alternative to Apple's native zipped XML export — much smaller, much
@@ -16,8 +16,8 @@ the same upsert helpers (``upsert_health_metrics`` / ``upsert_workout_sessions``
 / ``upsert_monthly_cardio``) — only the parser front-end differs. Sparse-
 merge protects existing values on re-runs; idempotent.
 
-The capability matrix is fixed in code: when the per-person ``Profile`` sheet
-says ``source = hl_export``, the coach's read layer skips HRV / wrist temp /
+The capability matrix is fixed in code: when ``profile.csv`` says
+``source = hl_export``, the coach's read layer skips HRV / wrist temp /
 sleep-stage analyses because this importer can't fill them. Resting HR,
 walking HR, and Apple's exercise-minute aggregate are **not** derived from
 raw samples here — Apple's published values use proprietary aggregation
@@ -26,8 +26,11 @@ Nihad's Apple-aggregate values would create misleading mixed trend lines.
 
 Writes ``<person>/data/health_metrics.csv`` and
 ``<person>/data/workout_sessions.csv`` (the per-source slim schema is
-applied automatically). Auto-cardio rows still flow into the YYYY.MM
-monthly sheet on the workout xlsx. The text export is **deleted on
+applied automatically). Auto-cardio rows flow into the matching
+``<person>/data/monthly/YYYY.MM.csv`` via ``upsert_monthly_cardio`` in
+``monthly_csv.py``. HL doesn't carry per-lap swim data, so the
+``swimming/`` folder isn't created for HL trackers — the coach skips
+the swim section automatically. The text export is **deleted on
 success** — the CSVs are the persistent record. Re-export from HLExport
 if you need to backfill.
 
@@ -48,10 +51,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-import openpyxl
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from tracker_sheet import (  # noqa: E402
+from monthly_csv import (  # noqa: E402
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
 )
@@ -63,7 +64,6 @@ from csv_store import (  # noqa: E402
 )
 from person_paths import (  # noqa: E402
     WORKOUT_TRACKER_ROOT,
-    tracker_for,
 )
 from apple_workout_types import (  # noqa: E402
     APPLE_TO_TRACKER_EXERCISE,
@@ -441,8 +441,8 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--person", required=True,
-                    help="Tracker owner (e.g. Fabian). Resolves the workout "
-                         "xlsx and data/ folder via "
+                    help="Tracker owner (e.g. Fabian). Resolves the "
+                         "per-person data/ folder via "
                          "Skills/shared/person_paths.py.")
     ap.add_argument("--txt", default=None, type=str,
                     help="Override the auto-resolved HLExport text file. "
@@ -472,11 +472,6 @@ def main() -> int:
     txt_path = resolve_txt(pattern)
     if txt_path is None:
         print(f"ERROR: HLExport file not found: {pattern}", file=sys.stderr)
-        return 1
-
-    tracker_path = tracker_for(person)
-    if not tracker_path.exists():
-        print(f"ERROR: tracker xlsx not found: {tracker_path}", file=sys.stderr)
         return 1
 
     since = args.since or default_since()
@@ -531,10 +526,8 @@ def main() -> int:
     out_lines.extend(upsert_health_metrics(person, metric_entries))
     out_lines.extend(upsert_workout_sessions(person, workout_rows))
 
-    # Auto-cardio + strength-session metadata still write to the monthly
-    # xlsx sheets via tracker_sheet's existing helpers — only HM/WS/Profile
-    # moved to CSV.
-    wb = openpyxl.load_workbook(tracker_path)
+    # Auto-cardio + strength-session metadata write to the per-month CSVs
+    # via monthly_csv (post-PR3a; xlsx is gone).
 
     # Strength session metadata: HL provides Active Cal and Duration per
     # strength workout (no Avg HR, no basal/elevation, no separate elapsed).
@@ -606,7 +599,7 @@ def main() -> int:
     if strength_warnings:
         out_lines.append("Strength clustering warnings:")
         out_lines.extend(strength_warnings)
-    out_lines.extend(upsert_monthly_strength_session(wb, strength_sessions))
+    out_lines.extend(upsert_monthly_strength_session(person, strength_sessions))
 
     if profile.get("auto_cardio"):
         # The current-month gate lives inside ``upsert_monthly_cardio`` —
@@ -635,12 +628,10 @@ def main() -> int:
                 "elapsed_min":  w.get("elapsed_min"),
             })
         out_lines.extend(upsert_monthly_cardio(
-            wb, cardio_payload, allow_past_months=args.allow_past_months,
+            person, cardio_payload, allow_past_months=args.allow_past_months,
         ))
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")
-
-    wb.save(tracker_path)
 
     # Delete the source export on success — the CSVs are the persistent
     # record now. ``--keep-export`` opts out for testing or one-off

@@ -1,4 +1,4 @@
-"""Read the given tracker xlsx for /coach analysis.
+"""Read the given person's CSV store for /coach analysis.
 
 Emits one JSON blob on stdout organised around session-level signals
 (decisions, not raw arrays). Top blocks:
@@ -61,8 +61,6 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-import openpyxl
-
 # Bring in the shared/ tracker schemas + the local lib/ analytics modules.
 # Each lib/ module also self-bootstraps its own sys.path so it can be
 # imported in isolation (REPL, unit tests); the entry-point doing it
@@ -70,7 +68,7 @@ import openpyxl
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from csv_store import read_profile  # noqa: E402
-from person_paths import tracker_for  # noqa: E402
+from person_paths import monthly_dir  # noqa: E402
 from constants import DEFAULT_DATA_SOURCE, SOURCE_CAPABILITIES  # noqa: E402
 from parsing import _compact, _parse_iso_date  # noqa: E402
 from extract import (  # noqa: E402
@@ -81,6 +79,8 @@ from extract import (  # noqa: E402
     load_exercises_db,
     read_bodyweight,
     read_health_metrics,
+    read_swim_laps,
+    read_swim_workouts,
     read_workout_sessions,
 )
 from health import (  # noqa: E402
@@ -111,6 +111,7 @@ from cardio import (  # noqa: E402
     training_load_summary,
     trimp_per_session,
 )
+from swim import swim_summary  # noqa: E402
 
 
 def main() -> int:
@@ -138,26 +139,24 @@ def main() -> int:
     args = ap.parse_args()
 
     person = args.person
-    tracker_path = tracker_for(person)
-    if not tracker_path.exists():
-        print(f"ERROR: tracker not found: {tracker_path}", file=sys.stderr)
+    md = monthly_dir(person)
+    if not md.exists():
+        print(f"ERROR: monthly CSVs not found: {md}", file=sys.stderr)
         return 1
 
     today_d = (
         datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
     )
 
-    wb = openpyxl.load_workbook(tracker_path, data_only=True, read_only=True)
-    rows, session_totals, session_summaries = extract_rows(wb, args.months, today_d)
-    deloads = find_deloads(wb)
+    rows, session_totals, session_summaries = extract_rows(person, args.months, today_d)
+    deloads = find_deloads(person)
 
     profile = read_profile(person)
     data_source = profile.get("source") or DEFAULT_DATA_SOURCE
     capabilities = SOURCE_CAPABILITIES.get(data_source, SOURCE_CAPABILITIES[DEFAULT_DATA_SOURCE])
 
-    # Health Metrics + Workout Sessions live in CSVs now (per-person
-    # data/ folder). The lib readers below take the person string, not
-    # the workbook, since the workbook no longer carries those sheets.
+    # Every dataset lives in a CSV under <person>/data/. The lib readers
+    # below all take the person string and resolve the matching file.
     health_all = read_health_metrics(person)
     # Per-day rows go into health_metrics_recent. ``bodyweight_kg`` is dropped
     # because it duplicates the dedicated ``bodyweight_recent`` series — the
@@ -169,6 +168,8 @@ def main() -> int:
     ]
 
     workout_sessions_all = read_workout_sessions(person)
+    swim_workouts_all = read_swim_workouts(person)
+    swim_laps_all = read_swim_laps(person)
 
     bw_all = read_bodyweight(person)
     bw_latest = (
@@ -229,6 +230,9 @@ def main() -> int:
     auto_deloads = auto_deload_candidates(monthly_sessions, deloads, today_d)
     weekly_health = health_metrics_weekly(health_all, today_d, weeks=4)
     daily_activity = daily_activity_28d(health_all, workout_sessions_all, today_d)
+    swim = swim_summary(
+        swim_workouts_all, swim_laps_all, today_d, profile, max_hr,
+    )
 
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
@@ -247,6 +251,9 @@ def main() -> int:
         # ---- Cardio rollup ----
         "cardio_last_28d": cardio_last_28d(rows, today_d),
         "cardio_hr_zones_28d": cardio_zones,
+        # ---- Swim summary (only present when there are swims in the
+        # 28-day window; ``_compact`` drops None below). ----
+        "swim_summary": swim,
         # ---- Daily activity (NEAT) — all-day movement beyond workouts. ----
         "daily_activity_28d": daily_activity,
         # ---- Recovery + training load (Python-derived, not raw metrics) ----

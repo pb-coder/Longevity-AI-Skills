@@ -61,6 +61,25 @@ Leave fields blank if not provided.
 
 **Laps (swim):** recognise `<N> laps`, `<N> lengths`, or `<N> bahnen` (case-insensitive) anywhere on a swim row. Set `laps=N`. Pool length × laps should match `distance_km × 1000`; if the user gives both and they're inconsistent, prefer what they typed and flag the mismatch in Notes.
 
+**Per-lap swim detail (Stroke / SWOLF / per-lap pace) is NOT manually parseable.** Apple Health is the only source — the importer reads `HKWorkoutEventTypeLap` events and writes them to `<Person>/data/swimming/swim_laps.csv`. A manual `/log` swim row records distance + duration + (optionally) `<N> laps`; that's the full surface.
+
+## CSS test (Critical Swim Speed)
+
+When the user types `CSS test` on the header line of a `/log` message that contains a 400m + 200m time-trial pair on the same date, also produce a top-level `css_test` field on the payload wrapper:
+
+```json
+{
+  "rows": [ ... two swim rows for 400m and 200m ... ],
+  "css_test": {"date": "YYYY-MM-DD", "t400_sec": 450, "t200_sec": 210}
+}
+```
+
+- `date` is the session date.
+- `t400_sec` / `t200_sec` are the durations of each TT in seconds (convert MM:SS → seconds).
+- The script computes `(t400_sec - t200_sec) / 2` (sec/100m) and writes `swim_css_sec_per_100m` + `swim_css_set_at` to `<Person>/data/profile.csv`.
+
+Only emit `css_test` when the user explicitly types `CSS test` on the header. Never infer it from a 400+200 pair logged without that keyword — silent CSS overwrites surprise the user. The two TT swims still get logged as normal swim rows on the monthly CSV.
+
 ## Bodyweight (opt-in)
 
 If (and only if) the `/log` message contains an explicit bodyweight line, parse it into a `bodyweight` entry keyed to the session's date. Accepted forms (case-insensitive):

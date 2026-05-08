@@ -1,28 +1,35 @@
-"""canonicalize_logs.py — Rename typo'd exercise names in past monthly sheets and
+"""canonicalize_logs.py — Rename typo'd exercise names in past monthly CSVs and
 strip stale '(not in database)' notes for rows whose exercise is now canonical.
 
-Iterates every YYYY.MM sheet in a tracker xlsx, applies the rename map (case-
-insensitive) to the Exercise column, and removes '(not in database)' from the
-Notes column whenever the (post-rename) exercise name is in the canonical
-exercises-database.md. After all edits, calls style_monthly_sheet so SESSION
-numbering, sort, merges, and TOTAL rows self-heal.
+Iterates every per-month CSV (``<Person>/data/monthly/YYYY.MM.csv``),
+applies the rename map (case-insensitive) to the Exercise column, and
+removes '(not in database)' from the Notes column whenever the
+(post-rename) exercise name is in the canonical exercises-database.md.
+After all edits, calls ``canonicalize_monthly_csv`` so SESSION
+numbering, sort, and TOTAL rows self-heal.
 
-Ambiguous names (e.g. bare 'Leg Curl' which could be Lying or Seated) are
-reported but not auto-renamed.
+Ambiguous names (e.g. bare 'Leg Curl' which could be Lying or Seated)
+are reported but not auto-renamed.
 
 Usage:
-    python3 canonicalize_logs.py "Workout Tracker - Nihad.xlsx"
+    python3 canonicalize_logs.py --person Nihad
 """
 from __future__ import annotations
+
+import argparse
+import csv
 import re
 import sys
 from pathlib import Path
 
-import openpyxl
-
 THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
-from tracker_sheet import style_monthly_sheet  # noqa: E402
+from monthly_csv import (  # noqa: E402
+    MONTHLY_HEADERS,
+    canonicalize_monthly_csv,
+    list_year_months,
+)
+from person_paths import monthly_csv as monthly_csv_path  # noqa: E402
 
 # --- canonical-name source --------------------------------------------------
 
@@ -71,109 +78,116 @@ RENAMES: dict[str, str] = {
     "stomach press vertical machine": "Ab Crunch Machine",
 }
 
-# Keys we report (don't auto-rename) so the user can disambiguate.
 AMBIGUOUS = {"leg curl"}
 
-# Some renames also need a Notes annotation (e.g. Hanging Leg Raise → Leg Raise
-# with a 'hanging' note so the variant info isn't lost).
 RENAME_NOTE: dict[str, str] = {
     "hanging leg raise": "hanging",
 }
 
 NOT_IN_DB_RE = re.compile(r"\s*\(\s*not in database\s*\)\s*", re.IGNORECASE)
-SHEET_NAME_RE = re.compile(r"^\d{4}\.\d{2}$")
 
-EXERCISE_COL = 4
-NOTES_COL = 9
+# Column indices (0-based) in the per-month CSV.
+EXERCISE_IDX = MONTHLY_HEADERS.index("Exercise")
+NOTES_IDX = MONTHLY_HEADERS.index("Notes")
 
 
 # --- core --------------------------------------------------------------------
 
-def canonicalize_sheet(ws, canonical: set[str]) -> tuple[int, int, list[tuple[int, str]]]:
-    """Apply renames and clear stale notes on a single sheet.
+def canonicalize_csv(path: Path, canonical: set[str]) -> tuple[int, int, list[tuple[int, str]]]:
+    """Apply renames and clear stale notes on a single per-month CSV.
 
     Returns (renamed_count, cleared_notes_count, ambiguous_rows).
-    ambiguous_rows is [(row, original_name)] for caller-side reporting.
+    ``ambiguous_rows`` is [(row_idx, original_name)] for caller-side
+    reporting.
     """
     renamed = 0
     cleared = 0
     ambiguous: list[tuple[int, str]] = []
 
-    for r in range(2, ws.max_row + 1):
-        ex_cell = ws.cell(row=r, column=EXERCISE_COL)
-        ex_val = ex_cell.value
+    if not path.exists():
+        return renamed, cleared, ambiguous
+
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader, [])
+        rows = list(reader)
+    if header != MONTHLY_HEADERS:
+        return renamed, cleared, ambiguous
+
+    for i, row in enumerate(rows):
+        if len(row) <= max(EXERCISE_IDX, NOTES_IDX):
+            continue
+        ex_val = row[EXERCISE_IDX]
         if not ex_val or not isinstance(ex_val, str):
             continue
         key = ex_val.strip().lower()
 
         if key in AMBIGUOUS:
-            ambiguous.append((r, ex_val))
+            ambiguous.append((i + 2, ex_val))  # +2 for 1-indexed + header
 
         if key in RENAMES:
-            ex_cell.value = RENAMES[key]
+            row[EXERCISE_IDX] = RENAMES[key]
             renamed += 1
             note_addition = RENAME_NOTE.get(key)
             if note_addition:
-                notes_cell = ws.cell(row=r, column=NOTES_COL)
-                cur = (notes_cell.value or "").strip()
+                cur = (row[NOTES_IDX] or "").strip()
                 if note_addition not in cur.lower():
-                    notes_cell.value = note_addition if not cur else f"{cur}; {note_addition}"
+                    row[NOTES_IDX] = (
+                        note_addition if not cur else f"{cur}; {note_addition}"
+                    )
 
-        # After potential rename, check whether the canonical name is in the DB
-        # and the Notes column carries '(not in database)' that's now stale.
-        post_name = (ex_cell.value or "").strip().lower()
+        post_name = (row[EXERCISE_IDX] or "").strip().lower()
         if post_name in canonical:
-            notes_cell = ws.cell(row=r, column=NOTES_COL)
-            notes_val = notes_cell.value
+            notes_val = row[NOTES_IDX]
             if isinstance(notes_val, str) and NOT_IN_DB_RE.search(notes_val):
                 cleaned = NOT_IN_DB_RE.sub("", notes_val).strip().strip(";").strip()
-                notes_cell.value = cleaned or None
+                row[NOTES_IDX] = cleaned
                 cleared += 1
 
+    if renamed or cleared:
+        with path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            writer.writerows(rows)
     return renamed, cleared, ambiguous
 
 
-def main(xlsx_path: str) -> None:
+def main(person: str) -> int:
     canonical = load_canonical_names(DB_MD)
-    wb = openpyxl.load_workbook(xlsx_path)
-
-    monthly_sheets = [s for s in wb.sheetnames if SHEET_NAME_RE.match(s)]
-    if not monthly_sheets:
-        print(f"{xlsx_path}: no monthly sheets found")
-        return
+    yms = list_year_months(person)
+    if not yms:
+        print(f"{person}: no monthly CSVs found")
+        return 0
 
     total_renamed = 0
     total_cleared = 0
-    all_ambiguous: list[tuple[str, int, str]] = []  # (sheet, row, name)
+    all_ambiguous: list[tuple[str, int, str]] = []
 
-    for name in monthly_sheets:
-        ws = wb[name]
-        renamed, cleared, amb = canonicalize_sheet(ws, canonical)
+    for ym in yms:
+        path = monthly_csv_path(person, ym)
+        renamed, cleared, amb = canonicalize_csv(path, canonical)
         if renamed or cleared or amb:
-            print(f"  {name}: renamed={renamed} cleared_notes={cleared} ambiguous={len(amb)}")
+            print(f"  {ym}: renamed={renamed} cleared_notes={cleared} ambiguous={len(amb)}")
         total_renamed += renamed
         total_cleared += cleared
         for r, nm in amb:
-            all_ambiguous.append((name, r, nm))
-
-        # Re-style the sheet so SESSION/sort/merges/TOTAL rebuild around the edits.
-        # The styler rebuilds the data area from scratch by reading the cells we
-        # just modified, so renamed names propagate cleanly.
+            all_ambiguous.append((ym, r, nm))
         if renamed or cleared:
-            style_monthly_sheet(ws)
+            canonicalize_monthly_csv(person, ym)
 
-    wb.save(xlsx_path)
-    print(f"{xlsx_path}: total renamed={total_renamed} cleared_notes={total_cleared}")
+    print(f"{person}: total renamed={total_renamed} cleared_notes={total_cleared}")
 
     if all_ambiguous:
         print("\nAmbiguous rows (manual disambiguation needed):")
-        print(f"  {'Sheet':<10} {'Row':>4}  Exercise (decide Lying vs Seated)")
-        for sheet, row, nm in all_ambiguous:
-            print(f"  {sheet:<10} {row:>4}  {nm}")
+        print(f"  {'Month':<10} {'Row':>4}  Exercise (decide Lying vs Seated)")
+        for ym, row, nm in all_ambiguous:
+            print(f"  {ym:<10} {row:>4}  {nm}")
+    return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("usage: canonicalize_logs.py <tracker.xlsx>", file=sys.stderr)
-        sys.exit(2)
-    main(sys.argv[1])
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--person", required=True,
+                    help="Tracker owner (Nihad or Fabian).")
+    args = ap.parse_args()
+    sys.exit(main(args.person))

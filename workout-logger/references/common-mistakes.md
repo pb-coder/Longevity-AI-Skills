@@ -15,8 +15,8 @@
 | `deadhang 30s` | "Deadhang" (not in database) | "Dead Hang" (alias table) |
 | `leg curl 55kg x 10 (seated)` | "Leg Curl" (ambiguous) | "Leg Curl (Seated)" — modifier resolves variant |
 | Tracker missing from CWD | Search the filesystem for it | Stop, one-line error: tracker must be in the working directory |
-| Date from a brand-new month | Ask the user if it's OK to create the sheet | Just call the script — it creates the `YYYY.MM` sheet with headers if missing |
-| Writing a standalone `.xlsx` or markdown table to chat | Claude.ai-era output | The tracker itself is the output. Summary line only. |
+| Date from a brand-new month | Ask the user if it's OK to create the file | Just call the script — it creates the `monthly/YYYY.MM.csv` file with headers if missing |
+| Writing a standalone `.xlsx` or markdown table to chat | Claude.ai-era output | The tracker (CSV) itself is the output. Summary line only. |
 | `/log 22.04 deload ...` with no deload marker | Session logged normally | Keyword `deload` on the header line sets `Deload Workout` in the first row's notes. Coach reads this for mesocycle math. |
 | `plank 45s` → reps=45 | Duration smuggled into reps | `reps=0`, `duration_min=0.75`. Isometric holds belong in the Duration column. |
 | `deadhang 30s` (isometric hold) | `reps=30` | `reps=0`, `duration_min=0.5`, canonical name "Dead Hang". |
@@ -27,3 +27,5 @@
 | Pinning HL to `health_export - <Person>.txt` like the XML naming convention | Resolver expects the bare `health_export_*.txt` glob; the per-person variant won't match | HL files keep their app-generated `health_export_<timestamp>.txt` name. The resolver picks the most recent by mtime; one person at a time, swap files between runs. |
 | `Swim 550m 22 laps` parsed with `reps=22` | reps is for strength rows; `22` here is laps, and `550m` is metres | `reps=0`, `distance_km=0.55`, `laps=22`. Convert metres to km; recognise `laps` / `lengths` / `Bahnen` (case-insensitive) on swim rows. |
 | Logging swim distance as `550` (kept as-is) → tracker shows `550 km` | The tracker's Distance column is km; swims are typically 0.2–3 km | Convert metres to km when the user writes `<N>m` (Apple's XML importer now handles this automatically via `<WorkoutStatistics unit="m">`). |
+| Inferring a `css_test` from any 400m + 200m pair | Silently overwrites the user's stored CSS | Only emit `css_test` when the user explicitly typed `CSS test` on the header line. Otherwise log the two swims as normal rows. |
+| Trying to record per-lap stroke / SWOLF on a manual `/log` swim | There's no manual surface for it | Per-lap detail comes from Apple Health import only. A manual swim row records distance + duration + (optionally) `<N> laps`. |

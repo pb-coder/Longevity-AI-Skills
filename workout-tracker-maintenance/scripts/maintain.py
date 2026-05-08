@@ -1,184 +1,108 @@
 """Workout Tracker monthly maintenance.
 
 Idempotent. Safe to re-run. Performs:
-  1. Restyle the monthly YYYY.MM workout sheets to the canonical look
-  2. Trim empty trailing rows/columns (with buffer for the current month)
-  3. Reorder remaining sheets: months newest → oldest
-  4. Validate the per-person CSVs (well-formed, monotonic dates)
-  5. Report row counts and verify data integrity
+  1. Canonicalize every per-month workout CSV (sort, recompute Volume/
+     Pace/SESSION, rebuild TOTAL rows, hoist deload markers).
+  2. Validate all CSVs (header schema match, monotonic date order,
+     row counts).
+  3. Optional ``--fix-distance-units`` swim sweep (legacy meter-as-km
+     bug across monthly CSVs + workout_sessions.csv + swim_workouts.csv).
 
-Post-PR1: only the monthly workout sheets live in xlsx; Health Metrics,
-Workout Sessions, and Profile are CSVs in ``<person>/data/``.
+Post-PR3a: there is no xlsx anywhere. Per-month workout data lives in
+``<Person>/data/monthly/YYYY.MM.csv``. Health Metrics, Workout Sessions,
+Profile, swim_workouts, swim_laps live alongside in ``<Person>/data/``.
 
 Usage:
     python3 maintain.py --person Nihad
     python3 maintain.py --person Nihad --dry-run
     python3 maintain.py --person Nihad --fix-distance-units
 """
+from __future__ import annotations
+
 import argparse
 import csv
-import re
-import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 
-import openpyxl
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from tracker_sheet import (  # noqa: E402
-    MONTHLY_COLS,
+from monthly_csv import (  # noqa: E402
+    MONTHLY_HEADERS,
+    TOTAL_LABEL,
     _format_pace_min_per_km,
     _parse_duration_minutes,
-    canonicalize_sheet_order,
-    date_str,
-    find_last_data_cell,
-    style_monthly_sheet,
+    canonicalize_monthly_csv,
+    list_year_months,
 )
 from csv_store import (  # noqa: E402
     HEALTH_METRICS_HEADERS_BY_SOURCE,
+    SWIM_LAPS_HEADERS,
+    SWIM_WORKOUTS_HEADERS,
     WORKOUT_SESSIONS_HEADERS_BY_SOURCE,
     read_profile,
 )
 from person_paths import (  # noqa: E402
-    data_dir,
     health_metrics_csv,
+    monthly_csv as monthly_csv_path,
+    monthly_dir,
     profile_csv,
-    tracker_for,
+    swim_laps_csv,
+    swim_workouts_csv,
     workout_sessions_csv,
 )
 
-# Row buffer policy when trimming empty rows.
-# Current-month sheet: leave a generous buffer since the user is actively logging.
-# Past-month sheets: 2 blank rows.
-CURRENT_MONTH_BUFFER = 50
-PAST_MONTH_BUFFER = 2
 
-
-# ------------------------------------------------------------------ helpers
-def is_monthly(sheet_name: str) -> bool:
-    return bool(re.match(r"^\d{4}\.\d{2}$", sheet_name))
-
-
-def current_month_key():
-    """Return the YYYY.MM string for the current calendar month."""
-    return datetime.now().strftime("%Y.%m")
-
-
-# ------------------------------------------------------------------ trim
-def trim_sheet(ws, buffer: int, target_cols: int):
-    """Drop trailing empty rows (keeping `buffer` extras) and cap columns at `target_cols`."""
-    last_r, last_c = find_last_data_cell(ws)
-    if last_r < 1:
-        last_r = 1
-    target_last_row = last_r + buffer
-
-    if ws.max_row > target_last_row:
-        ws.delete_rows(target_last_row + 1, ws.max_row - target_last_row)
-    if ws.max_column > target_cols:
-        ws.delete_cols(target_cols + 1, ws.max_column - target_cols)
-
-
-# ------------------------------------------------------------------ reorder
-def reorder_sheets(wb):
-    """Delegate to the shared canonicalize_sheet_order helper.
-
-    Kept as a thin wrapper so existing callers (and tests, if any) don't
-    need to update their call sites — the canonical order logic lives in
-    ``tracker_sheet`` so writers (`/log`, importers, /maintain) all use
-    the same code path.
-    """
-    canonicalize_sheet_order(wb)
-
-
-# ------------------------------------------------------------------ main
+# ------------------------------------------------------------------ run
 def run(person: str, dry_run: bool = False) -> int:
-    """Restyle the workout xlsx (monthly sheets only) and validate the CSVs."""
-    path = tracker_for(person)
-    if not path.exists():
-        print(f"ERROR: tracker not found: {path}", file=sys.stderr)
+    """Canonicalize every per-month CSV + validate the per-person CSV store."""
+    md = monthly_dir(person)
+    if not md.exists():
+        print(f"ERROR: no monthly CSV directory: {md}", file=sys.stderr)
         return 1
 
-    # Safety backup before any write.
-    if not dry_run:
-        backup = path.with_suffix(".maintain-backup.xlsx")
-        shutil.copy2(path, backup)
-        print(f"Backup: {backup.name}")
+    yms = list_year_months(person)
+    if not yms:
+        print(f"WARN: no monthly CSVs found in {md}", file=sys.stderr)
 
-    wb = openpyxl.load_workbook(path)
+    print("Canonicalize:")
+    for ym in yms:
+        path = monthly_csv_path(person, ym)
+        before_size = path.stat().st_size if path.exists() else 0
+        before_rows = _row_count(path)
+        if not dry_run:
+            canonicalize_monthly_csv(person, ym)
+        after_size = path.stat().st_size if path.exists() else 0
+        after_rows = _row_count(path)
+        delta = "no change" if (
+            before_size == after_size and before_rows == after_rows
+        ) else f"{before_rows} → {after_rows} rows"
+        print(f"  {ym}: {delta}")
 
-    # 0. Drop empty monthly sheets that aren't the current month — keeps the
-    # workbook lean. Empty sheets get created by accident (e.g. a future-month
-    # placeholder) and clutter the tab bar. The current month is preserved
-    # even when empty because /log may write to it any moment.
-    current = current_month_key()
-    for name in list(wb.sheetnames):
-        if is_monthly(name) and name != current:
-            if count_nonempty_rows(wb[name]) == 0:
-                del wb[name]
-                print(f"Dropped empty sheet: {name}")
-
-    # Warn if a stale dense sheet survived the migration. Past-PR1 the
-    # workbook should hold only YYYY.MM monthly sheets.
-    stale_sheets = [
-        n for n in wb.sheetnames
-        if not is_monthly(n)
-    ]
-    if stale_sheets:
-        print(f"WARN: unexpected non-monthly sheets in xlsx: {stale_sheets} "
-              f"(should have been migrated to CSV by migrate_xlsx_to_csv.py)")
-
-    before_counts = {name: count_nonempty_rows(wb[name]) for name in wb.sheetnames}
-
-    # 1. Style + trim every monthly sheet.
-    for name in list(wb.sheetnames):
-        if not is_monthly(name):
-            continue
-        ws = wb[name]
-        style_monthly_sheet(ws)
-        buf = CURRENT_MONTH_BUFFER if name == current else PAST_MONTH_BUFFER
-        trim_sheet(ws, buffer=buf, target_cols=MONTHLY_COLS)
-
-    # 2. Reorder
-    reorder_sheets(wb)
-
-    # 3. Verify data integrity (nonempty row counts should be preserved)
-    after_counts = {name: count_nonempty_rows(wb[name]) for name in wb.sheetnames}
-    mismatches = [n for n in before_counts if before_counts[n] != after_counts.get(n)]
-    if mismatches:
-        print(f"ERROR: nonempty row count changed: {mismatches}", file=sys.stderr)
-        for n in mismatches:
-            print(f"  {n}: before={before_counts[n]} after={after_counts.get(n)}")
-        return 2
-
-    # 4. Write
-    if dry_run:
-        print("Dry run — not saving.")
-    else:
-        wb.save(path)
-        print(f"Saved: {path.name}")
-
-    print("\nFinal sheet order:", list(wb.sheetnames))
-    print("\nRow counts per sheet:")
-    for name in wb.sheetnames:
-        ws = wb[name]
-        last_r, last_c = find_last_data_cell(ws)
-        print(f"  {name}: data rows={after_counts[name]:4d}  max_row={ws.max_row:4d}  max_col={ws.max_column}")
-
-    # 5. Validate CSVs (per-person data folder).
-    csv_status = validate_csvs(person)
     print("\nCSV checks:")
-    for line in csv_status:
+    for line in validate_csvs(person):
         print(f"  {line}")
+
+    if dry_run:
+        print("\nDry run — no writes performed.")
     return 0
 
 
-def validate_csvs(person: str) -> list[str]:
-    """Sanity-check the per-person CSVs.
+def _row_count(path: Path) -> int:
+    """Count data rows (excluding header)."""
+    if not path.exists():
+        return 0
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        return sum(1 for row in reader if any(c.strip() for c in row))
 
-    Reports header schema match (against the active source's expected
-    header), monotonic-DESC date order, and row counts. Read-only — never
-    rewrites the CSVs; the importers' upsert helpers own the rewrite path.
+
+# ------------------------------------------------------------------ validate
+def validate_csvs(person: str) -> list[str]:
+    """Sanity-check the per-person CSV store.
+
+    Reports header schema match, monotonic date order, and row counts.
+    Read-only — never rewrites the CSVs; the importers' upsert helpers
+    own the rewrite path.
     """
     out: list[str] = []
     profile = read_profile(person)
@@ -186,16 +110,24 @@ def validate_csvs(person: str) -> list[str]:
     if source not in HEALTH_METRICS_HEADERS_BY_SOURCE:
         source = "xml"
 
-    targets = {
+    targets: dict[str, tuple] = {
         "health_metrics.csv":   (health_metrics_csv(person),
-                                 HEALTH_METRICS_HEADERS_BY_SOURCE[source]),
+                                 HEALTH_METRICS_HEADERS_BY_SOURCE[source],
+                                 "desc"),
         "workout_sessions.csv": (workout_sessions_csv(person),
-                                 WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source]),
+                                 WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source],
+                                 "desc"),
         "profile.csv":          (profile_csv(person),
-                                 ["key", "value"]),
+                                 ["key", "value"],
+                                 None),
     }
+    sw_path = swim_workouts_csv(person)
+    sl_path = swim_laps_csv(person)
+    if sw_path.exists() or sl_path.exists():
+        targets["swim_workouts.csv"] = (sw_path, SWIM_WORKOUTS_HEADERS, "desc")
+        targets["swim_laps.csv"] = (sl_path, SWIM_LAPS_HEADERS, "asc")
 
-    for label, (path, expected_header) in targets.items():
+    for label, (path, expected_header, order) in targets.items():
         if not path.exists():
             out.append(f"{label}: missing")
             continue
@@ -213,55 +145,51 @@ def validate_csvs(person: str) -> list[str]:
                 f"expected {expected_header}"
             )
             continue
-        # Monotonic-DESC date check (Health Metrics + Workout Sessions only).
-        if label != "profile.csv":
+        if order in ("desc", "asc"):
             dates = [row[0] for row in rows if row and row[0]]
-            if dates and any(dates[i] < dates[i + 1] for i in range(len(dates) - 1)):
-                out.append(f"{label}: WARN dates not strictly DESC")
+            if dates:
+                if order == "desc" and any(
+                    dates[i] < dates[i + 1] for i in range(len(dates) - 1)
+                ):
+                    out.append(f"{label}: WARN dates not strictly DESC")
+                elif order == "asc" and any(
+                    dates[i] > dates[i + 1] for i in range(len(dates) - 1)
+                ):
+                    out.append(f"{label}: WARN dates not strictly ASC")
         out.append(f"{label}: {len(rows)} rows ok")
+
+    # Per-month workout CSVs.
+    for ym in list_year_months(person):
+        path = monthly_csv_path(person, ym)
+        with path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.reader(f)
+            header = next(reader, [])
+            rows = list(reader)
+        if header != MONTHLY_HEADERS:
+            out.append(
+                f"monthly/{ym}.csv: header mismatch — got {header}, "
+                f"expected {MONTHLY_HEADERS}"
+            )
+            continue
+        # Monotonic-ASC date check (skip TOTAL rows since they share
+        # the session date with the data rows above them).
+        dates = [
+            row[1] for row in rows
+            if len(row) > 3 and row[1]
+            and (row[3] or "").strip().upper() != TOTAL_LABEL
+        ]
+        if dates and any(dates[i] > dates[i + 1] for i in range(len(dates) - 1)):
+            out.append(f"monthly/{ym}.csv: WARN dates not strictly ASC")
+        out.append(f"monthly/{ym}.csv: {len(rows)} rows ok")
+
     return out
 
 
-def count_nonempty_rows(ws) -> int:
-    """Count non-empty rows.
-
-    Monthly sheets: count rows with an Exercise value populated, excluding
-    TOTAL summary rows. Exercise sits at col C pre-migration, col D post-
-    migration; we read both and take whichever is populated. This ignores
-    legacy trailing rows that only held a carried-down Volume formula —
-    they have no exercise name, so they don't represent logged sets either
-    before or after migration. Keeps the before/after verify stable.
-
-    Other sheets: count any row with content.
-    """
-    if is_monthly(ws.title):
-        count = 0
-        for row in ws.iter_rows(min_row=2):
-            ex_c = row[2].value if len(row) > 2 else None  # col C
-            ex_d = row[3].value if len(row) > 3 else None  # col D
-            exercise = ex_c if isinstance(ex_c, str) else ex_d
-            if not isinstance(exercise, str) or not exercise.strip():
-                continue
-            if exercise.strip().upper() == "TOTAL":
-                continue
-            count += 1
-        return count
-
-    count = 0
-    for row in ws.iter_rows():
-        if any(c.value is not None and c.value != "" for c in row):
-            count += 1
-    return count
-
-
 # ------------------------------------------------------------------ historical fix
-# Distance threshold above which a Swim row's value is almost certainly a
-# meter-as-km bug. Open-water records exceed 30 km but the tracker's user
-# base is pool-only; >10 km is functionally never legitimate here.
 SUSPICIOUS_SWIM_DISTANCE_KM = 10.0
 
 
-def _is_swim(exercise) -> bool:
+def _is_swim_label(exercise) -> bool:
     return isinstance(exercise, str) and exercise.strip().lower() == "swim"
 
 
@@ -270,73 +198,81 @@ def _is_swim_session_type(apple_type) -> bool:
 
 
 def fix_distance_units(person: str, dry_run: bool = False) -> int:
-    """Scan all monthly + Workout Sessions rows for the meter-as-km bug.
+    """Sweep all CSVs for the legacy meter-as-km swim distance bug.
 
-    Auto-fix swim rows whose Distance (km) > 10 (almost certainly metres):
-    divide by 1000, recompute pace via the shared formatter (which now
-    blanks degenerate ``0:01`` outputs). Print every change. For other
-    activities (Run / Cycle / Walk / Hike), only flag suspicious rows
-    where pace is implausibly fast — never auto-mutate them, since the
-    XML importer never had the unit bug for non-swims.
+    Auto-fix any swim row whose Distance (km) > 10 (almost certainly
+    metres mis-stored as km): divide by 1000, recompute pace via the
+    shared formatter. Print every change. For other activities (Run /
+    Cycle / Walk / Hike), only flag suspicious rows where pace is
+    implausibly fast — never auto-mutate them.
 
-    Idempotent: re-runs on a clean tracker print "no fixes needed" and
-    don't touch the file.
+    Idempotent: a clean tracker prints "no fixes needed".
     """
-    path = tracker_for(person)
-    if not path.exists():
-        print(f"ERROR: tracker not found: {path}", file=sys.stderr)
-        return 1
-
-    wb = openpyxl.load_workbook(path)
     fixes: list[tuple[str, int, str]] = []
     flags: list[tuple[str, int, str]] = []
 
-    # 1. Monthly xlsx sweep: swims with distance > 10 km auto-fix; non-swim
-    # outliers flagged but not mutated.
-    for name in wb.sheetnames:
-        if not is_monthly(name):
+    # 1. Per-month workout CSVs.
+    for ym in list_year_months(person):
+        path = monthly_csv_path(person, ym)
+        with path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.reader(f)
+            header = next(reader, [])
+            rows = list(reader)
+        if header != MONTHLY_HEADERS:
             continue
-        ws = wb[name]
-        for r in range(2, ws.max_row + 1):
-            exercise = ws.cell(row=r, column=4).value
-            distance_v = ws.cell(row=r, column=10).value
-            duration_v = ws.cell(row=r, column=11).value
-            if distance_v in (None, ""):
+        try:
+            ex_idx = header.index("Exercise")
+            dist_idx = header.index("Distance (km)")
+            dur_idx = header.index("Duration (min)")
+            pace_idx = header.index("Pace (min/km)")
+        except ValueError:
+            continue
+        changed = False
+        for i, row in enumerate(rows):
+            if len(row) <= max(ex_idx, dist_idx, dur_idx, pace_idx):
+                continue
+            exercise = row[ex_idx]
+            distance_v = row[dist_idx]
+            duration_v = row[dur_idx]
+            if not distance_v:
                 continue
             try:
                 distance = float(distance_v)
-            except (TypeError, ValueError):
+            except ValueError:
                 continue
 
-            if _is_swim(exercise) and distance > SUSPICIOUS_SWIM_DISTANCE_KM:
+            if _is_swim_label(exercise) and distance > SUSPICIOUS_SWIM_DISTANCE_KM:
                 new_distance = round(distance / 1000.0, 3)
                 dur_min = _parse_duration_minutes(duration_v)
                 new_pace = _format_pace_min_per_km(dur_min, new_distance)
-                old_pace = ws.cell(row=r, column=12).value
-                if not dry_run:
-                    ws.cell(row=r, column=10).value = new_distance
-                    ws.cell(row=r, column=12).value = new_pace
+                old_pace = row[pace_idx]
+                row[dist_idx] = str(new_distance)
+                row[pace_idx] = new_pace or ""
                 fixes.append((
-                    name, r,
-                    f"Swim {date_str(ws.cell(row=r, column=2).value)}: "
-                    f"distance {distance} → {new_distance} km, "
+                    f"monthly/{ym}.csv", i + 2,
+                    f"Swim {row[1]}: distance {distance} → {new_distance} km, "
                     f"pace {old_pace!r} → {new_pace!r}"
                 ))
+                changed = True
                 continue
 
-            # Sanity-flag non-swim rows where pace is implausibly fast.
             dur_min = _parse_duration_minutes(duration_v)
             if dur_min and distance > 0:
                 pace = dur_min / distance
                 if pace < 0.5:
                     flags.append((
-                        name, r,
-                        f"{exercise} {date_str(ws.cell(row=r, column=2).value)}: "
-                        f"pace {pace:.3f} min/km — verify distance/duration"
+                        f"monthly/{ym}.csv", i + 2,
+                        f"{exercise} {row[1]}: pace {pace:.3f} min/km — "
+                        f"verify distance/duration"
                     ))
+        if changed and not dry_run:
+            with path.open("w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+                writer.writerows(rows)
+            canonicalize_monthly_csv(person, ym)
 
-    # 2. Workout Sessions CSV sweep — Apple-Watch swim rows where
-    # ``Distance (km) > 10`` get the same divide-by-1000 fix.
+    # 2. Workout Sessions CSV.
     ws_path = workout_sessions_csv(person)
     if ws_path.exists():
         with ws_path.open("r", encoding="utf-8", newline="") as f:
@@ -380,48 +316,70 @@ def fix_distance_units(person: str, dry_run: bool = False) -> int:
                         writer.writerow(header)
                         writer.writerows(csv_rows)
 
+    # 3. Swim Workouts CSV.
+    sw_path = swim_workouts_csv(person)
+    if sw_path.exists():
+        with sw_path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.reader(f)
+            sw_header = next(reader, [])
+            sw_csv_rows = list(reader)
+        if sw_header:
+            try:
+                sw_date_idx = sw_header.index("Date")
+                sw_dist_idx = sw_header.index("Distance (km)")
+            except ValueError:
+                sw_date_idx = sw_dist_idx = -1
+            if sw_date_idx >= 0 and sw_dist_idx >= 0:
+                sw_changed = False
+                for i, row in enumerate(sw_csv_rows):
+                    if len(row) <= max(sw_date_idx, sw_dist_idx):
+                        continue
+                    if not row[sw_dist_idx]:
+                        continue
+                    try:
+                        distance = float(row[sw_dist_idx])
+                    except ValueError:
+                        continue
+                    if distance > SUSPICIOUS_SWIM_DISTANCE_KM:
+                        new_distance = round(distance / 1000.0, 3)
+                        if not dry_run:
+                            row[sw_dist_idx] = str(new_distance)
+                            sw_changed = True
+                        fixes.append((
+                            "swim_workouts.csv", i + 2,
+                            f"Swim {row[sw_date_idx]}: "
+                            f"distance {distance} → {new_distance} km"
+                        ))
+                if sw_changed and not dry_run:
+                    with sw_path.open("w", encoding="utf-8", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(sw_header)
+                        writer.writerows(sw_csv_rows)
+
     if not fixes and not flags:
-        print(f"{path.name}: no fixes needed")
+        print(f"{person}: no fixes needed")
         return 0
 
-    print(f"{path.name}:")
-    for sheet, row, msg in fixes:
-        print(f"  fix [{sheet} row {row}]: {msg}")
-    for sheet, row, msg in flags:
-        print(f"  flag [{sheet} row {row}]: {msg}")
-
-    # Re-style every monthly sheet that received a fix so the corrected
-    # Pace cell is laid out properly. Cheap and idempotent.
-    if fixes and not dry_run:
-        touched_monthly = sorted({s for s, _r, _m in fixes if is_monthly(s)})
-        for s in touched_monthly:
-            style_monthly_sheet(wb[s])
-
+    print(f"{person}:")
+    for label, row, msg in fixes:
+        print(f"  fix [{label} row {row}]: {msg}")
+    for label, row, msg in flags:
+        print(f"  flag [{label} row {row}]: {msg}")
     if dry_run:
         print(f"\nDry run — {len(fixes)} fixes would be applied, "
               f"{len(flags)} flags reviewed (no save).")
     else:
-        if fixes:
-            backup = path.with_suffix(".fix-units-backup.xlsx")
-            shutil.copy2(path, backup)
-            print(f"\nBackup: {backup.name}")
-            wb.save(path)
-            print(f"Saved: {path.name} ({len(fixes)} fixes applied, "
-                  f"{len(flags)} flags reviewed)")
-        else:
-            print(f"\n{len(flags)} flags reviewed; no auto-fixes applied.")
+        print(f"\n{len(fixes)} fixes applied, {len(flags)} flags reviewed.")
     return 0
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--person", required=True,
-                    help="Tracker owner (Nihad or Fabian).")
+                    help="Tracker owner (e.g. Nihad or Fabian).")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument(
-        "--fix-distance-units", action="store_true",
-        help="Run the meter-as-km historical sweep for swim rows",
-    )
+    ap.add_argument("--fix-distance-units", action="store_true",
+                    help="Run the meter-as-km historical sweep across all CSVs")
     args = ap.parse_args()
     if args.fix_distance_units:
         sys.exit(fix_distance_units(args.person, args.dry_run))

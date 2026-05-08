@@ -1,12 +1,16 @@
-"""Import Apple Health export into the tracker (CSV + monthly xlsx).
+"""Import Apple Health export into the tracker CSV store.
 
 Streams the zipped ``Export.xml`` directly with stdlib ``zipfile`` +
 ``xml.etree.iterparse`` (no extraction step, ~150 MB peak RAM on a 540 MB
 unzipped XML). Aggregates per-day Tier 1+2 metrics into
 ``<person>/data/health_metrics.csv`` and one row per ``Workout`` element
-into ``<person>/data/workout_sessions.csv``. Auto-cardio rows still
-flow into the YYYY.MM monthly sheet on the workout xlsx. Sparse-merge
-upserts protect existing data on re-run; idempotent.
+into ``<person>/data/workout_sessions.csv``. Auto-cardio rows flow into
+the matching ``<person>/data/monthly/YYYY.MM.csv`` via the pure-CSV
+``upsert_monthly_cardio`` in ``monthly_csv.py``. For swim workouts
+(XML only), per-swim aggregates land in
+``<person>/data/swimming/swim_workouts.csv`` and per-lap detail in
+``swim_laps.csv``. Sparse-merge upserts protect existing data on re-run;
+idempotent.
 
 The export file is **deleted on success** — the CSVs are the persistent
 record. Re-export from iPhone if you need to backfill.
@@ -28,10 +32,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-import openpyxl
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from tracker_sheet import (  # noqa: E402
+from monthly_csv import (  # noqa: E402
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
 )
@@ -39,16 +41,18 @@ from csv_store import (  # noqa: E402
     ensure_profile,
     read_profile,
     upsert_health_metrics,
+    upsert_swim_laps,
+    upsert_swim_workouts,
     upsert_workout_sessions,
 )
 from person_paths import (  # noqa: E402
     WORKOUT_TRACKER_ROOT,
     person_dir,
-    tracker_for,
 )
 from apple_workout_types import (  # noqa: E402
     APPLE_TO_TRACKER_EXERCISE,
     CARDIO_AUTOLOG_TYPES,
+    HK_SWIMMING_STROKE_STYLE,
 )
 
 # ---------- type identifiers we care about ----------
@@ -98,6 +102,8 @@ BASAL_ENERGY_TYPE = "HKQuantityTypeIdentifierBasalEnergyBurned"
 DISTANCE_WR_TYPE = "HKQuantityTypeIdentifierDistanceWalkingRunning"
 DISTANCE_CYCLE_TYPE = "HKQuantityTypeIdentifierDistanceCycling"
 DISTANCE_SWIM_TYPE = "HKQuantityTypeIdentifierDistanceSwimming"
+SWIM_STROKE_COUNT_TYPE = "HKQuantityTypeIdentifierSwimmingStrokeCount"
+WATER_TEMP_TYPE = "HKQuantityTypeIdentifierWaterTemperature"
 
 # Apple's <WorkoutStatistics> tag carries a per-record `unit` attribute.
 # Walks/runs/cycling typically arrive in km, but swimming is recorded in
@@ -395,6 +401,15 @@ def extract_workout(elem, since_date):
     elevation_m: float | None = None
     indoor = False
     laps: int = 0
+    # Swim-only extras. Captured for every workout to keep the loop simple,
+    # but the importer only writes them to swim_workouts.csv when the
+    # canonical activity type is "Swimming".
+    pool_length_m: int | None = None
+    stroke_count_total: int | None = None
+    water_temp_c: float | None = None
+    swimming_location_type: str | None = None  # "1" pool, "2" open water
+    indoor_workout_meta: str | None = None      # "0" outdoor pool, "1" indoor
+    swim_lap_events: list[dict] = []
     for child in elem:
         if child.tag == "MetadataEntry":
             # Apple uses the same activity-type enum for indoor + outdoor
@@ -405,6 +420,7 @@ def extract_workout(elem, since_date):
             val = child.attrib.get("value")
             if key == "HKIndoorWorkout":
                 indoor = val == "1"
+                indoor_workout_meta = val
             elif key == "HKElevationAscended" and val is not None:
                 # Apple reports elevation in cm with a unit suffix (e.g.
                 # "11589 cm"). Strip the unit and convert to metres.
@@ -412,6 +428,14 @@ def extract_workout(elem, since_date):
                 cm = to_float(token)
                 if cm is not None:
                     elevation_m = cm / 100.0
+            elif key == "HKLapLength" and val is not None:
+                # Format: "25 m" or "50 m". Token-split + float for safety.
+                token = val.split()[0] if isinstance(val, str) else val
+                f = to_float(token)
+                if f is not None:
+                    pool_length_m = int(round(f))
+            elif key == "HKSwimmingLocationType" and val is not None:
+                swimming_location_type = str(val).strip()
             continue
         if child.tag == "WorkoutEvent":
             # Lap count: Apple emits one ``<WorkoutEvent type="HKWorkoutEventTypeLap"/>``
@@ -420,6 +444,33 @@ def extract_workout(elem, since_date):
             # value to the Laps column on swim rows.
             if child.attrib.get("type") == "HKWorkoutEventTypeLap":
                 laps += 1
+                # Capture per-lap detail for swim_laps.csv. Stroke style
+                # and SWOLF are nested MetadataEntry children of the lap
+                # event. Filter on lap events ONLY — Apple also emits
+                # HKWorkoutEventTypeSegment events with SWOLF that would
+                # double-count if we let them in.
+                lap_dur_min = to_float(child.attrib.get("duration"))
+                stroke_raw: int | None = None
+                swolf_v: float | None = None
+                for sub in child:
+                    if sub.tag != "MetadataEntry":
+                        continue
+                    sk = sub.attrib.get("key")
+                    sv = sub.attrib.get("value")
+                    if sk == "HKSwimmingStrokeStyle" and sv is not None:
+                        try:
+                            stroke_raw = int(str(sv).strip())
+                        except (TypeError, ValueError):
+                            stroke_raw = None
+                    elif sk == "HKSWOLFScore" and sv is not None:
+                        swolf_v = to_float(sv)
+                swim_lap_events.append({
+                    "lap_num": laps,
+                    "stroke_raw": stroke_raw,
+                    "duration_sec": round(lap_dur_min * 60.0, 2)
+                                    if lap_dur_min is not None else None,
+                    "swolf": round(swolf_v, 2) if swolf_v is not None else None,
+                })
             continue
         if child.tag != "WorkoutStatistics":
             continue
@@ -433,6 +484,12 @@ def extract_workout(elem, since_date):
             active_cal = to_float(a.get("sum"))
         elif ctype == BASAL_ENERGY_TYPE:
             basal_cal = to_float(a.get("sum"))
+        elif ctype == SWIM_STROKE_COUNT_TYPE:
+            v = to_float(a.get("sum"))
+            if v is not None:
+                stroke_count_total = int(round(v))
+        elif ctype == WATER_TEMP_TYPE:
+            water_temp_c = to_float(a.get("average"))
         elif ctype in (DISTANCE_WR_TYPE, DISTANCE_CYCLE_TYPE, DISTANCE_SWIM_TYPE):
             # Use whichever distance type matches the activity (Apple
             # records the right one per workout). If multiple, the last
@@ -480,6 +537,20 @@ def extract_workout(elem, since_date):
     device_str = attrib.get("device") or ""
     is_machine = FITNESS_MACHINE_DEVICE_MARKER in device_str.lower()
 
+    # Derive a single Location string from the swim metadata flags.
+    # See PR2 plan / Apple Health swim primer:
+    #   HKSwimmingLocationType=2 → Open Water
+    #   HKIndoorWorkout=1        → Pool (indoor lane pool)
+    #   HKIndoorWorkout=0 + HKSwimmingLocationType=1 → Outdoor Pool
+    swim_location: str | None = None
+    if apple_type == "Swimming":
+        if swimming_location_type == "2":
+            swim_location = "Open Water"
+        elif indoor_workout_meta == "1":
+            swim_location = "Pool"
+        elif indoor_workout_meta == "0" and swimming_location_type == "1":
+            swim_location = "Outdoor Pool"
+
     return {
         "date":         d_start,
         "start":        hhmm(dt_start),
@@ -502,6 +573,12 @@ def extract_workout(elem, since_date):
         "dt_start":     dt_start,
         "dt_end":       dt_end,
         "notes":        notes,
+        # Swim-only extras (None for non-swims).
+        "pool_length_m":      pool_length_m,
+        "stroke_count_total": stroke_count_total,
+        "water_temp_c":       round(water_temp_c, 2) if water_temp_c is not None else None,
+        "swim_location":      swim_location,
+        "swim_lap_events":    swim_lap_events if apple_type == "Swimming" else None,
     }
 
 
@@ -764,6 +841,128 @@ def cluster_strength_sessions(workout_rows: list[dict]) -> tuple[list[dict], lis
     return sessions, warnings
 
 
+# Stroke-name → 4-letter abbreviation for the Stroke Mix summary.
+# Kept short (3-5 chars) so the CSV cell stays readable.
+_STROKE_ABBREV = {
+    "Freestyle":    "Free",
+    "Backstroke":   "Back",
+    "Breaststroke": "Breast",
+    "Butterfly":    "Fly",
+    "Mixed":        "Mix",
+    "Kickboard":    "Kick",
+    "Unknown":      "Unk",
+}
+
+
+def _stroke_mix_summary(lap_events: list[dict]) -> str | None:
+    """Compact stroke-mix label, e.g. ``"Free 21 / Fly 1"``.
+
+    Blank when there's only one stroke type and it's Freestyle (the
+    default — not worth displaying). Counts are derived from the
+    decoded stroke style; unknown enum values fall through to "Unk".
+    """
+    if not lap_events:
+        return None
+    counts: dict[str, int] = {}
+    for ev in lap_events:
+        raw = ev.get("stroke_raw")
+        if raw is None:
+            name = "Unknown"
+        else:
+            name = HK_SWIMMING_STROKE_STYLE.get(int(raw), "Unknown")
+        counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return None
+    if len(counts) == 1 and "Freestyle" in counts:
+        return None
+    parts = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return " / ".join(f"{_STROKE_ABBREV.get(name, name)} {n}" for name, n in parts)
+
+
+def build_swim_csv_payloads(
+    workout_rows: list[dict],
+    profile: dict | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Build per-swim and per-lap CSV payloads from extracted workout rows.
+
+    Filters ``workout_rows`` to swims and produces:
+      - one ``swim_workouts.csv`` entry per swim with computed SPL / Avg
+        SWOLF / Stroke Mix.
+      - per-lap ``swim_laps.csv`` entries with decoded stroke names.
+    Workouts without lap events still produce a per-swim row (with SPL /
+    Avg SWOLF blank) so the totals line up with workout_sessions.csv.
+
+    When Apple omits ``HKLapLength`` (rare — happens on some open-water
+    swims), the per-swim ``Pool Length`` cell falls back to
+    ``profile.swim_pool_length_default`` if the user has set one.
+    A one-line note is printed to stderr for each fallback so the user
+    can audit which rows were inferred.
+    """
+    pool_default: int | None = None
+    if profile is not None:
+        pool_default = profile.get("swim_pool_length_default")
+    swim_rows: list[dict] = []
+    lap_rows: list[dict] = []
+    for w in workout_rows:
+        if (w.get("apple_type") or "") != "Swimming":
+            continue
+        lap_events = w.get("swim_lap_events") or []
+        # Avg SWOLF: mean over laps that reported a SWOLF score.
+        swolf_vals = [ev.get("swolf") for ev in lap_events
+                      if ev.get("swolf") is not None]
+        avg_swolf = (round(sum(swolf_vals) / len(swolf_vals), 1)
+                     if swolf_vals else None)
+        # SPL: total strokes / lap count.
+        strokes = w.get("stroke_count_total")
+        laps_n = w.get("laps")
+        spl = (round(strokes / laps_n, 1)
+               if (strokes and laps_n) else None)
+        stroke_mix = _stroke_mix_summary(lap_events)
+        # Pool Length: prefer Apple's HKLapLength; fall back to the
+        # profile default when missing (open-water swims, etc.).
+        pool_length = w.get("pool_length_m")
+        if pool_length is None and pool_default is not None:
+            pool_length = pool_default
+            print(
+                f"Pool Length: fell back to profile default {pool_default}m "
+                f"for swim {w.get('date')} {w.get('start')}",
+                file=sys.stderr,
+            )
+        swim_rows.append({
+            "date":          w.get("date"),
+            "start":         w.get("start"),
+            "end":           w.get("end"),
+            "duration_min":  w.get("duration_min"),
+            "distance_km":   w.get("distance_km"),
+            "pool_length_m": pool_length,
+            "laps":          laps_n,
+            "strokes":       strokes,
+            "spl":           spl,
+            "avg_swolf":     avg_swolf,
+            "stroke_mix":    stroke_mix,
+            "location":      w.get("swim_location"),
+            "water_temp_c":  w.get("water_temp_c"),
+            "avg_hr":        w.get("avg_hr"),
+            "active_cal":    int(round(w["active_cal"]))
+                              if w.get("active_cal") is not None else None,
+        })
+        for ev in lap_events:
+            raw = ev.get("stroke_raw")
+            decoded = (HK_SWIMMING_STROKE_STYLE.get(int(raw))
+                       if raw is not None else None)
+            lap_rows.append({
+                "date":            w.get("date"),
+                "workout_start":   w.get("start"),
+                "lap_num":         ev.get("lap_num"),
+                "stroke_raw":      raw,
+                "stroke_decoded":  decoded,
+                "duration_sec":    ev.get("duration_sec"),
+                "swolf":           ev.get("swolf"),
+                "source":          "Apple Watch",
+            })
+    return swim_rows, lap_rows
+
+
 def _resolve_export_zip(person: str) -> Path | None:
     """Find the Apple Health export zip in the workout-tracker root.
 
@@ -786,7 +985,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--person", required=True,
                     help="Tracker owner (e.g. Nihad or Fabian). "
-                         "Resolves the workout xlsx and data/ folder via "
+                         "Resolves the per-person data/ folder via "
                          "Skills/shared/person_paths.py.")
     ap.add_argument("--zip", default=None, type=Path,
                     help="Override the auto-resolved Apple Health export zip. "
@@ -816,11 +1015,6 @@ def main():
     if zip_path is None or not zip_path.exists():
         print(f"ERROR: no Apple Health export found for {person} "
               f"(looked in {WORKOUT_TRACKER_ROOT})", file=sys.stderr)
-        return 1
-
-    tracker_path = tracker_for(person)
-    if not tracker_path.exists():
-        print(f"ERROR: tracker xlsx not found: {tracker_path}", file=sys.stderr)
         return 1
 
     since = args.since or default_since()
@@ -854,11 +1048,18 @@ def main():
     out_lines.extend(upsert_health_metrics(person, metric_entries))
     out_lines.extend(upsert_workout_sessions(person, workout_rows))
 
-    # Auto-cardio + strength-session metadata still write to the monthly
-    # xlsx sheets via tracker_sheet's existing helpers — only HM/WS/Profile
-    # moved to CSV.
-    wb = openpyxl.load_workbook(tracker_path)
+    # Swim CSV pipeline. XML only — HL .txt exports don't carry per-lap
+    # data, so an HL run leaves swim_workouts.csv / swim_laps.csv empty
+    # and the coach skips the swim section.
+    if profile.get("source") == "xml":
+        swim_rows, swim_lap_rows = build_swim_csv_payloads(workout_rows, profile)
+        if swim_rows:
+            out_lines.extend(upsert_swim_workouts(person, swim_rows))
+        if swim_lap_rows:
+            out_lines.extend(upsert_swim_laps(person, swim_lap_rows))
 
+    # Auto-cardio + strength-session metadata write to the per-month CSVs
+    # via monthly_csv. The xlsx is gone post-PR3a.
     if profile.get("auto_cardio"):
         # The current-month gate lives inside ``upsert_monthly_cardio`` —
         # we hand it every eligible Apple workout in the --since window
@@ -911,7 +1112,7 @@ def main():
                 "machine_tag":  machine_tag,
             })
         out_lines.extend(upsert_monthly_cardio(
-            wb, cardio_payload, allow_past_months=args.allow_past_months,
+            person, cardio_payload, allow_past_months=args.allow_past_months,
         ))
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")
@@ -929,9 +1130,7 @@ def main():
     if strength_warnings:
         out_lines.append("Strength clustering warnings:")
         out_lines.extend(strength_warnings)
-    out_lines.extend(upsert_monthly_strength_session(wb, strength_sessions))
-
-    wb.save(tracker_path)
+    out_lines.extend(upsert_monthly_strength_session(person, strength_sessions))
 
     # Delete the source export on success — the CSVs are the persistent
     # record now. ``--keep-export`` opts out for testing or one-off

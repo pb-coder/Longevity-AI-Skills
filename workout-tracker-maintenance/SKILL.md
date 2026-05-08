@@ -2,31 +2,30 @@
 name: workout-tracker-maintenance
 description: >
   ONLY activate when the user's message starts with "/maintain". Runs
-  end-of-month maintenance on a workout tracker (xlsx + per-person CSVs):
-  restyles the monthly YYYY.MM sheets, trims empty rows/cols, reorders sheets,
-  validates the per-person CSV store. Idempotent. Do NOT trigger on general
-  spreadsheet questions, formatting requests, or anything that doesn't begin
-  with the literal command "/maintain".
+  end-of-month maintenance on a workout tracker (per-person CSV store):
+  canonicalizes every per-month workout CSV (sort + recompute Volume/
+  Pace/SESSION + rebuild TOTAL rows), validates the per-person CSV
+  store. Idempotent. Do NOT trigger on general spreadsheet questions,
+  formatting requests, or anything that doesn't begin with the literal
+  command "/maintain".
 ---
 
 # Workout Tracker Maintenance
 
 **Trigger**: Message starts with `/maintain`. No other messages.
 
-Run this at the end of each month (or any time the sheet looks messy). It's idempotent — safe to run repeatedly.
+Run this at the end of each month (or any time something looks off in the CSV store). It's idempotent — safe to run repeatedly.
 
 ## Who is this for?
 
 Two trackers live in per-person folders:
-- `Nihad/Workout Tracker - Nihad.xlsx` + `Nihad/data/*.csv`
-- `Fabian/Workout Tracker - Fabian.xlsx` + `Fabian/data/*.csv`
+- `Nihad/data/` (CSV store)
+- `Fabian/data/` (CSV store)
 
 Resolve which person(s) `/maintain` should run on:
 - If the user names a person ("/maintain fabian"), run for that one.
 - If the user says "both" or runs `/maintain` bare at end of month, offer to run on both back-to-back (one `python3 scripts/maintain.py --person <Name>` invocation per person).
 - Otherwise ask: **"Is this for Nihad, Fabian, or both?"** before proceeding.
-
-The script's safety backup (`Workout Tracker - <Person>.maintain-backup.xlsx`) lands inside the person's folder.
 
 ## When NOT to Use
 
@@ -36,15 +35,9 @@ The script's safety backup (`Workout Tracker - <Person>.maintain-backup.xlsx`) l
 
 ## What It Does
 
-1. **Reapplies canonical styling** to every monthly sheet (header row, data rows, column widths, freeze pane, session separators). Self-heals any manual formatting drift.
-2. **Trims empty rows and columns** on monthly sheets:
-   - Current-month sheet: 50 blank rows (room to log).
-   - Past-month sheets: 2 blank rows.
-   - Columns capped at 18.
-3. **Reorders sheets**: monthly sheets newest → oldest. Warns if any non-monthly sheet survived the PR1 migration.
-4. **Verifies data integrity**: compares nonempty row counts before/after; aborts if any data was lost.
-5. **Validates per-person CSVs**: checks header schema match (against the active `Profile.source`), monotonic-DESC dates, and reports row counts.
-6. **Takes a safety backup** (`Workout Tracker - <Person>.maintain-backup.xlsx`) before writing.
+1. **Canonicalizes every per-month CSV** (`<Person>/data/monthly/YYYY.MM.csv`): sort by (Date, #, Set), recompute Volume / Pace / SESSION, rebuild TOTAL rows, hoist deload markers. Self-heals any manual edits.
+2. **Validates the per-person CSV store**: checks header schema match (against the active `Profile.source`) and monotonic date order on `health_metrics.csv` / `workout_sessions.csv` / `profile.csv` and every `monthly/YYYY.MM.csv`. When the optional `swimming/` folder exists (XML trackers with per-lap swim data), also validates `swim_workouts.csv` (DESC) and `swim_laps.csv` (ASC). Reports row counts.
+3. **Optional `--fix-distance-units` sweep**: auto-fixes legacy meter-as-km swim distance bug across all per-month CSVs + `workout_sessions.csv` + `swim_workouts.csv`. Idempotent.
 
 ## How to Run
 
@@ -69,35 +62,31 @@ The script lives at `scripts/maintain.py` inside this skill. Read it before runn
 ## After Running
 
 Report:
-- Final sheet order.
-- Row counts per sheet (data rows + max_row).
+- Per-month CSV canonicalize summary (rows before → after).
+- Per-CSV row counts and any header / order warnings from the validator.
 - File size change, if notable.
 - Any warnings surfaced by the verification step.
 
-Do not edit the xlsx further unless the user asks — the script is the source of truth for style + structure.
+Do not edit the CSVs further unless the user asks — the canonicalizer is the source of truth for sort order + computed cells (Volume, Pace, SESSION, TOTAL rows).
 
-## Canonical Style Reference
+## Canonical Layout Reference
 
-Kept here so the rules are visible and reviewable without reading the script.
+Kept here so the rules are visible without reading the script.
 
-### Row 1 header (all sheets)
-- Fill `#BDC3C7`, bold black, size 10, centered, frozen.
+### Per-month CSV (`<Person>/data/monthly/YYYY.MM.csv`)
+- Header row 1, then ASC data rows by (Date, #, Set), TOTAL rows interleaved at strength-session boundaries.
+- 18 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed | Laps`.
+- `SESSION` is a per-month counter (1..N) repeated on every row of the same date (including TOTAL).
+- `Volume` is `reps × kg` written as a literal number — recomputed on every canonicalize pass.
+- `Pace (min/km)` is `duration / distance` formatted MM:SS, blanked outside [0.5, 60] min/km.
+- `TOTAL` row (Exercise = "TOTAL") at every strength session boundary; carries the volume sum + Apple-watch session metadata (Duration, Avg HR, Active Cal, Total Cal, Elevation, Elapsed) + the Deload Workout marker on Notes when present.
 
-### Data rows
-- Fill `#F2F3F4`, size 10, centered (Notes column left-aligned on monthly sheets), no borders except session separators.
-
-### Section headers (Exercises Database only)
-- Muscle groups (`CHEST`, `BACK`, etc.): alternating navy `#2C3E50` (white text) and light gray `#D5D8DC` (black text), merged across all 5 columns.
-- Subsections (`Horizontal Push (Compound)`, etc.): fill `#EAEDED`, italic bold black, merged across all 5 columns.
-
-### Session separators (monthly sheets)
-- Thin top border color `#BDC3C7` on the first row of each new date.
-
-### Column widths (monthly sheet, 18 cols)
-
-| Col | A | B | C | D | E | F | G | H | I | J | K | L | M | N | O | P | Q | R |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Width | 8 | 12 | 5 | 28 | 5 | 6 | 6 | 9 | 24 | 13 | 14 | 13 | 9 | 11 | 11 | 13 | 11 | 7 |
+### Dense CSVs (`<Person>/data/`)
+- `health_metrics.csv` — DESC by Date.
+- `workout_sessions.csv` — DESC by (Date, Start).
+- `profile.csv` — `key,value` 2-column.
+- `swimming/swim_workouts.csv` — DESC by (Date, Start). XML only.
+- `swimming/swim_laps.csv` — ASC by (Date, Lap #). XML only.
 
 ## Automating Monthly
 
@@ -111,9 +100,7 @@ Three options, in order of hands-off-ness:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| "tracker not found" | Wrong person name | Pass `--person Nihad` or `--person Fabian` |
-| "nonempty row count changed" | A delete went wrong | Restore from `<Person>/Workout Tracker - <Person>.maintain-backup.xlsx` and re-run with `--dry-run` to debug |
-| Sheet appears unstyled after run | Opened in a viewer that ignores openpyxl styles | Open in Excel / Numbers / LibreOffice to verify |
-| Current-month sheet has no blank rows to append | Buffer math off | Bump `CURRENT_MONTH_BUFFER` in the script |
-| "WARN: unexpected non-monthly sheets in xlsx" | A pre-PR1 dense sheet (Profile, Health Metrics, …) snuck back into the xlsx | Re-run the migration: `python3 Skills/shared/migrate_xlsx_to_csv.py --person <Person>` |
-| "header mismatch" on a CSV | Profile.source flipped without a matching CSV rewrite | Re-run the matching importer with the current export, or hand-fix the header |
+| "no monthly CSV directory" | Migrator never ran | Run `python3 Skills/shared/migrate_xlsx_monthly_to_csv.py --person <Person>` if a `pre-monthly-csv-backup.xlsx` exists; otherwise check the path |
+| "header mismatch" on a CSV | Profile.source flipped without a matching CSV rewrite, or hand-edit broke the schema | Re-run the matching importer with the current export, or hand-fix the header |
+| "WARN dates not strictly ASC/DESC" | Hand-edit moved a row out of order | Re-run `/maintain` (canonicalize re-sorts every monthly CSV) |
+| Computed cells look stale (Volume, Pace) | Hand-edit changed reps/kg/distance/duration without re-canonicalizing | Re-run `/maintain` — canonicalize recomputes on every pass |

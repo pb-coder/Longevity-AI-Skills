@@ -1,8 +1,9 @@
 ---
 name: workout-logger
 description: >
-  Appends a parsed workout to the requested person's tracker (e.g.
-  Nihad/Workout Tracker - Nihad.xlsx) with canonical styling applied to the new rows.
+  Appends a parsed workout to the requested person's tracker (per-month
+  CSV under <Person>/data/monthly/) with canonical sort + computed
+  cells applied on every write.
   Invoked by the `/log` slash command or when the user explicitly asks to log a
   workout. Do NOT trigger on general fitness questions, training discussion, or
   anything that isn't an explicit request to record a workout.
@@ -15,8 +16,8 @@ description: >
 ## Who is this for?
 
 Two trackers live in per-person folders inside the workout directory:
-- `Nihad/Workout Tracker - Nihad.xlsx` (+ `Nihad/data/*.csv`)
-- `Fabian/Workout Tracker - Fabian.xlsx` (+ `Fabian/data/*.csv`)
+- `Nihad/data/` (CSV store: monthly/ + dense + swimming/)
+- `Fabian/data/` (same shape; no swimming/ for HL trackers)
 
 Resolve which person this log is for BEFORE running the script:
 - If the user names a person ("log Fabian's push day", "this is for Nihad"), use that name.
@@ -24,7 +25,7 @@ Resolve which person this log is for BEFORE running the script:
 - Otherwise ask: **"Is this for Nihad or Fabian?"** before proceeding.
 
 Pass the resolved name via `--person <Name>`. The path resolver
-(`Skills/shared/person_paths.py`) finds the right xlsx + data folder.
+(`Skills/shared/person_paths.py`) finds the right `data/` folder.
 Bodyweight entries, deload flags, and all other session data route into
 that person's tracker — never split one session across both.
 
@@ -42,24 +43,25 @@ Read before processing:
 - `references/parsing-rules.md` — parsing logic for all input formats
 - `references/common-mistakes.md` — known parsing traps
 
-The tracker for the resolved person lives at
-`<Person>/Workout Tracker - <Person>.xlsx` (with CSV data in `<Person>/data/`).
-The `--person` flag resolves the path automatically; if the script
-exits non-zero with a "tracker not found" error, stop and say so in
-one line. Don't search the filesystem.
+The tracker for the resolved person lives under
+`<Person>/data/` (`monthly/YYYY.MM.csv` per month, plus the dense
+CSVs at the data/ root). The `--person` flag resolves the paths
+automatically; if the script exits non-zero, stop and say so in one
+line. Don't search the filesystem.
 
 ## Flow
 
-1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log. If the message contains an explicit bodyweight line (see parsing rules), also parse that into a bodyweight entry.
+1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log. If the message contains an explicit bodyweight line (see parsing rules), also parse that into a bodyweight entry. If the user includes `CSS test` on the header line of a 400m + 200m TT pair (see parsing rules), parse the two times and assemble a `css_test` payload field.
 2. Build the payload JSON (wrapper form) and write it to a temp file (e.g. `/tmp/workout_payload.json`):
    ```json
    {
      "rows": [ ... parsed row dicts ... ],
-     "bodyweight": [ {"date": "YYYY-MM-DD", "kg": 78.4, "notes": null}, ... ]
+     "bodyweight": [ {"date": "YYYY-MM-DD", "kg": 78.4, "notes": null}, ... ],
+     "css_test": {"date": "YYYY-MM-DD", "t400_sec": 450, "t200_sec": 210}
    }
    ```
-   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.**
-3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `YYYY.MM` sheet on the workout xlsx, mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), and applies canonical styling.
+   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually; it comes from the Apple Health import only.
+3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), and mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date).
 4. **Verify the write succeeded.** Capture the script's stdout and exit code:
    - If the exit code is non-zero, print the exact stderr output and stop. Do not report success.
    - If the exit code is 0 but stdout does not contain the word `Appended`, print the exact stdout and stop with: "Unexpected script output — please check the tracker manually."
@@ -107,12 +109,13 @@ The logger never imports Apple Health on its own — it shells out to one of two
 - `Skills/shared/import_apple_health.py` for `Export*.zip` (Apple's native XML; full feature surface — VO2max, RHR, HRV, wrist temp, sleep stages, per-workout HR).
 - `Skills/shared/import_hl_export.py` for `health_export_*.txt` (HLExport text dump; lighter feature surface — VO2max, HR Recovery, total sleep, resp rate, bodyweight, workout durations / distance / calories. No HRV, no wrist temp, no per-workout HR, no sleep stages.)
 
-Both write into the same two tracker sheets:
+Both write into the same per-person CSV store under `<Person>/data/`:
 
-- `Health Metrics` — daily aggregates. Cells the active source can't fill stay None; sparse-merge protects any older values from a previous source.
-- `Workout Sessions` — one row per Apple `Workout`. HR columns are populated for XML, blank for HL.
+- `health_metrics.csv` — daily aggregates. Cells the active source can't fill stay None; sparse-merge protects any older values from a previous source.
+- `workout_sessions.csv` — one row per Apple `Workout`. HR columns are populated for XML, blank for HL.
+- (XML only) `swimming/swim_workouts.csv` + `swimming/swim_laps.csv` — per-swim aggregates (Pool Length, Strokes, SPL, Avg SWOLF, Stroke Mix, Location, Water Temp) and per-lap detail (Stroke, Duration, SWOLF). HL has no lap data, so HL trackers don't have a `swimming/` folder.
 
-Both also create / read a hidden-by-convention `Profile` sheet that pins the per-tracker `source` (`xml` | `hl_export`) and `auto_cardio` flag. The coach's `read_tracker.py` reads this to decide which sections of the report it can fill.
+Both also create / read `<Person>/data/profile.csv`, a 2-column key/value file pinning the per-tracker `source` (`xml` | `hl_export`), `auto_cardio` flag, `birthday`, and the swim CSS keys (`swim_css_sec_per_100m`, `swim_css_set_at`, `swim_pool_length_default`). The coach's `read_tracker.py` reads this to decide which sections of the report it can fill.
 
 **File-naming conventions.**
 
@@ -121,7 +124,7 @@ Both also create / read a hidden-by-convention `Profile` sheet that pins the per
 
 **Idempotency.** Re-running with the same export is a no-op. Sparse-merge upserts protect existing values — incoming `None` never overwrites a populated cell, so a partial export (e.g. just last week) won't erase older history. Switching a tracker from XML to HL (or vice versa) mid-stream is safe: the new source only fills cells it can, and old XML-derived HRV / wrist temp etc. stay put.
 
-**Auto-cardio.** When the importer ingests cardio workouts (Running, Hiking, Cycling, Swimming, HIIT) AND `Profile.auto_cardio` is True, those workouts also flow into the matching `YYYY.MM` monthly sheet as cardio rows tagged `auto-imported from Apple`. Manually-logged rows always win — the dedupe rule (date + exercise + duration ±1 min) skips Apple workouts that match an existing manual entry. Default: `auto_cardio = true` on both XML and HL trackers (the old conservative HL opt-in was retired once HL workout records proved reliable). Flip to `false` per-tracker via the Profile sheet if a user prefers manual-only logging.
+**Auto-cardio.** When the importer ingests cardio workouts (Running, Hiking, Cycling, Swimming, HIIT) AND `auto_cardio` in `profile.csv` is True, those workouts also flow into the matching `<Person>/data/monthly/YYYY.MM.csv` as cardio rows tagged `auto-imported from Apple`. Manually-logged rows always win — the dedupe rule (date + exercise + duration ±1 min) skips Apple workouts that match an existing manual entry. Default: `auto_cardio = true` on both XML and HL trackers (the old conservative HL opt-in was retired once HL workout records proved reliable). Flip to `false` per-tracker by editing `profile.csv` if a user prefers manual-only logging.
 
 **Step 6 always asks.** No watchers, no cron, no auto-detection. The user picked this flow explicitly: ask every time, accept "Skip" cleanly. Never silently skip just because no export is in the folder.
 
@@ -170,10 +173,10 @@ Each row is a dict with these keys. `date` / `num` / `exercise` / `set` are requ
 Rules:
 - `num` restarts at 1 for each new date. All sets of the same exercise share a `num`.
 - `set` is 1, 2, 3 within an exercise.
-- Do NOT compute or include a `volume` field — the sheet fills Volume via the formula `=reps*kg` and writes a SESSION total via `=SUM(...)` automatically. Skip the arithmetic.
+- Do NOT compute or include a `volume` field — `canonicalize_monthly_csv` recomputes Volume = reps × kg on every write and writes a literal sum on the TOTAL row. Skip the arithmetic.
 - The cardio fields (`distance_km`, `duration_min`, `pace`, `avg_hr`) are cardio-only. Leave null for strength rows.
 - `laps` is swim-specific: integer count of pool lengths (e.g. `22` for a `22 × 25 m = 550 m` swim). Leave null for non-swim rows. The Apple importer fills this from `HKWorkoutEventTypeLap` events; users can include it in `/log` via `<N> laps`, `<N> lengths`, or `<N> Bahnen`.
-- The monthly sheets have 18 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed | Laps`. SESSION is filled in by the styler (per-month session number, merged per date); leave it out of the row dict.
+- The monthly CSVs have 18 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed | Laps`. SESSION is filled in by `canonicalize_monthly_csv` (per-month session number repeated on every row of the same date); leave it out of the row dict.
 - Sort rows in the JSON by date ascending, then `num`, then `set`. The script does not re-sort.
 
 ## Rules

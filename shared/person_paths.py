@@ -1,26 +1,37 @@
 """Per-person path resolver.
 
-Single source of truth for where a person's workout xlsx and CSV
-data folder live. Used by every script that needs to find files.
+Single source of truth for where a person's CSV store lives. Used by
+every script that needs to find files.
 
-Layout (post-PR1):
+Layout (post-PR3a — pure CSV, no xlsx):
 
-    Workout Tracker/                  ← WORKOUT_TRACKER_ROOT
+    Workout Tracker/                       ← WORKOUT_TRACKER_ROOT
     ├── Nihad/
-    │   ├── Workout Tracker - Nihad.xlsx
     │   └── data/
     │       ├── health_metrics.csv
     │       ├── workout_sessions.csv
-    │       └── profile.csv
+    │       ├── profile.csv
+    │       ├── monthly/
+    │       │   ├── 2026.05.csv
+    │       │   └── …                      # one CSV per YYYY.MM
+    │       └── swimming/                  # XML-only; absent on HL trackers
+    │           ├── swim_workouts.csv
+    │           └── swim_laps.csv
     ├── Fabian/
-    │   └── (same)
+    │   └── (same; no swimming/ for HL)
     ├── Skills/
-    │   └── shared/                   ← this file
+    │   └── shared/                        ← this file
     └── Export.zip / health_export_*.txt   (transient; deleted on success)
 
 Every importer / logger / coach / maintain script accepts ``--person
 <Name>`` (e.g. ``--person Nihad``) and resolves the rest via this
 module. No raw filesystem paths in the CLI surface.
+
+The ``tracker_for`` / ``legacy_root_tracker_for`` helpers below resolve
+the now-archived ``Workout Tracker - <Person>.xlsx`` path. They exist
+only for the one-shot migration scripts (``migrate_xlsx_to_csv.py`` for
+PR1's dense-data move and ``migrate_xlsx_monthly_to_csv.py`` for
+PR3a's monthly-data move) — production code never touches the xlsx.
 """
 from __future__ import annotations
 
@@ -41,11 +52,15 @@ def person_dir(person: str) -> Path:
 
 
 def tracker_for(person: str) -> Path:
-    """Return the path to the person's workout xlsx.
+    """Return the path to the person's archived workout xlsx (legacy).
 
-    Naming convention preserved from the pre-migration layout
-    (``Workout Tracker - <Person>.xlsx``) so git history and any
-    external references survive the folder reshuffle.
+    Post-PR3a there is no live xlsx — the migration script archives it
+    as ``Workout Tracker - <Person>.pre-monthly-csv-backup.xlsx`` next
+    to the per-person folder. This helper returns the original
+    pre-archive path; callers are restricted to the migration scripts
+    (``migrate_xlsx_to_csv.py``, ``migrate_xlsx_monthly_to_csv.py``).
+    Production code reads CSVs only — see ``data_dir`` /
+    ``monthly_csv`` / ``health_metrics_csv`` etc.
     """
     return person_dir(person) / f"Workout Tracker - {person}.xlsx"
 
@@ -76,6 +91,46 @@ def workout_sessions_csv(person: str) -> Path:
 
 def profile_csv(person: str) -> Path:
     return data_dir(person) / "profile.csv"
+
+
+def monthly_dir(person: str) -> Path:
+    """Per-person directory holding one CSV per month (``YYYY.MM.csv``)."""
+    return data_dir(person) / "monthly"
+
+
+def monthly_csv(person: str, year_month: str) -> Path:
+    """Path to the per-month workout CSV (``YYYY.MM.csv``).
+
+    ``year_month`` is the same ``YYYY.MM`` key the xlsx-era code used as
+    sheet name. The CSV preserves the 18-column monthly schema; rows
+    are sorted ASC by (Date, num, set), with a TOTAL row appended at
+    each strength session boundary.
+    """
+    return monthly_dir(person) / f"{year_month}.csv"
+
+
+def ensure_monthly_dir(person: str) -> Path:
+    """Create ``<person>/data/monthly`` if missing and return it."""
+    d = monthly_dir(person)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def swim_workouts_csv(person: str) -> Path:
+    """Per-swim aggregate CSV under ``<person>/data/swimming/``."""
+    return data_dir(person) / "swimming" / "swim_workouts.csv"
+
+
+def swim_laps_csv(person: str) -> Path:
+    """Per-lap detail CSV under ``<person>/data/swimming/``."""
+    return data_dir(person) / "swimming" / "swim_laps.csv"
+
+
+def ensure_swimming_dir(person: str) -> Path:
+    """Create ``<person>/data/swimming/`` if missing and return it."""
+    d = data_dir(person) / "swimming"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 # Per-person legacy xlsx that may still sit at the root before the

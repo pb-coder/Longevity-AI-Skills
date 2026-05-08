@@ -1,22 +1,27 @@
-"""Sheet readers, exercises-database parser, profile + max-HR helpers.
+"""CSV readers, exercises-database parser, profile + max-HR helpers.
 
-Anything that touches the workbook directly lives here. Downstream
+Anything that reads the per-person CSV store lives here. Downstream
 analytics modules consume the structured outputs (rows / health_all /
-workout_sessions_all / exercises DB / max_hr) and never re-open the
-xlsx.
+workout_sessions_all / swim_workouts / swim_laps / exercises DB /
+max_hr) and never re-open the source files.
 
-Sheet readers:
+CSV readers:
 
-- ``extract_rows(wb, months_back, today_d)`` — walk YYYY.MM monthly
-  sheets, return ``(rows, session_totals, session_summaries)``. Folds
-  TOTAL-row metadata into the per-session summary dict.
-- ``find_deloads(wb)`` — dates whose TOTAL-row Notes contain the
+- ``extract_rows(person, months_back, today_d)`` — walk every per-month
+  CSV in ``<person>/data/monthly/``, return
+  ``(rows, session_totals, session_summaries)``. Folds TOTAL-row
+  metadata into the per-session summary dict.
+- ``find_deloads(person)`` — dates whose TOTAL-row Notes contain the
   ``Deload Workout`` marker (case-insensitive).
-- ``read_bodyweight(wb)`` — Bodyweight sheet rows, ASC.
-- ``read_health_metrics(wb)`` — Health Metrics rows, ASC, with
+- ``read_bodyweight(person)`` — bodyweight series sourced from
+  ``health_metrics.csv`` col B, ASC.
+- ``read_health_metrics(person)`` — Health Metrics rows, ASC, with
   source-aware column mapping and missing-key backfill so HL trackers
   surface the same key surface as XML.
-- ``read_workout_sessions(wb)`` — Apple Workout Sessions rows, ASC.
+- ``read_workout_sessions(person)`` — Apple Workout Sessions rows, ASC.
+- ``read_swim_workouts(person)`` / ``read_swim_laps(person)`` —
+  per-swim aggregates and per-lap detail; XML trackers only (HL has
+  no lap data, returns ``[]``).
 
 Exercises database:
 
@@ -69,90 +74,81 @@ from parsing import (
     to_int_or_none,
 )
 
-# tracker_sheet is the canonical authority for sheet schemas; import
-# directly so the analytics layer doesn't fork field lists.
-from tracker_sheet import (  # type: ignore[import-not-found]
+# Monthly CSVs (post-PR3a) are the canonical authority for monthly
+# workout data. Coercions (date_str, etc.) live in monthly_csv now.
+from monthly_csv import (  # type: ignore[import-not-found]
     date_str,
+    list_year_months,
+    read_monthly,
 )
 import csv_store as _csv_store  # noqa: E402  — CSV-backed HM/WS/Profile reads
 
 
-def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict, dict]:
+def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dict], dict, dict]:
     """Return (rows, session_totals, session_summaries).
 
-    ``rows`` excludes TOTAL summary rows — one entry per logged set. Keys:
-    ``session, date, num, exercise, set, reps, kg, volume, notes,
-    distance_km, duration_min, pace, avg_hr, active_cal, total_cal,
-    elevation_m, elapsed``.
+    Reads per-month CSVs from ``<person>/data/monthly/YYYY.MM.csv``.
+    ``rows`` excludes TOTAL summary rows — one entry per logged set.
+    Keys: ``session, date, num, exercise, set, reps, kg, volume,
+    notes, distance_km, duration_min, pace, avg_hr, active_cal,
+    total_cal, elevation_m, elapsed, laps``.
 
-    ``session_totals`` maps ``YYYY-MM-DD`` → total volume lifted that session,
-    populated from the sheet's TOTAL rows (formula-driven).
+    ``session_totals`` maps ``YYYY-MM-DD`` → total volume lifted that
+    session, populated from the per-month CSV's TOTAL rows.
 
     ``session_summaries`` maps ``YYYY-MM-DD`` → dict of session-level
     metadata harvested from the TOTAL row: ``volume`` (=session_totals
     value), ``notes`` (deload marker if present), ``duration_min``,
     ``avg_hr``, ``active_cal``, ``total_cal``, ``elevation_m``,
-    ``elapsed``, ``is_deload`` (bool). Cardio-only dates (no TOTAL row)
-    are absent from this dict.
+    ``elapsed``, ``is_deload`` (bool). Cardio-only dates (no TOTAL
+    row) are absent from this dict.
     """
     cutoff = today_d - timedelta(days=months_back * 31)
-    data_sheets = sorted(
-        [s for s in wb.sheetnames if MONTHLY_RE.match(s)],
-        reverse=True,
-    )
+    yms = sorted(list_year_months(person), reverse=True)
 
     rows: list[dict] = []
     session_totals: dict[str, float] = {}
     session_summaries: dict[str, dict] = {}
-    for name in data_sheets:
-        # Quick filter: sheet YYYY.MM vs cutoff
-        y, m = name.split(".")
-        first_of_month = date(int(y), int(m), 1)
+    for ym in yms:
+        # Quick filter: month-key vs cutoff
+        try:
+            y, m = ym.split(".")
+            first_of_month = date(int(y), int(m), 1)
+        except ValueError:
+            continue
         if first_of_month < cutoff.replace(day=1):
             continue
 
-        ws = wb[name]
-        current_date: str | None = None
-        empty_streak = 0
+        for rd in read_monthly(person, ym):
+            session = rd.get("session")
+            date_val = rd.get("date")
+            num = rd.get("num")
+            exercise = rd.get("exercise")
+            set_n = rd.get("set")
+            reps = rd.get("reps")
+            kg = rd.get("kg")
+            volume = rd.get("volume")
+            notes = rd.get("notes")
+            distance = rd.get("distance")
+            duration = rd.get("duration")
+            pace = rd.get("pace")
+            avg_hr = rd.get("avg_hr")
+            active_cal = rd.get("active_cal")
+            total_cal = rd.get("total_cal")
+            elevation_m = rd.get("elevation_m")
+            elapsed = rd.get("elapsed")
+            laps = rd.get("laps")
 
-        for raw in ws.iter_rows(min_row=2, values_only=True):
-            padded = list(raw) + [None] * 18
-            (session, date_val, num, exercise, set_n, reps, kg, volume,
-             notes, distance, duration, pace, avg_hr,
-             active_cal, total_cal, elevation_m, elapsed, laps) = padded[:18]
+            current_date = date_str(date_val)
 
-            if date_val is None and exercise is None:
-                empty_streak += 1
-                if empty_streak >= EMPTY_STREAK_STOP:
-                    break
-                continue
-            empty_streak = 0
-
-            if date_val is not None:
-                current_date = date_str(date_val)
-
-            # TOTAL rows now carry the session's full summary record:
-            # Date (col 2 may be set), Volume (col 8), Notes (col 9 —
-            # carries the Deload Workout marker), Duration (col 11),
-            # Avg HR (col 13), Active/Total Cal (cols 14-15), Elevation
-            # (col 16), Elapsed (col 17). Harvest those into
-            # session_summaries keyed by date.
             if isinstance(exercise, str) and exercise.strip().upper() == TOTAL_LABEL:
-                # Prefer the TOTAL row's own Date if set; fall back to
-                # current_date from the preceding non-TOTAL rows for
-                # legacy data.
-                total_date = current_date
-                if date_val is not None:
-                    parsed = date_str(date_val)
-                    if parsed:
-                        total_date = parsed
-                if total_date is not None:
+                if current_date is not None:
                     if volume not in (None, ""):
-                        session_totals[total_date] = to_float(volume)
+                        session_totals[current_date] = to_float(volume)
                     notes_str = str(notes).strip() if notes else None
                     is_deload = bool(notes_str and DELOAD_MARKER in notes_str.lower())
-                    session_summaries[total_date] = {
-                        "volume":       session_totals.get(total_date),
+                    session_summaries[current_date] = {
+                        "volume":       session_totals.get(current_date),
                         "notes":        notes_str,
                         "is_deload":    is_deload,
                         "duration_min": parse_duration_minutes(duration) if duration else None,
@@ -167,8 +163,6 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict,
             if exercise is None or current_date is None:
                 continue
 
-            # Volume is formula-driven in the sheet; if Excel hasn't cached it,
-            # recompute from kg × reps so downstream consumers never see None.
             reps_i = to_int_or_none(reps)
             kg_f = to_float(kg)
             if volume in (None, ""):
@@ -199,9 +193,7 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict,
 
     rows.sort(key=lambda r: (r["date"], r["num"] or 0, r["set"] or 0))
 
-    # Fill in session_totals for any date whose TOTAL cell lacked a cached
-    # value (common when openpyxl reads formulas Excel hasn't saved yet).
-    # Trust the sheet first — only sum rows for dates the sheet didn't cover.
+    # Fill in session_totals for any date whose TOTAL row lacked a Volume.
     cached_dates = set(session_totals.keys())
     for r in rows:
         if r["date"] in cached_dates:
@@ -211,44 +203,23 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict,
     return rows, session_totals, session_summaries
 
 
-def find_deloads(wb) -> list[str]:
-    """Dates whose strength session's TOTAL row has Notes containing 'Deload Workout'.
+def find_deloads(person: str) -> list[str]:
+    """Return YYYY-MM-DD dates whose TOTAL row Notes contain 'Deload Workout'.
 
-    Deload marker now lives on the TOTAL row's Notes column (col 9),
-    consistent with the other session-level metadata. The TOTAL row's
-    Date (col 2) is the canonical date; fall back to ``current_date``
-    from preceding rows for legacy data.
+    Reads each per-month CSV; checks each TOTAL row's Notes for the
+    deload marker (case-insensitive substring).
     """
     deloads: set[str] = set()
-    for name in wb.sheetnames:
-        if not MONTHLY_RE.match(name):
-            continue
-        ws = wb[name]
-        current_date: str | None = None
-        empty_streak = 0
-        for raw in ws.iter_rows(min_row=2, values_only=True):
-            vals = list(raw) + [None] * 13
-            _session, date_val, _num, exercise, _set_n, _reps, _kg, _vol, notes = vals[:9]
-            if date_val is None and exercise is None:
-                empty_streak += 1
-                if empty_streak >= EMPTY_STREAK_STOP:
-                    break
+    for ym in list_year_months(person):
+        for rd in read_monthly(person, ym):
+            exercise = rd.get("exercise")
+            if not (isinstance(exercise, str)
+                    and exercise.strip().upper() == TOTAL_LABEL):
                 continue
-            empty_streak = 0
-            if date_val is not None:
-                parsed = date_str(date_val)
-                if parsed:
-                    current_date = parsed
-            if exercise is None:
-                continue
-            if isinstance(exercise, str) and exercise.strip().upper() == TOTAL_LABEL:
-                target_date = current_date
-                if date_val is not None:
-                    parsed = date_str(date_val)
-                    if parsed:
-                        target_date = parsed
-                if target_date and notes and DELOAD_MARKER in str(notes).lower():
-                    deloads.add(target_date)
+            target_date = date_str(rd.get("date"))
+            notes = rd.get("notes")
+            if target_date and notes and DELOAD_MARKER in str(notes).lower():
+                deloads.add(target_date)
     return sorted(deloads)
 
 
@@ -309,6 +280,20 @@ def read_health_metrics(person: str) -> list[dict]:
         out.append(rec)
     out.sort(key=lambda e: e["date"])
     return out
+
+
+def read_swim_workouts(person: str) -> list[dict]:
+    """Return per-swim aggregate rows from ``swimming/swim_workouts.csv``.
+
+    Pass-through to ``csv_store.read_swim_workouts`` — the analytics
+    layer doesn't reshape the schema, just consumes it.
+    """
+    return _csv_store.read_swim_workouts(person)
+
+
+def read_swim_laps(person: str) -> list[dict]:
+    """Return per-lap rows from ``swimming/swim_laps.csv``."""
+    return _csv_store.read_swim_laps(person)
 
 
 def read_workout_sessions(person: str) -> list[dict]:

@@ -1,8 +1,8 @@
 ---
 name: workout-coach
 description: >
-  Reads the requested person's tracker (e.g. Nihad/Workout Tracker - Nihad.xlsx
-  + Nihad/data/*.csv), analyzes recent training state, and writes a report
+  Reads the requested person's tracker (per-person CSVs under
+  <Person>/data/), analyzes recent training state, and writes a report
   plus the next workout plan to ./workout_plan - <Person>.md. Invoked by the
   `/coach` slash command or when the user explicitly asks for coaching,
   analysis, or a new plan. Do NOT trigger on general fitness questions,
@@ -16,8 +16,8 @@ description: >
 ## Who is this for?
 
 Two trackers live in per-person folders inside the workout directory:
-- `Nihad/Workout Tracker - Nihad.xlsx` (+ `Nihad/data/*.csv`)
-- `Fabian/Workout Tracker - Fabian.xlsx` (+ `Fabian/data/*.csv`)
+- `Nihad/data/` (CSV store: monthly/ + dense + swimming/)
+- `Fabian/data/` (same shape; no swimming/ for HL trackers)
 
 Resolve which person this request is about BEFORE running the script:
 - If the user names a person ("coach Fabian", "plan Nihad's next block"), use that name.
@@ -35,8 +35,8 @@ Pass the resolved name via `--person <Name>`. The sidecar `workout_plan.md` foll
 ## Setup
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
-2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis.
-3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the workout xlsx + the per-person CSVs (`<Person>/data/health_metrics.csv`, `workout_sessions.csv`, `profile.csv`) and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
+2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis. When `swim_summary` is present in the JSON, also read `references/swim-coaching.md` for SWOLF / SPL / CSS-zone interpretation, retest cadence, and what NOT to say about swim form.
+3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the per-person CSVs — `<Person>/data/monthly/YYYY.MM.csv` (per-month workout data), `health_metrics.csv`, `workout_sessions.csv`, `profile.csv`, and on XML trackers with recent swims also `swimming/swim_workouts.csv` + `swimming/swim_laps.csv` — and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `swim_summary` (only present when there are swims in the last 28 days — totals, avg pace per 100m, SPL, SWOLF, trends, CSS zones, stroke-mix outliers, retest prompt), `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the data folder isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
    **Output is compact (no indentation) by default** — saves ~20% of tokens vs pretty-printed. Pass `--pretty` for human inspection.
 
@@ -44,7 +44,7 @@ Pass the resolved name via `--person <Name>`. The sidecar `workout_plan.md` foll
 
 Each row = one set. Columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed`. SESSION is a per-month number merged across rows of the same date.
 
-**TOTAL row carries the strength session's full summary record.** The sheet closes each strength session with a `TOTAL` row that holds: the session's `Date`, `Volume` (sum formula), `Avg HR`, `Active Cal`, `Total Cal`, `Elevation`, `Elapsed`, `Duration` (active workout time), and the `Deload Workout` marker on Notes when applicable. The session's data rows (warmup + working sets) hold per-set data only — their session-level metadata cells are blank. The coach reads these via `monthly_sessions` (which folds in TOTAL-row metadata + `volume`, `is_deload`, plus the per-session TRIMP / load_band); don't sum or scan for the deload marker yourself. Cardio-only sessions have no TOTAL row — each cardio row carries its own per-row metadata directly.
+**TOTAL row carries the strength session's full summary record.** Each per-month CSV closes every strength session with a `TOTAL` row that holds: the session's `Date`, `Volume` (literal sum, not a formula), `Avg HR`, `Active Cal`, `Total Cal`, `Elevation`, `Elapsed`, `Duration` (active workout time), and the `Deload Workout` marker on Notes when applicable. The session's data rows (warmup + working sets) hold per-set data only — their session-level metadata cells are blank. The coach reads these via `monthly_sessions` (which folds in TOTAL-row metadata + `volume`, `is_deload`, plus the per-session TRIMP / load_band); don't sum or scan for the deload marker yourself. Cardio-only sessions have no TOTAL row — each cardio row carries its own per-row metadata directly.
 
 4. From the script's output, identify the **most recent workout** (last date with logged sets). Note which muscle groups it trained and which exercises were performed. Use this as the planning baseline: do not repeat the same primary muscle emphasis in the very next session, and carry forward any exercises where progression was visible. The rest of each session's slots are where variation lives — see §17.
 
@@ -94,7 +94,7 @@ Write the file in one pass at the end. Don't stream sections to chat while think
 
 ## Data Reading Strategy
 
-`scripts/read_tracker.py` handles all the quirks (date normalization, empty-row streaks, case-insensitive grouping, numeric casting, deload detection, cardio categorization) and emits a single JSON blob. Call it once at the start of `/coach`. Don't re-read the xlsx inline unless you're debugging something the script can't see.
+`scripts/read_tracker.py` handles all the quirks (date normalization, empty-row streaks, case-insensitive grouping, numeric casting, deload detection, cardio categorization) and emits a single JSON blob. Call it once at the start of `/coach`. Don't re-read the CSV store inline unless you're debugging something the script can't see.
 
 What the JSON contains:
 

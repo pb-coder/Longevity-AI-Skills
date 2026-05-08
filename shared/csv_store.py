@@ -26,8 +26,11 @@ from typing import Iterable
 
 from person_paths import (
     ensure_data_dir,
+    ensure_swimming_dir,
     health_metrics_csv,
     profile_csv,
+    swim_laps_csv,
+    swim_workouts_csv,
     workout_sessions_csv,
 )
 
@@ -174,11 +177,17 @@ def _strength_metadata_drifts(existing, incoming) -> bool:
 
 
 # ============================================================ Profile (CSV)
-PROFILE_KEYS = ("source", "auto_cardio", "birthday")
+PROFILE_KEYS = (
+    "source", "auto_cardio", "birthday",
+    "swim_css_sec_per_100m", "swim_css_set_at", "swim_pool_length_default",
+)
 PROFILE_DEFAULTS = {
-    "source":      None,
-    "auto_cardio": False,
-    "birthday":    None,
+    "source":                   None,
+    "auto_cardio":              False,
+    "birthday":                 None,
+    "swim_css_sec_per_100m":    None,
+    "swim_css_set_at":          None,
+    "swim_pool_length_default": None,
 }
 
 
@@ -202,6 +211,38 @@ def _coerce_bool(v):
     if s in ("false", "no", "n", "0", "off"):
         return False
     return None
+
+
+def _coerce_float(v):
+    """Permissive float coercion. Returns None on failure / empty / NaN."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        f = float(v)
+    else:
+        try:
+            f = float(str(v).strip())
+        except (TypeError, ValueError):
+            return None
+    if f != f:  # NaN
+        return None
+    return f
+
+
+def _coerce_int(v):
+    """Permissive int coercion. Accepts ``"25"``, ``25.0``, ``25``."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    f = _coerce_float(v)
+    if f is None:
+        return None
+    return int(round(f))
 
 
 def read_profile(person: str) -> dict:
@@ -248,6 +289,18 @@ def read_profile(person: str) -> dict:
                 d = _date_str(v)
                 if d:
                     out["birthday"] = d
+            elif k == "swim_css_sec_per_100m":
+                f = _coerce_float(v)
+                if f is not None:
+                    out["swim_css_sec_per_100m"] = f
+            elif k == "swim_css_set_at":
+                d = _date_str(v)
+                if d:
+                    out["swim_css_set_at"] = d
+            elif k == "swim_pool_length_default":
+                i = _coerce_int(v)
+                if i is not None:
+                    out["swim_pool_length_default"] = i
     return out
 
 
@@ -514,3 +567,196 @@ def upsert_workout_sessions(person: str, entries: Iterable[dict]) -> list[str]:
         f"Workout Sessions: {written} sessions written / "
         f"{updated} updated ({incidental} walks flagged incidental)"
     ]
+
+
+# ============================================================ Swim (per-workout)
+# Per-swim aggregate row. Dedupe key = (date, start). Sorted DESC by
+# date+start to mirror workout_sessions.csv layout. Notes is reserved
+# for manual annotations and is preserved on every upsert (manual wins).
+SWIM_WORKOUTS_HEADERS = [
+    "Date", "Start", "End", "Duration (min)", "Distance (km)",
+    "Pool Length (m)", "Laps", "Strokes", "SPL", "Avg SWOLF",
+    "Stroke Mix", "Location", "Water Temp (°C)", "Avg HR (bpm)",
+    "Active Cal", "Notes",
+]
+
+SWIM_WORKOUTS_FIELDS = [
+    "start", "end", "duration_min", "distance_km",
+    "pool_length_m", "laps", "strokes", "spl", "avg_swolf",
+    "stroke_mix", "location", "water_temp_c", "avg_hr",
+    "active_cal",
+]
+
+# Per-lap detail. Dedupe key = (date, workout_start, lap_num). Sorted
+# ASC by (date, lap_num) for chart-friendliness. Replace-on-match
+# (no sparse-merge) since lap data is fully Apple-sourced — there's no
+# manual lap entry path today, and a re-export with corrected stroke
+# styles must overwrite rather than preserve stale values.
+SWIM_LAPS_HEADERS = [
+    "Date", "Workout Start", "Lap #", "Stroke (raw)",
+    "Stroke (decoded)", "Duration (sec)", "SWOLF", "Source",
+]
+
+SWIM_LAPS_FIELDS = [
+    "workout_start", "lap_num", "stroke_raw", "stroke_decoded",
+    "duration_sec", "swolf", "source",
+]
+
+
+def read_swim_workouts(person: str) -> list[dict]:
+    """Return per-swim aggregate rows. Sorted DESC by (date, start).
+
+    Missing file → ``[]``. Each dict has ``date`` plus the fields in
+    ``SWIM_WORKOUTS_FIELDS`` plus ``notes``.
+    """
+    path = swim_workouts_csv(person)
+    header, rows = _read_csv_rows(path)
+    if not header:
+        return []
+    out: list[dict] = []
+    for row in rows:
+        d = _date_str(row[0]) if row else None
+        if d is None:
+            continue
+        rec: dict = {"date": d}
+        for i, key in enumerate(SWIM_WORKOUTS_FIELDS, start=1):
+            v = row[i] if len(row) > i else None
+            if key in ("start", "end", "stroke_mix", "location"):
+                rec[key] = v if v not in (None, "") else None
+            else:
+                rec[key] = _parse_value(v)
+        notes_idx = len(SWIM_WORKOUTS_HEADERS) - 1
+        notes = row[notes_idx] if len(row) > notes_idx else None
+        rec["notes"] = notes if notes else None
+        out.append(rec)
+    return out
+
+
+def upsert_swim_workouts(person: str, entries: Iterable[dict]) -> list[str]:
+    """Sparse-merge per-swim rows into ``swim_workouts.csv``.
+
+    Dedupe by ``(date, start)``. Notes column is preserved untouched
+    (manual annotation wins). Incoming None never overwrites a populated
+    cell — the importer always writes complete records, but if Apple
+    re-exports a swim with one field newly missing, we don't erase the
+    stored value.
+    """
+    entries = list(entries or [])
+    if not entries:
+        return ["Swim Workouts: 0 sessions written / 0 updated"]
+
+    existing = read_swim_workouts(person)
+    by_key: dict[tuple, dict] = {(r["date"], r.get("start")): r for r in existing}
+
+    written = 0
+    updated = 0
+    for e in entries:
+        d = _date_str(e.get("date"))
+        s = e.get("start")
+        if not d or s is None:
+            continue
+        key = (d, str(s))
+        cur = by_key.get(key)
+        if cur is None:
+            new_record = {"date": d, "notes": None}
+            for k in SWIM_WORKOUTS_FIELDS:
+                new_record[k] = e.get(k)
+            by_key[key] = new_record
+            written += 1
+            continue
+        changed = False
+        for k in SWIM_WORKOUTS_FIELDS:
+            v = e.get(k)
+            if v is None:
+                continue
+            if cur.get(k) != v:
+                cur[k] = v
+                changed = True
+        if changed:
+            updated += 1
+
+    ensure_swimming_dir(person)
+    rows = []
+    for k in sorted(by_key.keys(), reverse=True):
+        rec = by_key[k]
+        row = [rec["date"]] + [rec.get(field) for field in SWIM_WORKOUTS_FIELDS] \
+            + [rec.get("notes")]
+        rows.append(row)
+    _write_csv(swim_workouts_csv(person), SWIM_WORKOUTS_HEADERS, rows)
+    return [f"Swim Workouts: {written} sessions written / {updated} updated"]
+
+
+def read_swim_laps(person: str) -> list[dict]:
+    """Return per-lap rows sorted ASC by (date, lap_num).
+
+    Missing file → ``[]``. Each dict has ``date`` plus the fields in
+    ``SWIM_LAPS_FIELDS``.
+    """
+    path = swim_laps_csv(person)
+    header, rows = _read_csv_rows(path)
+    if not header:
+        return []
+    out: list[dict] = []
+    for row in rows:
+        d = _date_str(row[0]) if row else None
+        if d is None:
+            continue
+        rec: dict = {"date": d}
+        for i, key in enumerate(SWIM_LAPS_FIELDS, start=1):
+            v = row[i] if len(row) > i else None
+            if key in ("workout_start", "stroke_decoded", "source"):
+                rec[key] = v if v not in (None, "") else None
+            else:
+                rec[key] = _parse_value(v)
+        out.append(rec)
+    out.sort(key=lambda r: (r["date"], r.get("lap_num") or 0))
+    return out
+
+
+def upsert_swim_laps(person: str, entries: Iterable[dict]) -> list[str]:
+    """Replace-on-match upsert for ``swim_laps.csv``.
+
+    Dedupe by ``(date, workout_start, lap_num)``. Lap data is fully
+    Apple-sourced — there's no manual lap entry today — so re-imports
+    are treated as authoritative replacement rather than sparse-merge.
+    Sparse-merge would be active harm here: it'd preserve a stale
+    stroke style if Apple corrects it in a later re-export.
+    """
+    entries = list(entries or [])
+    if not entries:
+        return ["Swim Laps: 0 laps written / 0 updated"]
+
+    existing = read_swim_laps(person)
+    by_key: dict[tuple, dict] = {
+        (r["date"], r.get("workout_start"), r.get("lap_num")): r
+        for r in existing
+    }
+
+    written = 0
+    updated = 0
+    for e in entries:
+        d = _date_str(e.get("date"))
+        ws = e.get("workout_start")
+        ln = e.get("lap_num")
+        if not d or ws is None or ln is None:
+            continue
+        key = (d, str(ws), int(ln))
+        new_rec = {"date": d}
+        for k in SWIM_LAPS_FIELDS:
+            new_rec[k] = e.get(k)
+        if key in by_key:
+            if by_key[key] != new_rec:
+                by_key[key] = new_rec
+                updated += 1
+        else:
+            by_key[key] = new_rec
+            written += 1
+
+    ensure_swimming_dir(person)
+    rows = []
+    for k in sorted(by_key.keys(), key=lambda t: (t[0], t[2])):
+        rec = by_key[k]
+        row = [rec["date"]] + [rec.get(field) for field in SWIM_LAPS_FIELDS]
+        rows.append(row)
+    _write_csv(swim_laps_csv(person), SWIM_LAPS_HEADERS, rows)
+    return [f"Swim Laps: {written} laps written / {updated} updated"]

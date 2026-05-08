@@ -1,9 +1,10 @@
-"""Append parsed workout rows to the right monthly sheet in the given tracker xlsx.
+"""Append parsed workout rows to the right per-month CSV in the per-person store.
 
-Routes each row to the YYYY.MM sheet matching its date. Creates the sheet
-(headers only) if missing. Styling is applied on every write via the shared
-`tracker_sheet.style_monthly_sheet` so new rows match the rest of the sheet
-without waiting for /maintain.
+Routes each row to the matching ``<Person>/data/monthly/YYYY.MM.csv``. Creates
+the file (headers only) if missing. Canonicalization (sort + recompute
+Volume / Pace / SESSION + rebuild TOTAL rows + hoist deload markers) runs on
+every write via ``monthly_csv.canonicalize_monthly_csv`` so the file stays
+consistent without waiting for /maintain.
 
 Input JSON is either a bare list of row dicts (legacy) or a wrapper object:
 
@@ -41,25 +42,20 @@ Usage:
     python3 append_workout.py --person Nihad <payload_json_path>
     python3 append_workout.py --person Nihad -    # read JSON from stdin
 """
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 from pathlib import Path
 
-import openpyxl
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-from tracker_sheet import (  # noqa: E402
-    MONTHLY_HEADERS,
-    TOTAL_LABEL,
-    _numeric_cell,
-    canonicalize_sheet_order,
-    style_monthly_sheet,
+from monthly_csv import (  # noqa: E402
+    canonicalize_monthly_csv,
+    upsert_rows as monthly_upsert_rows,
 )
-from csv_store import upsert_health_metrics  # noqa: E402
-from person_paths import tracker_for  # noqa: E402
-
-HEADERS = MONTHLY_HEADERS
+from csv_store import upsert_health_metrics, write_profile  # noqa: E402
+from person_paths import monthly_csv as monthly_csv_path  # noqa: E402
 
 
 def sheet_for_date(date_str: str) -> str:
@@ -68,73 +64,78 @@ def sheet_for_date(date_str: str) -> str:
     return f"{y}.{m}"
 
 
-def find_last_data_row(ws) -> int:
-    """Return the last row containing real set data.
+def _to_monthly_row(r: dict) -> dict:
+    """Translate a /log payload row into the monthly_csv field schema.
 
-    Trailing TOTAL rows are skipped so new sets land at the session boundary,
-    not after the TOTAL. When `style_monthly_sheet` runs after the append it
-    rebuilds TOTAL rows in the correct place.
+    Payload keys (incoming):
+      ``date, num, exercise, set, reps, kg, notes, distance_km,
+      duration_min, pace, avg_hr, laps``.
+
+    Monthly CSV keys (outgoing): match ``MONTHLY_FIELDS`` —
+      ``distance_km`` → ``distance``, ``duration_min`` → ``duration``.
+    Apple-watch session metadata (cols 14-17) is left blank; the
+    importers fill it post-hoc on the matching session.
     """
-    last = 1
-    for row in ws.iter_rows(min_row=2):
-        # Column D (index 3) is Exercise in the 13-col layout.
-        exercise = row[3].value if len(row) > 3 else None
-        if exercise == TOTAL_LABEL:
-            continue
-        if any(c.value is not None and c.value != "" for c in row):
-            last = row[0].row
-    return last
+    return {
+        "session":     None,  # canonicalize fills
+        "date":        r["date"],
+        "num":         r.get("num"),
+        "exercise":    r["exercise"],
+        "set":         r.get("set"),
+        "reps":        r.get("reps"),
+        "kg":          r.get("kg"),
+        "volume":      None,  # canonicalize computes (reps × kg)
+        "notes":       r.get("notes") or None,
+        "distance":    r.get("distance_km"),
+        "duration":    r.get("duration_min"),  # MM:SS or float
+        "pace":        r.get("pace"),
+        "avg_hr":      r.get("avg_hr"),
+        "active_cal":  None,
+        "total_cal":   None,
+        "elevation_m": None,
+        "elapsed":     None,
+        "laps":        r.get("laps"),
+    }
 
 
-def ensure_sheet(wb, name: str):
-    """Return the sheet, creating it with headers if missing."""
-    if name in wb.sheetnames:
-        return wb[name], False
-    ws = wb.create_sheet(title=name)
-    for col, header in enumerate(HEADERS, start=1):
-        ws.cell(row=1, column=col, value=header)
-    return ws, True
+def apply_css_test(person: str, css_test: dict | None) -> list[str]:
+    """Compute and persist CSS from a 400m + 200m TT pair logged as a CSS test.
 
+    Payload shape (inside the wrapper):
+      ``{"date": "YYYY-MM-DD", "t400_sec": 450, "t200_sec": 210}``
 
-def row_values(r: dict):
-    """Build the 18-col row. SESSION and Volume are left blank — the styler
-    populates the SESSION number (merged per date) and writes the Volume
-    formula (``=F*G``) on every set row. Date/#/Exercise are populated on
-    every row (tracker convention).
+    Both seconds are required. CSS is written to ``profile.csv`` as
+    ``swim_css_sec_per_100m`` with ``swim_css_set_at`` = the test date
+    (or today if absent). The standard CSS test protocol per
+    MyProCoach / TopEndSports: ``CSS = (t400_sec - t200_sec) / 2``,
+    in sec/100m.
 
-    Numeric columns are coerced to real ints/floats via ``_numeric_cell`` so
-    Excel can consume them in arithmetic formulas — stringified numbers like
-    ``"67,5"`` would silently break ``=F*G`` and produce #VALUE!. The
-    styler also normalises on every write, but pre-coercing here means any
-    intermediate inspection of the sheet shows clean types from the start.
+    Caller (the /log agent) parses the user's ``CSS test`` keyword on
+    the header line and assembles this dict. Manual rows (the two TT
+    swims themselves) flow through ``rows`` like any other workout.
     """
-    return [
-        None,  # SESSION — styler fills & merges
-        r["date"],
-        _numeric_cell(r["num"]),
-        r["exercise"],
-        _numeric_cell(r["set"]),
-        _numeric_cell(r.get("reps")),
-        _numeric_cell(r.get("kg")),
-        None,  # Volume — styler writes =F*G formula
-        r.get("notes") or None,
-        _numeric_cell(r.get("distance_km")),
-        r.get("duration_min"),  # MM:SS string — not arithmetic
-        r.get("pace"),           # MM:SS string — not arithmetic
-        _numeric_cell(r.get("avg_hr")),
-        # Cols 14-17: Apple-Watch session metadata. Manual /log payloads
-        # don't supply these — the importers fill them on the first row
-        # of the matching session via upsert_monthly_strength_session /
-        # upsert_monthly_cardio.
-        None,  # Active Cal
-        None,  # Total Cal
-        None,  # Elevation (m)
-        None,  # Elapsed
-        # Col 18: swim Laps. Filled by the Apple importer from the XML
-        # lap-event count, or by the user via /log when they include
-        # `<N> laps` / `<N> lengths` / `<N> bahnen` on a swim row.
-        _numeric_cell(r.get("laps")),
-    ]
+    if not css_test:
+        return []
+    try:
+        t400 = float(css_test.get("t400_sec"))
+        t200 = float(css_test.get("t200_sec"))
+    except (TypeError, ValueError):
+        return ["WARN: css_test ignored — t400_sec / t200_sec not numeric"]
+    if t400 <= 0 or t200 <= 0 or t400 <= t200:
+        return [f"WARN: css_test ignored — invalid times "
+                f"(t400={t400}, t200={t200})"]
+    css = round((t400 - t200) / 2.0, 1)
+    set_at = str(css_test.get("date") or "")[:10]
+    if not set_at:
+        from datetime import date as _date
+        set_at = _date.today().isoformat()
+    write_profile(
+        person,
+        swim_css_sec_per_100m=css,
+        swim_css_set_at=set_at,
+    )
+    return [f"CSS test: wrote swim_css_sec_per_100m={css}, "
+            f"swim_css_set_at={set_at} to profile.csv"]
 
 
 def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
@@ -163,59 +164,59 @@ def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
     return [f"Bodyweight: mirrored to Health Metrics ({summary})"]
 
 
-def write_payload(person: str, rows: list[dict], bodyweight: list[dict]) -> list[str]:
-    """Apply rows + bodyweight entries in a single save."""
-    tracker_path = tracker_for(person)
-    if not tracker_path.exists():
-        raise FileNotFoundError(f"tracker xlsx not found: {tracker_path}")
-    wb = openpyxl.load_workbook(tracker_path)
-    status = []
+def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
+                  css_test: dict | None = None) -> list[str]:
+    """Apply rows + bodyweight entries + optional CSS test.
+
+    Routes per-set rows to the matching ``YYYY.MM.csv`` under
+    ``<person>/data/monthly/``, then canonicalizes each touched month
+    (sort, recompute Volume / Pace / TOTAL rows). Bodyweight + css_test
+    flow through the existing CSV helpers.
+    """
+    status: list[str] = []
 
     if rows:
-        by_sheet: dict[str, list[dict]] = {}
+        by_month: dict[str, list[dict]] = {}
         for r in rows:
-            by_sheet.setdefault(sheet_for_date(r["date"]), []).append(r)
-        for sheet_name, sheet_rows in by_sheet.items():
-            ws, created = ensure_sheet(wb, sheet_name)
-            # Legacy 12-col sheets had ``Date`` in column A; the current
-            # layout is ``SESSION | Date | …``. Trigger a full restyle only
-            # when we detect the old header — otherwise rely on the post-
-            # write restyle to handle sort/merge/TOTAL rebuilds. Skipping
-            # the redundant pre-pass roughly halves ``/log`` run time on
-            # large sheets.
-            if ws.cell(row=1, column=1).value == "Date":
-                style_monthly_sheet(ws)
-            last_row = find_last_data_row(ws)
-            write_row = last_row + 1
-            for r in sheet_rows:
-                for col, val in enumerate(row_values(r), start=1):
-                    ws.cell(row=write_row, column=col, value=val)
-                write_row += 1
-            style_monthly_sheet(ws)
-            dates = sorted({r["date"] for r in sheet_rows})
+            by_month.setdefault(sheet_for_date(r["date"]), []).append(r)
+        for ym, month_rows in by_month.items():
+            target = monthly_csv_path(person, ym)
+            created = not target.exists()
+            payload = [_to_monthly_row(r) for r in month_rows]
+            monthly_upsert_rows(person, ym, payload)
+            # upsert_rows already calls canonicalize, but call it again
+            # defensively in case a future refactor short-circuits the
+            # internal call.
+            canonicalize_monthly_csv(person, ym)
+            dates = sorted({r["date"] for r in month_rows})
             tag = " (new sheet)" if created else ""
             status.append(
-                f"Appended {len(sheet_rows)} row(s) to {sheet_name}{tag} "
+                f"Appended {len(month_rows)} row(s) to {ym}{tag} "
                 f"for {', '.join(dates)}"
             )
 
-    # Re-canonicalize sheet order so any newly-created month sheet
-    # lands in the right tab position without waiting for /maintain.
-    canonicalize_sheet_order(wb)
-    wb.save(tracker_path)
-
-    # Bodyweight upserts the Health Metrics CSV (separate file from the xlsx).
+    # Bodyweight upserts the Health Metrics CSV.
     status.extend(upsert_bodyweight(person, bodyweight))
+    # CSS test writes to profile.csv. Independent of rows / bodyweight.
+    status.extend(apply_css_test(person, css_test))
     return status
 
 
-def load_payload(source: str) -> tuple[list[dict], list[dict]]:
-    """Return (rows, bodyweight_entries). Accepts bare list or wrapper dict."""
+def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None]:
+    """Return (rows, bodyweight_entries, css_test). Accepts bare list or wrapper dict.
+
+    Wrapper dict accepts an optional ``css_test`` key whose value is
+    ``{"date": "YYYY-MM-DD", "t400_sec": float, "t200_sec": float}``.
+    The /log agent assembles this when the user types ``CSS test`` on
+    the header line of a 400m + 200m TT pair. Bare list (legacy form)
+    has no CSS-test path — returns None.
+    """
     if source == "-":
         data = json.load(sys.stdin)
     else:
         data = json.loads(Path(source).read_text())
 
+    css_test: dict | None = None
     if isinstance(data, list):
         rows = data
         bw = []
@@ -226,6 +227,7 @@ def load_payload(source: str) -> tuple[list[dict], list[dict]]:
         if isinstance(bw_raw, dict):
             bw_raw = [bw_raw]
         bw = bw_raw
+        css_test = data.get("css_test") or None
     else:
         raise ValueError("payload must be a list of rows or a dict wrapper")
 
@@ -235,8 +237,15 @@ def load_payload(source: str) -> tuple[list[dict], list[dict]]:
     for e in bw:
         if "date" not in e or "kg" not in e:
             raise ValueError(f"bodyweight entry missing date/kg: {e!r}")
+    if css_test is not None:
+        if not isinstance(css_test, dict):
+            raise ValueError(f"css_test must be a dict: {css_test!r}")
+        if "t400_sec" not in css_test or "t200_sec" not in css_test:
+            raise ValueError(
+                f"css_test missing t400_sec / t200_sec: {css_test!r}"
+            )
 
-    return rows, bw
+    return rows, bw, css_test
 
 
 def main() -> int:
@@ -248,12 +257,12 @@ def main() -> int:
                     help="Path to payload JSON, or '-' to read from stdin.")
     args = ap.parse_args()
 
-    rows, bodyweight = load_payload(args.payload)
-    if not rows and not bodyweight:
-        print("No rows or bodyweight entries to write.")
+    rows, bodyweight, css_test = load_payload(args.payload)
+    if not rows and not bodyweight and not css_test:
+        print("No rows, bodyweight entries, or css_test to write.")
         return 0
     try:
-        for line in write_payload(args.person, rows, bodyweight):
+        for line in write_payload(args.person, rows, bodyweight, css_test):
             print(line)
     except FileNotFoundError as e:
         print(f"ERROR: {e}", file=sys.stderr)

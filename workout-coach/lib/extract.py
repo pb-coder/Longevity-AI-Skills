@@ -72,17 +72,9 @@ from parsing import (
 # tracker_sheet is the canonical authority for sheet schemas; import
 # directly so the analytics layer doesn't fork field lists.
 from tracker_sheet import (  # type: ignore[import-not-found]
-    HEALTH_METRICS_COLS_BY_SOURCE,
-    HEALTH_METRICS_FIELDS_BY_SOURCE,
-    HEALTH_METRICS_SHEET_NAME,
-    WORKOUT_SESSIONS_FIELDS_BY_SOURCE,
-    WORKOUT_SESSIONS_SHEET_NAME,
-    bw_locate_date,
     date_str,
-    hm_locate_date,
-    read_profile,
-    ws_locate_date_start,
 )
+import csv_store as _csv_store  # noqa: E402  — CSV-backed HM/WS/Profile reads
 
 
 def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict, dict]:
@@ -260,44 +252,17 @@ def find_deloads(wb) -> list[str]:
     return sorted(deloads)
 
 
-def read_bodyweight(wb) -> list[dict]:
-    """Return all Bodyweight entries sorted ascending by date.
+def read_bodyweight(person: str) -> list[dict]:
+    """Return bodyweight entries sorted ascending by date.
 
-    Each entry: {"date": "YYYY-MM-DD", "kg": float, "notes": str|None}.
-    Falls back to Health Metrics' ``bodyweight_kg`` column when no
-    dedicated Bodyweight sheet is present (or it is empty) so trackers
-    that only receive bodyweight via the Apple importer still surface a
-    series for /coach.
+    Sourced from the ``Bodyweight (kg)`` column on the per-person
+    ``health_metrics.csv``. Returns ``[{"date": ..., "kg": ..., "notes": None}]``.
+    Bodyweight no longer has a dedicated sheet — manual /log entries
+    flow through ``upsert_health_metrics`` (sparse-merge), so the same
+    source covers both manual and Apple-Watch readings.
     """
     out: list[dict] = []
-    if "Bodyweight" in wb.sheetnames:
-        ws = wb["Bodyweight"]
-        for raw in ws.iter_rows(min_row=2, values_only=True):
-            if not raw:
-                continue
-            d, date_idx = bw_locate_date(raw)
-            if d is None:
-                continue
-            kg_raw = raw[date_idx + 1] if len(raw) > date_idx + 1 else None
-            try:
-                kg = float(kg_raw) if kg_raw not in (None, "") else None
-            except (TypeError, ValueError):
-                continue
-            if kg is None:
-                continue
-            notes = raw[date_idx + 2] if len(raw) > date_idx + 2 else None
-            out.append({
-                "date": d,
-                "kg": kg,
-                "notes": (str(notes).strip() if notes else None),
-            })
-    if out:
-        out.sort(key=lambda e: e["date"])
-        return out
-    # Fallback: pull from Health Metrics' bodyweight_kg column. Notes on
-    # Health Metrics describe the day overall, not the weigh-in, so leave
-    # the bodyweight notes None.
-    for entry in read_health_metrics(wb):
+    for entry in read_health_metrics(person):
         kg = entry.get("bodyweight_kg")
         if kg is None:
             continue
@@ -306,87 +271,75 @@ def read_bodyweight(wb) -> list[dict]:
     return out
 
 
-def read_health_metrics(wb) -> list[dict]:
-    """Return all Health Metrics rows sorted ascending by date.
+def read_health_metrics(person: str) -> list[dict]:
+    """Return Health Metrics rows from the per-person CSV, ASC by date.
 
-    Each entry: ``{"date": "YYYY-MM-DD", <field>: <value>|None, ...}``,
-    with one key per ``HEALTH_METRICS_FIELDS`` plus ``notes`` from the
-    sheet's manual Notes column. Returns ``[]`` if the sheet is missing
-    or empty.
-
-    The sheet stores newest-first (the importer writes DESC); this
-    function re-sorts ascending so trend/rolling helpers see a stable
-    chronological order.
+    Reads ``<person>/data/health_metrics.csv`` via ``csv_store``. Each
+    entry has one key per ``HEALTH_METRICS_FIELDS_BY_SOURCE[source]``
+    field, plus ``date`` and ``notes``. Keys absent from the active
+    source's slim schema (HL drops resting_hr, hrv_sdnn, etc.) are
+    surfaced as None so downstream capability checks don't KeyError.
     """
-    if HEALTH_METRICS_SHEET_NAME not in wb.sheetnames:
+    rows = _csv_store.read_health_metrics(person)
+    if not rows:
         return []
-    src = read_profile(wb).get("source") or "xml"
-    if src not in HEALTH_METRICS_FIELDS_BY_SOURCE:
+    src = _csv_store.read_profile(person).get("source") or "xml"
+    if src not in _csv_store.HEALTH_METRICS_FIELDS_BY_SOURCE:
         src = "xml"
-    fields = HEALTH_METRICS_FIELDS_BY_SOURCE[src]
-    notes_idx = HEALTH_METRICS_COLS_BY_SOURCE[src] - 1  # zero-based notes col
-    # Keys callers may legitimately query but that the active source can't
-    # populate (HL slim schema). Surface them as None so downstream
-    # capability gates and trend helpers don't KeyError.
-    all_xml_keys = HEALTH_METRICS_FIELDS_BY_SOURCE["xml"]
-    missing_keys = [k for k in all_xml_keys if k not in fields]
-
-    ws = wb[HEALTH_METRICS_SHEET_NAME]
-    out: list[dict] = []
-    for raw in ws.iter_rows(min_row=2, values_only=True):
-        if not raw:
-            continue
-        d, _ = hm_locate_date(raw)
-        if d is None:
-            continue
-        entry = {"date": d}
-        for i, key in enumerate(fields, start=1):
-            v = raw[i] if len(raw) > i else None
-            if v in (None, ""):
-                entry[key] = None
-            else:
-                try:
-                    entry[key] = float(v)
-                except (TypeError, ValueError):
-                    entry[key] = None
+    all_xml_keys = _csv_store.HEALTH_METRICS_FIELDS_BY_SOURCE["xml"]
+    active_keys = _csv_store.HEALTH_METRICS_FIELDS_BY_SOURCE[src]
+    missing_keys = [k for k in all_xml_keys if k not in active_keys]
+    out = []
+    for entry in rows:
+        # csv_store returns floats / ints / None already; pad missing
+        # keys so trend helpers see a uniform shape.
+        rec = dict(entry)
         for k in missing_keys:
-            entry[k] = None
-        notes = raw[notes_idx] if len(raw) > notes_idx else None
-        entry["notes"] = (str(notes).strip() if notes else None)
-        out.append(entry)
+            rec.setdefault(k, None)
+        # Coerce numeric strings (in case a hand-edited CSV slipped a
+        # locale-formatted value through).
+        for k in active_keys:
+            v = rec.get(k)
+            if v is None or isinstance(v, (int, float)):
+                continue
+            try:
+                rec[k] = float(v)
+            except (TypeError, ValueError):
+                rec[k] = None
+        out.append(rec)
     out.sort(key=lambda e: e["date"])
     return out
 
 
-def read_workout_sessions(wb) -> list[dict]:
-    """Return all Workout Sessions rows sorted ascending by date+start.
+def read_workout_sessions(person: str) -> list[dict]:
+    """Return Workout Sessions rows from the per-person CSV, ASC by date+start.
 
-    Each entry has the per-source columns of the sheet (xml: 12 cols incl.
-    Avg/Max/Min HR; hl_export: 9 cols, HR fields surfaced as None).
-    Returns ``[]`` if the sheet is missing.
+    Reads ``<person>/data/workout_sessions.csv`` via ``csv_store``. The
+    schema follows ``Profile.source`` (xml: 12 cols including
+    Avg/Max/Min HR; hl_export: 9 cols, HR fields absent).
     """
-    if WORKOUT_SESSIONS_SHEET_NAME not in wb.sheetnames:
+    rows = _csv_store.read_workout_sessions(person)
+    if not rows:
         return []
-    src = read_profile(wb).get("source") or "xml"
-    if src not in WORKOUT_SESSIONS_FIELDS_BY_SOURCE:
+    src = _csv_store.read_profile(person).get("source") or "xml"
+    if src not in _csv_store.WORKOUT_SESSIONS_FIELDS_BY_SOURCE:
         src = "xml"
-    fields = WORKOUT_SESSIONS_FIELDS_BY_SOURCE[src]
+    fields = _csv_store.WORKOUT_SESSIONS_FIELDS_BY_SOURCE[src]
 
-    # Per-key coercer. Keys absent from the active source's field list
-    # (HL: avg/max/min HR) get None.
     numeric_keys = {"duration_min", "avg_hr", "active_cal", "distance_km"}
     int_keys     = {"max_hr", "min_hr"}
 
-    ws = wb[WORKOUT_SESSIONS_SHEET_NAME]
-    out: list[dict] = []
-    for raw in ws.iter_rows(min_row=2, values_only=True):
-        d, s = ws_locate_date_start(raw)
-        if d is None:
+    out = []
+    for entry in rows:
+        d = entry.get("date")
+        if not d:
             continue
-        entry = {"date": d, "start": s}
-        # Map fields[i] → raw[i+1] (col 1 is Date, col 2..N is fields[0..N-1]).
-        for i, key in enumerate(fields, start=1):
-            v = raw[i] if len(raw) > i else None
+        # Coerce per-key types into the shape the rest of the analytics
+        # pipeline expects. csv_store hands us native ints/floats already
+        # for numeric cells; this normalises stringy edge-cases (locale-
+        # comma decimals, hand-edited cells).
+        for key in fields:
+            v = entry.get(key)
             if key in numeric_keys:
                 entry[key] = to_float(v) if v is not None else 0.0
             elif key in int_keys:
@@ -403,7 +356,7 @@ def read_workout_sessions(wb) -> list[dict]:
             entry.setdefault(missing,
                              0.0 if missing in numeric_keys else None)
         out.append(entry)
-    out.sort(key=lambda e: (e["date"], e["start"] or ""))
+    out.sort(key=lambda e: (e["date"], e.get("start") or ""))
     return out
 
 

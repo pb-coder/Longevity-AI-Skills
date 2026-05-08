@@ -1,12 +1,12 @@
 ---
 name: workout-tracker-maintenance
 description: >
-  ONLY activate when the user's message starts with "/maintain". Runs end-of-month
-  maintenance on a workout tracker xlsx (e.g. Workout Tracker - Nihad.xlsx):
-  restyles all sheets, trims empty rows/cols, reorders sheets (DB first, months
-  newest → oldest), and verifies data integrity. Idempotent. Do NOT trigger on
-  general spreadsheet questions, formatting requests, or anything that doesn't
-  begin with the literal command "/maintain".
+  ONLY activate when the user's message starts with "/maintain". Runs
+  end-of-month maintenance on a workout tracker (xlsx + per-person CSVs):
+  restyles the monthly YYYY.MM sheets, trims empty rows/cols, reorders sheets,
+  validates the per-person CSV store. Idempotent. Do NOT trigger on general
+  spreadsheet questions, formatting requests, or anything that doesn't begin
+  with the literal command "/maintain".
 ---
 
 # Workout Tracker Maintenance
@@ -17,50 +17,52 @@ Run this at the end of each month (or any time the sheet looks messy). It's idem
 
 ## Who is this for?
 
-Two trackers live alongside each other in the workout directory:
-- `Workout Tracker - Nihad.xlsx`
-- `Workout Tracker - Fabian.xlsx`
+Two trackers live in per-person folders:
+- `Nihad/Workout Tracker - Nihad.xlsx` + `Nihad/data/*.csv`
+- `Fabian/Workout Tracker - Fabian.xlsx` + `Fabian/data/*.csv`
 
-Resolve which tracker(s) `/maintain` should run on:
-- If the user names a person ("/maintain fabian"), run on that one tracker.
-- If the user says "both" or runs `/maintain` bare at end of month, offer to run on both back-to-back (one `python3 scripts/maintain.py` invocation per file).
+Resolve which person(s) `/maintain` should run on:
+- If the user names a person ("/maintain fabian"), run for that one.
+- If the user says "both" or runs `/maintain` bare at end of month, offer to run on both back-to-back (one `python3 scripts/maintain.py --person <Name>` invocation per person).
 - Otherwise ask: **"Is this for Nihad, Fabian, or both?"** before proceeding.
 
-The script's safety backup (`<stem>.maintain-backup.xlsx`) lands next to whichever input file you pass — pass `Workout Tracker - Fabian.xlsx` and you get `Workout Tracker - Fabian.maintain-backup.xlsx` automatically. No per-person backup handling needed in this skill.
+The script's safety backup (`Workout Tracker - <Person>.maintain-backup.xlsx`) lands inside the person's folder.
 
 ## When NOT to Use
 
 - General spreadsheet formatting questions
 - Ad-hoc styling requests
-- No tracker xlsx in the conversation or project directory
+- No tracker in the conversation or project directory
 
 ## What It Does
 
-1. **Reapplies canonical styling** to every sheet (header row, data rows, section headers on Exercises Database, column widths, freeze pane, session separators on monthly sheets). Self-heals any manual formatting drift.
-2. **Trims empty rows and columns**. Keeps a buffer so active logging still works:
-   - Exercises Database: no buffer (static lookup).
+1. **Reapplies canonical styling** to every monthly sheet (header row, data rows, column widths, freeze pane, session separators). Self-heals any manual formatting drift.
+2. **Trims empty rows and columns** on monthly sheets:
    - Current-month sheet: 50 blank rows (room to log).
    - Past-month sheets: 2 blank rows.
-   - Columns capped at 5 (DB) / 12 (monthly).
-3. **Reorders sheets**: `Exercises Database` first, then monthly sheets newest → oldest.
+   - Columns capped at 18.
+3. **Reorders sheets**: monthly sheets newest → oldest. Warns if any non-monthly sheet survived the PR1 migration.
 4. **Verifies data integrity**: compares nonempty row counts before/after; aborts if any data was lost.
-5. **Takes a safety backup** (`<stem>.maintain-backup.xlsx`, e.g. `Workout Tracker - Nihad.maintain-backup.xlsx`) before writing.
+5. **Validates per-person CSVs**: checks header schema match (against the active `Profile.source`), monotonic-DESC dates, and reports row counts.
+6. **Takes a safety backup** (`Workout Tracker - <Person>.maintain-backup.xlsx`) before writing.
 
 ## How to Run
 
 After resolving the person (see "Who is this for?" above):
 
 ```bash
-python3 scripts/maintain.py "/path/to/Workout Tracker - <Person>.xlsx"
+python3 scripts/maintain.py --person <Person>
 ```
 
 For a preview without writing:
 
 ```bash
-python3 scripts/maintain.py "/path/to/Workout Tracker - <Person>.xlsx" --dry-run
+python3 scripts/maintain.py --person <Person> --dry-run
 ```
 
-When running on both, invoke the script twice — once per tracker — and report results per person.
+When running on both, invoke the script twice — once per person — and report results per person.
+
+For the historical meter-as-km swim fix sweep, add `--fix-distance-units` (with optional `--dry-run`).
 
 The script lives at `scripts/maintain.py` inside this skill. Read it before running so you can explain what it will do if the user asks.
 
@@ -91,12 +93,11 @@ Kept here so the rules are visible and reviewable without reading the script.
 ### Session separators (monthly sheets)
 - Thin top border color `#BDC3C7` on the first row of each new date.
 
-### Column widths
+### Column widths (monthly sheet, 18 cols)
 
-| Sheet | A | B | C | D | E | F | G | H | I | J | K | L |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Exercises Database | 30 | 13 | 16 | 14 | 48 | — | — | — | — | — | — | — |
-| Monthly | 12 | 5 | 28 | 5 | 6 | 6 | 9 | 24 | 13 | 14 | 13 | 9 |
+| Col | A | B | C | D | E | F | G | H | I | J | K | L | M | N | O | P | Q | R |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Width | 8 | 12 | 5 | 28 | 5 | 6 | 6 | 9 | 24 | 13 | 14 | 13 | 9 | 11 | 11 | 13 | 11 | 7 |
 
 ## Automating Monthly
 
@@ -110,7 +111,9 @@ Three options, in order of hands-off-ness:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| "file not found" | Wrong path | Pass the full path including `Workout Tracker - <Person>.xlsx` |
-| "nonempty row count changed" | A delete went wrong | Restore from the matching `Workout Tracker - <Person>.maintain-backup.xlsx` and re-run with `--dry-run` to debug |
+| "tracker not found" | Wrong person name | Pass `--person Nihad` or `--person Fabian` |
+| "nonempty row count changed" | A delete went wrong | Restore from `<Person>/Workout Tracker - <Person>.maintain-backup.xlsx` and re-run with `--dry-run` to debug |
 | Sheet appears unstyled after run | Opened in a viewer that ignores openpyxl styles | Open in Excel / Numbers / LibreOffice to verify |
 | Current-month sheet has no blank rows to append | Buffer math off | Bump `CURRENT_MONTH_BUFFER` in the script |
+| "WARN: unexpected non-monthly sheets in xlsx" | A pre-PR1 dense sheet (Profile, Health Metrics, …) snuck back into the xlsx | Re-run the migration: `python3 Skills/shared/migrate_xlsx_to_csv.py --person <Person>` |
+| "header mismatch" on a CSV | Profile.source flipped without a matching CSV rewrite | Re-run the matching importer with the current export, or hand-fix the header |

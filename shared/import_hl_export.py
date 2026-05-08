@@ -24,12 +24,18 @@ raw samples here — Apple's published values use proprietary aggregation
 methods that we can't replicate. Surfacing a derived approximation alongside
 Nihad's Apple-aggregate values would create misleading mixed trend lines.
 
+Writes ``<person>/data/health_metrics.csv`` and
+``<person>/data/workout_sessions.csv`` (the per-source slim schema is
+applied automatically). Auto-cardio rows still flow into the YYYY.MM
+monthly sheet on the workout xlsx. The text export is **deleted on
+success** — the CSVs are the persistent record. Re-export from HLExport
+if you need to backfill.
+
 Usage:
-    python3 import_hl_export.py \\
-        --txt "./health_export_*.txt" \\
-        --tracker "Workout Tracker - Fabian.xlsx" \\
+    python3 import_hl_export.py --person Fabian \\
+        [--txt PATH_OR_GLOB]      # default: <root>/health_export_*.txt
         [--since YYYY-MM-DD]      # default: 6 months back from today
-        [--also-bodyweight]
+        [--allow-past-months]     # bypass the current-month auto-cardio gate
         [--dry-run]
 """
 from __future__ import annotations
@@ -46,12 +52,18 @@ import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tracker_sheet import (  # noqa: E402
-    ensure_profile_sheet,
-    read_profile,
-    upsert_health_metrics,
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
+)
+from csv_store import (  # noqa: E402
+    ensure_profile,
+    read_profile,
+    upsert_health_metrics,
     upsert_workout_sessions,
+)
+from person_paths import (  # noqa: E402
+    WORKOUT_TRACKER_ROOT,
+    tracker_for,
 )
 from apple_workout_types import (  # noqa: E402
     APPLE_TO_TRACKER_EXERCISE,
@@ -428,32 +440,43 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ap.add_argument("--txt", required=True, type=str,
-                    help="Path or glob to HLExport text file (latest mtime wins on glob).")
-    ap.add_argument("--tracker", required=True, type=Path,
-                    help="Path to Workout Tracker xlsx.")
+    ap.add_argument("--person", required=True,
+                    help="Tracker owner (e.g. Fabian). Resolves the workout "
+                         "xlsx and data/ folder via "
+                         "Skills/shared/person_paths.py.")
+    ap.add_argument("--txt", default=None, type=str,
+                    help="Override the auto-resolved HLExport text file. "
+                         "Default: <root>/health_export_*.txt (latest mtime "
+                         "wins on glob).")
     ap.add_argument("--since", default=None, type=parse_since,
                     help="Cutoff date (YYYY-MM-DD) for Health Metrics + "
                          "Workout Sessions ingest. Default: 6 months back. "
                          "Auto-cardio appends are scoped to the current "
                          "calendar month regardless — past months are not "
                          "re-scanned (see upsert_monthly_cardio).")
-    ap.add_argument("--also-bodyweight", action="store_true",
-                    help="Mirror the parsed bodyweight series into the Bodyweight sheet.")
     ap.add_argument("--allow-past-months", action="store_true",
                     help="Bypass the current-month auto-cardio gate so rows "
                          "flow into prior YYYY.MM sheets too. One-off backfill "
                          "switch — past months are normally treated as finished.")
+    ap.add_argument("--keep-export", action="store_true",
+                    help="Don't delete the export txt after a successful "
+                         "import. Default behavior is to delete it; the CSVs "
+                         "are the persistent record.")
     ap.add_argument("--dry-run", action="store_true",
-                    help="Parse and aggregate; do not write the workbook.")
+                    help="Parse and aggregate; do not write anything.")
     args = ap.parse_args()
 
-    txt_path = resolve_txt(args.txt)
+    person = args.person
+
+    pattern = args.txt or str(WORKOUT_TRACKER_ROOT / "health_export_*.txt")
+    txt_path = resolve_txt(pattern)
     if txt_path is None:
-        print(f"ERROR: HLExport file not found: {args.txt}", file=sys.stderr)
+        print(f"ERROR: HLExport file not found: {pattern}", file=sys.stderr)
         return 1
-    if not args.tracker.exists():
-        print(f"ERROR: tracker not found: {args.tracker}", file=sys.stderr)
+
+    tracker_path = tracker_for(person)
+    if not tracker_path.exists():
+        print(f"ERROR: tracker xlsx not found: {tracker_path}", file=sys.stderr)
         return 1
 
     since = args.since or default_since()
@@ -478,18 +501,6 @@ def main() -> int:
 
     metric_entries = aggregator.emit(since)
 
-    bodyweight_entries: list[dict] = []
-    if args.also_bodyweight:
-        for entry in metric_entries:
-            bw = entry.get("bodyweight_kg")
-            if bw is None:
-                continue
-            bodyweight_entries.append({
-                "date": entry["date"],
-                "kg": bw,
-                "notes": "from HLExport",
-            })
-
     if args.dry_run:
         print(
             f"HLExport file: {txt_path.name}\n"
@@ -502,30 +513,28 @@ def main() -> int:
                          if (r.get('notes') or '').startswith('incidental'))
         print(f"Workout Sessions: {len(workout_rows)} sessions would be written "
               f"({incidental} walks flagged incidental)")
-        if args.also_bodyweight:
-            print(f"Bodyweight: {len(bodyweight_entries)} entries would be mirrored")
-        else:
-            print("Bodyweight: skipped (no --also-bodyweight)")
         return 0
 
-    wb = openpyxl.load_workbook(args.tracker)
+    out_lines: list[str] = []
 
-    # Bootstrap the Profile sheet for HL on first run. Auto-cardio defaults
+    # Bootstrap the profile CSV for HL on first run. Auto-cardio defaults
     # to True — HL workout records (Hike / Outdoor Run / Outdoor Cycling /
     # Swim / HIIT) have proven reliable in practice, so the conservative
     # opt-in default has been retired. Flip the flag to False on a per-
     # tracker basis if a specific user wants manual-only logging.
-    _, profile_created = ensure_profile_sheet(
-        wb, default_source="hl_export", default_auto_cardio=True,
+    profile, profile_created = ensure_profile(
+        person, default_source="hl_export", default_auto_cardio=True,
     )
-    profile = read_profile(wb)
-
-    out_lines: list[str] = []
     if profile_created:
         out_lines.append("Profile: created (source=hl_export, auto_cardio=true)")
 
-    out_lines.extend(upsert_health_metrics(wb, metric_entries))
-    out_lines.extend(upsert_workout_sessions(wb, workout_rows))
+    out_lines.extend(upsert_health_metrics(person, metric_entries))
+    out_lines.extend(upsert_workout_sessions(person, workout_rows))
+
+    # Auto-cardio + strength-session metadata still write to the monthly
+    # xlsx sheets via tracker_sheet's existing helpers — only HM/WS/Profile
+    # moved to CSV.
+    wb = openpyxl.load_workbook(tracker_path)
 
     # Strength session metadata: HL provides Active Cal and Duration per
     # strength workout (no Avg HR, no basal/elevation, no separate elapsed).
@@ -631,17 +640,18 @@ def main() -> int:
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")
 
-    if args.also_bodyweight:
-        # Reuse the logger's idempotent bodyweight upsert — same dedupe-by-date
-        # rules apply whether the source is /log, XML, or HL.
-        logger_scripts = Path(__file__).resolve().parents[1] / "workout-logger" / "scripts"
-        sys.path.insert(0, str(logger_scripts))
-        from append_workout import upsert_bodyweight  # noqa: E402
-        out_lines.extend(upsert_bodyweight(wb, bodyweight_entries))
-    else:
-        out_lines.append("Bodyweight: skipped (no --also-bodyweight)")
+    wb.save(tracker_path)
 
-    wb.save(args.tracker)
+    # Delete the source export on success — the CSVs are the persistent
+    # record now. ``--keep-export`` opts out for testing or one-off
+    # debugging where you want to re-run.
+    if not args.keep_export:
+        try:
+            txt_path.unlink()
+            out_lines.append(f"Deleted source export: {txt_path.name}")
+        except OSError as e:
+            out_lines.append(f"WARN: could not delete {txt_path.name}: {e}")
+
     for line in out_lines:
         print(line)
     return 0

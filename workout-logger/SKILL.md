@@ -2,7 +2,7 @@
 name: workout-logger
 description: >
   Appends a parsed workout to the requested person's tracker (e.g.
-  ./Workout Tracker - Nihad.xlsx) with canonical styling applied to the new rows.
+  Nihad/Workout Tracker - Nihad.xlsx) with canonical styling applied to the new rows.
   Invoked by the `/log` slash command or when the user explicitly asks to log a
   workout. Do NOT trigger on general fitness questions, training discussion, or
   anything that isn't an explicit request to record a workout.
@@ -14,16 +14,19 @@ description: >
 
 ## Who is this for?
 
-Two trackers live alongside each other in the workout directory:
-- `Workout Tracker - Nihad.xlsx`
-- `Workout Tracker - Fabian.xlsx`
+Two trackers live in per-person folders inside the workout directory:
+- `Nihad/Workout Tracker - Nihad.xlsx` (+ `Nihad/data/*.csv`)
+- `Fabian/Workout Tracker - Fabian.xlsx` (+ `Fabian/data/*.csv`)
 
-Resolve which tracker this log is for BEFORE running the script:
-- If the user names a person ("log Fabian's push day", "this is for Nihad"), use that tracker.
-- If the user uses pronouns or context that clearly refer to one person ("my bf" / "boyfriend" → Fabian; "I" / "me" / "my" with no other person mentioned → Nihad, since Nihad is the account owner), use that tracker.
+Resolve which person this log is for BEFORE running the script:
+- If the user names a person ("log Fabian's push day", "this is for Nihad"), use that name.
+- If the user uses pronouns or context that clearly refer to one person ("my bf" / "boyfriend" → Fabian; "I" / "me" / "my" with no other person mentioned → Nihad, since Nihad is the account owner), use that name.
 - Otherwise ask: **"Is this for Nihad or Fabian?"** before proceeding.
 
-Pass the resolved path to `append_workout.py`. Bodyweight entries, deload flags, and all other session data route into whichever tracker file you picked — never split one session across both.
+Pass the resolved name via `--person <Name>`. The path resolver
+(`Skills/shared/person_paths.py`) finds the right xlsx + data folder.
+Bodyweight entries, deload flags, and all other session data route into
+that person's tracker — never split one session across both.
 
 ## When NOT to Use
 
@@ -39,7 +42,11 @@ Read before processing:
 - `references/parsing-rules.md` — parsing logic for all input formats
 - `references/common-mistakes.md` — known parsing traps
 
-The tracker for the resolved person (`./Workout Tracker - <Person>.xlsx`) lives in the current working directory. If it's not there, stop and say so in one line. Don't search the filesystem.
+The tracker for the resolved person lives at
+`<Person>/Workout Tracker - <Person>.xlsx` (with CSV data in `<Person>/data/`).
+The `--person` flag resolves the path automatically; if the script
+exits non-zero with a "tracker not found" error, stop and say so in
+one line. Don't search the filesystem.
 
 ## Flow
 
@@ -52,7 +59,7 @@ The tracker for the resolved person (`./Workout Tracker - <Person>.xlsx`) lives 
    }
    ```
    Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.**
-3. Run `python3 scripts/append_workout.py "Workout Tracker - <Person>.xlsx" /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `YYYY.MM` sheet, upserts bodyweight entries on the `Bodyweight` sheet (creating it if missing), and applies canonical styling to both.
+3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `YYYY.MM` sheet on the workout xlsx, mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), and applies canonical styling.
 4. **Verify the write succeeded.** Capture the script's stdout and exit code:
    - If the exit code is non-zero, print the exact stderr output and stop. Do not report success.
    - If the exit code is 0 but stdout does not contain the word `Appended`, print the exact stdout and stop with: "Unexpected script output — please check the tracker manually."
@@ -64,27 +71,28 @@ The tracker for the resolved person (`./Workout Tracker - <Person>.xlsx`) lives 
    > Question: "Refresh Apple Health data?"
    > Options: `Refresh now`, `Skip`
 
-   On `Refresh now`, resolve the export file in this priority order:
+   On `Refresh now`, the importer auto-resolves the export file from the
+   workout-tracker root (one above the per-person folders):
 
    1. `./Export - <Person>.zip` (Apple's native XML, per-person)
    2. `./Export.zip` (Apple's native XML, single-user fallback)
-   3. `./health_export_*.txt` (HLExport text dump — globbed; **most recent by mtime wins**, never naming-pinned to a person, since the user drops one fresh file at a time)
+   3. `./health_export_*.txt` (HLExport text dump — globbed; **most recent by mtime wins**)
 
-   If none exists, print one line: `No Apple Health export found — skipping.` and finish.
+   If none exists, the script prints `ERROR: no Apple Health export found …` and exits 1 — surface that one line to the user.
 
    Dispatch by file extension:
 
-   - `.zip` → `python3 Skills/shared/import_apple_health.py --zip <found_zip> --tracker "Workout Tracker - <Person>.xlsx"`
-   - `.txt` → `python3 Skills/shared/import_hl_export.py --txt <found_txt> --tracker "Workout Tracker - <Person>.xlsx"`
+   - `.zip` → `python3 Skills/shared/import_apple_health.py --person <Person>`
+   - `.txt` → `python3 Skills/shared/import_hl_export.py --person <Person>`
 
-   Both default to 6 months back (no `--since` needed). Capture stdout. Append the importer's `Health Metrics: …` and `Workout Sessions: …` summary lines (and any `Auto-cardio: …` / `Profile: …` lines) to the user-facing summary printed in step 5.
+   Both default to 6 months back (no `--since` needed). Both **delete the source export on success** — the per-person CSVs are the persistent record now. Capture stdout and append the importer's `Health Metrics: …` and `Workout Sessions: …` summary lines (and any `Auto-cardio: …` / `Profile: …` / `Deleted source export: …` lines) to the user-facing summary printed in step 5.
 
-   **Source-mismatch guardrail.** Before dispatching, peek at the tracker's `Profile.source` value (the importer creates the Profile sheet on first run, but a user may have hand-edited it). If the file extension implies a different source than the tracker is configured for, stop and ask once via `AskUserQuestion` before importing:
+   **Source-mismatch guardrail.** Before dispatching, peek at the tracker's `Profile.source` value via `csv_store.read_profile(person)`. If the file extension implies a different source than the tracker is configured for, stop and ask once via `AskUserQuestion` before importing:
 
    > "This tracker is configured for `<current_source>`, but only an `<other>` export was found. Switch this tracker to `<other_source>`?"
    > Options: `Switch and import`, `Skip import`
 
-   On `Switch and import`, the importer will update `Profile.source` on its next write (HL bootstrap + XML bootstrap both honor existing values, so a manual `write_profile` from the logger isn't required — just dispatch the matching script and it writes the right defaults if the sheet was missing). On `Skip import`, finish without running the importer. Sparse-merge means switching mid-stream is safe: existing values aren't erased, and the new source only fills cells it can.
+   On `Switch and import`, the importer will update `Profile.source` on its next write. On `Skip import`, finish without running the importer. Sparse-merge means switching mid-stream is safe: existing values aren't erased, and the new source only fills cells it can.
 
    On `Skip` to the original prompt: print nothing extra, finish.
 
@@ -125,7 +133,7 @@ The standing convention is **morning, empty stomach**. If the user writes someth
 
 ### Bulk-seed (historical import)
 
-To back-fill many historical weights at once, call `append_workout.py` with a payload of only bodyweight entries: `{"rows": [], "bodyweight": [{"date": "...", "kg": ..., "notes": null}, ...]}`. `upsert_bodyweight` dedupes by date and re-sorts newest-first.
+To back-fill many historical weights at once, call `append_workout.py` with a payload of only bodyweight entries: `{"rows": [], "bodyweight": [{"date": "...", "kg": ..., "notes": null}, ...]}`. The logger forwards each entry into `<person>/data/health_metrics.csv` via the sparse-merge `upsert_health_metrics` — same dedupe-by-date semantics, but the bodyweight is now stored on the Health Metrics row (col B) alongside the rest of that day's metrics.
 
 ## Session-level flags
 

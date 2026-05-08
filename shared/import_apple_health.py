@@ -1,21 +1,20 @@
-"""Import Apple Health export into the tracker xlsx.
+"""Import Apple Health export into the tracker (CSV + monthly xlsx).
 
 Streams the zipped ``Export.xml`` directly with stdlib ``zipfile`` +
 ``xml.etree.iterparse`` (no extraction step, ~150 MB peak RAM on a 540 MB
-unzipped XML). Aggregates per-day Tier 1+2 metrics into ``Health Metrics``
-and one row per ``Workout`` element into ``Workout Sessions``. Sparse-
-merge upserts protect existing data on re-run; idempotent.
+unzipped XML). Aggregates per-day Tier 1+2 metrics into
+``<person>/data/health_metrics.csv`` and one row per ``Workout`` element
+into ``<person>/data/workout_sessions.csv``. Auto-cardio rows still
+flow into the YYYY.MM monthly sheet on the workout xlsx. Sparse-merge
+upserts protect existing data on re-run; idempotent.
 
-The logger drives this — it shells out after the user opts into the
-"Refresh Apple Health data?" prompt. The script itself is person-agnostic;
-``--zip`` and ``--tracker`` are the only inputs.
+The export file is **deleted on success** — the CSVs are the persistent
+record. Re-export from iPhone if you need to backfill.
 
 Usage:
-    python3 import_apple_health.py \\
-        --zip "./Export - Nihad.zip" \\
-        --tracker "Workout Tracker - Nihad.xlsx" \\
+    python3 import_apple_health.py --person Nihad \\
         [--since YYYY-MM-DD]      # default: 6 months back from today
-        [--also-bodyweight]       # mirror Apple BodyMass into Bodyweight sheet
+        [--allow-past-months]     # bypass the current-month auto-cardio gate
         [--dry-run]
 """
 from __future__ import annotations
@@ -33,12 +32,19 @@ import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tracker_sheet import (  # noqa: E402
-    ensure_profile_sheet,
-    read_profile,
-    upsert_health_metrics,
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
+)
+from csv_store import (  # noqa: E402
+    ensure_profile,
+    read_profile,
+    upsert_health_metrics,
     upsert_workout_sessions,
+)
+from person_paths import (  # noqa: E402
+    WORKOUT_TRACKER_ROOT,
+    person_dir,
+    tracker_for,
 )
 from apple_workout_types import (  # noqa: E402
     APPLE_TO_TRACKER_EXERCISE,
@@ -758,56 +764,72 @@ def cluster_strength_sessions(workout_rows: list[dict]) -> tuple[list[dict], lis
     return sessions, warnings
 
 
+def _resolve_export_zip(person: str) -> Path | None:
+    """Find the Apple Health export zip in the workout-tracker root.
+
+    Resolution order:
+      1. ``<root>/Export - <Person>.zip`` (per-person)
+      2. ``<root>/Export.zip`` (single-user fallback)
+    Returns the first hit, or None if no eligible zip is found.
+    """
+    candidates = [
+        WORKOUT_TRACKER_ROOT / f"Export - {person}.zip",
+        WORKOUT_TRACKER_ROOT / "Export.zip",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--zip", required=True, type=Path, help="Path to Apple Health export zip")
-    ap.add_argument("--tracker", required=True, type=Path, help="Path to Workout Tracker xlsx")
+    ap.add_argument("--person", required=True,
+                    help="Tracker owner (e.g. Nihad or Fabian). "
+                         "Resolves the workout xlsx and data/ folder via "
+                         "Skills/shared/person_paths.py.")
+    ap.add_argument("--zip", default=None, type=Path,
+                    help="Override the auto-resolved Apple Health export zip. "
+                         "Default: <root>/Export - <Person>.zip → "
+                         "<root>/Export.zip.")
     ap.add_argument("--since", default=None, type=parse_since,
                     help="Cutoff date (YYYY-MM-DD) for Health Metrics + "
                          "Workout Sessions ingest. Default: 6 months back. "
                          "Auto-cardio appends are scoped to the current "
                          "calendar month regardless — past months are not "
                          "re-scanned (see upsert_monthly_cardio).")
-    ap.add_argument("--also-bodyweight", action="store_true",
-                    help="Mirror Apple BodyMass into the Bodyweight sheet.")
     ap.add_argument("--allow-past-months", action="store_true",
                     help="Bypass the current-month auto-cardio gate so rows "
                          "flow into prior YYYY.MM sheets too. One-off backfill "
                          "switch — past months are normally treated as finished.")
+    ap.add_argument("--keep-export", action="store_true",
+                    help="Don't delete the export zip after a successful "
+                         "import. Default behavior is to delete it; the CSVs "
+                         "are the persistent record.")
     ap.add_argument("--dry-run", action="store_true",
-                    help="Parse and aggregate; do not write the workbook.")
+                    help="Parse and aggregate; do not write anything.")
     args = ap.parse_args()
 
-    if not args.zip.exists():
-        print(f"ERROR: zip not found: {args.zip}", file=sys.stderr)
+    person = args.person
+
+    zip_path = args.zip or _resolve_export_zip(person)
+    if zip_path is None or not zip_path.exists():
+        print(f"ERROR: no Apple Health export found for {person} "
+              f"(looked in {WORKOUT_TRACKER_ROOT})", file=sys.stderr)
         return 1
-    if not args.tracker.exists():
-        print(f"ERROR: tracker not found: {args.tracker}", file=sys.stderr)
+
+    tracker_path = tracker_for(person)
+    if not tracker_path.exists():
+        print(f"ERROR: tracker xlsx not found: {tracker_path}", file=sys.stderr)
         return 1
 
     since = args.since or default_since()
 
     aggregator = DayAggregator()
     workout_rows: list[dict] = []
-    consume_apple_export(args.zip, since, aggregator, workout_rows)
+    consume_apple_export(zip_path, since, aggregator, workout_rows)
 
     metric_entries = list(aggregator.emit(since))
-
-    bodyweight_entries = []
-    if args.also_bodyweight:
-        # Mirror the latest bodyweight per date from Apple into the
-        # Bodyweight sheet. The manual entries remain truth-of-record;
-        # upsert_bodyweight overwrites by date, so re-running with the
-        # same export is a no-op.
-        for entry in metric_entries:
-            bw = entry.get("bodyweight_kg")
-            if bw is None:
-                continue
-            bodyweight_entries.append({
-                "date": entry["date"],
-                "kg": bw,
-                "notes": "from Apple Health",
-            })
 
     if args.dry_run:
         print(f"Health Metrics: {len(metric_entries)} dates would be written "
@@ -815,28 +837,27 @@ def main():
               f"{metric_entries[-1]['date'] if metric_entries else '-'})")
         print(f"Workout Sessions: {len(workout_rows)} sessions would be written "
               f"({sum(1 for r in workout_rows if (r.get('notes') or '').startswith('incidental'))} walks flagged incidental)")
-        if args.also_bodyweight:
-            print(f"Bodyweight: {len(bodyweight_entries)} entries would be mirrored")
-        else:
-            print("Bodyweight: skipped (no --also-bodyweight)")
         return 0
 
-    wb = openpyxl.load_workbook(args.tracker)
     out_lines = []
 
-    # Bootstrap the Profile sheet for XML on first run. ``auto_cardio``
+    # Bootstrap the profile CSV for XML on first run. ``auto_cardio``
     # defaults to True for XML — the user almost always wants Apple-recorded
     # runs / hikes / HIIT to flow into the monthly sheets without needing
     # to log them by hand.
-    _, profile_created = ensure_profile_sheet(
-        wb, default_source="xml", default_auto_cardio=True,
+    profile, profile_created = ensure_profile(
+        person, default_source="xml", default_auto_cardio=True,
     )
-    profile = read_profile(wb)
     if profile_created:
         out_lines.append("Profile: created (source=xml, auto_cardio=true)")
 
-    out_lines.extend(upsert_health_metrics(wb, metric_entries))
-    out_lines.extend(upsert_workout_sessions(wb, workout_rows))
+    out_lines.extend(upsert_health_metrics(person, metric_entries))
+    out_lines.extend(upsert_workout_sessions(person, workout_rows))
+
+    # Auto-cardio + strength-session metadata still write to the monthly
+    # xlsx sheets via tracker_sheet's existing helpers — only HM/WS/Profile
+    # moved to CSV.
+    wb = openpyxl.load_workbook(tracker_path)
 
     if profile.get("auto_cardio"):
         # The current-month gate lives inside ``upsert_monthly_cardio`` —
@@ -910,17 +931,18 @@ def main():
         out_lines.extend(strength_warnings)
     out_lines.extend(upsert_monthly_strength_session(wb, strength_sessions))
 
-    if args.also_bodyweight:
-        # Reach into the logger's append_workout.upsert_bodyweight so the
-        # mirroring path uses the same idempotent dedupe-by-date logic
-        # `/log` itself uses. Avoids duplicating that small module.
-        logger_scripts = Path(__file__).resolve().parents[1] / "workout-logger" / "scripts"
-        sys.path.insert(0, str(logger_scripts))
-        from append_workout import upsert_bodyweight  # noqa: E402
-        out_lines.extend(upsert_bodyweight(wb, bodyweight_entries))
-    else:
-        out_lines.append("Bodyweight: skipped (no --also-bodyweight)")
-    wb.save(args.tracker)
+    wb.save(tracker_path)
+
+    # Delete the source export on success — the CSVs are the persistent
+    # record now. ``--keep-export`` opts out for testing or one-off
+    # debugging where you want to re-run.
+    if not args.keep_export:
+        try:
+            zip_path.unlink()
+            out_lines.append(f"Deleted source export: {zip_path.name}")
+        except OSError as e:
+            out_lines.append(f"WARN: could not delete {zip_path.name}: {e}")
+
     for line in out_lines:
         print(line)
     return 0

@@ -14,6 +14,8 @@ Input JSON is either a bare list of row dicts (legacy) or a wrapper object:
 
 The wrapper form allows /log to capture the user's morning weight alongside
 the workout. Both `rows` and `bodyweight` are optional within the wrapper.
+Bodyweight entries are upserted into the per-person Health Metrics CSV
+(``<person>/data/health_metrics.csv`` col ``Bodyweight (kg)``).
 
 Row dict schema:
     {
@@ -28,16 +30,18 @@ Row dict schema:
       "distance_km": null,           # optional cardio fields
       "duration_min": null,
       "pace": null,                  # string "MM:SS"
-      "avg_hr": null
+      "avg_hr": null,
+      "laps": null                   # swim only
     }
 
 Rows must arrive pre-sorted: by date ascending, then by num ascending, then by set.
 The script does not re-sort — it trusts the caller.
 
 Usage:
-    python3 append_workout.py <tracker_path> <payload_json_path>
-    python3 append_workout.py <tracker_path> -    # read JSON from stdin
+    python3 append_workout.py --person Nihad <payload_json_path>
+    python3 append_workout.py --person Nihad -    # read JSON from stdin
 """
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -46,15 +50,14 @@ import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from tracker_sheet import (  # noqa: E402
-    BODYWEIGHT_HEADERS,
     MONTHLY_HEADERS,
     TOTAL_LABEL,
     _numeric_cell,
-    bw_locate_date,
     canonicalize_sheet_order,
-    style_bodyweight_sheet,
     style_monthly_sheet,
 )
+from csv_store import upsert_health_metrics  # noqa: E402
+from person_paths import tracker_for  # noqa: E402
 
 HEADERS = MONTHLY_HEADERS
 
@@ -134,76 +137,37 @@ def row_values(r: dict):
     ]
 
 
-def ensure_bodyweight_sheet(wb):
-    if "Bodyweight" in wb.sheetnames:
-        return wb["Bodyweight"], False
-    ws = wb.create_sheet(title="Bodyweight")
-    for col, header in enumerate(BODYWEIGHT_HEADERS, start=1):
-        ws.cell(row=1, column=col, value=header)
-    return ws, True
+def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
+    """Mirror manual bodyweight entries into the Health Metrics CSV.
 
-
-def upsert_bodyweight(wb, entries: list[dict]) -> list[str]:
-    """Insert or overwrite bodyweight entries by date. Sort DESC after."""
+    Bodyweight is no longer a separate sheet — it lives on the
+    ``Bodyweight (kg)`` column of ``<person>/data/health_metrics.csv``.
+    Each ``{"date": ..., "kg": ..., "notes": ...}`` becomes a Health
+    Metrics record with ``bodyweight_kg`` set; csv_store's sparse-merge
+    leaves all other metrics on that date alone.
+    """
     if not entries:
         return []
-    ws, created = ensure_bodyweight_sheet(wb)
-
-    # Read existing rows into a date-keyed dict. `bw_locate_date` tolerates
-    # both the current 3-col layout (Date|Kg|Notes) and the legacy 4-col
-    # layout (Year|Date|Kg|Notes) so this runs cleanly against un-migrated
-    # trackers.
-    merged: dict[str, dict] = {}
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row:
-            continue
-        date, date_idx = bw_locate_date(row)
-        if date is None:
-            continue
-        kg_raw = row[date_idx + 1] if len(row) > date_idx + 1 else None
-        notes = row[date_idx + 2] if len(row) > date_idx + 2 else None
+    metric_entries = []
+    for e in entries:
+        d = str(e["date"])[:10]
         try:
-            kg = float(kg_raw) if kg_raw is not None else None
+            kg = float(e["kg"])
         except (TypeError, ValueError):
             continue
-        if kg is None:
-            continue
-        merged[date] = {"kg": kg, "notes": notes}
-
-    added = 0
-    updated = 0
-    for e in entries:
-        date = str(e["date"])[:10]
-        kg = float(e["kg"])
-        notes = e.get("notes") or None
-        if date in merged:
-            if merged[date] != {"kg": kg, "notes": notes}:
-                updated += 1
-            merged[date] = {"kg": kg, "notes": notes}
-        else:
-            added += 1
-            merged[date] = {"kg": kg, "notes": notes}
-
-    # Rewrite sheet body in DESC order. Unmerge first so delete_rows is safe.
-    for merged_range in list(ws.merged_cells.ranges):
-        ws.unmerge_cells(str(merged_range))
-    if ws.max_row > 1:
-        ws.delete_rows(2, ws.max_row - 1)
-    for i, date in enumerate(sorted(merged.keys(), reverse=True), start=2):
-        entry = merged[date]
-        ws.cell(row=i, column=1, value=date)
-        ws.cell(row=i, column=2, value=entry["kg"])
-        ws.cell(row=i, column=3, value=entry.get("notes") or None)
-
-    style_bodyweight_sheet(ws)
-
-    tag = " (new sheet)" if created else ""
+        metric_entries.append({"date": d, "bodyweight_kg": kg})
+    if not metric_entries:
+        return []
+    upsert_health_metrics(person, metric_entries)
     summary = ", ".join(f"{e['date']}={e['kg']}kg" for e in entries)
-    return [f"Bodyweight{tag}: {added} new, {updated} updated ({summary})"]
+    return [f"Bodyweight: mirrored to Health Metrics ({summary})"]
 
 
-def write_payload(tracker_path: Path, rows: list[dict], bodyweight: list[dict]) -> list[str]:
+def write_payload(person: str, rows: list[dict], bodyweight: list[dict]) -> list[str]:
     """Apply rows + bodyweight entries in a single save."""
+    tracker_path = tracker_for(person)
+    if not tracker_path.exists():
+        raise FileNotFoundError(f"tracker xlsx not found: {tracker_path}")
     wb = openpyxl.load_workbook(tracker_path)
     status = []
 
@@ -235,13 +199,13 @@ def write_payload(tracker_path: Path, rows: list[dict], bodyweight: list[dict]) 
                 f"for {', '.join(dates)}"
             )
 
-    status.extend(upsert_bodyweight(wb, bodyweight))
-
-    # Re-canonicalize sheet order so any newly-created month or Bodyweight
-    # sheet lands in the right tab position without waiting for /maintain.
+    # Re-canonicalize sheet order so any newly-created month sheet
+    # lands in the right tab position without waiting for /maintain.
     canonicalize_sheet_order(wb)
-
     wb.save(tracker_path)
+
+    # Bodyweight upserts the Health Metrics CSV (separate file from the xlsx).
+    status.extend(upsert_bodyweight(person, bodyweight))
     return status
 
 
@@ -276,19 +240,24 @@ def load_payload(source: str) -> tuple[list[dict], list[dict]]:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print(__doc__, file=sys.stderr)
-        return 2
-    tracker = Path(sys.argv[1])
-    if not tracker.exists():
-        print(f"ERROR: tracker not found: {tracker}", file=sys.stderr)
-        return 1
-    rows, bodyweight = load_payload(sys.argv[2])
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--person", required=True,
+                    help="Tracker owner (Nihad or Fabian).")
+    ap.add_argument("payload", type=str,
+                    help="Path to payload JSON, or '-' to read from stdin.")
+    args = ap.parse_args()
+
+    rows, bodyweight = load_payload(args.payload)
     if not rows and not bodyweight:
         print("No rows or bodyweight entries to write.")
         return 0
-    for line in write_payload(tracker, rows, bodyweight):
-        print(line)
+    try:
+        for line in write_payload(args.person, rows, bodyweight):
+            print(line)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
     return 0
 
 

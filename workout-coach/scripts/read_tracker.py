@@ -42,7 +42,7 @@ Emits one JSON blob on stdout organised around session-level signals
   - estimated_1rm.e1rm_history (--include-1rm-history)
 
 Usage:
-    python3 read_tracker.py "<tracker path>" [--months 3] [--today YYYY-MM-DD]
+    python3 read_tracker.py --person <Name> [--months 3] [--today YYYY-MM-DD]
         [--include-rows] [--include-1rm-history] [--include-daily-health]
         [--pretty]
 
@@ -69,7 +69,8 @@ import openpyxl
 # here makes the imports work even before any lib/ module loads.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-from tracker_sheet import read_profile  # noqa: E402
+from csv_store import read_profile  # noqa: E402
+from person_paths import tracker_for  # noqa: E402
 from constants import DEFAULT_DATA_SOURCE, SOURCE_CAPABILITIES  # noqa: E402
 from parsing import _compact, _parse_iso_date  # noqa: E402
 from extract import (  # noqa: E402
@@ -114,7 +115,8 @@ from cardio import (  # noqa: E402
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("tracker", type=Path)
+    ap.add_argument("--person", required=True,
+                    help="Tracker owner (Nihad or Fabian).")
     ap.add_argument("--months", type=int, default=3,
                     help="How many months back to load from monthly sheets. The data is used internally for "
                          "all roll-ups regardless of --include-rows.")
@@ -135,23 +137,28 @@ def main() -> int:
                          "tokens for the LLM consumer. Use for human inspection.")
     args = ap.parse_args()
 
-    if not args.tracker.exists():
-        print(f"ERROR: tracker not found: {args.tracker}", file=sys.stderr)
+    person = args.person
+    tracker_path = tracker_for(person)
+    if not tracker_path.exists():
+        print(f"ERROR: tracker not found: {tracker_path}", file=sys.stderr)
         return 1
 
     today_d = (
         datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
     )
 
-    wb = openpyxl.load_workbook(args.tracker, data_only=True, read_only=True)
+    wb = openpyxl.load_workbook(tracker_path, data_only=True, read_only=True)
     rows, session_totals, session_summaries = extract_rows(wb, args.months, today_d)
     deloads = find_deloads(wb)
 
-    profile = read_profile(wb)
+    profile = read_profile(person)
     data_source = profile.get("source") or DEFAULT_DATA_SOURCE
     capabilities = SOURCE_CAPABILITIES.get(data_source, SOURCE_CAPABILITIES[DEFAULT_DATA_SOURCE])
 
-    health_all = read_health_metrics(wb)
+    # Health Metrics + Workout Sessions live in CSVs now (per-person
+    # data/ folder). The lib readers below take the person string, not
+    # the workbook, since the workbook no longer carries those sheets.
+    health_all = read_health_metrics(person)
     # Per-day rows go into health_metrics_recent. ``bodyweight_kg`` is dropped
     # because it duplicates the dedicated ``bodyweight_recent`` series — the
     # coach reads daily metrics for HRV / VO2max / sleep / wrist temp, not
@@ -161,9 +168,9 @@ def main() -> int:
         for entry in health_all[-30:]
     ]
 
-    workout_sessions_all = read_workout_sessions(wb)
+    workout_sessions_all = read_workout_sessions(person)
 
-    bw_all = read_bodyweight(wb)
+    bw_all = read_bodyweight(person)
     bw_latest = (
         {"date": bw_all[-1]["date"], "kg": bw_all[-1]["kg"]}
         if bw_all else None

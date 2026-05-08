@@ -5,43 +5,65 @@ Source for the Claude Code skills used by pb-coder. Cloned from
 
 ## Layout
 
+Per-person directories sit at the workout-tracker root: `Nihad/`,
+`Fabian/`. Each holds the workout xlsx (only the YYYY.MM monthly
+sheets) and a `data/` folder of CSVs for the dense, machine-only data
+(Health Metrics, Workout Sessions, Profile). Apple Health exports drop
+into the root and get **auto-deleted** after a successful import — the
+CSVs are the persistent record.
+
 ```
+<root>/
+├── Nihad/
+│   ├── Workout Tracker - Nihad.xlsx     # only YYYY.MM monthly sheets
+│   └── data/
+│       ├── health_metrics.csv           # date-keyed, sparse-merge
+│       ├── workout_sessions.csv         # (date,start)-keyed
+│       └── profile.csv                  # key,value (source, auto_cardio, birthday)
+├── Fabian/                              # same shape
+└── Skills/
+    └── shared/
+        └── exercises-database.md        # canonical catalog (markdown is truth)
+
 shared/               # Code + docs imported by multiple skills
-  tracker_sheet.py    # Single authority for the per-person tracker xlsx files:
-                      #   layout constants (monthly / Bodyweight / DB / Profile /
-                      #   Health Metrics / Workout Sessions), coercions
-                      #   (date_str, bw_locate_date, _numeric_cell,
-                      #   _parse_duration_minutes), canonical sheet styling
-                      #   (style_monthly_sheet, style_bodyweight_sheet,
-                      #   style_db_sheet, style_health_metrics_sheet,
-                      #   style_workout_sessions_sheet, style_profile_sheet),
-                      #   and the upsert helpers used by the importers
-                      #   (upsert_health_metrics, upsert_workout_sessions,
-                      #   upsert_monthly_cardio with manual-wins dedupe +
-                      #   current-month gate, upsert_monthly_strength_session
-                      #   with the same gate). Profile helpers (read_profile /
-                      #   write_profile / ensure_profile_sheet) live here too.
-                      #   Profile schema: source, auto_cardio, birthday
-                      #   (YYYY-MM-DD — used by /coach for dynamic max-HR
-                      #   estimation). The current-month gate
-                      #   (_current_month_key) means importers only ever write
-                      #   into the YYYY.MM sheet matching today; past months
-                      #   are "finished" and never re-scanned, so deleted
-                      #   rows stay deleted without a Tombstones bookkeeping
-                      #   sheet. Idempotent. style_monthly_sheet auto-sorts
-                      #   sessions by date ascending and merges non-contiguous
-                      #   same-date blocks on every pass.
+  person_paths.py     # Path resolver. tracker_for(person), data_dir(person),
+                      # health_metrics_csv(person), workout_sessions_csv(person),
+                      # profile_csv(person). Every script accepts
+                      # `--person <Name>` and resolves the rest from there.
+  csv_store.py        # CSV-backed store for the dense data. Same functional
+                      # surface as the old xlsx upserts: read_health_metrics,
+                      # upsert_health_metrics (sparse-merge, schema-by-source),
+                      # read_workout_sessions, upsert_workout_sessions
+                      # (dedupe by date+start), read_profile, write_profile,
+                      # ensure_profile. HEALTH_METRICS_HEADERS_BY_SOURCE and
+                      # WORKOUT_SESSIONS_HEADERS_BY_SOURCE are the schema
+                      # constants. Atomic writes via tmp + rename.
+  migrate_xlsx_to_csv.py  # One-shot migration: existing xlsx → per-person
+                          # folders + CSVs + .pre-csv-backup.xlsx. Idempotent.
+                          # Usage: python3 shared/migrate_xlsx_to_csv.py
+                          #          --person Nihad [--dry-run] [--force]
+  tracker_sheet.py    # Slimmed authority for the monthly YYYY.MM workout
+                      # sheets only. Layout constants (MONTHLY_HEADERS,
+                      # MONTHLY_WIDTHS, MONTHLY_COLS, TOTAL_LABEL),
+                      # coercions (date_str, _numeric_cell,
+                      # _parse_duration_minutes, _format_pace_min_per_km,
+                      # _format_duration_mmss), the canonical
+                      # style_monthly_sheet, plus the upserts that still
+                      # write to xlsx (upsert_monthly_cardio with
+                      # manual-wins dedupe + Matrix/GymKit overlap
+                      # filtering, upsert_monthly_strength_session for
+                      # session-metadata annotation). The current-month
+                      # gate (_current_month_key) means importers only
+                      # ever write into the YYYY.MM sheet matching today;
+                      # past months are "finished" and never re-scanned.
+                      # Idempotent. style_monthly_sheet auto-sorts sessions
+                      # by date ascending and merges non-contiguous same-
+                      # date blocks on every pass.
   exercises-database.md  # Canonical exercise catalog (muscle → pattern →
-                         # exercises). Source of truth — the xlsx "Exercises
-                         # Database" tab is mirrored from this via
-                         # sync_db_sheet.py. Read by /log (name lookup) and
-                         # /coach (muscle mapping + tag reading).
-  sync_db_sheet.py    # Mirror exercises-database.md → xlsx "Exercises Database"
-                      # tab. Idempotent: missing entries are inserted at the
-                      # end of their section, new sections appended at the
-                      # bottom with a navy header. Run after editing the
-                      # markdown so both tracker xlsx files stay in sync.
-                      # Usage: python3 shared/sync_db_sheet.py "<tracker>.xlsx"
+                         # exercises). Source of truth (no xlsx mirror — the
+                         # Exercises Database tab was retired in PR1). Read
+                         # directly by /log (name lookup) and /coach
+                         # (muscle mapping + tag reading).
   canonicalize_logs.py  # One-shot rename map for past monthly sheets. Fixes
                         # historical typo'd exercise names ("Deadhang" → "Dead
                         # Hang", "Dips" → "Dip", "Stomach Press*" →
@@ -55,15 +77,20 @@ shared/               # Code + docs imported by multiple skills
                           # Metrics (VO2max, RHR, HRV, sleep stages, wrist
                           # temp, exercise minutes, BodyMass) and per-workout
                           # Workout Sessions rows (avg/max/min HR, calories,
-                          # distance, source). Bootstraps the Profile sheet
-                          # with source=xml, auto_cardio=true. When auto_cardio
-                          # is on, also appends matching cardio workouts (Run /
-                          # Hike / Cycle / Swim / HIIT) to the YYYY.MM monthly
-                          # sheet via upsert_monthly_cardio. Idempotent;
-                          # sparse-merge upserts never overwrite populated
-                          # cells with None.
+                          # distance, source) into the per-person CSVs.
+                          # Bootstraps profile.csv with source=xml,
+                          # auto_cardio=true. When auto_cardio is on, also
+                          # appends matching cardio workouts (Run / Hike /
+                          # Cycle / Swim / HIIT) to the YYYY.MM monthly sheet
+                          # via upsert_monthly_cardio. Idempotent; sparse-
+                          # merge upserts never overwrite populated cells
+                          # with None. Distance is unit-aware
+                          # (<WorkoutStatistics unit="m">). Matrix/GymKit
+                          # workouts pre-empt overlapping Watch-only ones.
+                          # Deletes the export zip on success.
                           # Usage: python3 shared/import_apple_health.py
-                          #          --zip Export.zip --tracker "<tracker>.xlsx"
+                          #          --person Nihad [--since YYYY-MM-DD]
+                          #          [--dry-run] [--keep-export]
   import_hl_export.py     # HLExport text dump importer (Fabian). Same upsert
                           # pipeline as import_apple_health.py, but parses
                           # line-event text instead of XML. Lighter feature
@@ -73,15 +100,16 @@ shared/               # Code + docs imported by multiple skills
                           # cal / distance. No HRV, wrist temp, per-workout
                           # HR, or sleep stages — those depend on Apple
                           # watch-side aggregation HL doesn't replicate.
-                          # Bootstraps Profile with source=hl_export,
+                          # Bootstraps profile.csv with source=hl_export,
                           # auto_cardio=true. HL workout records (Hike,
                           # Outdoor Run, Outdoor Cycling, Swim, HIIT) have
                           # proven reliable; flip auto_cardio=false on a
                           # per-tracker basis if manual-only logging is
-                          # preferred.
+                          # preferred. Deletes the export txt on success.
                           # Usage: python3 shared/import_hl_export.py
-                          #          --txt "./health_export_*.txt"
-                          #          --tracker "<tracker>.xlsx"
+                          #          --person Fabian [--txt PATH_OR_GLOB]
+                          #          [--since YYYY-MM-DD] [--dry-run]
+                          #          [--keep-export]
   apple_workout_types.py  # Single source of truth for Apple's workout-type
                           # enum: rawValue → canonical name (RAWVALUE_TO_TYPE),
                           # the auto-cardio eligibility set
@@ -199,12 +227,11 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
   source: <DeviceName>` in the Notes column so the user can tell at a
   glance which rows came from gym telemetry vs Watch estimation.
 - **Historical unit-bug fix.** `python3 maintain.py
-  --fix-distance-units [--dry-run] "<tracker>.xlsx"` scans every
-  monthly + Workout Sessions sheet and auto-fixes Swim rows where
-  Distance > 10 km (almost always meters mis-stored as km), recomputing
-  pace. Non-swim outliers are flagged for human review but not mutated
-  — only swims hit the metres-as-km bug because Apple records every
-  other distance type in km already. Idempotent; safe to re-run.
+  --person <Person> --fix-distance-units [--dry-run]` scans every
+  monthly sheet AND `<Person>/data/workout_sessions.csv` for Swim rows
+  where Distance > 10 km (almost always meters mis-stored as km),
+  divides by 1000, and recomputes pace. Non-swim outliers are flagged
+  for human review but not mutated. Idempotent; safe to re-run.
 - **Opt-in bodyweight**: `/log` does **not** prompt for morning weight.
   The user includes a line like `weight 76.5` (or `bw 76.5`, `bodyweight:
   76.5`) in the `/log` message when they want to record one. Bulk seeding
@@ -216,20 +243,17 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
   synonyms, and old typo'd names (e.g. `Hiking` → `Hike`, `Stomach Press`
   → `Ab Crunch Machine`). The aliases file is read by the agent at
   logging time, not by code, so adding an alias takes effect on the next
-  `/log` run. After adding new entries to the markdown, run
-  `python3 shared/sync_db_sheet.py "Workout Tracker - <Person>.xlsx"` to
-  mirror them into the xlsx "Exercises Database" tab so the user-facing
-  catalog reflects the change. Don't add exercises by hand inside the
-  xlsx — they'll be silently ignored by `/coach` (which reads only the
-  markdown) and overwritten on the next sync.
+  `/log` run. There's no xlsx "Exercises Database" tab anymore — the
+  markdown is consulted directly by /log and /coach. New entries go into
+  the markdown only; no sync step.
 - **Cardio + wellness logging is supported**: the markdown includes a
   CARDIO section (Hike, Swim, Walk, Outdoor Run, Outdoor Cycling, HIIT
   + indoor machines) and a WELLNESS section (Yoga, Stretching). These
   entries have no muscle tags, so they're logged and counted toward
   `cardio_last_28d` (where applicable) without contributing to the
   weekly hard-set volume model.
-- **Multi-source Apple Health**: each tracker xlsx pins a `Profile`
-  sheet with `source` (`xml` / `hl_export`) and `auto_cardio` (bool).
+- **Multi-source Apple Health**: each person's `data/profile.csv`
+  pins `source` (`xml` / `hl_export`) and `auto_cardio` (bool).
   `import_apple_health.py` handles `.zip` (Apple's native export);
   `import_hl_export.py` handles `health_export_*.txt` (HLExport iOS
   app). The /log skill dispatches by extension; /coach gates report
@@ -246,9 +270,12 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
 
 ## Workout Tracker
 
-The tracker xlsx files (`Workout Tracker - <Person>.xlsx`, one per
-person) live in the parent directory of this repo, not inside it. The
-skills resolve which person a request is about (see each `SKILL.md`'s
-"Who is this for?" section) and pass the matching path to their script.
-See [`PROJECT.md`](PROJECT.md) for sheet format, column semantics,
-routing rules, profile / auto-cardio behavior, and backup strategy.
+Each tracker lives in its own per-person folder
+(`<root>/<Person>/Workout Tracker - <Person>.xlsx` plus
+`<root>/<Person>/data/{health_metrics,workout_sessions,profile}.csv`),
+one level above this Skills repo. The skills resolve which person a
+request is about (see each `SKILL.md`'s "Who is this for?" section)
+and pass `--person <Name>` to their scripts; path resolution lives in
+`shared/person_paths.py`. See [`PROJECT.md`](PROJECT.md) for sheet
+format, column semantics, routing rules, profile / auto-cardio
+behavior, and backup strategy.

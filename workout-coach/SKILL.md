@@ -1,12 +1,12 @@
 ---
 name: workout-coach
 description: >
-  Reads the requested person's tracker (e.g. ./Workout Tracker - Nihad.xlsx),
-  analyzes recent training state, and writes a report plus the next workout plan
-  to ./workout_plan - <Person>.md. Invoked by the `/coach` slash command or when
-  the user explicitly asks for coaching, analysis, or a new plan. Do NOT trigger
-  on general fitness questions, training discussion, logging, or requests
-  unrelated to the tracker.
+  Reads the requested person's tracker (e.g. Nihad/Workout Tracker - Nihad.xlsx
+  + Nihad/data/*.csv), analyzes recent training state, and writes a report
+  plus the next workout plan to ./workout_plan - <Person>.md. Invoked by the
+  `/coach` slash command or when the user explicitly asks for coaching,
+  analysis, or a new plan. Do NOT trigger on general fitness questions,
+  training discussion, logging, or requests unrelated to the tracker.
 ---
 
 # Workout Coach
@@ -15,16 +15,16 @@ description: >
 
 ## Who is this for?
 
-Two trackers live alongside each other in the workout directory:
-- `Workout Tracker - Nihad.xlsx`
-- `Workout Tracker - Fabian.xlsx`
+Two trackers live in per-person folders inside the workout directory:
+- `Nihad/Workout Tracker - Nihad.xlsx` (+ `Nihad/data/*.csv`)
+- `Fabian/Workout Tracker - Fabian.xlsx` (+ `Fabian/data/*.csv`)
 
-Resolve which tracker this request is about BEFORE running the script:
-- If the user names a person ("coach Fabian", "plan Nihad's next block"), use that tracker.
-- If the user uses pronouns or context that clearly refer to one person ("my bf" / "boyfriend" → Fabian; "I" / "me" / "my" with no other person mentioned → Nihad, since Nihad is the account owner), use that tracker.
+Resolve which person this request is about BEFORE running the script:
+- If the user names a person ("coach Fabian", "plan Nihad's next block"), use that name.
+- If the user uses pronouns or context that clearly refer to one person ("my bf" / "boyfriend" → Fabian; "I" / "me" / "my" with no other person mentioned → Nihad, since Nihad is the account owner), use that name.
 - Otherwise ask: **"Is this for Nihad or Fabian?"** before proceeding.
 
-Pass the resolved path to the script. The sidecar `workout_plan.md` follows the same naming — write to `./workout_plan - <Person>.md` (e.g. `./workout_plan - Fabian.md`). Never write one person's plan over the other.
+Pass the resolved name via `--person <Name>`. The sidecar `workout_plan.md` follows the same naming — write to `./workout_plan - <Person>.md` (e.g. `./workout_plan - Fabian.md`). Never write one person's plan over the other.
 
 ## When NOT to Use
 
@@ -36,7 +36,7 @@ Pass the resolved path to the script. The sidecar `workout_plan.md` follows the 
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
 2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis.
-3. Run `scripts/read_tracker.py "./Workout Tracker - <Person>.xlsx"` from the current working directory (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
+3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the workout xlsx + the per-person CSVs (`<Person>/data/health_metrics.csv`, `workout_sessions.csv`, `profile.csv`) and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the tracker isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
    **Output is compact (no indentation) by default** — saves ~20% of tokens vs pretty-printed. Pass `--pretty` for human inspection.
 

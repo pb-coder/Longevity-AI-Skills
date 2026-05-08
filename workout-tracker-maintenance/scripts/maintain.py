@@ -1,16 +1,22 @@
 """Workout Tracker monthly maintenance.
 
 Idempotent. Safe to re-run. Performs:
-  1. Restyle all sheets to the canonical look
-  2. Trim empty trailing rows/columns (with buffer for monthly sheets)
-  3. Reorder sheets: Exercises Database, Bodyweight, months newest → oldest
-  4. Report row counts and verify data integrity
+  1. Restyle the monthly YYYY.MM workout sheets to the canonical look
+  2. Trim empty trailing rows/columns (with buffer for the current month)
+  3. Reorder remaining sheets: months newest → oldest
+  4. Validate the per-person CSVs (well-formed, monotonic dates)
+  5. Report row counts and verify data integrity
+
+Post-PR1: only the monthly workout sheets live in xlsx; Health Metrics,
+Workout Sessions, and Profile are CSVs in ``<person>/data/``.
 
 Usage:
-    python3 maintain.py "/path/to/Workout Tracker - <Person>.xlsx"
-    python3 maintain.py "/path/to/Workout Tracker - <Person>.xlsx" --dry-run
+    python3 maintain.py --person Nihad
+    python3 maintain.py --person Nihad --dry-run
+    python3 maintain.py --person Nihad --fix-distance-units
 """
 import argparse
+import csv
 import re
 import shutil
 import sys
@@ -22,43 +28,31 @@ import openpyxl
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 from tracker_sheet import (  # noqa: E402
     MONTHLY_COLS,
-    DB_COLS,
-    BODYWEIGHT_COLS,
-    HEALTH_METRICS_COLS_BY_SOURCE,
-    HEALTH_METRICS_SHEET_NAME,
-    PROFILE_SHEET_NAME,
-    WORKOUT_SESSIONS_COLS_BY_SOURCE,
-    WORKOUT_SESSIONS_SHEET_NAME,
     _format_pace_min_per_km,
     _parse_duration_minutes,
     canonicalize_sheet_order,
     date_str,
     find_last_data_cell,
-    read_profile,
     style_monthly_sheet,
-    style_db_sheet,
-    style_bodyweight_sheet,
-    style_health_metrics_sheet,
-    style_profile_sheet,
-    style_workout_sessions_sheet,
+)
+from csv_store import (  # noqa: E402
+    HEALTH_METRICS_HEADERS_BY_SOURCE,
+    WORKOUT_SESSIONS_HEADERS_BY_SOURCE,
+    read_profile,
+)
+from person_paths import (  # noqa: E402
+    data_dir,
+    health_metrics_csv,
+    profile_csv,
+    tracker_for,
+    workout_sessions_csv,
 )
 
 # Row buffer policy when trimming empty rows.
 # Current-month sheet: leave a generous buffer since the user is actively logging.
 # Past-month sheets: 2 blank rows.
-# Exercises Database: 0 (static-ish lookup table).
-# Bodyweight: 10 (small buffer for upcoming entries).
-# Health Metrics + Workout Sessions: 30 (Apple emits daily, fills fast).
 CURRENT_MONTH_BUFFER = 50
 PAST_MONTH_BUFFER = 2
-DB_BUFFER = 0
-BODYWEIGHT_BUFFER = 10
-HEALTH_METRICS_BUFFER = 30
-WORKOUT_SESSIONS_BUFFER = 30
-# Profile holds a fixed set of key/value rows; no buffer needed because the
-# sheet is configuration, not a growing log.
-PROFILE_BUFFER = 0
-PROFILE_COLS = 2
 
 
 # ------------------------------------------------------------------ helpers
@@ -98,9 +92,11 @@ def reorder_sheets(wb):
 
 
 # ------------------------------------------------------------------ main
-def run(path: Path, dry_run: bool = False) -> int:
+def run(person: str, dry_run: bool = False) -> int:
+    """Restyle the workout xlsx (monthly sheets only) and validate the CSVs."""
+    path = tracker_for(person)
     if not path.exists():
-        print(f"ERROR: file not found: {path}", file=sys.stderr)
+        print(f"ERROR: tracker not found: {path}", file=sys.stderr)
         return 1
 
     # Safety backup before any write.
@@ -122,38 +118,26 @@ def run(path: Path, dry_run: bool = False) -> int:
                 del wb[name]
                 print(f"Dropped empty sheet: {name}")
 
+    # Warn if a stale dense sheet survived the migration. Past-PR1 the
+    # workbook should hold only YYYY.MM monthly sheets.
+    stale_sheets = [
+        n for n in wb.sheetnames
+        if not is_monthly(n)
+    ]
+    if stale_sheets:
+        print(f"WARN: unexpected non-monthly sheets in xlsx: {stale_sheets} "
+              f"(should have been migrated to CSV by migrate_xlsx_to_csv.py)")
+
     before_counts = {name: count_nonempty_rows(wb[name]) for name in wb.sheetnames}
 
-    # Resolve the data source once — drives the slim/full schema for the
-    # Health Metrics + Workout Sessions sheets.
-    src = read_profile(wb).get("source") or "xml"
-    if src not in HEALTH_METRICS_COLS_BY_SOURCE:
-        src = "xml"
-    hm_cols = HEALTH_METRICS_COLS_BY_SOURCE[src]
-    ws_cols = WORKOUT_SESSIONS_COLS_BY_SOURCE[src]
-
-    # 1. Style + trim every sheet
+    # 1. Style + trim every monthly sheet.
     for name in list(wb.sheetnames):
+        if not is_monthly(name):
+            continue
         ws = wb[name]
-        if name == "Exercises Database":
-            style_db_sheet(ws)
-            trim_sheet(ws, buffer=DB_BUFFER, target_cols=DB_COLS)
-        elif name == PROFILE_SHEET_NAME:
-            style_profile_sheet(ws)
-            trim_sheet(ws, buffer=PROFILE_BUFFER, target_cols=PROFILE_COLS)
-        elif name == "Bodyweight":
-            style_bodyweight_sheet(ws)
-            trim_sheet(ws, buffer=BODYWEIGHT_BUFFER, target_cols=BODYWEIGHT_COLS)
-        elif name == HEALTH_METRICS_SHEET_NAME:
-            style_health_metrics_sheet(ws, source=src)
-            trim_sheet(ws, buffer=HEALTH_METRICS_BUFFER, target_cols=hm_cols)
-        elif name == WORKOUT_SESSIONS_SHEET_NAME:
-            style_workout_sessions_sheet(ws, source=src)
-            trim_sheet(ws, buffer=WORKOUT_SESSIONS_BUFFER, target_cols=ws_cols)
-        elif is_monthly(name):
-            style_monthly_sheet(ws)
-            buf = CURRENT_MONTH_BUFFER if name == current else PAST_MONTH_BUFFER
-            trim_sheet(ws, buffer=buf, target_cols=MONTHLY_COLS)
+        style_monthly_sheet(ws)
+        buf = CURRENT_MONTH_BUFFER if name == current else PAST_MONTH_BUFFER
+        trim_sheet(ws, buffer=buf, target_cols=MONTHLY_COLS)
 
     # 2. Reorder
     reorder_sheets(wb)
@@ -180,7 +164,62 @@ def run(path: Path, dry_run: bool = False) -> int:
         ws = wb[name]
         last_r, last_c = find_last_data_cell(ws)
         print(f"  {name}: data rows={after_counts[name]:4d}  max_row={ws.max_row:4d}  max_col={ws.max_column}")
+
+    # 5. Validate CSVs (per-person data folder).
+    csv_status = validate_csvs(person)
+    print("\nCSV checks:")
+    for line in csv_status:
+        print(f"  {line}")
     return 0
+
+
+def validate_csvs(person: str) -> list[str]:
+    """Sanity-check the per-person CSVs.
+
+    Reports header schema match (against the active source's expected
+    header), monotonic-DESC date order, and row counts. Read-only — never
+    rewrites the CSVs; the importers' upsert helpers own the rewrite path.
+    """
+    out: list[str] = []
+    profile = read_profile(person)
+    source = profile.get("source") or "xml"
+    if source not in HEALTH_METRICS_HEADERS_BY_SOURCE:
+        source = "xml"
+
+    targets = {
+        "health_metrics.csv":   (health_metrics_csv(person),
+                                 HEALTH_METRICS_HEADERS_BY_SOURCE[source]),
+        "workout_sessions.csv": (workout_sessions_csv(person),
+                                 WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source]),
+        "profile.csv":          (profile_csv(person),
+                                 ["key", "value"]),
+    }
+
+    for label, (path, expected_header) in targets.items():
+        if not path.exists():
+            out.append(f"{label}: missing")
+            continue
+        with path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.reader(f)
+            try:
+                header = next(reader)
+            except StopIteration:
+                out.append(f"{label}: empty (no header)")
+                continue
+            rows = list(reader)
+        if header != expected_header:
+            out.append(
+                f"{label}: header mismatch — got {header}, "
+                f"expected {expected_header}"
+            )
+            continue
+        # Monotonic-DESC date check (Health Metrics + Workout Sessions only).
+        if label != "profile.csv":
+            dates = [row[0] for row in rows if row and row[0]]
+            if dates and any(dates[i] < dates[i + 1] for i in range(len(dates) - 1)):
+                out.append(f"{label}: WARN dates not strictly DESC")
+        out.append(f"{label}: {len(rows)} rows ok")
+    return out
 
 
 def count_nonempty_rows(ws) -> int:
@@ -230,7 +269,7 @@ def _is_swim_session_type(apple_type) -> bool:
     return isinstance(apple_type, str) and "swimming" in apple_type.lower()
 
 
-def fix_distance_units(path: Path, dry_run: bool = False) -> int:
+def fix_distance_units(person: str, dry_run: bool = False) -> int:
     """Scan all monthly + Workout Sessions rows for the meter-as-km bug.
 
     Auto-fix swim rows whose Distance (km) > 10 (almost certainly metres):
@@ -243,93 +282,103 @@ def fix_distance_units(path: Path, dry_run: bool = False) -> int:
     Idempotent: re-runs on a clean tracker print "no fixes needed" and
     don't touch the file.
     """
+    path = tracker_for(person)
     if not path.exists():
-        print(f"ERROR: file not found: {path}", file=sys.stderr)
+        print(f"ERROR: tracker not found: {path}", file=sys.stderr)
         return 1
 
     wb = openpyxl.load_workbook(path)
     fixes: list[tuple[str, int, str]] = []
     flags: list[tuple[str, int, str]] = []
 
+    # 1. Monthly xlsx sweep: swims with distance > 10 km auto-fix; non-swim
+    # outliers flagged but not mutated.
     for name in wb.sheetnames:
-        if is_monthly(name):
-            ws = wb[name]
-            for r in range(2, ws.max_row + 1):
-                exercise = ws.cell(row=r, column=4).value
-                distance_v = ws.cell(row=r, column=10).value
-                duration_v = ws.cell(row=r, column=11).value
-                if distance_v in (None, ""):
-                    continue
-                try:
-                    distance = float(distance_v)
-                except (TypeError, ValueError):
-                    continue
-
-                if _is_swim(exercise) and distance > SUSPICIOUS_SWIM_DISTANCE_KM:
-                    new_distance = round(distance / 1000.0, 3)
-                    dur_min = _parse_duration_minutes(duration_v)
-                    new_pace = _format_pace_min_per_km(dur_min, new_distance)
-                    old_pace = ws.cell(row=r, column=12).value
-                    if not dry_run:
-                        ws.cell(row=r, column=10).value = new_distance
-                        ws.cell(row=r, column=12).value = new_pace
-                    fixes.append((
-                        name, r,
-                        f"Swim {date_str(ws.cell(row=r, column=2).value)}: "
-                        f"distance {distance} → {new_distance} km, "
-                        f"pace {old_pace!r} → {new_pace!r}"
-                    ))
-                    continue
-
-                # Sanity-flag non-swim rows where pace is implausibly fast.
-                # Don't mutate — these almost never come from a unit bug
-                # (Apple records run/cycle in km already), so an outlier
-                # here is more likely a manual typo worth human review.
-                dur_min = _parse_duration_minutes(duration_v)
-                if dur_min and distance > 0:
-                    pace = dur_min / distance
-                    if pace < 0.5:
-                        flags.append((
-                            name, r,
-                            f"{exercise} {date_str(ws.cell(row=r, column=2).value)}: "
-                            f"pace {pace:.3f} min/km — verify distance/duration"
-                        ))
-
-        elif name == WORKOUT_SESSIONS_SHEET_NAME:
-            # Same rule on the Workout Sessions sheet's Distance (km) col J,
-            # filtered to Swimming rows. Schema differs per source; pull the
-            # column index by header name to stay schema-agnostic.
-            ws = wb[name]
-            header_to_col: dict[str, int] = {}
-            for c in range(1, ws.max_column + 1):
-                v = ws.cell(row=1, column=c).value
-                if isinstance(v, str):
-                    header_to_col[v.strip()] = c
-            type_col = header_to_col.get("Apple Type")
-            dist_col = header_to_col.get("Distance (km)")
-            date_col = header_to_col.get("Date")
-            if not (type_col and dist_col):
+        if not is_monthly(name):
+            continue
+        ws = wb[name]
+        for r in range(2, ws.max_row + 1):
+            exercise = ws.cell(row=r, column=4).value
+            distance_v = ws.cell(row=r, column=10).value
+            duration_v = ws.cell(row=r, column=11).value
+            if distance_v in (None, ""):
                 continue
-            for r in range(2, ws.max_row + 1):
-                apple_type = ws.cell(row=r, column=type_col).value
-                if not _is_swim_session_type(apple_type):
-                    continue
-                distance_v = ws.cell(row=r, column=dist_col).value
-                if distance_v in (None, ""):
-                    continue
-                try:
-                    distance = float(distance_v)
-                except (TypeError, ValueError):
-                    continue
-                if distance > SUSPICIOUS_SWIM_DISTANCE_KM:
-                    new_distance = round(distance / 1000.0, 3)
-                    if not dry_run:
-                        ws.cell(row=r, column=dist_col).value = new_distance
-                    d = ws.cell(row=r, column=date_col).value if date_col else "?"
-                    fixes.append((
+            try:
+                distance = float(distance_v)
+            except (TypeError, ValueError):
+                continue
+
+            if _is_swim(exercise) and distance > SUSPICIOUS_SWIM_DISTANCE_KM:
+                new_distance = round(distance / 1000.0, 3)
+                dur_min = _parse_duration_minutes(duration_v)
+                new_pace = _format_pace_min_per_km(dur_min, new_distance)
+                old_pace = ws.cell(row=r, column=12).value
+                if not dry_run:
+                    ws.cell(row=r, column=10).value = new_distance
+                    ws.cell(row=r, column=12).value = new_pace
+                fixes.append((
+                    name, r,
+                    f"Swim {date_str(ws.cell(row=r, column=2).value)}: "
+                    f"distance {distance} → {new_distance} km, "
+                    f"pace {old_pace!r} → {new_pace!r}"
+                ))
+                continue
+
+            # Sanity-flag non-swim rows where pace is implausibly fast.
+            dur_min = _parse_duration_minutes(duration_v)
+            if dur_min and distance > 0:
+                pace = dur_min / distance
+                if pace < 0.5:
+                    flags.append((
                         name, r,
-                        f"Swimming {d}: distance {distance} → {new_distance} km"
+                        f"{exercise} {date_str(ws.cell(row=r, column=2).value)}: "
+                        f"pace {pace:.3f} min/km — verify distance/duration"
                     ))
+
+    # 2. Workout Sessions CSV sweep — Apple-Watch swim rows where
+    # ``Distance (km) > 10`` get the same divide-by-1000 fix.
+    ws_path = workout_sessions_csv(person)
+    if ws_path.exists():
+        with ws_path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.reader(f)
+            header = next(reader, [])
+            csv_rows = list(reader)
+        if header:
+            try:
+                date_idx = header.index("Date")
+                type_idx = header.index("Apple Type")
+                dist_idx = header.index("Distance (km)")
+            except ValueError:
+                date_idx = type_idx = dist_idx = -1
+            if date_idx >= 0 and type_idx >= 0 and dist_idx >= 0:
+                csv_changed = False
+                for i, row in enumerate(csv_rows):
+                    if len(row) <= max(date_idx, type_idx, dist_idx):
+                        continue
+                    apple_type = row[type_idx]
+                    if not _is_swim_session_type(apple_type):
+                        continue
+                    if not row[dist_idx]:
+                        continue
+                    try:
+                        distance = float(row[dist_idx])
+                    except ValueError:
+                        continue
+                    if distance > SUSPICIOUS_SWIM_DISTANCE_KM:
+                        new_distance = round(distance / 1000.0, 3)
+                        if not dry_run:
+                            row[dist_idx] = str(new_distance)
+                            csv_changed = True
+                        fixes.append((
+                            "workout_sessions.csv", i + 2,
+                            f"Swimming {row[date_idx]}: "
+                            f"distance {distance} → {new_distance} km"
+                        ))
+                if csv_changed and not dry_run:
+                    with ws_path.open("w", encoding="utf-8", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(header)
+                        writer.writerows(csv_rows)
 
     if not fixes and not flags:
         print(f"{path.name}: no fixes needed")
@@ -366,7 +415,8 @@ def fix_distance_units(path: Path, dry_run: bool = False) -> int:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("xlsx", type=Path)
+    ap.add_argument("--person", required=True,
+                    help="Tracker owner (Nihad or Fabian).")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
         "--fix-distance-units", action="store_true",
@@ -374,5 +424,5 @@ if __name__ == "__main__":
     )
     args = ap.parse_args()
     if args.fix_distance_units:
-        sys.exit(fix_distance_units(args.xlsx, args.dry_run))
-    sys.exit(run(args.xlsx, args.dry_run))
+        sys.exit(fix_distance_units(args.person, args.dry_run))
+    sys.exit(run(args.person, args.dry_run))

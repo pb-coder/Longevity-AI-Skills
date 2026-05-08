@@ -63,6 +63,9 @@ from apple_workout_types import (  # noqa: E402
 DATE_HEADER_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\s*$")
 SEPARATOR_RE = re.compile(r"^-{3,}\s*$")
 EVENT_RE = re.compile(r"^(\d{2}):(\d{2}):(\d{2})\s+([^:]+):\s*(.+?)\s*$")
+# HL contract: distance is always emitted in km (the literal "km" suffix
+# is part of the regex). No unit conversion needed here, unlike the XML
+# importer where <WorkoutStatistics> records swims in metres.
 WORKOUT_RE = re.compile(
     r"^HKWorkoutActivityType\(rawValue:\s*(\d+)\),"
     r"\s*([\d.]+)\s*min"

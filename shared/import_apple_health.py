@@ -93,6 +93,26 @@ DISTANCE_WR_TYPE = "HKQuantityTypeIdentifierDistanceWalkingRunning"
 DISTANCE_CYCLE_TYPE = "HKQuantityTypeIdentifierDistanceCycling"
 DISTANCE_SWIM_TYPE = "HKQuantityTypeIdentifierDistanceSwimming"
 
+# Apple's <WorkoutStatistics> tag carries a per-record `unit` attribute.
+# Walks/runs/cycling typically arrive in km, but swimming is recorded in
+# metres by default (a 25 m pool length × 22 laps → sum="550" unit="m").
+# Read the unit and convert; never assume km. Unknown units are dropped
+# with a warning rather than silently mis-stored.
+DISTANCE_UNIT_TO_KM = {
+    "km":  1.0,
+    "m":   0.001,
+    "mi":  1.609344,
+    "yd":  0.0009144,
+    "ft":  0.0003048,
+}
+
+# Marker that the device attribute came from a fitness machine via GymKit
+# (Matrix treadmill, Technogym bike, etc.). Apple wraps these in a
+# `<<HKDevice ...>` blob that always contains
+# `model:com.apple.health.fitnessmachinemodel.<kind>` — that substring is
+# the reliable cross-brand signal.
+FITNESS_MACHINE_DEVICE_MARKER = "fitnessmachinemodel"
+
 
 # ---------- date parsing ----------
 # Apple emits "YYYY-MM-DD HH:MM:SS +ZZZZ" in the user's local TZ. We don't
@@ -368,6 +388,7 @@ def extract_workout(elem, since_date):
     avg_hr = max_hr = min_hr = active_cal = basal_cal = distance_km = None
     elevation_m: float | None = None
     indoor = False
+    laps: int = 0
     for child in elem:
         if child.tag == "MetadataEntry":
             # Apple uses the same activity-type enum for indoor + outdoor
@@ -386,6 +407,14 @@ def extract_workout(elem, since_date):
                 if cm is not None:
                     elevation_m = cm / 100.0
             continue
+        if child.tag == "WorkoutEvent":
+            # Lap count: Apple emits one ``<WorkoutEvent type="HKWorkoutEventTypeLap"/>``
+            # per pool length on swims (and per manual lap press on runs).
+            # We count them generically; the consumer only writes the
+            # value to the Laps column on swim rows.
+            if child.attrib.get("type") == "HKWorkoutEventTypeLap":
+                laps += 1
+            continue
         if child.tag != "WorkoutStatistics":
             continue
         a = child.attrib
@@ -402,9 +431,22 @@ def extract_workout(elem, since_date):
             # Use whichever distance type matches the activity (Apple
             # records the right one per workout). If multiple, the last
             # one wins — that's vanishingly rare.
+            #
+            # Unit handling: <WorkoutStatistics> carries a `unit` attribute
+            # ("km" for runs/cycles, "m" for swims by default). Without
+            # the conversion a 550 m swim was being written as 550 km.
             v = to_float(a.get("sum"))
             if v is not None:
-                distance_km = v
+                unit = (a.get("unit") or "km").strip().lower()
+                factor = DISTANCE_UNIT_TO_KM.get(unit)
+                if factor is None:
+                    print(
+                        f"WARN: unknown distance unit {unit!r} on "
+                        f"workout {attrib.get('startDate', '?')}; skipped distance",
+                        file=sys.stderr,
+                    )
+                else:
+                    distance_km = v * factor
 
     # Specialise the canonical name for indoor variants. Only the three
     # types Apple records both ways are renamed; everything else (Hiking,
@@ -429,6 +471,9 @@ def extract_workout(elem, since_date):
     if active_cal is not None and basal_cal is not None:
         total_cal = round(active_cal + basal_cal, 1)
 
+    device_str = attrib.get("device") or ""
+    is_machine = FITNESS_MACHINE_DEVICE_MARKER in device_str.lower()
+
     return {
         "date":         d_start,
         "start":        hhmm(dt_start),
@@ -443,10 +488,96 @@ def extract_workout(elem, since_date):
         "total_cal":    total_cal,
         "elevation_m":  round(elevation_m, 1) if elevation_m is not None else None,
         "elapsed_min":  elapsed_min,
-        "distance_km":  round(distance_km, 2) if distance_km is not None else None,
+        "distance_km":  round(distance_km, 3) if distance_km is not None else None,
+        "laps":         laps if laps > 0 else None,
         "source":       attrib.get("sourceName"),
+        "device":       device_str or None,
+        "is_machine":   is_machine,
+        "dt_start":     dt_start,
+        "dt_end":       dt_end,
         "notes":        notes,
     }
+
+
+# ---------- fitness-machine dedupe ----------
+def _extract_device_name(device_str: str) -> str | None:
+    """Pull the ``name:<X>`` token out of an Apple HKDevice blob.
+
+    Apple stores devices as e.g.
+    ``<<HKDevice: 0x...>, name:Matrix, manufacturer:Matrix, model:com.apple.health.fitnessmachinemodel.treadmill, ...>``.
+    Returns the value after ``name:`` (e.g. ``"Matrix"``) or None if the
+    string doesn't follow that shape.
+    """
+    if not device_str:
+        return None
+    m = re.search(r"name:([^,>\s]+)", device_str)
+    return m.group(1) if m else None
+
+
+def _intervals_overlap(a_start, a_end, b_start, b_end) -> bool:
+    """True if two ``[start, end]`` datetime intervals overlap.
+
+    Strict inequality on both ends — back-to-back workouts (b_start == a_end)
+    don't count as overlapping. Both intervals must have a defined start;
+    a missing end falls back to start (zero-length interval).
+    """
+    if a_start is None or b_start is None:
+        return False
+    a_end = a_end or a_start
+    b_end = b_end or b_start
+    return (a_start < b_end) and (b_start < a_end)
+
+
+def _drop_watch_overlapping_machine(workouts: list[dict]) -> tuple[list[dict], list[str]]:
+    """Remove watch-only workouts that overlap a Matrix/GymKit row.
+
+    Apple often records a generic Watch detection (no fitness-machine
+    device) alongside the canonical GymKit workout when the user starts
+    on a treadmill / bike at the gym. The two share an activity type
+    and overlap in time; the machine row carries the accurate distance,
+    segments, and lap data. The watch row is a phantom duplicate.
+
+    Group by ``(date, apple_type)``. Within each group, if any workout
+    has ``is_machine=True``, drop every non-machine workout whose time
+    window overlaps a machine workout. Returns the filtered list plus
+    one human-readable note per drop so the importer can surface them.
+
+    No-op when a day has only watch-only workouts or only machine ones —
+    the dedupe never collapses across activity types or dates.
+    """
+    notes: list[str] = []
+    by_key: dict[tuple, list[dict]] = {}
+    for w in workouts:
+        key = (w.get("date"), w.get("apple_type"))
+        by_key.setdefault(key, []).append(w)
+
+    drop_ids = set()
+    for (d, atype), group in by_key.items():
+        machines = [w for w in group if w.get("is_machine")]
+        watches = [w for w in group if not w.get("is_machine")]
+        if not machines or not watches:
+            continue
+        for wch in watches:
+            for mch in machines:
+                if _intervals_overlap(
+                    wch.get("dt_start"), wch.get("dt_end"),
+                    mch.get("dt_start"), mch.get("dt_end"),
+                ):
+                    drop_ids.add(id(wch))
+                    name = _extract_device_name(mch.get("device") or "") or "fitness machine"
+                    notes.append(
+                        f"Auto-cardio: dropped Watch-only {atype} on {d} "
+                        f"({wch.get('duration_min')} min, "
+                        f"{wch.get('distance_km')} km) — overlaps "
+                        f"{name} GymKit workout"
+                    )
+                    break
+
+    if drop_ids:
+        kept = [w for w in workouts if id(w) not in drop_ids]
+    else:
+        kept = workouts
+    return kept, notes
 
 
 # ---------- main streaming pass ----------
@@ -712,14 +843,36 @@ def main():
         # we hand it every eligible Apple workout in the --since window
         # and the helper drops anything outside the current calendar
         # month. Past months are "finished" and never re-scanned.
+        #
+        # Pre-emptive dedupe: when the watch creates a generic running
+        # detection that overlaps a Matrix/GymKit-recorded workout for the
+        # same activity type and day, drop the watch-only one. The
+        # machine row is canonical (accurate distance, segments, laps);
+        # the watch row is essentially the first few minutes of the same
+        # activity double-counted.
+        eligible = [
+            w for w in workout_rows
+            if (w.get("apple_type") or "") in CARDIO_AUTOLOG_TYPES
+            and APPLE_TO_TRACKER_EXERCISE.get(w.get("apple_type") or "")
+        ]
+        eligible, dedupe_notes = _drop_watch_overlapping_machine(eligible)
+        out_lines.extend(dedupe_notes)
+
         cardio_payload: list[dict] = []
-        for w in workout_rows:
+        for w in eligible:
             apple_type = w.get("apple_type") or ""
-            if apple_type not in CARDIO_AUTOLOG_TYPES:
-                continue
             tracker_name = APPLE_TO_TRACKER_EXERCISE.get(apple_type)
             if not tracker_name:
                 continue
+            # Tag machine-recorded rows on the Notes column so the user
+            # can tell at a glance which rows came from the gym equipment
+            # vs the watch. The note is appended to the auto-cardio
+            # marker by the consumer; pass the device label here.
+            machine_tag = None
+            if w.get("is_machine"):
+                # Pull the human-readable name out of "...name:Matrix..." —
+                # falls back to "fitness machine" when Apple omits it.
+                machine_tag = _extract_device_name(w.get("device") or "") or "fitness machine"
             cardio_payload.append({
                 "date":         w.get("date"),
                 "exercise":     tracker_name,
@@ -733,6 +886,8 @@ def main():
                 "total_cal":    w.get("total_cal"),
                 "elevation_m":  w.get("elevation_m"),
                 "elapsed_min":  w.get("elapsed_min"),
+                "laps":         w.get("laps"),
+                "machine_tag":  machine_tag,
             })
         out_lines.extend(upsert_monthly_cardio(
             wb, cardio_payload, allow_past_months=args.allow_past_months,

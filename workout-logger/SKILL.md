@@ -154,7 +154,8 @@ Each row is a dict with these keys. `date` / `num` / `exercise` / `set` are requ
   "distance_km": null,
   "duration_min": null,
   "pace": null,
-  "avg_hr": null
+  "avg_hr": null,
+  "laps": null
 }
 ```
 
@@ -162,8 +163,9 @@ Rules:
 - `num` restarts at 1 for each new date. All sets of the same exercise share a `num`.
 - `set` is 1, 2, 3 within an exercise.
 - Do NOT compute or include a `volume` field — the sheet fills Volume via the formula `=reps*kg` and writes a SESSION total via `=SUM(...)` automatically. Skip the arithmetic.
-- The last four fields are cardio-only. Leave null for strength rows.
-- The monthly sheets have 13 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR`. SESSION is filled in by the styler (per-month session number, merged per date); leave it out of the row dict.
+- The cardio fields (`distance_km`, `duration_min`, `pace`, `avg_hr`) are cardio-only. Leave null for strength rows.
+- `laps` is swim-specific: integer count of pool lengths (e.g. `22` for a `22 × 25 m = 550 m` swim). Leave null for non-swim rows. The Apple importer fills this from `HKWorkoutEventTypeLap` events; users can include it in `/log` via `<N> laps`, `<N> lengths`, or `<N> Bahnen`.
+- The monthly sheets have 18 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed | Laps`. SESSION is filled in by the styler (per-month session number, merged per date); leave it out of the row dict.
 - Sort rows in the JSON by date ascending, then `num`, then `set`. The script does not re-sort.
 
 ## Rules

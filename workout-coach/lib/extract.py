@@ -124,10 +124,10 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict,
         empty_streak = 0
 
         for raw in ws.iter_rows(min_row=2, values_only=True):
-            padded = list(raw) + [None] * 17
+            padded = list(raw) + [None] * 18
             (session, date_val, num, exercise, set_n, reps, kg, volume,
              notes, distance, duration, pace, avg_hr,
-             active_cal, total_cal, elevation_m, elapsed) = padded[:17]
+             active_cal, total_cal, elevation_m, elapsed, laps) = padded[:18]
 
             if date_val is None and exercise is None:
                 empty_streak += 1
@@ -202,6 +202,7 @@ def extract_rows(wb, months_back: int, today_d: date) -> tuple[list[dict], dict,
                 "total_cal":   to_float(total_cal) if total_cal not in (None, "") else None,
                 "elevation_m": to_float(elevation_m) if elevation_m not in (None, "") else None,
                 "elapsed":     str(elapsed).strip() if elapsed not in (None, "") else None,
+                "laps":        to_int_or_none(laps) if laps not in (None, "") else None,
             })
 
     rows.sort(key=lambda r: (r["date"], r["num"] or 0, r["set"] or 0))

@@ -50,12 +50,15 @@ border_session = Border(top=sep_side)
 no_border = Border()
 
 # ------------------------------------------------------------------ structure
-# Monthly sheet columns (A..M). A=SESSION (per-month number, merged per date).
+# Monthly sheet columns (A..R). A=SESSION (per-month number, merged per date).
 # Notes column reads better left-aligned. Volume holds a formula, not a number.
+# Laps (col 18) is swim-specific: filled by the Apple importer from
+# HKWorkoutEventTypeLap counts and by /log when the user types `<N> laps` /
+# `<N> lengths` / `<N> bahnen` on a swim row. None for non-swim rows.
 MONTHLY_HEADERS = [
     "SESSION", "Date", "#", "Exercise", "Set", "Reps", "kg", "Volume", "Notes",
     "Distance (km)", "Duration (min)", "Pace (min/km)", "Avg HR",
-    "Active Cal", "Total Cal", "Elevation (m)", "Elapsed",
+    "Active Cal", "Total Cal", "Elevation (m)", "Elapsed", "Laps",
 ]
 
 # Deload marker text — case-sensitive on write (canonical form), but
@@ -98,10 +101,10 @@ def _extract_deload_marker(notes) -> tuple[bool, str | None]:
 MONTHLY_WIDTHS = {
     "A": 8,  "B": 12, "C": 5,  "D": 28, "E": 5,  "F": 6, "G": 6,
     "H": 9,  "I": 24, "J": 13, "K": 14, "L": 13, "M": 9,
-    "N": 11, "O": 11, "P": 13, "Q": 11,
+    "N": 11, "O": 11, "P": 13, "Q": 11, "R": 7,
 }
 MONTHLY_LEFT_COLS = {"I"}
-MONTHLY_COLS = 17
+MONTHLY_COLS = 18
 TOTAL_LABEL = "TOTAL"
 
 # Exercises Database: 5 columns (Exercise | Type | Primary Muscle | Equipment | Variations).
@@ -443,6 +446,7 @@ def style_monthly_sheet(ws):
                     "total_cal":    ws.cell(row=r, column=15).value,
                     "elevation_m": ws.cell(row=r, column=16).value,
                     "elapsed":      ws.cell(row=r, column=17).value,
+                    "laps":         ws.cell(row=r, column=18).value,
                 }
             continue
         # Drop fully-empty rows.
@@ -465,6 +469,7 @@ def style_monthly_sheet(ws):
             "total_cal":   ws.cell(row=r, column=15).value,
             "elevation_m": ws.cell(row=r, column=16).value,
             "elapsed":     ws.cell(row=r, column=17).value,
+            "laps":        ws.cell(row=r, column=18).value,
         }
 
         if current is None or date_val != current["date"]:
@@ -571,7 +576,7 @@ def style_monthly_sheet(ws):
             ws.cell(row=write_row, column=12, value=rd["pace"])
             if is_strength and kinds[idx] == "cardio":
                 # Cardio row inside a mixed-session day — keep its own
-                # per-row Duration / Avg HR / cols 14-17.
+                # per-row Duration / Avg HR / cols 14-18.
                 ws.cell(row=write_row, column=11, value=rd["duration"])
                 ws.cell(row=write_row, column=13, value=_numeric_cell(rd["avg_hr"]))
                 ws.cell(row=write_row, column=14,
@@ -581,6 +586,7 @@ def style_monthly_sheet(ws):
                 ws.cell(row=write_row, column=16,
                         value=_numeric_cell(rd.get("elevation_m")))
                 ws.cell(row=write_row, column=17, value=rd.get("elapsed"))
+                ws.cell(row=write_row, column=18, value=_numeric_cell(rd.get("laps")))
             elif is_strength:
                 # Strength/other row — session metadata moved to TOTAL,
                 # cells stay blank.
@@ -590,6 +596,7 @@ def style_monthly_sheet(ws):
                 ws.cell(row=write_row, column=15).value = None
                 ws.cell(row=write_row, column=16).value = None
                 ws.cell(row=write_row, column=17).value = None
+                ws.cell(row=write_row, column=18).value = None
             else:
                 # Pure cardio session — each row keeps its own metadata.
                 ws.cell(row=write_row, column=11, value=rd["duration"])
@@ -601,6 +608,7 @@ def style_monthly_sheet(ws):
                 ws.cell(row=write_row, column=16,
                         value=_numeric_cell(rd.get("elevation_m")))
                 ws.cell(row=write_row, column=17, value=rd.get("elapsed"))
+                ws.cell(row=write_row, column=18, value=_numeric_cell(rd.get("laps")))
             write_row += 1
         last_set_row = write_row - 1
 
@@ -608,7 +616,8 @@ def style_monthly_sheet(ws):
             # TOTAL row: Date, Volume formula, all session-level metadata,
             # and the Deload Workout marker on Notes when present. Merge
             # the SESSION column (col 1) through this row alongside the
-            # data rows below.
+            # data rows below. Laps is row-level (swim only) and never
+            # rolls up to TOTAL — strength sessions don't have laps.
             ws.cell(row=write_row, column=1, value=session_num)
             ws.cell(row=write_row, column=2, value=sess["date"])
             ws.cell(row=write_row, column=4, value=TOTAL_LABEL)
@@ -621,6 +630,7 @@ def style_monthly_sheet(ws):
             ws.cell(row=write_row, column=15, value=hoist_total)
             ws.cell(row=write_row, column=16, value=hoist_elev)
             ws.cell(row=write_row, column=17, value=hoist_elapsed)
+            ws.cell(row=write_row, column=18).value = None
             merge_last = write_row
             write_row += 1
         else:
@@ -1354,19 +1364,32 @@ def _format_duration_mmss(duration_min) -> str | None:
     return f"{whole}:{secs:02d}"
 
 
+# Pace sanity bounds. ``< 0.5 min/km`` is faster than any sustained human
+# (Bolt's 100 m WR ≈ 2:35/km); ``> 60 min/km`` is slower than a slow
+# stroll. Either side of this range is almost always a unit-bug or a
+# distance/duration entry mismatch — bail out and surface as blank so the
+# bad row stands out instead of a silent ``0:01``.
+PACE_MIN_PER_KM_LOWER = 0.5
+PACE_MIN_PER_KM_UPPER = 60.0
+
+
 def _format_pace_min_per_km(duration_min: float | None,
                             distance_km: float | None) -> str | None:
     """Return a ``MM:SS`` per-km pace string, or None if not computable.
 
     Mirrors the manual-log pace format. We only emit a pace when both
     distance and duration are positive — bare-duration cardio (HIIT,
-    swim laps without distance) leaves the cell blank.
+    swim laps without distance) leaves the cell blank. Pace values
+    outside ``[0.5, 60]`` min/km also return None — see the bounds
+    constants above for rationale.
     """
     if not duration_min or not distance_km:
         return None
     if duration_min <= 0 or distance_km <= 0:
         return None
     pace_min = duration_min / distance_km
+    if pace_min < PACE_MIN_PER_KM_LOWER or pace_min > PACE_MIN_PER_KM_UPPER:
+        return None
     whole = int(pace_min)
     secs = int(round((pace_min - whole) * 60))
     if secs == 60:
@@ -1659,6 +1682,7 @@ def upsert_monthly_cardio(wb, rows: list[dict], allow_past_months: bool = False)
                     15: int(round(r.get("total_cal"))) if isinstance(r.get("total_cal"), (int, float)) and r.get("total_cal") else None,
                     16: int(round(r.get("elevation_m"))) if isinstance(r.get("elevation_m"), (int, float)) and r.get("elevation_m") else None,
                     17: _format_elapsed_hms(r.get("elapsed_min")),
+                    18: int(r.get("laps")) if isinstance(r.get("laps"), (int, float)) and r.get("laps") else None,
                 }
                 row_changed = False
                 for col, new_val in incoming_meta.items():
@@ -1704,7 +1728,12 @@ def upsert_monthly_cardio(wb, rows: list[dict], allow_past_months: bool = False)
             ws.cell(row=write_row, column=6, value=None)        # Reps (cardio: blank)
             ws.cell(row=write_row, column=7, value=None)        # kg
             ws.cell(row=write_row, column=8, value=f"=F{write_row}*G{write_row}")
-            ws.cell(row=write_row, column=9, value=AUTO_IMPORT_NOTE)
+            machine_tag = r.get("machine_tag")
+            note_value = (
+                f"{AUTO_IMPORT_NOTE} | source: {machine_tag}"
+                if machine_tag else AUTO_IMPORT_NOTE
+            )
+            ws.cell(row=write_row, column=9, value=note_value)
             ws.cell(row=write_row, column=10, value=_numeric_cell(distance))
             ws.cell(row=write_row, column=11, value=_format_duration_mmss(dur_f))
             ws.cell(row=write_row, column=12, value=pace)
@@ -1722,6 +1751,7 @@ def upsert_monthly_cardio(wb, rows: list[dict], allow_past_months: bool = False)
                     value=int(round(el)) if isinstance(el, (int, float)) and el else None)
             ws.cell(row=write_row, column=17,
                     value=_format_elapsed_hms(r.get("elapsed_min")))
+            ws.cell(row=write_row, column=18, value=_numeric_cell(r.get("laps")))
 
             # Track the new row in the dedupe index too so subsequent input
             # rows don't double-add for the same date.

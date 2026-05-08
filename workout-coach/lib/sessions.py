@@ -153,6 +153,7 @@ def build_monthly_sessions(rows: list[dict],
                 "elapsed":     None,
                 "avg_hr":      None,
                 "duration_min": None,
+                "laps":        None,
                 "_has_strength": is_strength_row,
                 "_has_cardio":   is_cardio_row,
             }
@@ -167,7 +168,7 @@ def build_monthly_sessions(rows: list[dict],
         # For mixed/strength sessions, the TOTAL row summary is canonical
         # and is folded in below.
         if is_cardio_row and not is_strength_row:
-            for k in ("active_cal", "total_cal", "elevation_m", "elapsed", "avg_hr"):
+            for k in ("active_cal", "total_cal", "elevation_m", "elapsed", "avg_hr", "laps"):
                 if s.get(k) in (None, "") and r.get(k) not in (None, ""):
                     s[k] = r.get(k)
             if s.get("duration_min") in (None, "") and r.get("duration_min"):

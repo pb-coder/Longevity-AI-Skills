@@ -176,7 +176,35 @@ longevity-optimizer/  # /longevity — separate domain (not workout-tracker).
   SESSION numbering, TOTAL row placement, chronological row order).
   Running it twice is a no-op. `/log` calls it post-write; `/maintain`
   calls it on every sheet. An out-of-order sheet (e.g. after a backfill)
-  self-heals on the next pass.
+  self-heals on the next pass. The monthly sheet has 18 columns:
+  `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes |
+  Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal |
+  Total Cal | Elevation (m) | Elapsed | Laps`. The trailing `Laps` column
+  is swim-specific — populated by the Apple importer from
+  `HKWorkoutEventTypeLap` event counts and by `/log` when the user types
+  `<N> laps` / `<N> lengths` / `<N> Bahnen` on a swim row.
+- **Distance is unit-aware end-to-end.** The Apple Health XML importer
+  reads the `unit` attribute on `<WorkoutStatistics>` and converts to km
+  before writing. Swims arrive in metres by default (`sum="550"
+  unit="m"`); without conversion they landed as `550 km`. The
+  `_format_pace_min_per_km` helper now blanks pace values outside
+  `[0.5, 60]` min/km — degenerate `0:01` outputs from a future unit bug
+  surface as a blank cell instead of silent corruption.
+- **Fitness-machine dedupe.** The Apple importer detects GymKit-sourced
+  workouts via the `device` attribute (substring
+  `fitnessmachinemodel`). When a Matrix/Technogym/etc. workout overlaps
+  a Watch-only workout of the same activity type and date, the machine
+  row wins; the Watch row is dropped (it's a phantom duplicate
+  detection). Machine-recorded rows get `auto-imported from Apple |
+  source: <DeviceName>` in the Notes column so the user can tell at a
+  glance which rows came from gym telemetry vs Watch estimation.
+- **Historical unit-bug fix.** `python3 maintain.py
+  --fix-distance-units [--dry-run] "<tracker>.xlsx"` scans every
+  monthly + Workout Sessions sheet and auto-fixes Swim rows where
+  Distance > 10 km (almost always meters mis-stored as km), recomputing
+  pace. Non-swim outliers are flagged for human review but not mutated
+  — only swims hit the metres-as-km bug because Apple records every
+  other distance type in km already. Idempotent; safe to re-run.
 - **Opt-in bodyweight**: `/log` does **not** prompt for morning weight.
   The user includes a line like `weight 76.5` (or `bw 76.5`, `bodyweight:
   76.5`) in the `/log` message when they want to record one. Bulk seeding

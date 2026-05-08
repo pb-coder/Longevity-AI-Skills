@@ -94,7 +94,7 @@ def ensure_sheet(wb, name: str):
 
 
 def row_values(r: dict):
-    """Build the 13-col row. SESSION and Volume are left blank — the styler
+    """Build the 18-col row. SESSION and Volume are left blank — the styler
     populates the SESSION number (merged per date) and writes the Volume
     formula (``=F*G``) on every set row. Date/#/Exercise are populated on
     every row (tracker convention).
@@ -127,6 +127,10 @@ def row_values(r: dict):
         None,  # Total Cal
         None,  # Elevation (m)
         None,  # Elapsed
+        # Col 18: swim Laps. Filled by the Apple importer from the XML
+        # lap-event count, or by the user via /log when they include
+        # `<N> laps` / `<N> lengths` / `<N> bahnen` on a swim row.
+        _numeric_cell(r.get("laps")),
     ]
 
 

@@ -52,9 +52,14 @@ Extended columns activate for the entire workout if any cardio row is present.
 | Pace | `MM:SS` min/km | `10:16` |
 | Distance | km | `5` |
 | Avg HR | bpm | `155` |
+| Laps | integer (swim) | `22 laps`, `22 lengths`, `22 Bahnen` |
 
 Convert pace input: `8'53"` → `8:53`. Never use decimal for time fields.
 Leave fields blank if not provided.
+
+**Distance unit:** the tracker stores distance in km. If the user writes `Swim 550m` or `Run 800m`, convert (`550m` → `0.55`, `800m` → `0.8`). The Apple Health importer is unit-aware (reads the `unit` attribute from the XML) — never log `550` for a 550 m swim, that landed as `550 km` in the historical bug.
+
+**Laps (swim):** recognise `<N> laps`, `<N> lengths`, or `<N> bahnen` (case-insensitive) anywhere on a swim row. Set `laps=N`. Pool length × laps should match `distance_km × 1000`; if the user gives both and they're inconsistent, prefer what they typed and flag the mismatch in Notes.
 
 ## Bodyweight (opt-in)
 

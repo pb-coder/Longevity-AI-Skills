@@ -30,9 +30,10 @@ applied automatically). Auto-cardio rows flow into the matching
 ``<person>/data/monthly/YYYY.MM.csv`` via ``upsert_monthly_cardio`` in
 ``monthly_csv.py``. HL doesn't carry per-lap swim data, so the
 ``swimming/`` folder isn't created for HL trackers — the coach skips
-the swim section automatically. The text export is **deleted on
-success** — the CSVs are the persistent record. Re-export from HLExport
-if you need to backfill.
+the swim section automatically. The text export is **archived to
+``<root>/.processed/`` on success** — the CSVs are the persistent
+record; the archive keeps a forensic trail if a downstream bug damages
+the CSVs. Re-export from HLExport if you need to backfill.
 
 Usage:
     python3 import_hl_export.py --person Fabian \\
@@ -64,6 +65,7 @@ from csv_store import (  # noqa: E402
 )
 from person_paths import (  # noqa: E402
     WORKOUT_TRACKER_ROOT,
+    archive_processed_export,
 )
 from apple_workout_types import (  # noqa: E402
     APPLE_TO_TRACKER_EXERCISE,
@@ -336,8 +338,6 @@ def extract_hl_workout(d: str, ts: datetime, raw: str) -> dict | None:
         "max_hr":       None,
         "min_hr":       None,
         "active_cal":   round(cal, 1) if cal is not None else None,
-        # HL .txt doesn't carry basal energy or elevation metadata, so the
-        # corresponding note fields will be omitted by build_auto_cardio_note.
         "basal_cal":    None,
         "total_cal":    None,
         "elevation_m":  None,
@@ -633,15 +633,15 @@ def main() -> int:
     else:
         out_lines.append("Auto-cardio: skipped (Profile.auto_cardio=false)")
 
-    # Delete the source export on success — the CSVs are the persistent
-    # record now. ``--keep-export`` opts out for testing or one-off
-    # debugging where you want to re-run.
+    # Archive the source export on success into <root>/.processed/.
+    # Keeps a forensic trail in case a downstream bug damages the CSVs;
+    # ``--keep-export`` opts out for testing.
     if not args.keep_export:
         try:
-            txt_path.unlink()
-            out_lines.append(f"Deleted source export: {txt_path.name}")
+            archived = archive_processed_export(txt_path)
+            out_lines.append(f"Archived source export: {txt_path.name} → {archived.parent.name}/{archived.name}")
         except OSError as e:
-            out_lines.append(f"WARN: could not delete {txt_path.name}: {e}")
+            out_lines.append(f"WARN: could not archive {txt_path.name}: {e}")
 
     for line in out_lines:
         print(line)

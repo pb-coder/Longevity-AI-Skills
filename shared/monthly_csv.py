@@ -232,7 +232,15 @@ def _extract_deload_marker(notes) -> tuple[bool, str | None]:
 
 
 def _classify_session_rows(rows: list[dict]) -> tuple[list[str], bool]:
-    """Per-row strength/cardio/other classification + is_strength bool."""
+    """Per-row strength/cardio/other classification + is_strength bool.
+
+    A row is ``cardio`` if it has any of: positive distance, a populated
+    duration cell, or the auto-import note. The duration / auto-note
+    branches catch indoor / commute cycling and HIIT sessions where the
+    source provides time + calories but no distance — without them, those
+    rows would fall through to ``other`` and have their session-metadata
+    cells wiped on a mixed-day strength session (see ``_build_data_row``).
+    """
     kinds: list[str] = []
     for rd in rows:
         kg_v = _to_num(rd.get("kg"))
@@ -242,6 +250,13 @@ def _classify_session_rows(rows: list[dict]) -> tuple[list[str], bool]:
             continue
         dist_v = _to_num(rd.get("distance"))
         if dist_v > 0:
+            kinds.append("cardio")
+            continue
+        if _parse_duration_minutes(rd.get("duration")):
+            kinds.append("cardio")
+            continue
+        notes_v = rd.get("notes") or ""
+        if AUTO_IMPORT_NOTE.lower() in str(notes_v).lower():
             kinds.append("cardio")
             continue
         kinds.append("other")

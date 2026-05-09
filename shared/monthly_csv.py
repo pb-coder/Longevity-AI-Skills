@@ -265,41 +265,8 @@ def _classify_session_rows(rows: list[dict]) -> tuple[list[str], bool]:
 
 # ============================================================ Auto-cardio + drift
 AUTO_IMPORT_NOTE = "auto-imported from Apple"
-ELAPSED_TIME_MIN_DELTA = 1.0
 CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN = 1.0
 STRENGTH_METADATA_DRIFT_THRESHOLD = 0.05
-
-
-def build_auto_cardio_note(
-    *,
-    active_cal: float | None = None,
-    total_cal: float | None = None,
-    elevation_m: float | None = None,
-    duration_min: float | None = None,
-    elapsed_min: float | None = None,
-) -> str:
-    """Structured Notes string for an auto-imported cardio row.
-
-    Format: ``auto-imported from Apple | active 753 kcal | total 1041
-    kcal | elevation 73 m | elapsed 3:53:23``. Each ``| field value``
-    drops on missing source data; ``elapsed`` drops when within 1 min
-    of ``duration_min``.
-    """
-    parts: list[str] = [AUTO_IMPORT_NOTE]
-    if active_cal not in (None, 0, 0.0):
-        parts.append(f"active {int(round(active_cal))} kcal")
-    if total_cal not in (None, 0, 0.0):
-        if active_cal is None or total_cal - active_cal >= 1:
-            parts.append(f"total {int(round(total_cal))} kcal")
-    if elevation_m not in (None, 0, 0.0):
-        parts.append(f"elevation {int(round(elevation_m))} m")
-    if elapsed_min not in (None, 0, 0.0):
-        delta = abs(elapsed_min - (duration_min or 0))
-        if duration_min is None or delta >= ELAPSED_TIME_MIN_DELTA:
-            elapsed_str = _format_elapsed_hms(elapsed_min)
-            if elapsed_str:
-                parts.append(f"elapsed {elapsed_str}")
-    return " | ".join(parts)
 
 
 def _strength_metadata_drifts(existing, incoming) -> bool:

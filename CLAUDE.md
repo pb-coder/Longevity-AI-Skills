@@ -8,8 +8,9 @@ Source for the Claude Code skills used by pb-coder. Cloned from
 Per-person directories sit at the workout-tracker root: `Nihad/`,
 `Fabian/`. Each holds a `data/` folder with every CSV the skills read
 or write — there is no xlsx anywhere post-PR3a. Apple Health exports
-drop into the root and get **auto-deleted** after a successful
-import — the CSVs are the persistent record.
+drop into the root and get **archived to `<root>/.processed/`** after a
+successful import — the CSVs are the persistent record; the archive
+keeps a forensic trail in case a downstream bug damages the CSVs.
 
 ```
 <root>/

@@ -21,7 +21,8 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │   └── (same; no swimming/ for HL)
     ├── Skills/
     │   └── shared/                        ← this file
-    └── Export.zip / health_export_*.txt   (transient; deleted on success)
+    ├── Export.zip / health_export_*.txt   (transient; archived on success)
+    └── .processed/                        ← consumed export archive
 
 Every importer / logger / coach / maintain script accepts ``--person
 <Name>`` (e.g. ``--person Nihad``) and resolves the rest via this
@@ -29,6 +30,7 @@ module. No raw filesystem paths in the CLI surface.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 # This file lives at Workout Tracker/Skills/shared/person_paths.py.
@@ -111,3 +113,23 @@ def ensure_swimming_dir(person: str) -> Path:
     d = data_dir(person) / "swimming"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def archive_processed_export(path: Path) -> Path:
+    """Move a consumed Apple/HL export into ``<root>/.processed/`` and
+    return its new path.
+
+    Used in place of ``unlink()`` so a downstream bug that damages the
+    monthly CSVs leaves the source file recoverable. On basename
+    collision the archived copy is suffixed with the move timestamp
+    (``health_export_….txt`` → ``health_export_….txt.20260509T114205``).
+    Idempotent in spirit — the destination directory is created on
+    demand.
+    """
+    archive_dir = WORKOUT_TRACKER_ROOT / ".processed"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    dest = archive_dir / path.name
+    if dest.exists():
+        dest = archive_dir / f"{path.name}.{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+    path.replace(dest)
+    return dest

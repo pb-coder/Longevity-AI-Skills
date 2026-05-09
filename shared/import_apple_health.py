@@ -12,8 +12,10 @@ the matching ``<person>/data/monthly/YYYY.MM.csv`` via the pure-CSV
 ``swim_laps.csv``. Sparse-merge upserts protect existing data on re-run;
 idempotent.
 
-The export file is **deleted on success** — the CSVs are the persistent
-record. Re-export from iPhone if you need to backfill.
+The export file is **archived to ``<root>/.processed/`` on success** —
+the CSVs are the persistent record; the archive keeps a forensic trail
+if a downstream bug damages the CSVs. Re-export from iPhone if you need
+to backfill.
 
 Usage:
     python3 import_apple_health.py --person Nihad \\
@@ -47,6 +49,7 @@ from csv_store import (  # noqa: E402
 )
 from person_paths import (  # noqa: E402
     WORKOUT_TRACKER_ROOT,
+    archive_processed_export,
     person_dir,
 )
 from apple_workout_types import (  # noqa: E402
@@ -1132,15 +1135,15 @@ def main():
         out_lines.extend(strength_warnings)
     out_lines.extend(upsert_monthly_strength_session(person, strength_sessions))
 
-    # Delete the source export on success — the CSVs are the persistent
-    # record now. ``--keep-export`` opts out for testing or one-off
-    # debugging where you want to re-run.
+    # Archive the source export on success into <root>/.processed/.
+    # Keeps a forensic trail in case a downstream bug damages the CSVs;
+    # ``--keep-export`` opts out for testing.
     if not args.keep_export:
         try:
-            zip_path.unlink()
-            out_lines.append(f"Deleted source export: {zip_path.name}")
+            archived = archive_processed_export(zip_path)
+            out_lines.append(f"Archived source export: {zip_path.name} → {archived.parent.name}/{archived.name}")
         except OSError as e:
-            out_lines.append(f"WARN: could not delete {zip_path.name}: {e}")
+            out_lines.append(f"WARN: could not archive {zip_path.name}: {e}")
 
     for line in out_lines:
         print(line)

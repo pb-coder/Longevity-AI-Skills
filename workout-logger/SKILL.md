@@ -87,7 +87,7 @@ line. Don't search the filesystem.
    - `.zip` → `python3 Skills/shared/import_apple_health.py --person <Person>`
    - `.txt` → `python3 Skills/shared/import_hl_export.py --person <Person>`
 
-   Both default to 6 months back (no `--since` needed). Both **delete the source export on success** — the per-person CSVs are the persistent record now. Capture stdout and append the importer's `Health Metrics: …` and `Workout Sessions: …` summary lines (and any `Auto-cardio: …` / `Profile: …` / `Deleted source export: …` lines) to the user-facing summary printed in step 5.
+   Both default to 6 months back (no `--since` needed). Both **archive the source export to `<root>/.processed/` on success** — the per-person CSVs are the persistent record now; the archive keeps a forensic trail if a downstream bug damages the CSVs. Capture stdout and append the importer's `Health Metrics: …` and `Workout Sessions: …` summary lines (and any `Auto-cardio: …` / `Profile: …` / `Archived source export: …` lines) to the user-facing summary printed in step 5.
 
    **Source-mismatch guardrail.** Before dispatching, peek at the tracker's `Profile.source` value via `csv_store.read_profile(person)`. If the file extension implies a different source than the tracker is configured for, stop and ask once via `AskUserQuestion` before importing:
 

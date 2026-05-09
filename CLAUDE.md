@@ -45,16 +45,6 @@ shared/               # Code + docs imported by multiple skills
                       # ensure_profile. HEALTH_METRICS_HEADERS_BY_SOURCE and
                       # WORKOUT_SESSIONS_HEADERS_BY_SOURCE are the schema
                       # constants. Atomic writes via tmp + rename.
-  migrate_xlsx_to_csv.py        # One-shot PR1 migration: dense xlsx sheets
-                                # (Health Metrics / Workout Sessions / Profile)
-                                # → per-person CSVs. Historical artifact;
-                                # already run on every live tracker.
-  migrate_xlsx_monthly_to_csv.py  # One-shot PR3a migration: monthly YYYY.MM
-                                  # xlsx sheets → per-person monthly/ CSVs.
-                                  # Archives the xlsx as
-                                  # *.pre-monthly-csv-backup.xlsx. Idempotent.
-                                  # Usage: python3 shared/migrate_xlsx_monthly_to_csv.py
-                                  #          --person Nihad [--dry-run] [--keep-xlsx]
   monthly_csv.py      # Per-month CSV reader / writer / canonicalizer.
                       # Replaces the old tracker_sheet.py xlsx authority.
                       # MONTHLY_HEADERS / MONTHLY_FIELDS / TOTAL_LABEL /

@@ -1,21 +1,10 @@
 """CSV-backed store for the dense, machine-only tracker data.
 
-Replaces the xlsx ``Health Metrics``, ``Workout Sessions``, and
-``Profile`` sheets with flat CSVs in ``<person>/data/``. Same functional
-surface (sparse-merge upserts, schema-by-source, manual-wins drift
-guard, dedupe by date+start, sort DESC on every write) — only the
-on-disk format changed.
-
-Why CSV: openpyxl is ~10× slower than the stdlib ``csv`` module on
-dense rectangular data, the dense tables aren't human-glanceable in
-Excel anyway (15 cols × hundreds of rows), and CSVs are diffable in
-git. The monthly ``YYYY.MM`` workout sheets stay in xlsx — they're
-sparse and the styler / merge / SESSION numbering is what makes them
-readable.
-
-Functional surface mirrors the old ``tracker_sheet.upsert_*`` helpers
-so importers / coach / logger swap one import line and otherwise keep
-their internal call shapes.
+Handles the ``Health Metrics``, ``Workout Sessions``, and ``Profile``
+files in ``<person>/data/`` (sparse-merge upserts, schema-by-source,
+manual-wins drift guard, dedupe by date+start, sort DESC on every
+write). Post-PR3a everything is flat CSV — the monthly
+``YYYY.MM.csv`` files are handled separately by ``monthly_csv.py``.
 """
 from __future__ import annotations
 

@@ -26,12 +26,6 @@ Layout (post-PR3a — pure CSV, no xlsx):
 Every importer / logger / coach / maintain script accepts ``--person
 <Name>`` (e.g. ``--person Nihad``) and resolves the rest via this
 module. No raw filesystem paths in the CLI surface.
-
-The ``tracker_for`` / ``legacy_root_tracker_for`` helpers below resolve
-the now-archived ``Workout Tracker - <Person>.xlsx`` path. They exist
-only for the one-shot migration scripts (``migrate_xlsx_to_csv.py`` for
-PR1's dense-data move and ``migrate_xlsx_monthly_to_csv.py`` for
-PR3a's monthly-data move) — production code never touches the xlsx.
 """
 from __future__ import annotations
 
@@ -49,20 +43,6 @@ def person_dir(person: str) -> Path:
     ``ensure_data_dir`` instead, which creates ``<person>/data/``.
     """
     return WORKOUT_TRACKER_ROOT / person
-
-
-def tracker_for(person: str) -> Path:
-    """Return the path to the person's archived workout xlsx (legacy).
-
-    Post-PR3a there is no live xlsx — the migration script archives it
-    as ``Workout Tracker - <Person>.pre-monthly-csv-backup.xlsx`` next
-    to the per-person folder. This helper returns the original
-    pre-archive path; callers are restricted to the migration scripts
-    (``migrate_xlsx_to_csv.py``, ``migrate_xlsx_monthly_to_csv.py``).
-    Production code reads CSVs only — see ``data_dir`` /
-    ``monthly_csv`` / ``health_metrics_csv`` etc.
-    """
-    return person_dir(person) / f"Workout Tracker - {person}.xlsx"
 
 
 def data_dir(person: str) -> Path:
@@ -131,11 +111,3 @@ def ensure_swimming_dir(person: str) -> Path:
     d = data_dir(person) / "swimming"
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-
-# Per-person legacy xlsx that may still sit at the root before the
-# migration script runs. Returned by ``legacy_tracker_for`` so the
-# migration helper can find it. Once migrated, this path no longer
-# exists and the resolver returns ``tracker_for(person)`` exclusively.
-def legacy_root_tracker_for(person: str) -> Path:
-    return WORKOUT_TRACKER_ROOT / f"Workout Tracker - {person}.xlsx"

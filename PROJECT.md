@@ -77,9 +77,6 @@ When `Profile.auto_cardio` is true, every Apple-recorded workout in `CARDIO_AUTO
 Per-person sidecars:
 
 - `<Person>/workout_plan - <Person>.md` (written by `/coach` — actually drops at the workout-tracker root for now; coach naming TBD)
-- `<Person>/Workout Tracker - <Person>.pre-csv-backup.xlsx` (one-time, written by `migrate_xlsx_to_csv.py` during the PR1 cutover)
-- `<Person>/Workout Tracker - <Person>.pre-monthly-csv-backup.xlsx` (one-time, written by `migrate_xlsx_monthly_to_csv.py` during the PR3a cutover)
-- Older `<Person>/Workout Tracker - <Person>.maintain-backup.xlsx` may exist from pre-PR3a `/maintain` runs; safe to delete.
 
 ## Routing (who is a message about?)
 
@@ -132,4 +129,4 @@ Skill source lives in [pb-coder/Skills](https://github.com/pb-coder/Skills), clo
 
 ## Backups
 
-This directory is in iCloud, so the trackers are continuously backed up — no manual `.backup*.xlsx` copies needed. The PR1 cutover left a one-time `<Person>/Workout Tracker - <Person>.pre-csv-backup.xlsx` per person (the pre-migration snapshot with the dense sheets still inside); the PR3a cutover added a `.pre-monthly-csv-backup.xlsx` snapshot of every monthly sheet. Keep both around until you're confident the CSV layout is solid, then delete. Older `.maintain-backup.xlsx` files predate PR3a and are safe to delete now.
+This directory is in iCloud, so the trackers are continuously backed up — no manual backups needed. The PR1 / PR3a `*.pre-*-backup.xlsx` snapshots have been removed; iCloud version history is now the only rollback path.

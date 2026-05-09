@@ -100,7 +100,7 @@ Three options, in order of hands-off-ness:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| "no monthly CSV directory" | Migrator never ran | Run `python3 Skills/shared/migrate_xlsx_monthly_to_csv.py --person <Person>` if a `pre-monthly-csv-backup.xlsx` exists; otherwise check the path |
+| "no monthly CSV directory" | Person folder was never set up, or was moved | Restore from iCloud version history; check `<Person>/data/monthly/` exists |
 | "header mismatch" on a CSV | Profile.source flipped without a matching CSV rewrite, or hand-edit broke the schema | Re-run the matching importer with the current export, or hand-fix the header |
 | "WARN dates not strictly ASC/DESC" | Hand-edit moved a row out of order | Re-run `/maintain` (canonicalize re-sorts every monthly CSV) |
 | Computed cells look stale (Volume, Pace) | Hand-edit changed reps/kg/distance/duration without re-canonicalizing | Re-run `/maintain` — canonicalize recomputes on every pass |

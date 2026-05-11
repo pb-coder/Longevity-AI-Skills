@@ -4,7 +4,7 @@ Routes each row to the matching ``<Person>/data/monthly/YYYY.MM.csv``. Creates
 the file (headers only) if missing. Canonicalization (sort + recompute
 Volume / Pace / SESSION + rebuild TOTAL rows + hoist deload markers) runs on
 every write via ``monthly_csv.canonicalize_monthly_csv`` so the file stays
-consistent without waiting for /maintain.
+consistent without waiting for a cross-month maintenance sweep.
 
 Input JSON is either a bare list of row dicts (legacy) or a wrapper object:
 

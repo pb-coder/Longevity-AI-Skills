@@ -12,10 +12,10 @@ Post-PR3a: there is no xlsx anywhere. Per-month workout data lives in
 ``<Person>/data/monthly/YYYY.MM.csv``. Health Metrics, Workout Sessions,
 Profile, swim_workouts, swim_laps live alongside in ``<Person>/data/``.
 
-Usage:
-    python3 maintain.py --person Nihad
-    python3 maintain.py --person Nihad --dry-run
-    python3 maintain.py --person Nihad --fix-distance-units
+Usage (from the workout-tracker root):
+    python3 Skills/shared/maintain.py --person Nihad
+    python3 Skills/shared/maintain.py --person Nihad --dry-run
+    python3 Skills/shared/maintain.py --person Nihad --fix-distance-units
 """
 from __future__ import annotations
 
@@ -24,7 +24,11 @@ import csv
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+# Sibling-only imports (this script now lives in shared/ next to the modules
+# it imports). Python prepends the script directory to sys.path when run as
+# ``python3 Skills/shared/maintain.py …``; the explicit insert below keeps
+# imports working under module-load paths that don't seed sys.path[0].
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from monthly_csv import (  # noqa: E402
     MONTHLY_HEADERS,
     TOTAL_LABEL,

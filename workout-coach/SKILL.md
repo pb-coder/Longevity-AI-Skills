@@ -64,6 +64,10 @@ The file structure:
 ### What needs fixing
 ### Are you getting stronger?
 ### Missing from your tracking
+### Deload status
+### Recovery state
+### Cardio check
+### Swim                                <!-- only when swim_summary is present in the JSON -->
 
 ## Plan
 
@@ -271,9 +275,10 @@ For each major exercise with enough data, write **one bulleted line per lift** u
 
 Pull the values from `estimated_1rm[exercise]`:
 - `prev_e1rm_kg → current_e1rm_kg` for the immediate delta.
-- `slope_kg_per_4w` for the trajectory line (`+Ckg / 4w`). Use this as the **primary signal** — it sees through one-off noise that a last-vs-prev delta can't. If it's null (fewer than 3 sessions), drop the trend chunk and rely on the raw delta only.
+- `slope_kg_per_4w` for the trajectory line (`+Ckg / 4w`). Use this as the **primary signal** — it sees through one-off noise that a last-vs-prev delta can't. If it's null (fewer than 3 sessions, or context-change shrunk the eligible window below 3), drop the trend chunk and rely on the raw delta only.
 - `confidence`: when `low` (high-rep top sets), append a sub-bullet like "e1RM is noisy at 12+ reps — push one heavier set to get a cleaner read." Don't claim a trend with confidence on a noisy signal.
 - `stalled_sessions ≥ 2` without a deload in the window: surface the stall as a sub-bullet. Suggest one of: bump volume, change variation, or schedule a deload (let Phase 2 decide which).
+- `context_change_excluded ≥ 1`: at least one session in the trailing window was tagged by the user as a gym/equipment change. The slope already excludes those rows and confidence is dropped one band by the script. Append a one-line sub-bullet: "Slope reset by gym/equipment change — trend resumes once 3+ sessions log on the new equipment." Don't call the lift stalled or regressing on this basis.
 
 A negative `delta_vs_prev_kg` and a flat-or-negative `slope_kg_per_4w` together on a main lift without a deload around it is a real flag. A negative delta with a positive slope is one bad session — don't over-react.
 
@@ -420,6 +425,32 @@ VO2max: 48.0 ml/kg/min (2026-04-30), +1.2 / 4 weeks — trending up.
 ```
 
 If `vo2max_trend_per_4w` is null (fewer than 4 readings over 21+ days), drop the trend chunk: `VO2max: 48.0 ml/kg/min (2026-04-30) — not enough history for a trend yet.`
+
+### Swim
+
+**REQUIRED when `swim_summary` is in the JSON.** Skip the section entirely when the key is absent — that means HL trackers (no lap data) or no swims in the last 28 days, and silence is correct. Read `references/swim-coaching.md` for SWOLF / SPL / CSS interpretation, retest cadence, and what NOT to say about swim form.
+
+Hard template (3–5 lines, plain bullets):
+
+- **Totals.** `{N} sessions, {km} km, {minutes} minutes (avg pace ~{sec_per_100m}s/100m).` Pull from `swim_summary.sessions`, `total_distance_km`, `total_minutes`, `avg_pace_sec_per_100m`. Round pace to nearest second; round distance to 2 decimals.
+- **Trend.** Lead with what changed. Cite `swim_summary.spl_trend_4w_per_week` and `swolf_trend_4w_per_week` as primary signals; absolute SPL / SWOLF are secondary. If both trends are null (fewer than 3 sessions in the window), say "not enough swim history for a trend yet" and drop this bullet's trend claim.
+- **CSS state.** If `swim_summary.css` is null AND `swim_summary.css_test_detected` is non-null, prompt: "Looks like you did a 400m + 200m pair on {date} — was that a CSS test? If yes, the inferred CSS is {sec}/100m. Re-log with `CSS test` on the header to write it to your profile." If `swim_summary.css` is null and no test detected, prompt the CSS test workflow (see swim-coaching.md). If `swim_summary.css_retest_due: True`, prompt the retest. Otherwise cite zone distribution if present (`swim_summary.css_zone_distribution`).
+- **Stroke-mix outliers.** If `swim_summary.stroke_outliers` is non-empty, name them once and flag as Apple Watch misclassification candidates (e.g., one Butterfly lap in a Freestyle session). Never claim the user changed strokes mid-session without confirmation.
+
+Source-honesty rules (from swim-coaching.md):
+- Trend over absolute. Don't quote SWOLF / SPL ability brackets unless the user asks.
+- Don't lecture about technique (catch, body roll, kick mechanics). Coach reads metrics, not video.
+- Don't quote SPL to the decimal in user-facing text. "around 8" beats "8.4".
+- One outlier lap is almost always Apple Watch noise on a flip turn or stroke transition. Flag it; don't act on it.
+
+Example (filled from a real `swim_summary`):
+
+```
+- 2 sessions, 0.88 km, 21 minutes (avg pace ~145 s/100m).
+- SPL around 8, SWOLF around 28. Not enough swim history for a trend yet — needs ≥3 sessions in the window.
+- CSS not on file. Want to set one? Log a 400m + 200m TT pair on the same day with `CSS test` on the header.
+- Stroke outlier: one "Butterfly" lap on 2026-05-08 inside an otherwise Freestyle session. Likely an Apple Watch misclassification on a turn.
+```
 
 ## Phase 2: Planning (into workout_plan.md `## Plan`)
 
@@ -621,6 +652,9 @@ Source-honesty rules:
 | Defaulting to `→` on the recovery trend | Recovery row reads `4.2/10 (... trend → vs prior 4w)` even when every metric is moving down | Use the `improving / drifting / mixed` descriptor (deterministic procedure under "Last 28 days at a glance"). The arrow is no longer accepted. |
 | Calling a deload on TSB alone for HL trackers | TSB -10.7 from two big hikes triggers a "fatigued" prescription on Fabian even though strength load is invisible to TSB | When `capabilities.per_workout_hr_strength` is False, CTL/ATL/TSB are computed only from cardio TRIMPs — strength load is invisible. Don't treat a negative TSB as a unilateral deload trigger; cross-check with `recovery.score` and prefer recovery_score as the primary fatigue signal on these trackers. |
 | Citing `non_interval_minutes` as Zone-2 minutes | Cardio check section reports `cardio_last_28d.non_interval_minutes` (which is just "cardio time that wasn't intervals") as if it were a real Z2 measurement — a 3h Z1 hike inflates the number | Read `cardio_hr_zones_28d.z2` for true Zone-2 minutes (HRR-based). Use `cardio_last_28d.non_interval_minutes` only as a fallback when `cardio_hr_zones_28d` is empty (no avg_hr on cardio sessions). |
+| Skipping the Swim section when `swim_summary` is present | Fully-populated swim data emits zero coach output; the user sees a polished report that pretends they don't swim | Gate on `swim_summary` key presence. Write the REQUIRED 3–5 line block per `references/swim-coaching.md` (see `### Swim` in Phase 1). Skip cleanly only when the key is absent (HL trackers, or no swims in 28 days). |
+| Treating a context-change row as a real strength regression | Cable Lateral Raise drops from 15kg to 7kg after a gym change; coach flags the lift as "going backwards" with a -32kg/4w slope, even though the user's Notes say "new gym, different cable weights" | Read `estimated_1rm[exercise].context_change_excluded` and `progression_summary[exercise].last_notes`. When `context_change_excluded ≥ 1`, write "Slope reset by gym/equipment change; trend resumes once 3+ sessions logged on the new equipment" instead of calling stall or regression. |
+| Trusting recovery `confidence: high` on under-sampled signals | A high-weight signal with `n_recent: 1` (one HR-Recovery reading) inflates confidence to "high" even though the score is hanging on one data point | Confidence is gated on per-signal sample sufficiency in `health.py`. When the JSON shows `confidence: medium` or `low` after a thin recent week, soften any rule that relies on the score band — and cite the under-sampled driver by name. |
 
 ## Rules
 

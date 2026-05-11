@@ -1106,12 +1106,12 @@ def main():
                 "avg_hr":       w.get("avg_hr"),
                 # Pass through the metadata extras for the structured note
                 # builder. None-safe on the consumer side; XML always fills
-                # active/basal/elapsed when present.
+                # active/basal/elapsed when present. Lap count is no longer
+                # written to monthly — swim_workouts.csv is the sole record.
                 "active_cal":   w.get("active_cal"),
                 "total_cal":    w.get("total_cal"),
                 "elevation_m":  w.get("elevation_m"),
                 "elapsed_min":  w.get("elapsed_min"),
-                "laps":         w.get("laps"),
                 "machine_tag":  machine_tag,
             })
         out_lines.extend(upsert_monthly_cardio(

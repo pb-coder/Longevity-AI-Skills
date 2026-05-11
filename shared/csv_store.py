@@ -592,160 +592,241 @@ SWIM_LAPS_FIELDS = [
 ]
 
 
-def read_swim_workouts(person: str) -> list[dict]:
-    """Return per-swim aggregate rows. Sorted DESC by (date, start).
+def _date_to_year_month(date_str: str) -> str:
+    """Convert ``YYYY-MM-DD`` to ``YYYY.MM`` (per-month CSV key)."""
+    return f"{date_str[:4]}.{date_str[5:7]}"
 
-    Missing file → ``[]``. Each dict has ``date`` plus the fields in
+
+def read_swim_workouts(person: str) -> list[dict]:
+    """Return per-swim aggregate rows aggregated across all per-month
+    swim CSVs (``<person>/data/swimming/YYYY.MM.workouts.csv``).
+    Sorted DESC by (date, start).
+
+    No swim files → ``[]``. Each dict has ``date`` plus the fields in
     ``SWIM_WORKOUTS_FIELDS`` plus ``notes``.
     """
-    path = swim_workouts_csv(person)
-    header, rows = _read_csv_rows(path)
-    if not header:
-        return []
+    from person_paths import list_swim_workout_months
     out: list[dict] = []
-    for row in rows:
-        d = _date_str(row[0]) if row else None
-        if d is None:
+    for ym in list_swim_workout_months(person):
+        path = swim_workouts_csv(person, ym)
+        header, rows = _read_csv_rows(path)
+        if not header:
             continue
-        rec: dict = {"date": d}
-        for i, key in enumerate(SWIM_WORKOUTS_FIELDS, start=1):
-            v = row[i] if len(row) > i else None
-            if key in ("start", "end", "stroke_mix", "location"):
-                rec[key] = v if v not in (None, "") else None
-            else:
-                rec[key] = _parse_value(v)
-        notes_idx = len(SWIM_WORKOUTS_HEADERS) - 1
-        notes = row[notes_idx] if len(row) > notes_idx else None
-        rec["notes"] = notes if notes else None
-        out.append(rec)
+        for row in rows:
+            d = _date_str(row[0]) if row else None
+            if d is None:
+                continue
+            rec: dict = {"date": d}
+            for i, key in enumerate(SWIM_WORKOUTS_FIELDS, start=1):
+                v = row[i] if len(row) > i else None
+                if key in ("start", "end", "stroke_mix", "location"):
+                    rec[key] = v if v not in (None, "") else None
+                else:
+                    rec[key] = _parse_value(v)
+            notes_idx = len(SWIM_WORKOUTS_HEADERS) - 1
+            notes = row[notes_idx] if len(row) > notes_idx else None
+            rec["notes"] = notes if notes else None
+            out.append(rec)
+    out.sort(key=lambda r: (r["date"], str(r.get("start") or "")), reverse=True)
     return out
 
 
 def upsert_swim_workouts(person: str, entries: Iterable[dict]) -> list[str]:
-    """Sparse-merge per-swim rows into ``swim_workouts.csv``.
+    """Sparse-merge per-swim rows into the relevant
+    ``<person>/data/swimming/YYYY.MM.workouts.csv``.
 
-    Dedupe by ``(date, start)``. Notes column is preserved untouched
-    (manual annotation wins). Incoming None never overwrites a populated
-    cell — the importer always writes complete records, but if Apple
-    re-exports a swim with one field newly missing, we don't erase the
-    stored value.
+    Each entry is routed to its month by ``date``. Dedupe by
+    ``(date, start)`` within that month. Notes column is preserved
+    untouched (manual annotation wins). Incoming None never overwrites
+    a populated cell.
     """
     entries = list(entries or [])
     if not entries:
         return ["Swim Workouts: 0 sessions written / 0 updated"]
 
-    existing = read_swim_workouts(person)
-    by_key: dict[tuple, dict] = {(r["date"], r.get("start")): r for r in existing}
-
-    written = 0
-    updated = 0
+    # Group entries by year-month.
+    by_month_entries: dict[str, list[dict]] = {}
     for e in entries:
         d = _date_str(e.get("date"))
-        s = e.get("start")
-        if not d or s is None:
+        if not d:
             continue
-        key = (d, str(s))
-        cur = by_key.get(key)
-        if cur is None:
-            new_record = {"date": d, "notes": None}
-            for k in SWIM_WORKOUTS_FIELDS:
-                new_record[k] = e.get(k)
-            by_key[key] = new_record
-            written += 1
-            continue
-        changed = False
-        for k in SWIM_WORKOUTS_FIELDS:
-            v = e.get(k)
-            if v is None:
-                continue
-            if cur.get(k) != v:
-                cur[k] = v
-                changed = True
-        if changed:
-            updated += 1
+        by_month_entries.setdefault(_date_to_year_month(d), []).append(e)
 
-    ensure_swimming_dir(person)
-    rows = []
-    for k in sorted(by_key.keys(), reverse=True):
-        rec = by_key[k]
-        row = [rec["date"]] + [rec.get(field) for field in SWIM_WORKOUTS_FIELDS] \
-            + [rec.get("notes")]
-        rows.append(row)
-    _write_csv(swim_workouts_csv(person), SWIM_WORKOUTS_HEADERS, rows)
-    return [f"Swim Workouts: {written} sessions written / {updated} updated"]
+    total_written = 0
+    total_updated = 0
+    summaries: list[str] = []
+    for ym, month_entries in sorted(by_month_entries.items()):
+        # Load existing rows for this month only (not the whole history).
+        path = swim_workouts_csv(person, ym)
+        header, raw_rows = _read_csv_rows(path)
+        existing: list[dict] = []
+        for row in raw_rows if header else []:
+            d = _date_str(row[0]) if row else None
+            if d is None:
+                continue
+            rec: dict = {"date": d}
+            for i, key in enumerate(SWIM_WORKOUTS_FIELDS, start=1):
+                v = row[i] if len(row) > i else None
+                if key in ("start", "end", "stroke_mix", "location"):
+                    rec[key] = v if v not in (None, "") else None
+                else:
+                    rec[key] = _parse_value(v)
+            notes_idx = len(SWIM_WORKOUTS_HEADERS) - 1
+            notes = row[notes_idx] if len(row) > notes_idx else None
+            rec["notes"] = notes if notes else None
+            existing.append(rec)
+
+        by_key: dict[tuple, dict] = {(r["date"], r.get("start")): r for r in existing}
+
+        written = 0
+        updated = 0
+        for e in month_entries:
+            d = _date_str(e.get("date"))
+            s = e.get("start")
+            if not d or s is None:
+                continue
+            key = (d, str(s))
+            cur = by_key.get(key)
+            if cur is None:
+                new_record = {"date": d, "notes": None}
+                for k in SWIM_WORKOUTS_FIELDS:
+                    new_record[k] = e.get(k)
+                by_key[key] = new_record
+                written += 1
+                continue
+            changed = False
+            for k in SWIM_WORKOUTS_FIELDS:
+                v = e.get(k)
+                if v is None:
+                    continue
+                if cur.get(k) != v:
+                    cur[k] = v
+                    changed = True
+            if changed:
+                updated += 1
+
+        ensure_swimming_dir(person)
+        rows = []
+        for k in sorted(by_key.keys(), reverse=True):
+            rec = by_key[k]
+            row = [rec["date"]] + [rec.get(field) for field in SWIM_WORKOUTS_FIELDS] \
+                + [rec.get("notes")]
+            rows.append(row)
+        _write_csv(swim_workouts_csv(person, ym), SWIM_WORKOUTS_HEADERS, rows)
+        total_written += written
+        total_updated += updated
+        summaries.append(f"  {ym}: {written} written / {updated} updated")
+
+    return [f"Swim Workouts: {total_written} sessions written / "
+            f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries
 
 
 def read_swim_laps(person: str) -> list[dict]:
-    """Return per-lap rows sorted ASC by (date, lap_num).
+    """Return per-lap rows aggregated across all per-month swim-laps
+    CSVs (``<person>/data/swimming/YYYY.MM.laps.csv``).
+    Sorted ASC by (date, lap_num).
 
-    Missing file → ``[]``. Each dict has ``date`` plus the fields in
+    No swim files → ``[]``. Each dict has ``date`` plus the fields in
     ``SWIM_LAPS_FIELDS``.
     """
-    path = swim_laps_csv(person)
-    header, rows = _read_csv_rows(path)
-    if not header:
-        return []
+    from person_paths import list_swim_lap_months
     out: list[dict] = []
-    for row in rows:
-        d = _date_str(row[0]) if row else None
-        if d is None:
+    for ym in list_swim_lap_months(person):
+        path = swim_laps_csv(person, ym)
+        header, rows = _read_csv_rows(path)
+        if not header:
             continue
-        rec: dict = {"date": d}
-        for i, key in enumerate(SWIM_LAPS_FIELDS, start=1):
-            v = row[i] if len(row) > i else None
-            if key in ("workout_start", "stroke_decoded", "source"):
-                rec[key] = v if v not in (None, "") else None
-            else:
-                rec[key] = _parse_value(v)
-        out.append(rec)
+        for row in rows:
+            d = _date_str(row[0]) if row else None
+            if d is None:
+                continue
+            rec: dict = {"date": d}
+            for i, key in enumerate(SWIM_LAPS_FIELDS, start=1):
+                v = row[i] if len(row) > i else None
+                if key in ("workout_start", "stroke_decoded", "source"):
+                    rec[key] = v if v not in (None, "") else None
+                else:
+                    rec[key] = _parse_value(v)
+            out.append(rec)
     out.sort(key=lambda r: (r["date"], r.get("lap_num") or 0))
     return out
 
 
 def upsert_swim_laps(person: str, entries: Iterable[dict]) -> list[str]:
-    """Replace-on-match upsert for ``swim_laps.csv``.
+    """Replace-on-match upsert into per-month
+    ``<person>/data/swimming/YYYY.MM.laps.csv``.
 
-    Dedupe by ``(date, workout_start, lap_num)``. Lap data is fully
+    Each entry is routed to its month by ``date``. Dedupe within the
+    month by ``(date, workout_start, lap_num)``. Lap data is fully
     Apple-sourced — there's no manual lap entry today — so re-imports
     are treated as authoritative replacement rather than sparse-merge.
-    Sparse-merge would be active harm here: it'd preserve a stale
-    stroke style if Apple corrects it in a later re-export.
     """
     entries = list(entries or [])
     if not entries:
         return ["Swim Laps: 0 laps written / 0 updated"]
 
-    existing = read_swim_laps(person)
-    by_key: dict[tuple, dict] = {
-        (r["date"], r.get("workout_start"), r.get("lap_num")): r
-        for r in existing
-    }
-
-    written = 0
-    updated = 0
+    by_month_entries: dict[str, list[dict]] = {}
     for e in entries:
         d = _date_str(e.get("date"))
-        ws = e.get("workout_start")
-        ln = e.get("lap_num")
-        if not d or ws is None or ln is None:
+        if not d:
             continue
-        key = (d, str(ws), int(ln))
-        new_rec = {"date": d}
-        for k in SWIM_LAPS_FIELDS:
-            new_rec[k] = e.get(k)
-        if key in by_key:
-            if by_key[key] != new_rec:
-                by_key[key] = new_rec
-                updated += 1
-        else:
-            by_key[key] = new_rec
-            written += 1
+        by_month_entries.setdefault(_date_to_year_month(d), []).append(e)
 
-    ensure_swimming_dir(person)
-    rows = []
-    for k in sorted(by_key.keys(), key=lambda t: (t[0], t[2])):
-        rec = by_key[k]
-        row = [rec["date"]] + [rec.get(field) for field in SWIM_LAPS_FIELDS]
-        rows.append(row)
-    _write_csv(swim_laps_csv(person), SWIM_LAPS_HEADERS, rows)
-    return [f"Swim Laps: {written} laps written / {updated} updated"]
+    total_written = 0
+    total_updated = 0
+    summaries: list[str] = []
+    for ym, month_entries in sorted(by_month_entries.items()):
+        path = swim_laps_csv(person, ym)
+        header, raw_rows = _read_csv_rows(path)
+        existing: list[dict] = []
+        for row in raw_rows if header else []:
+            d = _date_str(row[0]) if row else None
+            if d is None:
+                continue
+            rec: dict = {"date": d}
+            for i, key in enumerate(SWIM_LAPS_FIELDS, start=1):
+                v = row[i] if len(row) > i else None
+                if key in ("workout_start", "stroke_decoded", "source"):
+                    rec[key] = v if v not in (None, "") else None
+                else:
+                    rec[key] = _parse_value(v)
+            existing.append(rec)
+
+        by_key: dict[tuple, dict] = {
+            (r["date"], r.get("workout_start"), r.get("lap_num")): r
+            for r in existing
+        }
+
+        written = 0
+        updated = 0
+        for e in month_entries:
+            d = _date_str(e.get("date"))
+            ws = e.get("workout_start")
+            ln = e.get("lap_num")
+            if not d or ws is None or ln is None:
+                continue
+            key = (d, str(ws), int(ln))
+            new_rec = {"date": d}
+            for k in SWIM_LAPS_FIELDS:
+                new_rec[k] = e.get(k)
+            if key in by_key:
+                if by_key[key] != new_rec:
+                    by_key[key] = new_rec
+                    updated += 1
+            else:
+                by_key[key] = new_rec
+                written += 1
+
+        ensure_swimming_dir(person)
+        rows = []
+        for k in sorted(by_key.keys(), key=lambda t: (t[0], t[2])):
+            rec = by_key[k]
+            row = [rec["date"]] + [rec.get(field) for field in SWIM_LAPS_FIELDS]
+            rows.append(row)
+        _write_csv(swim_laps_csv(person, ym), SWIM_LAPS_HEADERS, rows)
+        total_written += written
+        total_updated += updated
+        summaries.append(f"  {ym}: {written} written / {updated} updated")
+
+    return [f"Swim Laps: {total_written} laps written / "
+            f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries

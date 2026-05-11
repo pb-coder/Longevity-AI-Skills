@@ -46,6 +46,25 @@ HR_ZONES_PCT = [
 ]
 
 
+def _hr_zone_label_for_hrr_pct(hrr_pct: float) -> str:
+    """Map an HRR percent (0.0–1.0) to a Z1/Z2/Z3/Z4/Z5 label.
+
+    Below the Z1 floor (0.50 HRR — i.e. resting-ish activity) labels as
+    "Z1" rather than something out-of-band, since the coaching consumer
+    treats sub-50% HRR walks/commutes as base-aerobic context. Z1 also
+    catches the very top of recovery rides.
+    """
+    if hrr_pct >= 0.90:
+        return "Z5"
+    if hrr_pct >= 0.80:
+        return "Z4"
+    if hrr_pct >= 0.70:
+        return "Z3"
+    if hrr_pct >= 0.60:
+        return "Z2"
+    return "Z1"
+
+
 def cardio_last_28d(rows: list[dict], today_d: date) -> dict:
     """4-week cardio rollup: total distance, total minutes, total cal, and
     a coarse intervals-vs-non-interval split.
@@ -127,8 +146,12 @@ def trimp_per_session(monthly_sessions: list[dict],
     """Compute TRIMP for every session that has both avg_hr and duration.
 
     Returns one entry per session with ``date, kind, trimp, intensity_pct``
-    (HRR percent), plus a ``load_band`` classification: light <50,
-    moderate 50-100, hard 100-150, red-line >150.
+    (HRR percent), plus a ``load_band`` classification (light <50,
+    moderate 50-100, hard 100-150, red-line >150) and an ``hr_zone_label``
+    (Z1–Z5) for the session's average HR. The label is the per-session
+    counterpart to ``cardio_hr_zones_28d`` (which buckets *time* in zones
+    across the window); use it to say "this 35 min run was a Z3 grey-
+    zone session" without re-deriving from avg HR each time.
     """
     if not max_hr or not rest_hr or max_hr <= rest_hr:
         return []
@@ -162,6 +185,7 @@ def trimp_per_session(monthly_sessions: list[dict],
             "trimp":         trimp,
             "intensity_pct": round(hrr_pct * 100, 1),
             "load_band":     band,
+            "hr_zone_label": _hr_zone_label_for_hrr_pct(hrr_pct),
         })
     out.sort(key=lambda e: e["date"])
     return out

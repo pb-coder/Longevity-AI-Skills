@@ -98,14 +98,22 @@ def ensure_monthly_dir(person: str) -> Path:
     return d
 
 
-def swim_workouts_csv(person: str) -> Path:
-    """Per-swim aggregate CSV under ``<person>/data/swimming/``."""
-    return data_dir(person) / "swimming" / "swim_workouts.csv"
+def swim_workouts_csv(person: str, year_month: str) -> Path:
+    """Per-month swim-aggregate CSV under ``<person>/data/swimming/``.
+
+    Naming pattern mirrors ``monthly/YYYY.MM.csv`` so the swim store
+    stays sustainable as sessions accumulate (single-file store retired
+    in PR5, 2026-05): ``<person>/data/swimming/YYYY.MM.workouts.csv``.
+    """
+    return data_dir(person) / "swimming" / f"{year_month}.workouts.csv"
 
 
-def swim_laps_csv(person: str) -> Path:
-    """Per-lap detail CSV under ``<person>/data/swimming/``."""
-    return data_dir(person) / "swimming" / "swim_laps.csv"
+def swim_laps_csv(person: str, year_month: str) -> Path:
+    """Per-month swim-lap detail CSV under ``<person>/data/swimming/``.
+
+    ``<person>/data/swimming/YYYY.MM.laps.csv``.
+    """
+    return data_dir(person) / "swimming" / f"{year_month}.laps.csv"
 
 
 def ensure_swimming_dir(person: str) -> Path:
@@ -113,6 +121,32 @@ def ensure_swimming_dir(person: str) -> Path:
     d = data_dir(person) / "swimming"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def list_swim_workout_months(person: str) -> list[str]:
+    """Return ``YYYY.MM`` keys for which a per-month swim-workouts CSV exists, ASC."""
+    d = data_dir(person) / "swimming"
+    if not d.exists():
+        return []
+    import re as _re
+    return sorted(
+        p.name[:-len(".workouts.csv")]
+        for p in d.glob("*.workouts.csv")
+        if _re.match(r"^\d{4}\.\d{2}\.workouts\.csv$", p.name)
+    )
+
+
+def list_swim_lap_months(person: str) -> list[str]:
+    """Return ``YYYY.MM`` keys for which a per-month swim-laps CSV exists, ASC."""
+    d = data_dir(person) / "swimming"
+    if not d.exists():
+        return []
+    import re as _re
+    return sorted(
+        p.name[:-len(".laps.csv")]
+        for p in d.glob("*.laps.csv")
+        if _re.match(r"^\d{4}\.\d{2}\.laps\.csv$", p.name)
+    )
 
 
 def archive_processed_export(path: Path) -> Path:

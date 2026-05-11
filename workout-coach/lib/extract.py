@@ -91,7 +91,7 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
     ``rows`` excludes TOTAL summary rows — one entry per logged set.
     Keys: ``session, date, num, exercise, set, reps, kg, volume,
     notes, distance_km, duration_min, pace, avg_hr, active_cal,
-    total_cal, elevation_m, elapsed, laps``.
+    total_cal, elevation_m, elapsed``.
 
     ``session_totals`` maps ``YYYY-MM-DD`` → total volume lifted that
     session, populated from the per-month CSV's TOTAL rows.
@@ -137,7 +137,6 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
             total_cal = rd.get("total_cal")
             elevation_m = rd.get("elevation_m")
             elapsed = rd.get("elapsed")
-            laps = rd.get("laps")
 
             current_date = date_str(date_val)
 
@@ -188,7 +187,6 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
                 "total_cal":   to_float(total_cal) if total_cal not in (None, "") else None,
                 "elevation_m": to_float(elevation_m) if elevation_m not in (None, "") else None,
                 "elapsed":     str(elapsed).strip() if elapsed not in (None, "") else None,
-                "laps":        to_int_or_none(laps) if laps not in (None, "") else None,
             })
 
     rows.sort(key=lambda r: (r["date"], r["num"] or 0, r["set"] or 0))

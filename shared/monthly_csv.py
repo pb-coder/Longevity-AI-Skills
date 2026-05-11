@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
@@ -49,19 +50,23 @@ from person_paths import (
 
 
 # ============================================================ Schema
-# Order matches the historical xlsx columns A..R 1:1 — readers and
+# Order matches the historical xlsx columns A..Q 1:1 — readers and
 # writers across the codebase still treat column index as semantic.
+# (PR4: ``Laps`` was removed in 2026-05; swim lap count is now sourced
+# exclusively from ``<Person>/data/swimming/swim_workouts.csv``. Old
+# 18-col rows self-truncate on the next canonicalize pass because
+# ``_row_to_dict`` only iterates MONTHLY_FIELDS.)
 MONTHLY_HEADERS = [
     "SESSION", "Date", "#", "Exercise", "Set", "Reps", "kg", "Volume", "Notes",
     "Distance (km)", "Duration (min)", "Pace (min/km)", "Avg HR",
-    "Active Cal", "Total Cal", "Elevation (m)", "Elapsed", "Laps",
+    "Active Cal", "Total Cal", "Elevation (m)", "Elapsed",
 ]
 
 # Internal keys mirroring header order, for dict↔row translation.
 MONTHLY_FIELDS = [
     "session", "date", "num", "exercise", "set", "reps", "kg", "volume", "notes",
     "distance", "duration", "pace", "avg_hr",
-    "active_cal", "total_cal", "elevation_m", "elapsed", "laps",
+    "active_cal", "total_cal", "elevation_m", "elapsed",
 ]
 
 TOTAL_LABEL = "TOTAL"
@@ -199,6 +204,41 @@ def _format_pace_min_per_km(duration_min, distance_km) -> str | None:
         whole += 1
         secs = 0
     return f"{whole}:{secs:02d}"
+
+
+# Threshold: prefer Elapsed when Duration disagrees by ≥3× in either direction.
+# Catches "0.5 min vs 1:03:54 elapsed" and similar single-cell corruption that
+# slips past _parse_duration_minutes (which trusts whatever literal it's given).
+DURATION_VS_ELAPSED_RATIO_THRESHOLD = 3.0
+
+
+def _reconcile_duration_and_elapsed(duration_raw, elapsed_raw,
+                                    *, context: str = "") -> str | None:
+    """Cross-check Duration against Elapsed; prefer Elapsed when they diverge.
+
+    Returns a Duration string formatted MM:SS / H:MM:SS suitable for the
+    Duration cell. Emits a one-line stderr warning when it overrides the
+    stored Duration. Returns the original duration_raw unchanged when no
+    correction is needed.
+    """
+    duration_min = _parse_duration_minutes(duration_raw)
+    elapsed_min = _parse_duration_minutes(elapsed_raw)
+    if duration_min is None or elapsed_min is None:
+        return duration_raw
+    if duration_min <= 0 or elapsed_min <= 0:
+        return duration_raw
+    ratio = elapsed_min / duration_min
+    if ratio < DURATION_VS_ELAPSED_RATIO_THRESHOLD \
+            and ratio > 1.0 / DURATION_VS_ELAPSED_RATIO_THRESHOLD:
+        return duration_raw
+    corrected = _format_duration_mmss(elapsed_min)
+    print(
+        f"[canonicalize] {context}: Duration {duration_raw!r} "
+        f"({duration_min:.2f} min) inconsistent with Elapsed "
+        f"{elapsed_raw!r} ({elapsed_min:.2f} min); preferring Elapsed.",
+        file=sys.stderr,
+    )
+    return corrected
 
 
 def _format_elapsed_hms(elapsed_min) -> str | None:
@@ -371,7 +411,7 @@ def read_monthly(person: str, year_month: str) -> list[dict]:
     out: list[dict] = []
     numeric_keys = {"session", "num", "set", "reps", "kg", "volume",
                     "distance", "avg_hr", "active_cal", "total_cal",
-                    "elevation_m", "laps"}
+                    "elevation_m"}
     for raw in rows:
         d = _row_to_dict(raw)
         # Date stays as YYYY-MM-DD string; coerce numerics.
@@ -421,7 +461,6 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
         "total_cal":   None,
         "elevation_m": None,
         "elapsed":     None,
-        "laps":        None,
     }
 
     if is_strength and kind == "cardio":
@@ -434,7 +473,6 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
         out["total_cal"] = _numeric_cell(rd.get("total_cal"))
         out["elevation_m"] = _numeric_cell(rd.get("elevation_m"))
         out["elapsed"] = rd.get("elapsed")
-        out["laps"] = _numeric_cell(rd.get("laps"))
     elif is_strength:
         # Strength / other rows: session metadata moved to TOTAL row.
         pass
@@ -448,7 +486,6 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
         out["total_cal"] = _numeric_cell(rd.get("total_cal"))
         out["elevation_m"] = _numeric_cell(rd.get("elevation_m"))
         out["elapsed"] = rd.get("elapsed")
-        out["laps"] = _numeric_cell(rd.get("laps"))
 
     return out
 
@@ -475,7 +512,6 @@ def _build_total_row(session_num: int, sess: dict, hoist: dict,
         "total_cal":   hoist.get("total_cal"),
         "elevation_m": hoist.get("elevation_m"),
         "elapsed":     hoist.get("elapsed"),
-        "laps":        None,
     }
 
 
@@ -520,7 +556,6 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
                     "total_cal":    rd.get("total_cal"),
                     "elevation_m":  rd.get("elevation_m"),
                     "elapsed":      rd.get("elapsed"),
-                    "laps":         rd.get("laps"),
                 }
             continue
         if (date_v in (None, "")) and (ex_v in (None, "")):
@@ -592,6 +627,16 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
                     deload_present = True
                     rd["notes"] = row_remainder
 
+        # Sanity-check Duration vs Elapsed on the hoisted TOTAL-row metadata.
+        # When a Duration cell is corrupt (single-cell typos like 0.5 against
+        # an Elapsed of 1:03:54), prefer Elapsed and self-heal the cell.
+        if hoist.get("duration") not in (None, "") \
+                and hoist.get("elapsed") not in (None, ""):
+            hoist["duration"] = _reconcile_duration_and_elapsed(
+                hoist["duration"], hoist["elapsed"],
+                context=f"{person} {sess.get('date') or year_month}",
+            )
+
         # Emit data rows + accumulate volume sum for strength sessions.
         volume_sum = 0.0
         for idx, rd in enumerate(sess["rows"]):
@@ -646,7 +691,8 @@ def upsert_monthly_cardio(person: str,
     but writes to ``<person>/data/monthly/YYYY.MM.csv``. Each input row
     has the keys: ``date``, ``exercise``, ``duration_min``, ``distance_km``,
     ``avg_hr``, plus optional ``active_cal``, ``total_cal``, ``elevation_m``,
-    ``elapsed_min``, ``laps``, ``machine_tag``.
+    ``elapsed_min``, ``machine_tag``. (``laps``, if present, is dropped
+    here — swim lap count is sourced from ``swim_workouts.csv`` only.)
 
     Dedupe rule:
     - Any existing manual row on (date, exercise) wins unconditionally.
@@ -770,7 +816,6 @@ def upsert_monthly_cardio(person: str,
                     "total_cal":   int(round(r["total_cal"])) if isinstance(r.get("total_cal"), (int, float)) and r.get("total_cal") else None,
                     "elevation_m": int(round(r["elevation_m"])) if isinstance(r.get("elevation_m"), (int, float)) and r.get("elevation_m") else None,
                     "elapsed":     _format_elapsed_hms(r.get("elapsed_min")),
-                    "laps":        int(r["laps"]) if isinstance(r.get("laps"), (int, float)) and r.get("laps") else None,
                 }
                 row_changed = False
                 for key, new_val in incoming_meta.items():
@@ -830,7 +875,6 @@ def upsert_monthly_cardio(person: str,
                 "total_cal":   int(round(r["total_cal"])) if isinstance(r.get("total_cal"), (int, float)) and r.get("total_cal") else None,
                 "elevation_m": int(round(r["elevation_m"])) if isinstance(r.get("elevation_m"), (int, float)) and r.get("elevation_m") else None,
                 "elapsed":     _format_elapsed_hms(r.get("elapsed_min")),
-                "laps":        _numeric_cell(r.get("laps")),
             }
             new_rows_to_append.append(new_row)
             # Track the new row in the dedupe index too so two near-duration

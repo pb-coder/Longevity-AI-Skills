@@ -15,7 +15,7 @@ query time against current evidence, because:
 1. Look up current guideline ranges for the marker in question
 2. Identify whether a longevity-optimal interpretation exists in the literature
 3. Present both: clinical range vs longevity-framing range with source cited
-4. Apply user-specific context (vegan, PrEP, Berlin latitude, 25M, ~78kg)
+4. Apply user-specific context — load from `<Person>/data/longevity/profile.md`, `state.md`, `interventions.md`, and `biomarkers.md` for current bodyweight, conditions, medications, supplement stack, dietary pattern, latitude, and prior lab history.
 
 ---
 
@@ -53,9 +53,10 @@ target only if citable evidence supports it.
 
 ## Clinical Monitoring Principle
 
-Follow current clinical guidelines as the minimum frequency. For this user,
-PrEP-mandated monitoring (eGFR + creatinine) is already in place. All other
-intervals should be derived from current guidelines at query time.
+Follow current clinical guidelines as the minimum frequency. If
+PrEP-mandated monitoring (eGFR + creatinine) is in place for this user
+(check `state.md` and `profile.md`), that's the floor — all other intervals
+should be derived from current guidelines at query time.
 
 **Example:** BHIVA and EACS guidelines specify monitoring cadence for PrEP
 users. When advising on lab scheduling, look up the current version of the
@@ -81,14 +82,14 @@ ranking dynamically from the user's current gaps and current evidence.
 | Zinc (serum) | Phytate load; vegan diet |
 | Iodine (spot urine) | Kelp source has variable content |
 | Omega-3 Index | Algae supplement; absorption unconfirmed |
-| Vitamin D (25-OH-D) | 5000 IU supplemented but absorption unconfirmed; Berlin latitude (52°N) |
+| Vitamin D (25-OH-D) | Supplementation absorption unconfirmed; high-latitude residents (>45°N) see near-zero cutaneous synthesis Oct–Mar |
 
 ### PrEP-specific (tenofovir)
 
 | Marker | Profile context |
 |---|---|
 | eGFR | Nephrotoxicity monitoring; already mandated q3mo |
-| Creatinine | PrEP monitoring; 10g/day creatine inflates serum creatinine — flag to lab, use cystatin C when confounded |
+| Creatinine | PrEP monitoring; high-dose creatine supplementation (≥5 g/day) inflates serum creatinine — flag to lab, use cystatin C when confounded |
 | Serum calcium | Supplement dose adequacy; tenofovir reduces bone mineral density |
 | PTH | Elevated PTH with normal Ca = functional calcium deficiency |
 | DEXA scan | Bone mineral density baseline; relevant for PrEP users |
@@ -122,12 +123,13 @@ ranking dynamically from the user's current gaps and current evidence.
 
 ## Interpretation Notes (user-specific, not normative)
 
-**Creatine and creatinine:** 10g/day creatine will elevate serum creatinine,
-which can falsely suggest kidney impairment. Use cystatin C as an alternative
-eGFR marker when creatinine is confounded. Flag this to any GP or lab.
+**Creatine and creatinine:** High-dose creatine supplementation (≥5 g/day)
+elevates serum creatinine, which can falsely suggest kidney impairment. Use
+cystatin C as an alternative eGFR marker when creatinine is confounded. Flag
+this to any GP or lab.
 
-**Vitamin D and Berlin latitude:** Cutaneous synthesis is near-zero
-October–March at 52°N. Also note: magnesium is a cofactor for vitamin D
+**Vitamin D and high-latitude residence:** Cutaneous synthesis is near-zero
+October–March above ~45°N (e.g., Berlin 52°N, Copenhagen 55°N, Stockholm 59°N). Also note: magnesium is a cofactor for vitamin D
 activation. If 25-OH-D comes back low despite supplementation, evaluate
 magnesium status before increasing dose.
 

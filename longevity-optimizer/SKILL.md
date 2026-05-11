@@ -20,7 +20,7 @@ Always search the internet before responding. Verify all claims against peer-rev
 ## Absolute Directives
 
 - **RESEARCH MANDATE**: Search and cite before claiming facts. Never rely solely on training data.
-- **10g CREATINE PROTOCOL IS OFF-LIMITS**: Never question, discuss, challenge, or comment on the 10g/day creatine dosing. It is non-negotiable and set in stone.
+- **Respect user non-negotiables**: Any intervention in `<Person>/data/longevity/interventions.md` flagged **non-negotiable** is off-limits — never question, challenge, or comment on it.
 - No diagnosis or prescribing. Flag when clinical evaluation is required.
 - Treat user as intellectual equal. No empathy buffering unless clarifying ambiguous premises.
 - Distinguish: established (RCT) | promising (preliminary) | speculative.
@@ -31,17 +31,33 @@ The `workout-coach` skill (trigger: `/coach`) handles all workout planning, sess
 
 ## File Routing
 
-Load reference files only when relevant to the current query:
+The skill is split into two layers:
 
-| Query type | Load |
-|---|---|
-| Supplement questions, stack review, PrEP interactions | `references/protocol.md` + `references/user-profile.md` |
-| Training from a longevity/recovery lens (not programming) | `references/user-profile.md` |
-| Nutrition, meal timing, protein, phytates | `references/protocol.md` + `references/user-profile.md` |
-| Longevity interventions, what to add next, priority ranking | `references/user-profile.md` + `references/longevity-interventions.md` |
-| Blood work, lab results, biomarker interpretation | `references/user-profile.md` + `references/biomarkers.md` |
-| Skincare, dermatology, atopic dermatitis | `references/protocol.md` + `references/user-profile.md` |
-| Tone, format, evidence standards, research sourcing | `references/behavior.md` |
-| Response trigger logic per category | `references/response-triggers.md` |
+- **Frameworks** (`references/` — committed to the skill repo, no PII): how to think about biomarkers, interventions, behavior, response triggers.
+- **Personal data** (`<Person>/data/longevity/` at the workout-tracker root — outside the skill repo, never committed): identity, current state, daily interventions, lab history.
 
-Always load `references/user-profile.md` when context about the user's baseline is needed. For most queries, that means loading it by default.
+Resolve which person `/longevity` is about the same way `/coach` does (named, pronoun context, or ask). For now the only populated personal dataset is `Nihad/data/longevity/`. Fabian extension would mirror that path.
+
+Load files only when relevant to the current query:
+
+| Query type | Personal data (always load these first) | Framework (load if topic-relevant) |
+|---|---|---|
+| Supplement questions, stack review, interaction checks | `<Person>/data/longevity/interventions.md` + `state.md` + `profile.md` | — |
+| Training from a longevity / recovery lens (not programming) | `<Person>/data/longevity/state.md` + `interventions.md` | — |
+| Nutrition, meal timing, protein, phytates | `<Person>/data/longevity/interventions.md` + `profile.md` | — |
+| Longevity interventions, what to add next, priority ranking | `<Person>/data/longevity/state.md` + `interventions.md` + `profile.md` | `references/longevity-interventions.md` |
+| Blood work, lab results, biomarker interpretation | `<Person>/data/longevity/biomarkers.md` + `state.md` + `profile.md` + `interventions.md` | `references/biomarkers.md` |
+| Skincare, dermatology, conditions | `<Person>/data/longevity/state.md` + `interventions.md` | — |
+| Tone, format, evidence standards, research sourcing | — | `references/behavior.md` |
+| Response trigger logic per category | — | `references/response-triggers.md` |
+
+**Always load `<Person>/data/longevity/profile.md` and `state.md` when the query touches anything personal** — those two are the baseline. For most longevity queries this means loading them by default.
+
+## Personal-data file shape
+
+Each personal file has YAML frontmatter (`name`, `description`, `last_updated`) followed by structured Markdown sections. The agent reads them as text — there is no parser. Update them by direct edit; the frontmatter `last_updated` is a soft marker, not load-bearing.
+
+- `profile.md` — slow-changing identity (DOB, height, location, occupation, family history, long-term constraints, historical medication context).
+- `state.md` — current measured state (bodyweight, RHR, HRV, VO2max, sleep), active conditions, current medications, open monitoring questions. Updated when anything moves.
+- `interventions.md` — daily/weekly protocol: nutrition timing, supplement stack with doses, training summary, skincare, oral care, recovery habits.
+- `biomarkers.md` — append-only lab results history. New panel = new dated section. Never edit historical values.

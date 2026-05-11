@@ -46,6 +46,41 @@ from sessions import _is_working_set
 E1RM_HISTORY_LIMIT = 3
 
 
+# Context-change Notes patterns. When a working set's Notes contain any of
+# these substrings, the session is treated as a re-baselining event for the
+# e1RM model — the row stays in history (so the user sees their actual
+# lifts), but it's excluded from slope_kg_per_4w and from delta_vs_prev_kg
+# baselines so a gym change doesn't read as a strength regression. Patterns
+# are matched case-insensitively. Order doesn't matter; the predicate just
+# needs to match once.
+CONTEXT_CHANGE_NOTES_PATTERNS = (
+    "new gym",
+    "different gym",
+    "this gym",            # "unusual cable ratio at this gym"
+    "another gym",
+    "new machine",
+    "different machine",
+    "new cable",
+    "different cable",
+    "unusual cable",       # "unusual cable ratio at this gym, very heavy"
+    "cable ratio",
+    "different weights",
+    "new weights",
+    "new equipment",
+    "new technogym",
+    "learning weights",
+    "calibration",
+)
+
+
+def _is_context_change_note(notes) -> bool:
+    """True when a Notes cell contains a user-tagged equipment/gym change."""
+    if not notes:
+        return False
+    n = str(notes).lower()
+    return any(p in n for p in CONTEXT_CHANGE_NOTES_PATTERNS)
+
+
 def strength_session_avg_hr_trend(
     sessions: list[dict],
     strength_dates: set[str],
@@ -165,30 +200,60 @@ def estimated_1rm(rows: list[dict],
         canonical_name.setdefault(key, r["exercise"])
         e1rm = kg * (1.0 + reps / 30.0)
         by_ex.setdefault(key, []).append({
-            "date": r["date"], "e1rm": e1rm, "reps": reps, "kg": kg,
+            "date": r["date"],
+            "e1rm": e1rm,
+            "reps": reps,
+            "kg": kg,
+            "context_change": _is_context_change_note(r.get("notes")),
         })
 
     out: dict[str, dict] = {}
     for key, entries in by_ex.items():
         # Per date, keep the heaviest projected e1RM and remember the
         # (reps, kg) that produced it — needed for the history block and
-        # for the confidence judgement.
-        per_date: dict[str, dict] = {}
+        # for the confidence judgement. Track context-change as a date-
+        # level flag so a non-ctx heaviest set doesn't silently mask a
+        # ctx-tagged warmup/feeler set on the same date.
+        per_date_top: dict[str, dict] = {}
+        per_date_ctx: dict[str, bool] = {}
         for e in entries:
-            top = per_date.get(e["date"])
+            d = e["date"]
+            if e.get("context_change"):
+                per_date_ctx[d] = True
+            top = per_date_top.get(d)
             if top is None or e["e1rm"] > top["e1rm"]:
-                per_date[e["date"]] = {
+                per_date_top[d] = {
                     "e1rm": e["e1rm"], "reps": e["reps"], "kg": e["kg"],
                 }
+        per_date: dict[str, dict] = {
+            d: {**top, "context_change": per_date_ctx.get(d, False)}
+            for d, top in per_date_top.items()
+        }
         dates_desc = sorted(per_date.keys(), reverse=True)
         if not dates_desc:
             continue
         current = per_date[dates_desc[0]]["e1rm"]
-        prev = per_date[dates_desc[1]]["e1rm"] if len(dates_desc) >= 2 else None
+
+        # delta_vs_prev_kg baseline: walk back from the most recent date for
+        # the most recent prior session whose context_change flag is False
+        # AND whose own counterpart (the current session) is also non-
+        # context-change. If either side of the comparison is context-
+        # changed, the delta is meaningless equipment-shifted noise — emit
+        # None and let confidence handling take over.
+        current_is_ctx = per_date[dates_desc[0]].get("context_change", False)
+        prev = None
+        if not current_is_ctx and len(dates_desc) >= 2:
+            for prior_date in dates_desc[1:]:
+                if not per_date[prior_date].get("context_change", False):
+                    prev = per_date[prior_date]["e1rm"]
+                    break
         best = max(d["e1rm"] for d in per_date.values())
 
         # Slope is computed over the last 6 sessions for stability, even
-        # though the emitted history is capped at E1RM_HISTORY_LIMIT.
+        # though the emitted history is capped at E1RM_HISTORY_LIMIT. The
+        # emitted history shows ALL recent sessions including context-
+        # change ones (so the user sees what they actually lifted), but
+        # the slope regression below filters them out.
         slope_dates = dates_desc[:6]
         history_full = [
             {
@@ -201,14 +266,25 @@ def estimated_1rm(rows: list[dict],
         ]
         history = history_full[:E1RM_HISTORY_LIMIT]
 
-        # OLS slope (kg per 28 days) over the last 6 sessions. Use
-        # ``history_full``, not the emitted ``history`` — the trim is
-        # cosmetic for the JSON output, but the trend should still see all
-        # six sessions to stay stable.
+        # Count context-change sessions in the slope window; the coach
+        # uses this to soften "Are you getting stronger?" language across
+        # equipment-shift discontinuities.
+        context_change_excluded = sum(
+            1 for d in slope_dates if per_date[d].get("context_change")
+        )
+
+        # OLS slope (kg per 28 days) over the last 6 sessions, EXCLUDING
+        # context-change dates. Use ``history_full``, not the emitted
+        # ``history`` — the trim is cosmetic for the JSON output, but the
+        # trend should still see all six non-ctx sessions to stay stable.
         slope = None
-        if len(history_full) >= 3:
+        slope_pts_source = [
+            h for h in history_full
+            if not per_date[h["date"]].get("context_change")
+        ]
+        if len(slope_pts_source) >= 3:
             pts: list[tuple[date, float]] = []
-            for h in history_full:
+            for h in slope_pts_source:
                 hd = _parse_iso_date(h.get("date"))
                 if hd is None:
                     continue
@@ -240,10 +316,22 @@ def estimated_1rm(rows: list[dict],
         else:
             confidence = "medium"
 
+        # If any session in the trailing window was a context-change row
+        # (gym swap, new machine, different cable scaling), the slope and
+        # delta_vs_prev_kg are noisy across the discontinuity. Drop
+        # confidence one band (high→medium, medium→low). The user sees this
+        # via the new ``context_change_excluded`` key plus the softened
+        # confidence label.
+        if context_change_excluded > 0:
+            confidence = {"high": "medium",
+                          "medium": "low",
+                          "low": "low"}[confidence]
+
         # Stalled: walk back through consecutive sessions while the
         # e1RM swing is within ±0.5kg. Break on the first deload that
         # falls inside (or at either end of) the gap between two
         # consecutive sessions — a deliberate volume cut isn't a stall.
+        # Also break on context-change sessions: a gym swap isn't a stall.
         stalled = 0
         for i in range(len(dates_desc) - 1):
             this_date = dates_desc[i]
@@ -252,6 +340,9 @@ def estimated_1rm(rows: list[dict],
                 prev_date <= d <= this_date for d in deload_set
             )
             if crossed_deload:
+                break
+            if per_date[this_date].get("context_change") \
+                    or per_date[prev_date].get("context_change"):
                 break
             this_e = per_date[this_date]["e1rm"]
             prev_e = per_date[prev_date]["e1rm"]
@@ -267,15 +358,16 @@ def estimated_1rm(rows: list[dict],
         emit_history = include_history and not (confidence == "low" and slope is None)
 
         out[canonical_name[key]] = {
-            "current_e1rm_kg":  round(current, 1),
-            "prev_e1rm_kg":     round(prev, 1) if prev is not None else None,
-            "best_e1rm_kg":     round(best, 1),
-            "last_date":        dates_desc[0],
-            "delta_vs_prev_kg": (round(current - prev, 1) if prev is not None else None),
-            "e1rm_history":     history if emit_history else None,
-            "slope_kg_per_4w":  slope,
-            "confidence":       confidence,
-            "stalled_sessions": stalled,
+            "current_e1rm_kg":         round(current, 1),
+            "prev_e1rm_kg":            round(prev, 1) if prev is not None else None,
+            "best_e1rm_kg":            round(best, 1),
+            "last_date":               dates_desc[0],
+            "delta_vs_prev_kg":        (round(current - prev, 1) if prev is not None else None),
+            "e1rm_history":            history if emit_history else None,
+            "slope_kg_per_4w":         slope,
+            "confidence":              confidence,
+            "stalled_sessions":        stalled,
+            "context_change_excluded": context_change_excluded,
         }
     return out
 

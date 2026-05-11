@@ -51,9 +51,9 @@ Reference this file when a query falls into a defined domain. Apply the domain-s
 ## Nutrition
 
 1. Search nutritional science databases before making claims.
-2. Apply protein targets dynamically: search current recommendations for the user's training pattern + dietary profile (typically 1.6–2.2 g/kg for resistance-trained, vegan athletes need to clear the leucine threshold), then calculate against current bodyweight from `state.md`. Compare to intake recorded in `interventions.md`.
+2. Apply protein targets dynamically: search current recommendations for the user's training pattern + dietary profile (typically 1.6–2.2 g/kg for resistance-trained, vegan athletes need to clear the leucine threshold), then calculate against current bodyweight from `state.md`. Compare to intake recorded in `interventions.md`. For the per-meal leucine threshold and meal-distribution rules, defer to `workout-coach/references/training-science.md §23`; that file owns the operational rule (~2.5 g leucine per meal, ~30-40 g plant protein per meal, BCAAs / EAAs not additive above 2.0-2.2 g/kg) and shouldn't be restated differently here.
 3. Evaluate meal timing relative to training windows and circadian context — pull the actual schedule from `interventions.md`.
-4. Account for phytate load in mineral absorption assessments when the diet profile in `state.md` / `interventions.md` warrants it (oat / seed / legume-heavy patterns are high-phytate).
+4. Account for phytate load in mineral absorption assessments when the diet profile in `state.md` / `interventions.md` warrants it (oat / seed / legume-heavy patterns are high-phytate). Quantitative anchor: phytate-to-zinc molar ratio >15 drops zinc absorption below ~11% (Latunde-Dada et al. 2024, Established). Practical rule: separate zinc and calcium supplements from high-phytate meals by 2+ hours, or use soaking / sprouting / fermentation to reduce the phytate load.
 5. Calcium: when calcium is relevant, read the current daily dose from `interventions.md`, search current RDA + any condition-specific guidelines, then evaluate adequacy. Do not assume the answer in advance.
 6. Iron: read supplementation status from `interventions.md`. When iron or ferritin is relevant, search current evidence on bioavailability for the user's dietary pattern, then assess. Ferritin status is in `biomarkers.md` (or absent — flag the gap).
 
@@ -67,6 +67,16 @@ Reference this file when a query falls into a defined domain. Apply the domain-s
 4. Connect zinc supplementation to skin barrier function and any logged dermatologic conditions in `state.md` — zinc deficiency is a known exacerbating factor for atopic conditions.
 5. Topical corticosteroids: appropriate for short flare management. Flag if flare frequency or duration appears to be increasing (suggests inadequate barrier maintenance or systemic trigger).
 6. Investigate systemic contributors to chronic dermatologic conditions: stress (HRV suppression in `state.md` is a proxy), dietary factors, sleep disruption.
+
+---
+
+## Thermal Stress (sauna and cold)
+
+1. Search current Laukkanen / KIHD cohort data and downstream replications before quoting effect sizes. The Finnish KIHD cohort (N>2300 men, 20+ year follow-up) reports dose-dependent reductions in cardiovascular and all-cause mortality at 4-7 sauna sessions per week vs 1, with the strongest effects at the high-frequency end. Evidence tier: Established as a prospective observational signal; no RCT replicates the mortality endpoint, so confounding by health-baseline self-selection is the open question.
+2. Heat shock protein (HSP70/90) induction depends on sustained core temperature rise. Mechanistic studies and cohort sub-analyses point to ≥20 minutes at ≥80°C as the threshold to clear; sessions under 10 minutes are unlikely to trigger meaningful HSP upregulation. Evidence tier: Promising.
+3. Cross-reference `<Person>/data/longevity/interventions.md` for current sauna cadence and duration. Cross-reference `state.md` for blood pressure, cardiovascular history, and pregnancy status before recommending high-frequency or high-temperature protocols.
+4. Cold exposure timing relative to resistance training is owned by `workout-coach/references/training-science.md §22`. This file owns the longevity framing; the coach file owns the programming consequence. When the user asks here, defer the timing rule to that section and don't restate it differently.
+5. Søberg "end on cold" protocol for brown adipose tissue activation: Promising (small clinical trials, Søberg et al. 2021). Worth surfacing when the user asks about contrast therapy. Don't elevate above the Laukkanen mortality finding when prioritizing.
 
 ---
 

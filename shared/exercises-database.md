@@ -26,10 +26,12 @@ Organized by primary muscle group > movement pattern. Tags:
 - Dead Hang [BW]
 - Scapular Pull-Up [BW]
 - Pull-Up (warmup) [BW]
+- Wall Slide [BW] — +rear delts, +scapular muscles
 
 ### Lower Body
 - Bodyweight Squat [BW]
 - Glute Bridge [BW]
+- Hip Circle Walk [Band] — +glutes, +abductors
 
 ---
 

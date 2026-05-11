@@ -22,6 +22,7 @@
 | Outdoor Cycling, Bike Ride, Cycling | Outdoor Cycling | — |
 | Romain Chair Sit-Up, Romain Chair | Roman Chair Sit-Up | — |
 | Belt Squad Machine | Belt Squat Machine | — |
+| Abdominal crunch | Ab Crunch Machine | — |
 
 ## Modifier Handling
 

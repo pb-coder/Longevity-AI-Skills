@@ -6,8 +6,9 @@ Claude Code skills for workout logging, training analysis, and longevity researc
 
 - `workout-logger` (`/log`): parses a free-form workout into the per-month CSV store. When an exercise isn't in the catalog, dispatches a research sub-agent to propose an addition. The user confirms before write.
 - `workout-coach` (`/coach`): reads the tracker, computes training load (TRIMP, CTL/ATL/TSB), e1RM trajectories, HR zones, recovery score. Writes a report and the next N workouts to a plan file.
-- `workout-tracker-maintenance` (`/maintain`): canonicalizes every monthly CSV, validates the data store, runs optional historical fix sweeps.
 - `longevity-optimizer` (`/longevity`): supplement, biomarker, dermatology, and circadian queries. Reads personal data from a directory outside the repo. Cites peer-reviewed sources before claims.
+
+A maintenance utility lives at `shared/maintain.py`. Run it directly when you need to sweep canonicalize across all months (after a schema change or manual edit to a past month) or validate the CSV store: `python3 Skills/shared/maintain.py --person <Name>`.
 
 ## Data store
 

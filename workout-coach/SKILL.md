@@ -196,7 +196,7 @@ The pattern: every claim about training state cites a specific numeric value fro
 - Dates are usually `'YYYY-MM-DD'` strings, occasionally `datetime`. The script normalizes; if you bypass it, normalize yourself.
 - Numeric columns (kg, Reps, Volume) are often stringified.
 - Exercise names have inconsistent casing across sessions. Compare case-insensitively.
-- Monthly sheets keep a buffer of empty rows (~2 past months, ~50 current month after `/maintain`). Stop after 10 consecutive fully empty rows.
+- Monthly sheets keep a buffer of empty rows (~2 past months, ~50 current month after a maintenance sweep). Stop after 10 consecutive fully empty rows.
 
 Print the filtered values you actually use; never dump the full `rows` list into the response or the file.
 

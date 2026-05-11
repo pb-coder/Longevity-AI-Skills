@@ -146,6 +146,17 @@ shared/               # Code + docs imported by multiple skills
                           # → Outdoor Run / Hike / Outdoor Cycling / Swim /
                           # HIIT). Append-only as new workouts are encountered;
                           # used by both importers.
+  maintain.py           # Maintenance utility (no slash command — invoked
+                        # directly when needed). Canonicalizes every monthly
+                        # CSV across all months (idempotent), validates the
+                        # CSV store (header schema parity, sort order, row
+                        # counts), optional --fix-distance-units historical
+                        # swim-distance sweep. Run after schema migrations,
+                        # manual edits to past months, or anytime drift is
+                        # suspected. Auto-canonicalize on every /log write
+                        # keeps the current month clean — this script handles
+                        # the cross-month sweep.
+                        # Usage: python3 Skills/shared/maintain.py --person Nihad
 
 workout-logger/       # /log — append a parsed workout to the tracker.
   SKILL.md            # Agent entry point. Flow §1 has an unknown-exercise
@@ -229,13 +240,6 @@ workout-coach/        # /coach — read tracker, report, plan next workout.
                       # Null keys are dropped via _compact for token efficiency.
   references/training-science.md
 
-workout-tracker-maintenance/   # /maintain — end-of-month cleanup.
-  SKILL.md
-  scripts/maintain.py # Canonicalize every monthly CSV (idempotent), validate
-                      # CSV-store schemas + sort order (per-month swim files
-                      # walked individually), optional --fix-distance-units
-                      # historical sweep (meters-as-km swim bug).
-
 longevity-optimizer/  # /longevity — separate domain. All personal data lives
   SKILL.md            # outside this repo at <Person>/data/longevity/*.md;
   references/         # only framework docs (biomarkers, longevity-interventions,
@@ -261,8 +265,9 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   truth for monthly-CSV layout (sort by Date+#+Set, recompute Volume
   and Pace, rebuild SESSION numbering, rebuild TOTAL rows, hoist
   deload markers). Running it twice is a no-op. `/log` calls it
-  post-write; `/maintain` calls it on every monthly CSV. An out-of-
-  order CSV (e.g. after a backfill) self-heals on the next pass. The
+  post-write on the current month; `shared/maintain.py` calls it on
+  every monthly CSV for cross-month sweeps. An out-of-order CSV (e.g.
+  after a backfill) self-heals on the next pass. The
   monthly CSV has 17 columns:
   `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes |
   Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal |

@@ -29,6 +29,16 @@ Always search the internet before responding. Verify all claims against peer-rev
 
 The `workout-coach` skill (trigger: `/coach`) handles all workout planning, session programming, volume analysis, and exercise selection. Do not duplicate that work. When a longevity query touches training programming specifically, direct the user to `/coach`. This skill handles everything the workout-coach does not: supplements, nutrition, blood work, biomarkers, longevity interventions, skincare, dermatology, circadian optimization, protocol review, and intervention prioritization.
 
+**The two skills share a data store.** `/longevity` should read the workout tracker, not ignore it. The personal-data files at `<Person>/data/longevity/*.md` deliberately don't freeze bodyweight, HR, HRV, VO2max, or sleep numbers — those live in `<Person>/data/health_metrics.csv` and `workout_sessions.csv` and `monthly/*.csv`. To pull current state, run:
+
+```
+python3 Skills/workout-coach/scripts/read_tracker.py --person <Person>
+```
+
+The JSON it emits is the canonical view of the user's current physiological state and training load. Cite specific fields by name (`recovery.score`, `vo2max_latest`, `training_load.tsb`, `bodyweight_latest`, `health_metrics_weekly[]`, `weekly_volume_per_muscle`, etc.) rather than copy-pasting numbers into the response. When training context informs a longevity claim — e.g. "your TSB is -10 → don't add a new high-CNS intervention this week" — pull the value live and name it.
+
+**Logger writes feed this loop automatically.** When `/log` records a bodyweight line, it goes into `health_metrics.csv` (sparse-merge, date-keyed) — the same row Apple Health writes to on its next import. Nothing in `<Person>/data/longevity/*.md` needs to be edited to reflect a new weight; the longevity skill reads the latest on demand.
+
 ## File Routing
 
 The skill is split into two layers:
@@ -40,24 +50,26 @@ Resolve which person `/longevity` is about the same way `/coach` does (named, pr
 
 Load files only when relevant to the current query:
 
-| Query type | Personal data (always load these first) | Framework (load if topic-relevant) |
-|---|---|---|
-| Supplement questions, stack review, interaction checks | `<Person>/data/longevity/interventions.md` + `state.md` + `profile.md` | — |
-| Training from a longevity / recovery lens (not programming) | `<Person>/data/longevity/state.md` + `interventions.md` | — |
-| Nutrition, meal timing, protein, phytates | `<Person>/data/longevity/interventions.md` + `profile.md` | — |
-| Longevity interventions, what to add next, priority ranking | `<Person>/data/longevity/state.md` + `interventions.md` + `profile.md` | `references/longevity-interventions.md` |
-| Blood work, lab results, biomarker interpretation | `<Person>/data/longevity/biomarkers.md` + `state.md` + `profile.md` + `interventions.md` | `references/biomarkers.md` |
-| Skincare, dermatology, conditions | `<Person>/data/longevity/state.md` + `interventions.md` | — |
-| Tone, format, evidence standards, research sourcing | — | `references/behavior.md` |
-| Response trigger logic per category | — | `references/response-triggers.md` |
+| Query type | Personal data (always load first) | Live tracker data | Framework |
+|---|---|---|---|
+| Supplement questions, stack review, interaction checks | `interventions.md` + `state.md` + `profile.md` | `read_tracker.py` if bodyweight / dose-per-kg matters | — |
+| Training from a longevity / recovery lens (not programming) | `state.md` + `interventions.md` | `read_tracker.py` (recovery, TSB, weekly volume, VO2max trend) | — |
+| Nutrition, meal timing, protein, phytates | `interventions.md` + `profile.md` | `read_tracker.py` for bodyweight (protein target = g/kg) | — |
+| Longevity interventions, ranking, "what to add" | `state.md` + `interventions.md` + `profile.md` | `read_tracker.py` for the gap analysis (e.g. weekly Z2 minutes) | `references/longevity-interventions.md` |
+| Blood work, lab results, biomarker interpretation | `biomarkers.md` + `state.md` + `profile.md` + `interventions.md` | `read_tracker.py` for context (recovery, training load) | `references/biomarkers.md` |
+| Skincare, dermatology, conditions | `state.md` + `interventions.md` | — | — |
+| Tone, format, evidence standards, research sourcing | — | — | `references/behavior.md` |
+| Response trigger logic per category | — | — | `references/response-triggers.md` |
 
 **Always load `<Person>/data/longevity/profile.md` and `state.md` when the query touches anything personal** — those two are the baseline. For most longevity queries this means loading them by default.
+
+**Compute age from DOB.** `profile.md` stores date of birth, not "X years old". Compute current age dynamically: `(today - DOB).days / 365.25`. Same logic applies anywhere a date drives a recovery window (e.g. the PrEP BMD recovery window in `profile.md` is "stopped on YYYY-MM-DD"; whether the window is still open depends on today's date).
 
 ## Personal-data file shape
 
 Each personal file has YAML frontmatter (`name`, `description`, `last_updated`) followed by structured Markdown sections. The agent reads them as text — there is no parser. Update them by direct edit; the frontmatter `last_updated` is a soft marker, not load-bearing.
 
 - `profile.md` — slow-changing identity (DOB, height, location, occupation, family history, long-term constraints, historical medication context).
-- `state.md` — current measured state (bodyweight, RHR, HRV, VO2max, sleep), active conditions, current medications, open monitoring questions. Updated when anything moves.
-- `interventions.md` — daily/weekly protocol: nutrition timing, supplement stack with doses, training summary, skincare, oral care, recovery habits.
+- `state.md` — active conditions, current medications, open monitoring questions, goals. **Live metrics (bodyweight, RHR, HRV, VO2max, sleep) are NOT frozen here** — they come from `health_metrics.csv` via the coach. The file is a pointer table.
+- `interventions.md` — daily/weekly protocol: nutrition timing, supplement stack with doses, training summary, skincare, oral care, recovery habits, intervention status tracker.
 - `biomarkers.md` — append-only lab results history. New panel = new dated section. Never edit historical values.

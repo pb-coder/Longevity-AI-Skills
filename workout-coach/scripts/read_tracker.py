@@ -216,7 +216,10 @@ def main() -> int:
     recovery = recovery_score(health_all, today_d, capabilities)
     trimps = trimp_per_session(monthly_sessions, max_hr, rest_hr)
     training_load = training_load_summary(trimps, today_d)
-    # Fold TRIMP load_band back onto each monthly_session for the LLM.
+    # Fold TRIMP load_band, intensity_pct, and the cardio session's
+    # HR-zone label back onto each monthly_session for the LLM. The zone
+    # label lets a run/ride/hike entry read as "Z2 hike" or "Z4 interval"
+    # directly without re-deriving from avg_hr.
     trimp_by_date: dict[str, dict] = {t["date"]: t for t in trimps}
     for s in monthly_sessions:
         t = trimp_by_date.get(s.get("date"))
@@ -224,6 +227,8 @@ def main() -> int:
             s["trimp"] = t["trimp"]
             s["load_band"] = t["load_band"]
             s["intensity_pct"] = t["intensity_pct"]
+            if t.get("kind") == "cardio":
+                s["hr_zone_label"] = t.get("hr_zone_label")
 
     hr_volume_div = hr_at_volume_divergence(rows, monthly_sessions, db, today_d)
     cardio_zones = cardio_hr_zones(monthly_sessions, today_d, max_hr, rest_hr)

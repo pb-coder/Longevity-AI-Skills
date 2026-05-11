@@ -58,11 +58,11 @@ research rather than disease-threshold logic. Always name the evidence source.
 
 ### Priority Weighting (apply dynamically)
 
-When ranking interventions for this user, weight by:
+When ranking interventions for a user, weight by:
 1. Effect size for all-cause mortality or healthspan extension
 2. Evidence grade (above)
-3. User's current gap (status column below)
-4. Feasibility given user's context (vegan, PrEP user, Berlin, 25M, ~78kg)
+3. Current gap — load from `<Person>/data/longevity/interventions.md` (intervention status tracker section)
+4. Feasibility given user context — load `profile.md` (identity, constraints, location) and `state.md` (current conditions, medications) for the personal lens
 5. Cost and reversibility
 
 ---
@@ -85,41 +85,7 @@ conflict explicitly rather than silently preferring one.
 
 ## User Status Tracker
 
-Status key: DONE | PARTIAL | MISSING | EXPERIMENTAL
-
-This column reflects what the user has confirmed. It is not an assessment of
-whether current implementation is adequate — generate that from evidence.
-
-### Lifestyle Foundations
-
-| Intervention | Status | User Notes |
-|---|---|---|
-| Resistance training 3-5x/week | DONE | Push/pull/legs, machine-dominant |
-| Aerobic / VO2 max development | PARTIAL | 1x/week Zone 2 cardio |
-| Sleep 7-9h, consistent schedule | DONE | 95%+ score, masked, earplugged |
-| Non-smoking | DONE | Confirmed |
-| Zero alcohol | DONE | Confirmed |
-
-### Nutrition
-
-| Intervention | Status | User Notes |
-|---|---|---|
-| Adequate protein (vegan target) | PARTIAL | High intake claimed, untracked |
-| Time-restricted eating | PARTIAL | ~07:00-15:00 non-training days; extends to 19:00 on training days |
-
-### Core Supplementation (vegan + PrEP profile)
-
-| Intervention | Status | User Notes |
-|---|---|---|
-| B12 (methylcobalamin) | DONE | 1000µg/day |
-| Creatine | DONE | 10g/day — NON-NEGOTIABLE |
-| Iodine | DONE | 200µg kelp (variable content noted) |
-| Zinc | DONE | 25mg evening |
-| Magnesium bisglycinate | DONE | 300mg night |
-| Vitamin D3 + K2 | DONE | 5000 IU + 200µg |
-| Omega-3 algae EPA+DHA | DONE | 800mg EPA + 450mg DHA |
-| Calcium citrate | PARTIAL | 900mg/day (3 split doses) |
-| Iron monitoring | MISSING | No ferritin test conducted |
-
-
-
+The per-user intervention status (DONE / PARTIAL / MISSING / EXPERIMENTAL)
+lives in `<Person>/data/longevity/interventions.md` under the
+"Intervention status tracker" section. Load that to identify gaps before
+generating a priority ranking.

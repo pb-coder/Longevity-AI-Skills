@@ -31,9 +31,14 @@ Row dict schema:
       "distance_km": null,           # optional cardio fields
       "duration_min": null,
       "pace": null,                  # string "MM:SS"
-      "avg_hr": null,
-      "laps": null                   # swim only
+      "avg_hr": null
     }
+
+    Note: ``laps`` is no longer a monthly-CSV column. Swim lap counts live
+    on ``<Person>/data/swimming/swim_workouts.csv``; manual /log payloads
+    that include ``laps`` are silently dropped here. If the user types
+    ``<N> laps`` on a swim row, /log should route the value to the swim
+    store separately rather than passing it through this function.
 
 Rows must arrive pre-sorted: by date ascending, then by num ascending, then by set.
 The script does not re-sort — it trusts the caller.
@@ -69,7 +74,7 @@ def _to_monthly_row(r: dict) -> dict:
 
     Payload keys (incoming):
       ``date, num, exercise, set, reps, kg, notes, distance_km,
-      duration_min, pace, avg_hr, laps``.
+      duration_min, pace, avg_hr``.
 
     Monthly CSV keys (outgoing): match ``MONTHLY_FIELDS`` —
       ``distance_km`` → ``distance``, ``duration_min`` → ``duration``.
@@ -94,7 +99,6 @@ def _to_monthly_row(r: dict) -> dict:
         "total_cal":   None,
         "elevation_m": None,
         "elapsed":     None,
-        "laps":        r.get("laps"),
     }
 
 

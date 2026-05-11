@@ -121,11 +121,16 @@ def validate_csvs(person: str) -> list[str]:
                                  ["key", "value"],
                                  None),
     }
-    sw_path = swim_workouts_csv(person)
-    sl_path = swim_laps_csv(person)
-    if sw_path.exists() or sl_path.exists():
-        targets["swim_workouts.csv"] = (sw_path, SWIM_WORKOUTS_HEADERS, "desc")
-        targets["swim_laps.csv"] = (sl_path, SWIM_LAPS_HEADERS, "asc")
+    # Per-month swim CSVs (XML trackers only — HL exports omit lap data).
+    from person_paths import list_swim_workout_months, list_swim_lap_months
+    for ym in list_swim_workout_months(person):
+        targets[f"swimming/{ym}.workouts.csv"] = (
+            swim_workouts_csv(person, ym), SWIM_WORKOUTS_HEADERS, "desc"
+        )
+    for ym in list_swim_lap_months(person):
+        targets[f"swimming/{ym}.laps.csv"] = (
+            swim_laps_csv(person, ym), SWIM_LAPS_HEADERS, "asc"
+        )
 
     for label, (path, expected_header, order) in targets.items():
         if not path.exists():
@@ -316,45 +321,48 @@ def fix_distance_units(person: str, dry_run: bool = False) -> int:
                         writer.writerow(header)
                         writer.writerows(csv_rows)
 
-    # 3. Swim Workouts CSV.
-    sw_path = swim_workouts_csv(person)
-    if sw_path.exists():
+    # 3. Per-month Swim Workouts CSVs.
+    from person_paths import list_swim_workout_months
+    for ym in list_swim_workout_months(person):
+        sw_path = swim_workouts_csv(person, ym)
+        if not sw_path.exists():
+            continue
         with sw_path.open("r", encoding="utf-8", newline="") as f:
             reader = csv.reader(f)
             sw_header = next(reader, [])
             sw_csv_rows = list(reader)
-        if sw_header:
+        if not sw_header:
+            continue
+        try:
+            sw_date_idx = sw_header.index("Date")
+            sw_dist_idx = sw_header.index("Distance (km)")
+        except ValueError:
+            continue
+        sw_changed = False
+        for i, row in enumerate(sw_csv_rows):
+            if len(row) <= max(sw_date_idx, sw_dist_idx):
+                continue
+            if not row[sw_dist_idx]:
+                continue
             try:
-                sw_date_idx = sw_header.index("Date")
-                sw_dist_idx = sw_header.index("Distance (km)")
+                distance = float(row[sw_dist_idx])
             except ValueError:
-                sw_date_idx = sw_dist_idx = -1
-            if sw_date_idx >= 0 and sw_dist_idx >= 0:
-                sw_changed = False
-                for i, row in enumerate(sw_csv_rows):
-                    if len(row) <= max(sw_date_idx, sw_dist_idx):
-                        continue
-                    if not row[sw_dist_idx]:
-                        continue
-                    try:
-                        distance = float(row[sw_dist_idx])
-                    except ValueError:
-                        continue
-                    if distance > SUSPICIOUS_SWIM_DISTANCE_KM:
-                        new_distance = round(distance / 1000.0, 3)
-                        if not dry_run:
-                            row[sw_dist_idx] = str(new_distance)
-                            sw_changed = True
-                        fixes.append((
-                            "swim_workouts.csv", i + 2,
-                            f"Swim {row[sw_date_idx]}: "
-                            f"distance {distance} → {new_distance} km"
-                        ))
-                if sw_changed and not dry_run:
-                    with sw_path.open("w", encoding="utf-8", newline="") as f:
-                        writer = csv.writer(f)
-                        writer.writerow(sw_header)
-                        writer.writerows(sw_csv_rows)
+                continue
+            if distance > SUSPICIOUS_SWIM_DISTANCE_KM:
+                new_distance = round(distance / 1000.0, 3)
+                if not dry_run:
+                    row[sw_dist_idx] = str(new_distance)
+                    sw_changed = True
+                fixes.append((
+                    f"swimming/{ym}.workouts.csv", i + 2,
+                    f"Swim {row[sw_date_idx]}: "
+                    f"distance {distance} → {new_distance} km"
+                ))
+        if sw_changed and not dry_run:
+            with sw_path.open("w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(sw_header)
+                writer.writerows(sw_csv_rows)
 
     if not fixes and not flags:
         print(f"{person}: no fixes needed")

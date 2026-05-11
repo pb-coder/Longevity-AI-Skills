@@ -208,6 +208,24 @@ def _z_score_signal(health_all: list[dict], key: str, today_d: date,
     }
 
 
+# Per-signal recent-sample sufficiency thresholds. When a contributing
+# signal whose renormalized weight is ≥0.10 falls below its threshold,
+# confidence drops one band (high→medium, medium→low). Catches cases where
+# a high-weight signal is hanging off a single reading and inflating the
+# composite's apparent precision (e.g., one HR-Recovery sample swinging the
+# score and being labelled "high confidence").
+RECENT_SAMPLE_SUFFICIENCY = {
+    "hrv_sdnn":         5,   # of 7
+    "resting_hr":       5,   # of 7
+    "sleep_total_h":    5,   # of 7
+    "sleep_deep_h":     5,   # of 7
+    "sleep_rem_h":      5,   # of 7
+    "wrist_temp_c":     2,   # of 3 (overnight-only, allow misses)
+    "hr_recovery_1min": 3,   # of 5
+}
+SIGNAL_WEIGHT_FLOOR_FOR_GATE = 0.10
+
+
 def recovery_score(health_all: list[dict], today_d: date,
                    capabilities: dict) -> dict:
     """Renormalized weighted-average composite of per-signal personal
@@ -342,6 +360,22 @@ def recovery_score(health_all: list[dict], today_d: date,
     confidence = ("high" if n_contrib >= 4
                   else "medium" if n_contrib >= 2
                   else "low")
+
+    # Per-signal sufficiency gate: if any high-weight z-scored driver is
+    # under-sampled in the recent window, drop confidence one band. The
+    # `stdev` shape (sleep consistency penalty) is exempt — its `n_recent`
+    # is the 7-day window count and isn't a precision proxy in the same
+    # way the z-scored signals are.
+    under_sampled = [
+        d for d in drivers
+        if d.get("weight", 0) >= SIGNAL_WEIGHT_FLOOR_FOR_GATE
+        and "z" in d
+        and d.get("n_recent", 0) < RECENT_SAMPLE_SUFFICIENCY.get(d["metric"], 0)
+    ]
+    if under_sampled:
+        confidence = {"high": "medium",
+                      "medium": "low",
+                      "low": "low"}[confidence]
 
     return {
         "score":      round(score, 1),

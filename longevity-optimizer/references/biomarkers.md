@@ -79,6 +79,7 @@ ranking dynamically from the user's current gaps and current evidence.
 |---|---|
 | Ferritin | Non-heme iron only; phytate suppression; no iron supplementation |
 | B12 (serum + homocysteine) | High-dose supplement; serum alone can miss functional deficiency |
+| MMA (methylmalonic acid) | Functional B12 marker; more sensitive than serum B12. Complements homocysteine when both available (Niklewicz et al. 2024 systematic review) |
 | Zinc (serum) | Phytate load; vegan diet |
 | Iodine (spot urine) | Kelp source has variable content |
 | Omega-3 Index | Algae supplement; absorption unconfirmed |
@@ -102,9 +103,12 @@ ranking dynamically from the user's current gaps and current evidence.
 | Fasting glucose | Metabolic baseline |
 | HbA1c | Glucose regulation over 3-month window |
 | ApoB | Atherogenic particle count |
+| Lp(a) | Independent genetic CV risk factor. One-time test is sufficient for lifetime risk stratification; level is largely set by genetics and doesn't move with standard interventions |
 | LDL-C | Standard lipid panel |
 | HDL-C | Standard lipid panel |
 | Triglycerides | Banana + oat milk in diet |
+| Fasting insulin | Insulin resistance signal that drifts before HbA1c or fasting glucose. Pair with glucose to compute HOMA-IR when interpretation depends on context |
+| GGT | Liver oxidative stress and metabolic dysfunction. Sensitive to alcohol, hepatic iron, fatty liver; useful as a non-specific stress marker alongside ALT |
 | Homocysteine | B12/folate functional proxy |
 
 ### Hormonal
@@ -125,8 +129,13 @@ ranking dynamically from the user's current gaps and current evidence.
 
 **Creatine and creatinine:** High-dose creatine supplementation (≥5 g/day)
 elevates serum creatinine, which can falsely suggest kidney impairment. Use
-cystatin C as an alternative eGFR marker when creatinine is confounded. Flag
-this to any GP or lab.
+cystatin C as an alternative eGFR marker when creatinine is confounded. KDIGO
+2024 Practice Point 1.1.2.1 and Table 8 explicitly endorse cystatin C for
+populations where creatinine is unreliable, including high-muscle-mass and
+creatine-supplementing athletes. Combined eGFRcr-cys is the preferred
+equation when both markers are available. Flag this to any GP or lab,
+particularly when prior tenofovir exposure makes accurate renal monitoring
+load-bearing.
 
 **Vitamin D and high-latitude residence:** Cutaneous synthesis is near-zero
 October–March above ~45°N (e.g., Berlin 52°N, Copenhagen 55°N, Stockholm 59°N). Also note: magnesium is a cofactor for vitamin D
@@ -139,6 +148,41 @@ depleted. Always request ferritin specifically — many labs only flag hemoglobi
 **Homocysteine and B12:** Serum B12 can be normal while functional deficiency
 exists. Homocysteine is a better functional proxy. Elevated homocysteine
 despite high-dose methylcobalamin warrants investigation of methylfolate.
+MMA (methylmalonic acid) is the most sensitive functional B12 marker and
+should be ordered when homocysteine is equivocal or when serum B12 is
+inflated by inactive analogues from algae / fortified foods.
+
+**MTHFR variants and COMT balance:** MTHFR polymorphisms reduce conversion of
+folate to active methylfolate, contributing to elevated homocysteine. The
+standard correction is methylated B12 + methylfolate. A slow COMT pathway can
+be overwhelmed by aggressive methyl-donor loading; irritability and anxiety
+are the typical flags. When supplementing methylated forms, titrate moderate
+to high against homocysteine plus subjective tolerance, not just serum B12.
+Evidence tier: Established for MTHFR mechanism; Promising for the COMT
+balance framing.
+
+**GGT as a longevity signal beyond hepatobiliary screening:** UK Biobank
+(N=293,667, median follow-up 11.8 years) found that men with GGT around 60
+U/L, the upper end of the clinical "normal" reference, had hazard ratios of
+3.25 (95% CI 2.38-4.42) for liver-related mortality and 1.43 (95% CI
+1.27-1.60) for cardiovascular mortality versus the lowest decile (~14.5
+U/L). The signal tracks oxidative stress and hepatic insulin resistance, not
+just alcohol or biliary disease. When interpreting a "normal" GGT, anchor
+to the cohort's lowest decile, not the lab reference ceiling.
+
+**Homocysteine as a longevity signal:** Korean adult male cohort: every 5
+μmol/L increase in serum homocysteine elevated all-cause mortality by ~33.6%.
+For strict vegans without consistent B12 supplementation, hyperhomocysteinemia
+is the dominant preventable longevity risk. The clinical normal ceiling (<15
+μmol/L) is permissive; cohort data supports a working target nearer to 10
+μmol/L when modifiable causes are addressable.
+
+**Vitamin D plus calcium combined-dose risk:** 5000 IU/day D3 with 900 mg/day
+elemental calcium carries hypercalcemia and ectopic vascular calcification
+risk over years when not paired with serum calcium monitoring. K2 (MK-7)
+directs calcium toward bone and away from arteries but does not eliminate the
+hypercalcemia risk from the upstream load. When this stack is in place, serum
+calcium and PTH belong in the recurring panel alongside 25-OH-D.
 
 **ApoB vs LDL-C:** LDL-C can be misleading in high-HDL, low-TG individuals.
 ApoB counts all atherogenic particles directly. Request explicitly if not

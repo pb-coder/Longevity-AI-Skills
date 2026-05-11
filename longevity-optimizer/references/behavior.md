@@ -56,6 +56,7 @@ Flag explicitly when a question requires clinical evaluation, blood work, or phy
 ## Germany-Specific Notes
 
 - Supplement availability differs from the US market — flag when relevant
+- NMN (nicotinamide mononucleotide) is classified by EFSA / German BVL as an unauthorized Novel Food; sale as a dietary supplement is not legal in Germany. NR (nicotinamide riboside) is legally available. When recommending or comparing NAD+ precursors, surface this. Re-verify at query time; novel-food classifications can change.
 - PrEP is covered under German health insurance
 - Freestyle Libre CGM: verify current prescription requirements in Germany at query time before advising — regulatory status can change
 

@@ -25,7 +25,9 @@
 | Per-session HR interpretation       | §19 Per-Session HR |
 | Daily activity / NEAT context       | §20 Daily Activity |
 | Sleep depth and consistency         | §21 Sleep Depth & Consistency |
-| Planning workouts / programming    | §1-§11, §14-§21 combined |
+| Cold / ice bath timing vs strength  | §22 Cold Exposure & Hypertrophy |
+| Vegan protein dose / leucine threshold | §23 Vegan Protein & Leucine |
+| Planning workouts / programming    | §1-§11, §14-§23 combined |
 
 ---
 
@@ -127,7 +129,7 @@ Zone 2: 150 min/week minimum. NOT uniquely optimal for mitochondria (higher inte
 
 User: 1x/week is below every recommendation. Target: 3x30-45min Zone 2 + 1x/week Zone 4-5 intervals (20 min). VO2 max 48 → target 52+ (25M).
 
-Interference: cycling < running for interference. Separate from legs by 6-24h.
+Interference: same-session cardio + strength produces the worst lower-body hypertrophy outcome (Schumann 2022 meta-analysis, Sports Medicine). Temporal separation of 3-6 hours largely neutralizes the effect; longer is fine but not required. Modality matters more than intensity: impact-eccentric cardio (running) compounds with strength-induced damage, low-impact concentric modalities (cycling, swimming, rowing) don't (Casuso N=18 inflammation comparison). Total cardio duration is the dominant variable, not bioenergetic zone. For early intermediate trainees, interference is a minor practical concern; specialization-driven divergence emerges near genetic ceiling.
 
 ### §10.1 VO2max interpretation
 
@@ -151,7 +153,14 @@ Single-reading caveat: Apple emits VO2max episodically (post-walk, post-run). On
 
 ## §11 Deload
 
-Every 4-6 weeks: reduce volume 40-50%, maintain load. Not optional. Accumulated fatigue without deload increases tendon risk (§7) and masks strength.
+Default cadence: every 4-6 weeks, reduce volume 40-50%, maintain load. Accumulated fatigue without deload increases tendon risk (§7) and masks strength.
+
+Primary evidence for the scheduled-vs-reactive question (Established for hypertrophy equivalence; Moderate for the strength nuance):
+- Pancar et al. 2026 (Sci Rep, N=19, 8 weeks, within-subject): scheduled volume-reduction deloads at weeks 4 and 8 produced equivalent quadriceps hypertrophy to continuous training. Between-condition difference in lateral quad thickness was -0.76 mm (95% CI -2.20 to 0.68, p=0.282).
+- Coleman et al. 2024 (PeerJ, N=39, 9 weeks): a single mid-block total-cessation week produced equivalent hypertrophy but inferior 1RM gains vs continuous training. Hypertrophy is forgiving of brief interruption; max strength gain is not.
+- Lambrianides et al. 2024 (Scand J Med Sci Sports, 12 weeks): muscle force capacity rose ~6% by week 2; Achilles tendon stiffness, modulus, and CSA showed no change at week 8 and only emerged at week 12 (stiffness +13%, modulus +7%, CSA +6%). This is the biological anchor for keeping a calendar ceiling on training-block length independent of performance autoregulation.
+
+Autoregulation alternative (Helms 2023-25, practitioner consensus; Promising): for advanced lifters near MRV with reliable RIR / RPE tracking, reactive deloads triggered by performance decay can replace the calendar cadence. Trigger: failure to hit prescribed loads at the prescribed RIR across 2-3 sessions. Without RIR (§13) or load-velocity profiling, reactive can't be applied honestly; subjective psychological fatigue contaminates the signal. The tracker's `auto_deload_candidates` detector approximates the reactive trigger from volume and bar-speed proxies; it's a hint, not a substitute for RIR.
 
 **Tracker convention:** the user marks deload sessions by writing `Deload Workout` in the Notes column of any row of the session; the styler hoists the marker to the session's TOTAL row Notes. `scripts/read_tracker.py` surfaces `deloads` (list of dates) and `auto_deload_candidates` (Python-detected, unmarked candidates the user might have forgotten to flag). Compute weeks-since-last-deload from `deloads[-1]` and `today`; don't infer deloads from volume patterns directly — the auto-detector already does that conservatively.
 
@@ -331,3 +340,31 @@ Total sleep hours is the headline metric, but two users sleeping 7h/night can ha
 - `sleep_consistency_7d_stdev_h > 1.5h` → -0.4 contribution. The fix is bedtime regularity, not more total hours.
 
 **What NOT to do:** weight a single night's poor depth heavily (1-2 bad nights are normal); recommend "sleep more" when consistency is the actual issue; ask HL users to "track sleep stages better" — that's a source limitation, not a tracking gap.
+
+## §22 Cold Exposure & Hypertrophy
+
+Cold water immersion (CWI) within ~4-6 hours of a resistance session blunts mTOR signaling and satellite cell activation, reducing long-term muscle growth. Roberts et al. (2015) showed an attenuated hypertrophy response across a 12-week trial; subsequent meta-analyses through 2024 (e.g., Piñero et al. 2024, Wang et al. 2024) confirm the effect across cold modalities and body regions. Evidence tier: Established for the acute anabolic blunting; Promising for the magnitude of long-term loss in trained populations.
+
+Practical rules:
+- Ice baths and cold plunges belong on rest days, or separated from strength work by 4-6+ hours.
+- Sauna post-workout does not blunt hypertrophy and may mildly support recovery via heat shock protein induction (see longevity-optimizer `response-triggers.md`, Thermal Stress). Heat can immediately follow lifting; cold cannot.
+- For pure endurance sessions where same-day soreness reduction matters and hypertrophy isn't a goal, the rule inverts.
+
+When the user asks about post-workout recovery and mentions cold, name the trade-off explicitly: less soreness now, less muscle later. Don't bury it.
+
+## §23 Vegan Protein & Leucine
+
+Total daily protein 2.0-2.2 g/kg from varied plant sources matches omnivorous diets for longitudinal hypertrophy when total intake is equated. Evidence tier: Established.
+
+Primary evidence:
+- Hevia-Larraín et al. 2021 (Sports Med, N=38 trained males, 12 weeks, 1.6 g/kg matched): leg lean mass gain vegan +1.2 ± 1.0 kg vs omnivore +1.2 ± 0.8 kg; vastus lateralis CSA +2.2 ± 1.1 cm² vs +2.8 ± 1.0 cm², p > 0.05 across all between-group comparisons.
+- Monteyne et al. 2023 (J Nutr): equivalent daily myofibrillar protein synthesis and leg lean mass in vegans vs omnivores at high protein intake.
+- Pinckaers et al. 2021 (Br J Nutr): wheat protein, milk protein, and wheat-milk blend produce equivalent acute MPS in healthy young males. Casein-style "slow protein" advantage disappears when leucine threshold is met.
+
+Per-meal leucine threshold: ~2.5-3.0 g of leucine to saturate mTORC1. Plant proteins are lower in leucine by mass (wheat ~7%, soy ~8%, whey ~11%), so vegans need a larger absolute protein dose per meal to clear the threshold. Practical rule: 30-40 g plant protein per meal, distributed across 3-5 meals to repeatedly trigger MPS.
+
+Pre-sleep protein: there is no casein analogue in plants, but a pea + wheat blend (or a vital wheat gluten + pea protein shake) approximates slow release and balances limiting amino acids (wheat is low in lysine; pea is low in methionine). Acute MPS rates are equivalent (Pinckaers 2021).
+
+Supplemental free leucine, BCAAs, EAAs, and HMB add no measurable hypertrophy benefit above a well-distributed 2.0-2.2 g/kg vegan diet. Don't recommend them for hypertrophy. (The "acute MPS amplitude" advantage shown in 3-hour isotope-tracer studies normalizes over 24-hour integration when total daily protein exceeds 1.6 g/kg.)
+
+Creatine and vegans: 5 g/day monohydrate amplifies strength and lean-mass gains slightly more in vegans than omnivores due to lower baseline intramuscular phosphocreatine (Solis 2020, Burke 2003). At Nihad's 10 g/day dose, the relevant marker is intramuscular saturation, not further dose escalation. The high creatinine artifact on standard eGFR is real and is addressed in `longevity-optimizer/references/biomarkers.md` Interpretation Notes.

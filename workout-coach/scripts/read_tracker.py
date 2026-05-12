@@ -82,6 +82,7 @@ from extract import (  # noqa: E402
     read_sleep_nights,
     read_swim_laps,
     read_swim_workouts,
+    read_thermal_sessions,
     read_workout_sessions,
 )
 from health import (  # noqa: E402
@@ -114,6 +115,7 @@ from cardio import (  # noqa: E402
 )
 from sleep import sleep_summary  # noqa: E402
 from swim import swim_summary  # noqa: E402
+from thermal import thermal_summary  # noqa: E402
 
 
 def main() -> int:
@@ -173,6 +175,7 @@ def main() -> int:
     swim_workouts_all = read_swim_workouts(person)
     swim_laps_all = read_swim_laps(person)
     sleep_nights_all = read_sleep_nights(person)
+    thermal_sessions_all = read_thermal_sessions(person)
 
     bw_all = read_bodyweight(person)
     bw_latest = (
@@ -242,6 +245,14 @@ def main() -> int:
         swim_workouts_all, swim_laps_all, today_d, profile, max_hr,
     )
     sleep = sleep_summary(sleep_nights_all, today_d)
+    # Sauna frequency target reads from profile.csv (key
+    # ``sauna_target_per_week``) if set; otherwise the default 4×/week.
+    try:
+        sauna_target = int(profile.get("sauna_target_per_week") or 4)
+    except (TypeError, ValueError):
+        sauna_target = 4
+    thermal = thermal_summary(thermal_sessions_all, today_d,
+                              target_per_week=sauna_target)
 
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
@@ -266,6 +277,10 @@ def main() -> int:
         # ---- Sleep summary (only present when XML tracker has nights in
         # the 28-day window; ``_compact`` drops None for HL or no-data). ----
         "sleep_summary": sleep,
+        # ---- Thermal summary (sauna + cold exposure, only present when
+        # at least one manual /log session in the 28-day window;
+        # ``_compact`` drops None when absent). ----
+        "thermal_summary": thermal,
         # ---- Daily activity (NEAT) — all-day movement beyond workouts. ----
         "daily_activity_28d": daily_activity,
         # ---- Recovery + training load (Python-derived, not raw metrics) ----

@@ -25,6 +25,8 @@ CSV under `<Person>/data/`, sibling to the skill repo:
 │   └── YYYY.MM.laps.csv
 ├── sleep/                      # XML source only (or manual /log entries)
 │   └── YYYY.MM.nights.csv      # per-night architecture (6 stages + InBed + Efficiency + segments + clock times)
+├── thermal/                    # manual /log only (sauna + cold exposure)
+│   └── YYYY.MM.sessions.csv    # per-session heat (type/temp/rounds/durations/total) + cold (type/duration/temp)
 └── longevity/                  # personal data; never committed
     ├── profile.md
     ├── state.md

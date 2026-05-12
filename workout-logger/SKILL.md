@@ -51,7 +51,7 @@ line. Don't search the filesystem.
 
 ## Flow
 
-1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log. If the message contains an explicit bodyweight line (see parsing rules), also parse that into a bodyweight entry. If the user includes `CSS test` on the header line of a 400m + 200m TT pair (see parsing rules), parse the two times and assemble a `css_test` payload field. If the message contains an explicit sleep line (see parsing rules), parse that into a `sleep` entry keyed to the session's date.
+1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log. If the message contains an explicit bodyweight line (see parsing rules), also parse that into a bodyweight entry. If the user includes `CSS test` on the header line of a 400m + 200m TT pair (see parsing rules), parse the two times and assemble a `css_test` payload field. If the message contains an explicit sleep line (see parsing rules), parse that into a `sleep` entry keyed to the session's date. If the message contains explicit `sauna` and/or `cold` lines (see parsing rules), parse them into `thermal` entries — a `sauna` + `cold` pair under the same workout header pairs into one entry; standalone lines become their own entry.
 
    **Unknown-exercise gate (REQUIRED before building the payload).** For every distinct exercise name in the parsed rows, run `python3 Skills/shared/exercises_database.py lookup "<name>"`. The script consults both the canonical catalog and the alias table (case-insensitive). Three branches:
 
@@ -74,11 +74,16 @@ line. Don't search the filesystem.
      "sleep": [ {"date": "YYYY-MM-DD", "total_h": 7.5, "deep_h": 1.2, "rem_h": 1.3,
                  "core_h": null, "unspecified_h": null, "awake_h": null,
                  "time_in_bed_h": 8.4, "efficiency_pct": null, "notes": null}, ... ],
+     "thermal": [ {"date": "YYYY-MM-DD", "start": "18:30",
+                   "heat_type": "dry", "heat_temp_c": 85,
+                   "heat_rounds": 2, "heat_round_durations_min": [12, 8],
+                   "cold_type": "cold_air", "cold_duration_sec": 300,
+                   "cold_temp_c": null, "notes": null}, ... ],
      "css_test": {"date": "YYYY-MM-DD", "t400_sec": 450, "t200_sec": 210}
    }
    ```
-   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `sleep` entirely if the user didn't include a sleep line — **never prompt for sleep**. Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually; it comes from the Apple Health import only. Per-night segment metadata (`n_segments`, `first_segment_start`, `last_segment_end`) also can't be entered manually — only the Apple importer populates those.
-3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), and dual-writes any sleep entries into both `<Person>/data/sleep/YYYY.MM.nights.csv` (rich per-night detail) and `<Person>/data/health_metrics.csv` (headline Total/Deep/REM/Time in Bed for the recovery score). Sleep Efficiency is auto-derived inside the upsert when both Total and Time in Bed are present.
+   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `sleep` entirely if the user didn't include a sleep line — **never prompt for sleep**. Omit `thermal` entirely if the user didn't include a `sauna` / `cold` line — **never prompt for thermal**. Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually; it comes from the Apple Health import only. Per-night segment metadata (`n_segments`, `first_segment_start`, `last_segment_end`) also can't be entered manually — only the Apple importer populates those.
+3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), dual-writes any sleep entries into both `<Person>/data/sleep/YYYY.MM.nights.csv` (rich per-night detail) and `<Person>/data/health_metrics.csv` (headline Total/Deep/REM/Time in Bed for the recovery score), and writes any thermal entries to `<Person>/data/thermal/YYYY.MM.sessions.csv` (sparse-merge; `heat_total_min` auto-derived from the per-round durations). Sleep Efficiency is auto-derived inside the upsert when both Total and Time in Bed are present.
 4. **Verify the write succeeded.** Capture the script's stdout and exit code:
    - If the exit code is non-zero, print the exact stderr output and stop. Do not report success.
    - If the exit code is 0 but stdout does not contain the word `Appended`, print the exact stdout and stop with: "Unexpected script output — please check the tracker manually."
@@ -174,6 +179,18 @@ Sleep Efficiency is auto-derived inside the upsert when both `total_h` and `time
 To back-fill many historical sleep nights at once, call `append_workout.py` with a payload of only sleep entries: `{"rows": [], "bodyweight": [], "sleep": [{"date": "...", "total_h": ..., ...}, ...]}`. The logger routes each entry to the right `sleep/YYYY.MM.nights.csv` and mirrors the headline fields into `health_metrics.csv`. Same dedupe-by-date semantics as bodyweight.
 
 XML trackers only — the `sleep/` folder is never populated for HL trackers (HLExport doesn't surface per-stage data). Manual sleep entries on an HL tracker still dual-write (the folder is created on demand), but the coach's stage-aware report sections gate on capabilities so the user-facing output stays coherent.
+
+## Sauna + cold exposure (opt-in)
+
+Sauna and cold exposure are opt-in. The user includes a `sauna` and/or `cold` line in the `/log` message — see `references/parsing-rules.md` for the syntax (plus-shorthand for multi-round saunas, the 5-option cold-type enum, pairing rules). **No automatic prompts, no probing, no `AskUserQuestion`.** Absent ≡ didn't happen.
+
+Thermal entries are written to `<Person>/data/thermal/YYYY.MM.sessions.csv` (manual-/log-only — Apple Health doesn't classify sauna sessions reliably, so there's no importer-side write path). Sparse-merge by `(date, start)`; `Notes` is manual-wins. `heat_total_min` and (when absent) `heat_rounds` are auto-derived from `heat_round_durations_min` inside `upsert_thermal_sessions` so the file is internally consistent.
+
+**Pairing.** A `sauna` line and a `cold` line under the same workout's header become **one row** (one protocol session). Standalone cold (e.g. morning cold shower without sauna) lives in its own row with heat columns blank. Two heat sessions on the same date should use different `start` times to dedupe correctly.
+
+### Bulk-seed (historical thermal import)
+
+To back-fill historical thermal sessions, call `append_workout.py` with a payload of only thermal entries: `{"rows": [], "thermal": [{"date": "...", "heat_type": "dry", "heat_round_durations_min": [12], "heat_temp_c": 85, "cold_type": "cold_air", "cold_duration_sec": 300}, ...]}`. The logger routes each entry to the right `thermal/YYYY.MM.sessions.csv`. Same dedupe-by-`(date, start)` semantics as the per-month swim store.
 
 ## Session-level flags
 

@@ -306,6 +306,17 @@ def read_sleep_nights(person: str) -> list[dict]:
     return _csv_store.read_sleep_nights(person)
 
 
+def read_thermal_sessions(person: str) -> list[dict]:
+    """Return per-session sauna + cold rows from
+    ``thermal/YYYY.MM.sessions.csv``.
+
+    Pass-through to ``csv_store.read_thermal_sessions``. Empty list
+    when the thermal folder is absent (no manual /log sauna / cold
+    entries yet).
+    """
+    return _csv_store.read_thermal_sessions(person)
+
+
 def read_workout_sessions(person: str) -> list[dict]:
     """Return Workout Sessions rows from the per-person CSV, ASC by date+start.
 

@@ -17,11 +17,13 @@ from person_paths import (
     ensure_data_dir,
     ensure_sleep_dir,
     ensure_swimming_dir,
+    ensure_thermal_dir,
     health_metrics_csv,
     profile_csv,
     sleep_nights_csv,
     swim_laps_csv,
     swim_workouts_csv,
+    thermal_sessions_csv,
     workout_sessions_csv,
 )
 
@@ -1036,4 +1038,256 @@ def upsert_sleep_nights(person: str, entries: Iterable[dict]) -> list[str]:
         summaries.append(f"  {ym}: {written} written / {updated} updated")
 
     return [f"Sleep Nights: {total_written} nights written / "
+            f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries
+
+
+# ============================================================ Thermal (sauna + cold)
+# Per-session row capturing one heat-and/or-cold protocol session. Manual
+# /log only — Apple Health doesn't reliably surface sauna or cold-exposure
+# sessions. One row can be heat-only (sauna without cold), cold-only
+# (e.g. standalone morning cold shower), or paired (sauna → cold exposure).
+# Mirrors the per-month-CSV pattern of ``monthly/``, ``swimming/``, and
+# ``sleep/`` for scalability.
+#
+# Multi-round saunas ("2 saunas after each other") are stored as a single
+# row with ``Heat Round Durations (min)`` = comma-separated per-round
+# minutes (e.g. ``"12,8"``). ``Heat Total (min)`` is the sum, written on
+# every upsert for cheap reads.
+THERMAL_SESSIONS_HEADERS = [
+    "Date", "Start",
+    "Heat Type", "Heat Temp (°C)", "Heat Rounds",
+    "Heat Round Durations (min)", "Heat Total (min)",
+    "Cold Type", "Cold Duration (sec)", "Cold Temp (°C)",
+    "Notes",
+]
+
+THERMAL_SESSIONS_FIELDS = [
+    "start",
+    "heat_type", "heat_temp_c", "heat_rounds",
+    "heat_round_durations_min", "heat_total_min",
+    "cold_type", "cold_duration_sec", "cold_temp_c",
+]
+
+# Enum constants. Kept here so the parser and the coach can import a
+# single source of truth and refuse unknown values.
+HEAT_TYPES = {"dry", "steam", "infrared", "banya", "none"}
+COLD_TYPES = {"none", "cold_air", "cold_shower", "cold_plunge", "cold_water"}
+
+
+def _format_round_durations(value) -> str | None:
+    """Serialize the round-durations list to the CSV cell string.
+
+    Accepts a list of numbers (``[12, 8]``), a string already in
+    canonical form (``"12,8"``), or None. Returns the CSV cell value.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        return s if s else None
+    if isinstance(value, (list, tuple)):
+        parts = [str(int(x)) if float(x).is_integer() else str(x) for x in value]
+        return ",".join(parts) if parts else None
+    return None
+
+
+def _parse_round_durations(cell) -> list[float] | None:
+    """Inverse of ``_format_round_durations``: cell string → list of floats."""
+    if cell is None or cell == "":
+        return None
+    if isinstance(cell, (list, tuple)):
+        return [float(x) for x in cell]
+    out: list[float] = []
+    for part in str(cell).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(float(part))
+        except ValueError:
+            return None
+    return out or None
+
+
+def _sum_round_durations(durations) -> float | None:
+    """Return the sum of round durations as the Heat Total cell value."""
+    parsed = _parse_round_durations(durations)
+    if not parsed:
+        return None
+    total = sum(parsed)
+    return round(total, 2) if total else None
+
+
+def read_thermal_sessions(person: str) -> list[dict]:
+    """Return per-session thermal rows across all per-month CSVs.
+
+    Sorted DESC by ``(date, start)``. Each dict has ``date`` plus the
+    fields in ``THERMAL_SESSIONS_FIELDS`` plus ``notes``. Empty when
+    the ``thermal/`` folder is absent.
+    """
+    from person_paths import list_thermal_session_months
+    out: list[dict] = []
+    for ym in list_thermal_session_months(person):
+        path = thermal_sessions_csv(person, ym)
+        header, rows = _read_csv_rows(path)
+        if not header:
+            continue
+        for row in rows:
+            d = _date_str(row[0]) if row else None
+            if d is None:
+                continue
+            rec: dict = {"date": d}
+            for i, key in enumerate(THERMAL_SESSIONS_FIELDS, start=1):
+                v = row[i] if len(row) > i else None
+                if key in ("start", "heat_type", "cold_type"):
+                    rec[key] = v if v not in (None, "") else None
+                elif key == "heat_round_durations_min":
+                    rec[key] = _parse_round_durations(v)
+                else:
+                    rec[key] = _parse_value(v)
+            notes_idx = len(THERMAL_SESSIONS_HEADERS) - 1
+            notes = row[notes_idx] if len(row) > notes_idx else None
+            rec["notes"] = notes if notes else None
+            out.append(rec)
+    out.sort(key=lambda r: (r["date"], str(r.get("start") or "")), reverse=True)
+    return out
+
+
+def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
+    """Sparse-merge per-session thermal rows into the right
+    ``<person>/data/thermal/YYYY.MM.sessions.csv``.
+
+    Dedupe key = ``(date, start)`` within the month. Notes is manual-wins.
+    ``heat_total_min`` is auto-derived from
+    ``heat_round_durations_min`` on every write (whether the caller
+    supplied it or not) so the file is internally consistent.
+
+    Validates ``heat_type`` against ``HEAT_TYPES`` and ``cold_type``
+    against ``COLD_TYPES``; unknown values are silently dropped to None
+    (parser is the gate; the store is forgiving on read but strict on
+    write).
+    """
+    entries = list(entries or [])
+    if not entries:
+        return ["Thermal Sessions: 0 sessions written / 0 updated"]
+
+    by_month_entries: dict[str, list[dict]] = {}
+    for e in entries:
+        d = _date_str(e.get("date"))
+        if not d:
+            continue
+        by_month_entries.setdefault(_date_to_year_month(d), []).append(e)
+
+    total_written = 0
+    total_updated = 0
+    summaries: list[str] = []
+    for ym, month_entries in sorted(by_month_entries.items()):
+        path = thermal_sessions_csv(person, ym)
+        header, raw_rows = _read_csv_rows(path)
+        existing: list[dict] = []
+        for row in raw_rows if header else []:
+            d = _date_str(row[0]) if row else None
+            if d is None:
+                continue
+            rec: dict = {"date": d}
+            for i, key in enumerate(THERMAL_SESSIONS_FIELDS, start=1):
+                v = row[i] if len(row) > i else None
+                if key in ("start", "heat_type", "cold_type"):
+                    rec[key] = v if v not in (None, "") else None
+                elif key == "heat_round_durations_min":
+                    rec[key] = _parse_round_durations(v)
+                else:
+                    rec[key] = _parse_value(v)
+            notes_idx = len(THERMAL_SESSIONS_HEADERS) - 1
+            notes = row[notes_idx] if len(row) > notes_idx else None
+            rec["notes"] = notes if notes else None
+            existing.append(rec)
+
+        by_key: dict[tuple, dict] = {
+            (r["date"], r.get("start") or ""): r for r in existing
+        }
+
+        written = 0
+        updated = 0
+        for e in month_entries:
+            d = _date_str(e.get("date"))
+            if not d:
+                continue
+            # Sanitize enum values; unknown → None (silently dropped).
+            ht = e.get("heat_type")
+            if ht is not None and ht not in HEAT_TYPES:
+                ht = None
+            ct = e.get("cold_type")
+            if ct is not None and ct not in COLD_TYPES:
+                ct = None
+
+            durations = _parse_round_durations(e.get("heat_round_durations_min"))
+            heat_total = _sum_round_durations(durations) if durations else (
+                _parse_value(e.get("heat_total_min"))
+            )
+
+            sanitized = {
+                "start":                   e.get("start"),
+                "heat_type":               ht,
+                "heat_temp_c":             e.get("heat_temp_c"),
+                "heat_rounds":             (
+                    e.get("heat_rounds")
+                    if e.get("heat_rounds") is not None
+                    else (len(durations) if durations else None)
+                ),
+                "heat_round_durations_min": durations,
+                "heat_total_min":          heat_total,
+                "cold_type":               ct,
+                "cold_duration_sec":       e.get("cold_duration_sec"),
+                "cold_temp_c":             e.get("cold_temp_c"),
+            }
+
+            key = (d, sanitized["start"] or "")
+            cur = by_key.get(key)
+            if cur is None:
+                new_record = {"date": d, "notes": e.get("notes")}
+                for k in THERMAL_SESSIONS_FIELDS:
+                    new_record[k] = sanitized.get(k)
+                by_key[key] = new_record
+                written += 1
+                continue
+            changed = False
+            for k in THERMAL_SESSIONS_FIELDS:
+                v = sanitized.get(k)
+                if v is None:
+                    continue
+                if cur.get(k) != v:
+                    cur[k] = v
+                    changed = True
+            if e.get("notes") and not cur.get("notes"):
+                cur["notes"] = e["notes"]
+                changed = True
+            # Recompute heat_total from the now-merged durations so the
+            # invariant ``heat_total_min == sum(heat_round_durations_min)``
+            # always holds on write.
+            derived = _sum_round_durations(cur.get("heat_round_durations_min"))
+            if derived is not None and cur.get("heat_total_min") != derived:
+                cur["heat_total_min"] = derived
+                changed = True
+            if changed:
+                updated += 1
+
+        ensure_thermal_dir(person)
+        rows = []
+        for k in sorted(by_key.keys(), reverse=True):
+            rec = by_key[k]
+            row = [rec["date"]]
+            for field in THERMAL_SESSIONS_FIELDS:
+                v = rec.get(field)
+                if field == "heat_round_durations_min":
+                    v = _format_round_durations(v)
+                row.append(v)
+            row.append(rec.get("notes"))
+            rows.append(row)
+        _write_csv(thermal_sessions_csv(person, ym), THERMAL_SESSIONS_HEADERS, rows)
+        total_written += written
+        total_updated += updated
+        summaries.append(f"  {ym}: {written} written / {updated} updated")
+
+    return [f"Thermal Sessions: {total_written} sessions written / "
             f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries

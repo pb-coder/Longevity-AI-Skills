@@ -41,6 +41,11 @@ SOURCE_CAPABILITIES = {
                                       # first/last segment clock times)
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
+        # Thermal (sauna + cold exposure) is manual-/log-only, not
+        # source-dependent. The capability is True everywhere; the coach
+        # gates the report section on ``thermal_summary`` presence
+        # (data-presence gating, like ``sleep_summary`` and ``swim_summary``).
+        "thermal_log":        True,
     },
     "hl_export": {
         "hrv":                False,
@@ -52,6 +57,7 @@ SOURCE_CAPABILITIES = {
         "sleep_nights":       False,
         "exercise_min_daily": False,
         "per_workout_hr_strength": False,
+        "thermal_log":        True,
     },
 }
 

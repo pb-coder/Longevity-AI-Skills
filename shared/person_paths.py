@@ -17,10 +17,12 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │       ├── swimming/                  # XML-only; absent on HL trackers
     │       │   ├── YYYY.MM.workouts.csv
     │       │   └── YYYY.MM.laps.csv
-    │       └── sleep/                     # XML-only; absent on HL trackers
-    │           └── YYYY.MM.nights.csv
+    │       ├── sleep/                     # XML-only; absent on HL trackers
+    │       │   └── YYYY.MM.nights.csv
+    │       └── thermal/                   # manual /log only; absent until first sauna / cold log
+    │           └── YYYY.MM.sessions.csv
     ├── Fabian/
-    │   └── (same; no swimming/ or sleep/ for HL)
+    │   └── (same; no swimming/, sleep/, or thermal/ until populated)
     ├── Skills/
     │   └── shared/                        ← this file
     ├── Export.zip / health_export_*.txt   (transient; archived on success)
@@ -180,6 +182,36 @@ def list_sleep_night_months(person: str) -> list[str]:
         p.name[:-len(".nights.csv")]
         for p in d.glob("*.nights.csv")
         if _re.match(r"^\d{4}\.\d{2}\.nights\.csv$", p.name)
+    )
+
+
+def thermal_sessions_csv(person: str, year_month: str) -> Path:
+    """Per-month thermal (sauna + cold exposure) sessions CSV.
+
+    ``<person>/data/thermal/YYYY.MM.sessions.csv``. One row per heat
+    and/or cold protocol session. Manual-/log-only — Apple Health
+    doesn't expose sauna or cold-exposure sessions reliably.
+    """
+    return data_dir(person) / "thermal" / f"{year_month}.sessions.csv"
+
+
+def ensure_thermal_dir(person: str) -> Path:
+    """Create ``<person>/data/thermal/`` if missing and return it."""
+    d = data_dir(person) / "thermal"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def list_thermal_session_months(person: str) -> list[str]:
+    """Return ``YYYY.MM`` keys for which a per-month thermal-sessions CSV exists, ASC."""
+    d = data_dir(person) / "thermal"
+    if not d.exists():
+        return []
+    import re as _re
+    return sorted(
+        p.name[:-len(".sessions.csv")]
+        for p in d.glob("*.sessions.csv")
+        if _re.match(r"^\d{4}\.\d{2}\.sessions\.csv$", p.name)
     )
 
 

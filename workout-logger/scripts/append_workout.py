@@ -15,12 +15,19 @@ Input JSON is either a bare list of row dicts (legacy) or a wrapper object:
                   "deep_h": 1.2, "rem_h": 1.3, "core_h": null,
                   "unspecified_h": null, "awake_h": null,
                   "time_in_bed_h": 8.4, "efficiency_pct": null,
-                  "notes": null}, ... ]
+                  "notes": null}, ... ],
+      "thermal": [ {"date": "YYYY-MM-DD", "start": "18:30",
+                    "heat_type": "dry", "heat_temp_c": 85,
+                    "heat_rounds": 2,
+                    "heat_round_durations_min": [12, 8],
+                    "cold_type": "cold_air",
+                    "cold_duration_sec": 300, "cold_temp_c": null,
+                    "notes": null}, ... ]
     }
 
-The wrapper form allows /log to capture the user's morning weight and sleep
-alongside the workout. ``rows``, ``bodyweight``, and ``sleep`` are all
-optional within the wrapper.
+The wrapper form allows /log to capture the user's morning weight, sleep,
+and sauna / cold exposure alongside the workout. ``rows``, ``bodyweight``,
+``sleep``, and ``thermal`` are all optional within the wrapper.
 
 - Bodyweight entries are upserted into the per-person Health Metrics CSV
   (``<person>/data/health_metrics.csv`` col ``Bodyweight (kg)``).
@@ -30,6 +37,13 @@ optional within the wrapper.
   ``health_metrics.csv`` so the recovery score path picks them up
   without joining files. Both writes are sparse-merge — partial input
   is fine, missing keys preserve whatever was there before.
+- Thermal entries (sauna + cold exposure) are written to
+  ``<person>/data/thermal/YYYY.MM.sessions.csv`` via sparse-merge.
+  No mirror to health_metrics — heat / cold is per-event, not a
+  daily-snapshot metric. Multi-round saunas live on one row (per-round
+  minutes in ``heat_round_durations_min``); ``heat_total_min`` is
+  auto-derived inside the upsert. **Never prompted** — if the /log
+  message has no ``sauna`` or ``cold`` line, no row is written.
 
 Row dict schema:
     {
@@ -75,6 +89,7 @@ from monthly_csv import (  # noqa: E402
 from csv_store import (  # noqa: E402
     upsert_health_metrics,
     upsert_sleep_nights,
+    upsert_thermal_sessions,
     write_profile,
 )
 from person_paths import monthly_csv as monthly_csv_path  # noqa: E402
@@ -241,6 +256,65 @@ def upsert_sleep(person: str, entries: list[dict]) -> list[str]:
     return out
 
 
+def upsert_thermal(person: str, entries: list[dict]) -> list[str]:
+    """Forward parsed sauna / cold-exposure entries to the thermal store.
+
+    Each entry has shape:
+
+        {
+          "date": "2026-05-12",
+          "start": "18:30",
+          "heat_type": "dry" | "steam" | "infrared" | "banya" | "none",
+          "heat_temp_c": 85,
+          "heat_rounds": 2,                          # optional; derived from durations
+          "heat_round_durations_min": [12, 8],       # per-round minutes
+          "cold_type": "none" | "cold_air" | "cold_shower" | "cold_plunge" | "cold_water",
+          "cold_duration_sec": 300,
+          "cold_temp_c": null,
+          "notes": null
+        }
+
+    Sparse-merge by ``(date, start)`` within the matching per-month CSV.
+    ``heat_total_min`` and (if absent) ``heat_rounds`` are derived from
+    ``heat_round_durations_min`` inside ``upsert_thermal_sessions``. No
+    mirror to health_metrics — heat / cold is a per-event session, not a
+    daily-snapshot metric.
+    """
+    if not entries:
+        return []
+    summary_parts: list[str] = []
+    for e in entries:
+        d = str(e.get("date") or "")[:10]
+        if not d:
+            continue
+        bits: list[str] = []
+        if e.get("heat_type") and e.get("heat_type") != "none":
+            durations = e.get("heat_round_durations_min") or []
+            if isinstance(durations, list) and durations:
+                total = sum(durations)
+                rounds = len(durations)
+                if rounds > 1:
+                    bits.append(f"{e['heat_type']} {'+'.join(str(int(x)) if float(x).is_integer() else str(x) for x in durations)}min")
+                else:
+                    bits.append(f"{e['heat_type']} {int(total) if float(total).is_integer() else total}min")
+            elif e.get("heat_total_min") is not None:
+                t = e["heat_total_min"]
+                bits.append(f"{e['heat_type']} {int(t) if float(t).is_integer() else t}min")
+            if e.get("heat_temp_c") is not None:
+                bits[-1] += f"@{e['heat_temp_c']}C"
+        if e.get("cold_type") and e.get("cold_type") != "none":
+            seg = e["cold_type"].replace("cold_", "")
+            if e.get("cold_duration_sec") is not None:
+                seg += f" {e['cold_duration_sec']}s"
+            bits.append(seg)
+        summary_parts.append(f"{d}({' / '.join(bits) or 'no heat/cold'})")
+    out = upsert_thermal_sessions(person, entries)
+    if summary_parts:
+        out.append(f"Thermal: forwarded {len(summary_parts)} session(s) "
+                   f"({', '.join(summary_parts)})")
+    return out
+
+
 def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
     """Mirror manual bodyweight entries into the Health Metrics CSV.
 
@@ -269,13 +343,14 @@ def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
 
 def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
                   css_test: dict | None = None,
-                  sleep: list[dict] | None = None) -> list[str]:
-    """Apply rows + bodyweight + sleep entries + optional CSS test.
+                  sleep: list[dict] | None = None,
+                  thermal: list[dict] | None = None) -> list[str]:
+    """Apply rows + bodyweight + sleep + thermal entries + optional CSS test.
 
     Routes per-set rows to the matching ``YYYY.MM.csv`` under
     ``<person>/data/monthly/``, then canonicalizes each touched month
     (sort, recompute Volume / Pace / TOTAL rows). Bodyweight, sleep,
-    and css_test flow through the existing CSV helpers.
+    thermal, and css_test flow through the existing CSV helpers.
     """
     status: list[str] = []
 
@@ -303,22 +378,32 @@ def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
     status.extend(upsert_bodyweight(person, bodyweight))
     # Sleep dual-writes to sleep/YYYY.MM.nights.csv + health_metrics.csv.
     status.extend(upsert_sleep(person, sleep or []))
+    # Thermal (sauna + cold) writes to thermal/YYYY.MM.sessions.csv.
+    status.extend(upsert_thermal(person, thermal or []))
     # CSS test writes to profile.csv. Independent of rows / bodyweight.
     status.extend(apply_css_test(person, css_test))
     return status
 
 
-def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list[dict]]:
-    """Return (rows, bodyweight_entries, css_test, sleep_entries).
+def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list[dict], list[dict]]:
+    """Return (rows, bodyweight_entries, css_test, sleep_entries, thermal_entries).
 
     Accepts bare list (legacy — rows only) or wrapper dict. Wrapper
-    dict accepts optional ``bodyweight``, ``css_test``, and ``sleep``
-    keys; all are independent.
+    dict accepts optional ``bodyweight``, ``css_test``, ``sleep``, and
+    ``thermal`` keys; all are independent.
 
     ``sleep`` entries each require ``date``; all other keys (``total_h``,
     ``deep_h``, ``rem_h``, ``core_h``, ``unspecified_h``, ``awake_h``,
     ``time_in_bed_h``, ``efficiency_pct``, ``notes``) are optional —
     sparse-merge applies.
+
+    ``thermal`` entries each require ``date``; everything else
+    (``start``, ``heat_type``, ``heat_temp_c``, ``heat_rounds``,
+    ``heat_round_durations_min``, ``cold_type``, ``cold_duration_sec``,
+    ``cold_temp_c``, ``notes``) is optional. At least one of
+    ``heat_type`` (non-``none``) or ``cold_type`` (non-``none``) should
+    be present for the entry to be meaningful, but no schema-level
+    enforcement here — sparse-merge accepts whatever is given.
     """
     if source == "-":
         data = json.load(sys.stdin)
@@ -327,6 +412,7 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
 
     css_test: dict | None = None
     sleep_entries: list[dict] = []
+    thermal_entries: list[dict] = []
     if isinstance(data, list):
         rows = data
         bw = []
@@ -342,6 +428,10 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
         if isinstance(sleep_raw, dict):
             sleep_raw = [sleep_raw]
         sleep_entries = sleep_raw
+        thermal_raw = data.get("thermal", []) or []
+        if isinstance(thermal_raw, dict):
+            thermal_raw = [thermal_raw]
+        thermal_entries = thermal_raw
     else:
         raise ValueError("payload must be a list of rows or a dict wrapper")
 
@@ -361,8 +451,11 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
     for e in sleep_entries:
         if "date" not in e:
             raise ValueError(f"sleep entry missing date: {e!r}")
+    for e in thermal_entries:
+        if "date" not in e:
+            raise ValueError(f"thermal entry missing date: {e!r}")
 
-    return rows, bw, css_test, sleep_entries
+    return rows, bw, css_test, sleep_entries, thermal_entries
 
 
 def main() -> int:
@@ -374,13 +467,14 @@ def main() -> int:
                     help="Path to payload JSON, or '-' to read from stdin.")
     args = ap.parse_args()
 
-    rows, bodyweight, css_test, sleep_entries = load_payload(args.payload)
-    if not rows and not bodyweight and not css_test and not sleep_entries:
-        print("No rows, bodyweight, sleep, or css_test entries to write.")
+    rows, bodyweight, css_test, sleep_entries, thermal_entries = load_payload(args.payload)
+    if not rows and not bodyweight and not css_test and not sleep_entries and not thermal_entries:
+        print("No rows, bodyweight, sleep, thermal, or css_test entries to write.")
         return 0
     try:
         for line in write_payload(args.person, rows, bodyweight, css_test,
-                                  sleep=sleep_entries):
+                                  sleep=sleep_entries,
+                                  thermal=thermal_entries):
             print(line)
     except FileNotFoundError as e:
         print(f"ERROR: {e}", file=sys.stderr)

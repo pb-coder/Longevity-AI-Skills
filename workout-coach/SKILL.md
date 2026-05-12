@@ -36,7 +36,7 @@ Pass the resolved name via `--person <Name>`. The sidecar `workout_plan.md` foll
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
 2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis. When `swim_summary` is present in the JSON, also read `references/swim-coaching.md` for SWOLF / SPL / CSS-zone interpretation, retest cadence, and what NOT to say about swim form.
-3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the per-person CSVs — `<Person>/data/monthly/YYYY.MM.csv` (per-month workout data), `health_metrics.csv`, `workout_sessions.csv`, `profile.csv`, on XML trackers with recent swims also `swimming/YYYY.MM.{workouts,laps}.csv`, and on XML trackers with recent sleep data also `sleep/YYYY.MM.nights.csv` — and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `swim_summary` (only present when there are swims in the last 28 days), `sleep_summary` (only present when there are sleep nights in the last 28 days — all 6 stage means, efficiency mean + trend, fragmentation, schedule consistency, outlier nights), `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the data folder isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
+3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the per-person CSVs — `<Person>/data/monthly/YYYY.MM.csv` (per-month workout data), `health_metrics.csv`, `workout_sessions.csv`, `profile.csv`, on XML trackers with recent swims also `swimming/YYYY.MM.{workouts,laps}.csv`, on XML trackers with recent sleep data also `sleep/YYYY.MM.nights.csv`, and on any tracker with manual sauna / cold logs also `thermal/YYYY.MM.sessions.csv` — and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `swim_summary` (only present when there are swims in the last 28 days), `sleep_summary` (only present when there are sleep nights in the last 28 days — all 6 stage means, efficiency mean + trend, fragmentation, schedule consistency, outlier nights), `thermal_summary` (only present when there are sauna / cold sessions in the last 28 days — heat dose, HSP-threshold adherence, cold dominant type), `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the data folder isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
    **Output is compact (no indentation) by default** — saves ~20% of tokens vs pretty-printed. Pass `--pretty` for human inspection.
 
@@ -68,12 +68,14 @@ The file structure:
 ### Recovery state
 ### Cardio check
 ### Sleep                               <!-- only when sleep_summary is present in the JSON -->
+### Heat / Cold exposure                <!-- only when thermal_summary is present in the JSON -->
 ### Swim                                <!-- only when swim_summary is present in the JSON -->
 
 ## Plan
 
 ### Workout 1: <TYPE>
 **Date:** ___________
+**Sauna / cold:** ___________
 
 <quick list — plain bullets, one line per set>
 
@@ -83,6 +85,7 @@ The file structure:
 
 ### Workout 2: <TYPE>
 **Date:** ___________
+**Sauna / cold:** ___________
 ...
 
 ### Cardio 1: Zone 2 (optional, only if behind §10 target)
@@ -105,7 +108,7 @@ What the JSON contains:
 
 **Source + capabilities (read first to gate sections):**
 - `data_source`: `xml` (Apple's zipped XML — Nihad) or `hl_export` (HLExport text — Fabian). Trust this string; don't override based on populated fields.
-- `capabilities`: per-source feature map (`hrv`, `wrist_temp`, `resting_hr_daily`, `walking_hr`, `sleep_stages`, `sleep_breath_dist`, `sleep_nights`, `exercise_min_daily`, `per_workout_hr_strength`). **False = structurally unsupported.** Gate report sections on this, not on null fields. `per_workout_hr_strength` only describes strength-session HR — HL trackers still carry per-workout HR for cardio rows (hikes / runs), so cardio TRIMP and intensity_pct render normally on those. `sleep_nights` indicates the dedicated per-night CSV store is available (XML trackers + any tracker with manually-logged sleep) — when True, expect a `sleep_summary` block with the full sleep architecture; when False, sleep details are limited to the headline Total/Deep/REM on `health_metrics_weekly`.
+- `capabilities`: per-source feature map (`hrv`, `wrist_temp`, `resting_hr_daily`, `walking_hr`, `sleep_stages`, `sleep_breath_dist`, `sleep_nights`, `exercise_min_daily`, `per_workout_hr_strength`, `thermal_log`). **False = structurally unsupported.** Gate report sections on this, not on null fields. `per_workout_hr_strength` only describes strength-session HR — HL trackers still carry per-workout HR for cardio rows (hikes / runs), so cardio TRIMP and intensity_pct render normally on those. `sleep_nights` indicates the dedicated per-night CSV store is available (XML trackers + any tracker with manually-logged sleep) — when True, expect a `sleep_summary` block with the full sleep architecture; when False, sleep details are limited to the headline Total/Deep/REM on `health_metrics_weekly`. `thermal_log` is always True — sauna + cold exposure are manual-/log-only, not source-dependent — but the actual `thermal_summary` block is gated on data-presence (rendered only when ≥1 session was logged in the last 28d).
 - `auto_cardio_enabled`: bool. True = Apple-recorded runs / hikes / HIIT auto-flow into the monthly sheets.
 - `today`: ISO date.
 - `estimated_max_hr`, `estimated_rest_hr`: derived once at the top. `max_hr` is the largest observed Apple max-HR (or 208 − 0.7×age fallback for HL). `rest_hr` is the 28-day mean of `resting_hr` (or 60 fallback for HL). Used by all HR-zone / TRIMP / load-band math below.
@@ -150,6 +153,9 @@ What the JSON contains:
 
 **Sleep architecture (XML trackers only, 28-day window):**
 - `sleep_summary`: dedicated per-night analysis. Key absent when no nights in window (HL trackers, or XML trackers with no recent sleep data). Shape: `{n_nights_28d, means_h: {core, deep, rem, unspecified, awake, total, time_in_bed}, sleep_efficiency_pct: {mean, trend_per_week}, waso_h_mean, fragmentation: {n_segments_mean, n_segments_trend_per_week}, schedule_consistency: {bedtime_clock_stdev_min, waketime_clock_stdev_min}, outliers: [{date, reason, efficiency_pct, awake_h}, …]}`. Schedule stdevs are **circular** statistics (handle the midnight wraparound), so a 23:50 / 00:10 bedtime pair reports a 20-min stdev, not 23h. `outliers` lists last-14-day nights with efficiency<80% or WASO≥1h. Drives the `### Sleep` report section.
+
+**Heat + cold exposure (manual /log, 28-day window):**
+- `thermal_summary`: dedicated per-session analysis. Key absent when no manual sauna / cold sessions were logged in the last 28d. Shape: `{n_sessions_28d, heat: {n_sessions_28d, n_sessions_per_week, total_minutes_28d, minutes_per_week, minutes_above_hsp_threshold_per_week, type_distribution, multi_round_sessions_pct, avg_temp_c, avg_session_minutes}, cold: {n_sessions_28d, n_sessions_per_week, type_distribution, paired_with_heat_pct, dominant_type}, adherence: {heat_target_per_week, heat_actual_per_week, heat_status, duration_status}}`. The `heat` and `cold` sub-blocks are independent — a row with heat-only contributes to `heat` only; a row with cold-only contributes to `cold` only. `adherence.heat_status` is `below-target` / `on-target` / `above-target` against `profile.csv`'s `sauna_target_per_week` (default 4×/wk). `adherence.duration_status` is `below-HSP-threshold` / `in-band` / `above-band` against the Laukkanen + mechanistic-HSP consensus band (≥80°C AND ≥20min per session). Drives the `### Heat / Cold exposure` report section.
 
 **Debug deep-dive (off by default):**
 - `rows`: flat per-set list. Pass `--include-rows`. Use only for cross-sectional debugging the pre-aggregated keys can't answer.
@@ -456,6 +462,31 @@ Example (filled from a real `sleep_summary` with n_nights_28d=24):
 - Flag: 2 nights with efficiency<80% in the last 14d → look at pre-bed routine.
 ```
 
+### Heat / Cold exposure
+
+**REQUIRED when `thermal_summary` is in the JSON.** Skip the section entirely when the key is absent — that means no sauna / cold sessions logged in the last 28 days (`/log` is the only writer; Apple Health doesn't surface them). Silence is correct; never say "no sauna data" as a finding.
+
+Hard template (3–5 lines, plain bullets):
+
+- **Heat last 28d.** `{heat.n_sessions_28d} sessions ({heat.n_sessions_per_week}/wk, target {adherence.heat_target_per_week}). Avg {heat.avg_session_minutes}min @ ~{heat.avg_temp_c}°C, type {dominant heat type}.` Pull from `thermal_summary.heat`; cite `adherence.heat_status` ("below-target" / "on-target" / "above-target") as a one-word verdict.
+- **HSP-induction band.** `{heat.minutes_above_hsp_threshold_per_week} min/wk at ≥80°C ≥20min vs ~80 min/wk target — {adherence.duration_status}.` The threshold (≥80°C AND ≥20min per session) is the Laukkanen + mechanistic-HSP consensus band; below either bound is `below-HSP-threshold`. If `duration_status == "below-HSP-threshold"` AND `heat_status` is on/above target, the call is: "frequency is good, push session duration to ~20min if you want the HSP-induction benefit." If both are below, the call is: "frequency first, duration second."
+- **Cold.** `{cold.n_sessions_28d} sessions ({cold.n_sessions_per_week}/wk). Dominant: {cold.dominant_type}. Paired with sauna {cold.paired_with_heat_pct}% of the time.` Skip the bullet entirely when `cold` is null. Don't lecture about cold-shower bro-science; the metric is "did the protocol happen," not "is cold beneficial."
+- **Multi-round usage.** Optional. If `heat.multi_round_sessions_pct >= 30`, name it: "{pct}% of sessions are multi-round." Useful signal that the user is doing Finnish-style contrast cycles rather than single-pass exposure. Skip otherwise.
+
+Source-honesty rules:
+- Multi-round saunas are counted as ONE session, not multiple. A 12+8min two-round day = one session, 20 total heat minutes.
+- `cold_air` (sitting outside post-sauna) is a real protocol — don't claim it's "not cold enough" without a temp datapoint. If `cold_temp_c` is set, you can comment.
+- Adherence target defaults to 4×/wk (mid-band of the user's interventions.md 4-6 range). User can override via `profile.csv` `sauna_target_per_week`. Don't claim a higher target unless the JSON shows it.
+- Never moralise about hot-yoga / steam / banya vs dry as "better" — the dose math is the same.
+
+Example (filled from a real `thermal_summary`):
+
+```
+- Heat last 28d: 18 sessions (4.5/wk, target 4) — on-target. Avg 9min @ ~85°C dry.
+- HSP-induction band: 0 min/wk ≥80°C ≥20min — below-HSP-threshold. Frequency is good; push session duration to ~20min for the HSP benefit.
+- Cold: 16 sessions (4.0/wk). Dominant: cold_air. Paired with sauna 88% of the time.
+```
+
 ### Swim
 
 **REQUIRED when `swim_summary` is in the JSON.** Skip the section entirely when the key is absent — that means HL trackers (no lap data) or no swims in the last 28 days, and silence is correct. Read `references/swim-coaching.md` for SWOLF / SPL / CSS interpretation, retest cadence, and what NOT to say about swim form.
@@ -548,7 +579,7 @@ For each workout, output the quick list immediately followed by the table for th
 
 Correct order: Quick List WO1 → Table WO1 → Quick List WO2 → Table WO2 → etc.
 
-Each workout heading is immediately followed by `**Date:** ___________` on its own line, then a blank line, then the quick list. The user fills in the date when they actually train so the session can be logged later without guessing. This applies to every strength workout — cardio sections do not need a date line.
+Each workout heading is immediately followed by `**Date:** ___________` on its own line, then `**Sauna / cold:** ___________` on its own line, then a blank line, then the quick list. The user fills in the date when they actually train (so the session can be logged later without guessing) and the sauna/cold slot if they did a post-workout heat / cold protocol. The sauna/cold slot is free-text — the user can write `sauna 12+8min 85C / cold 5min air`, `sauna 10min 85C`, `skipped`, or leave it blank. `/log` parses it (or its absence) per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)`). Both lines apply to every strength workout — cardio sections do not need them.
 
 **Quick list** — what the user reads on their phone. One line per set, plain markdown bullets. No code fences. Format:
 - Bodyweight or single-rep: `Exercise Name : reps` (e.g., `Plank : 45s hold`)
@@ -684,6 +715,7 @@ Source-honesty rules:
 | Citing `non_interval_minutes` as Zone-2 minutes | Cardio check section reports `cardio_last_28d.non_interval_minutes` (which is just "cardio time that wasn't intervals") as if it were a real Z2 measurement — a 3h Z1 hike inflates the number | Read `cardio_hr_zones_28d.z2` for true Zone-2 minutes (HRR-based). Use `cardio_last_28d.non_interval_minutes` only as a fallback when `cardio_hr_zones_28d` is empty (no avg_hr on cardio sessions). |
 | Skipping the Swim section when `swim_summary` is present | Fully-populated swim data emits zero coach output; the user sees a polished report that pretends they don't swim | Gate on `swim_summary` key presence. Write the REQUIRED 3–5 line block per `references/swim-coaching.md` (see `### Swim` in Phase 1). Skip cleanly only when the key is absent (HL trackers, or no swims in 28 days). |
 | Skipping the Sleep section when `sleep_summary` is present | Fully-populated sleep architecture (all 6 stages, efficiency, fragmentation, schedule stdev) gets zero coach output; the user only sees the headline Sleep total/Deep/REM lines under `### Recovery state` and misses the efficiency / schedule story | Gate on `sleep_summary` key presence. Write the REQUIRED 3–5 line block per the `### Sleep` template in Phase 1. Skip cleanly only when the key is absent (HL trackers, or no nights in 28 days). |
+| Skipping the Heat / Cold section when `thermal_summary` is present | The user logged sauna / cold sessions but the coach silently ignores them. Adherence call (on-target / below-target) and HSP-threshold call are exactly the actionable bits the user needs to see. | Gate on `thermal_summary` key presence. Write the REQUIRED 3–5 line block per the `### Heat / Cold exposure` template in Phase 1. Skip cleanly only when the key is absent (no sauna / cold sessions logged in the last 28 days). |
 | Treating a context-change row as a real strength regression | Cable Lateral Raise drops from 15kg to 7kg after a gym change; coach flags the lift as "going backwards" with a -32kg/4w slope, even though the user's Notes say "new gym, different cable weights" | Read `estimated_1rm[exercise].context_change_excluded` and `progression_summary[exercise].last_notes`. When `context_change_excluded ≥ 1`, write "Slope reset by gym/equipment change; trend resumes once 3+ sessions logged on the new equipment" instead of calling stall or regression. |
 | Trusting recovery `confidence: high` on under-sampled signals | A high-weight signal with `n_recent: 1` (one HR-Recovery reading) inflates confidence to "high" even though the score is hanging on one data point | Confidence is gated on per-signal sample sufficiency in `health.py`. When the JSON shows `confidence: medium` or `low` after a thin recent week, soften any rule that relies on the score band — and cite the under-sampled driver by name. |
 

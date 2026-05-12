@@ -35,9 +35,11 @@ The `workout-coach` skill (trigger: `/coach`) handles all workout planning, sess
 python3 Skills/workout-coach/scripts/read_tracker.py --person <Person>
 ```
 
-The JSON it emits is the canonical view of the user's current physiological state and training load. Cite specific fields by name (`recovery.score`, `vo2max_latest`, `training_load.tsb`, `bodyweight_latest`, `health_metrics_weekly[]`, `weekly_volume_per_muscle`, etc.) rather than copy-pasting numbers into the response. When training context informs a longevity claim — e.g. "your TSB is -10 → don't add a new high-CNS intervention this week" — pull the value live and name it.
+The JSON it emits is the canonical view of the user's current physiological state and training load. Cite specific fields by name (`recovery.score`, `vo2max_latest`, `training_load.tsb`, `bodyweight_latest`, `health_metrics_weekly[]`, `weekly_volume_per_muscle`, `sleep_summary`, `thermal_summary`, etc.) rather than copy-pasting numbers into the response. When training context informs a longevity claim — e.g. "your TSB is -10 → don't add a new high-CNS intervention this week" — pull the value live and name it.
 
-**Logger writes feed this loop automatically.** When `/log` records a bodyweight line, it goes into `health_metrics.csv` (sparse-merge, date-keyed) — the same row Apple Health writes to on its next import. Nothing in `<Person>/data/longevity/*.md` needs to be edited to reflect a new weight; the longevity skill reads the latest on demand.
+**For heat / cold exposure questions, prefer `thermal_summary` over verbal claims on `interventions.md`.** The sauna row is `LIVE-TRACKED` since 2026-05-12; the protocol in `interventions.md` is the *intended* protocol, but actual adherence comes from `thermal_summary.heat.n_sessions_per_week`, `thermal_summary.heat.minutes_above_hsp_threshold_per_week`, and `thermal_summary.adherence.{heat_status, duration_status}`. When `/longevity` answers "am I doing enough sauna," cite the live numbers, not the protocol text. Same pattern for cold: `thermal_summary.cold.n_sessions_per_week` and `dominant_type` over the "outdoor cold-air post-sauna" verbal claim. When `thermal_summary` is absent from the JSON, that means no sessions in the last 28 days — surface that as a finding ("no sauna sessions logged in the last 28 days"), not as a missing capability.
+
+**Logger writes feed this loop automatically.** When `/log` records a bodyweight line, it goes into `health_metrics.csv` (sparse-merge, date-keyed) — the same row Apple Health writes to on its next import. Sleep entries dual-write to `sleep/YYYY.MM.nights.csv` + `health_metrics.csv`. Sauna / cold entries write to `thermal/YYYY.MM.sessions.csv`. Nothing in `<Person>/data/longevity/*.md` needs to be edited to reflect a new value; the longevity skill reads the latest on demand.
 
 ## File Routing
 
@@ -54,6 +56,7 @@ Load files only when relevant to the current query:
 |---|---|---|---|
 | Supplement questions, stack review, interaction checks | `interventions.md` + `state.md` + `profile.md` | `read_tracker.py` if bodyweight / dose-per-kg matters | — |
 | Training from a longevity / recovery lens (not programming) | `state.md` + `interventions.md` | `read_tracker.py` (recovery, TSB, weekly volume, VO2max trend) | — |
+| Sauna / heat / cold exposure adherence and dose | `interventions.md` (intended protocol) | `read_tracker.py` `thermal_summary` (live frequency, dose, HSP-band status, cold dominant type) — **prefer this over the protocol text** | `references/response-triggers.md` (Thermal Stress section) |
 | Nutrition, meal timing, protein, phytates | `interventions.md` + `profile.md` | `read_tracker.py` for bodyweight (protein target = g/kg) | — |
 | Longevity interventions, ranking, "what to add" | `state.md` + `interventions.md` + `profile.md` | `read_tracker.py` for the gap analysis (e.g. weekly Z2 minutes) | `references/longevity-interventions.md` |
 | Blood work, lab results, biomarker interpretation | `biomarkers.md` + `state.md` + `profile.md` + `interventions.md` | `read_tracker.py` for context (recovery, training load) | `references/biomarkers.md` |

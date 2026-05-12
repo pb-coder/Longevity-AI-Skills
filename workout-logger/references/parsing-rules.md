@@ -134,3 +134,73 @@ Omit any field the user didn't type — sparse-merge applies, so partial input i
 For multi-date logs, attach the sleep entry to the date on whose header line it appears. If the user wrote the sleep line on the top-level `/log` header, attach it to every date in the message.
 
 Never invent or guess sleep numbers. If no sleep line is present, omit `sleep` from the payload entirely. Never prompt for missing sleep data.
+
+## Sauna + cold exposure (opt-in)
+
+If (and only if) the `/log` message contains an explicit `sauna` or `cold` line, parse it into a `thermal` entry keyed to that session's date. All forms case-insensitive. **Absent ≡ didn't happen** — if no sauna / cold line appears, omit `thermal` from the payload entirely. **Never prompt.**
+
+### Sauna line
+
+`sauna <duration>[+<duration>...]min [<temp>C] [<type>]`
+
+| Form | Writes |
+|---|---|
+| `sauna 12min` | one round, no temp / type |
+| `sauna 12min 85C` | with temp |
+| `sauna 12+8min 85C` | two rounds (12 + 8 minutes), one row with `heat_round_durations_min: [12, 8]` |
+| `sauna 12+8+5min 85C dry` | three rounds, explicit type |
+
+- **Plus-shorthand for multi-round saunas.** `12+8min` means two rounds: 12 minutes + 8 minutes. The schema stores per-round durations on one row (NOT one row per round). The total is auto-derived.
+- **Heat types (case-insensitive):** `dry` (default), `steam`, `infrared` / `IR`, `banya`. Anything else falls through to `dry`.
+- **Temperature:** integer Celsius, suffixed `C` (e.g. `85C`). Optional.
+
+### Cold line
+
+`cold <duration><unit> <type> [<temp>C]`
+
+| Form | Writes |
+|---|---|
+| `cold 30s shower` | cold_shower, 30 seconds |
+| `cold 5min air` | cold_air, 5 minutes (= 300 seconds) |
+| `cold 5min air 4C` | cold_air with ambient temp |
+| `cold 90s plunge 8C` | cold_plunge with water temp |
+| `cold 12min water 14C` | open-water swim / lake / sea |
+
+- **Cold types (case-insensitive aliases):**
+  - `air` / `outside` / `outdoor` → `cold_air`
+  - `shower` → `cold_shower`
+  - `plunge` / `bath` / `ice` → `cold_plunge`
+  - `water` / `lake` / `sea` / `swim` → `cold_water`
+- **Duration unit:** `s` / `sec` / `seconds` stays in seconds (typical for showers); `m` / `min` / `minutes` converts to seconds (×60). The store column is `cold_duration_sec`.
+- **Temperature:** integer Celsius, optional. Ambient air temp for `cold_air`; water temp for `cold_shower` / `cold_plunge` / `cold_water`.
+
+### Pairing rule
+
+A `sauna` line and a `cold` line under the same workout's header within one `/log` message become **one row** in `thermal/YYYY.MM.sessions.csv` — they're assumed to be one protocol session (sauna → cold).
+
+Force separate rows by placing them under different workout headers (e.g. a morning standalone cold shower + an evening post-workout sauna+cold = two rows for that date).
+
+### Payload entry shape (one row → one entry)
+
+```json
+{
+  "date": "2026-05-12",
+  "start": "18:30",
+  "heat_type": "dry",
+  "heat_temp_c": 85,
+  "heat_rounds": 2,
+  "heat_round_durations_min": [12, 8],
+  "cold_type": "cold_air",
+  "cold_duration_sec": 300,
+  "cold_temp_c": null,
+  "notes": null
+}
+```
+
+Omit any field the user didn't provide — sparse-merge applies. `heat_rounds` and `heat_total_min` are auto-derived from `heat_round_durations_min` inside `upsert_thermal_sessions` (don't bother computing them client-side). Default `notes` to `null` — only set it for an explicit user annotation on the same line (e.g. `sauna 10min 85C dry; felt overheated` → `"felt overheated"`).
+
+### Date attachment
+
+For multi-date logs, attach the thermal entry to the date on whose header line the sauna / cold line appears. If the user wrote it on the top-level `/log` header, attach to every date in the message (rare; typically one heat session per workout day).
+
+Never invent sauna or cold sessions. Never prompt for missing data. If the user didn't type a sauna / cold line, they didn't do one — no row.

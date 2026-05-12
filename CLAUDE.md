@@ -30,6 +30,9 @@ keeps a forensic trail in case a downstream bug damages the CSVs.
 │       ├── sleep/                         # XML-only; absent on HL trackers (or when no sleep logged manually)
 │       │   ├── 2026.05.nights.csv         # per-night, date-keyed; all 6 stages + Time in Bed + Efficiency + N Segments + first/last segment clock times
 │       │   └── …
+│       ├── thermal/                       # manual /log only; absent until first sauna / cold session is logged
+│       │   ├── 2026.05.sessions.csv       # per-session, (date,start)-keyed; heat (type/temp/rounds/durations/total) + cold (type/duration/temp)
+│       │   └── …
 │       └── longevity/                     # /longevity personal data (outside the Skills repo by design)
 │           ├── profile.md                 # slow-changing identity (DOB, height, family history)
 │           ├── state.md                   # current snapshot (conditions, meds; live metrics pulled from health_metrics.csv)
@@ -363,6 +366,29 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   per-night aggregate; raw segments stay in the archived Apple XML
   at `<root>/.processed/Export*.zip` and can be re-extracted if a
   future need arises (hypnograms, sleep-latency derivation).
+- **Thermal (sauna + cold exposure) lives in `<Person>/data/thermal/YYYY.MM.sessions.csv`, per-month.**
+  Per-session aggregates: Date, Start, Heat Type (`dry` / `steam` /
+  `infrared` / `banya` / `none`), Heat Temp (°C), Heat Rounds, Heat
+  Round Durations (min) (comma-separated per-round minutes for
+  multi-round saunas), Heat Total (min) (auto-derived sum), Cold Type
+  (`none` / `cold_air` / `cold_shower` / `cold_plunge` / `cold_water`),
+  Cold Duration (sec), Cold Temp (°C), Notes. **Manual /log only** —
+  Apple Health doesn't classify sauna sessions reliably, so there's no
+  importer-side write path; the `thermal/` folder is absent until the
+  user logs their first session. Dedupe by `(date, start)`. A `sauna`
+  + `cold` line under the same workout header in one `/log` message
+  becomes one row (paired protocol session); standalone cold (morning
+  cold shower) is a row with heat columns blank.
+  `csv_store.read_thermal_sessions` aggregates across all months on
+  read; `upsert_thermal_sessions` is sparse-merge by `(date, start)`
+  with manual-wins on Notes; `heat_total_min` and (when absent)
+  `heat_rounds` are auto-derived from `heat_round_durations_min` on
+  every write so the file is internally consistent. **Never prompts.**
+  `/coach`'s `thermal_summary` block reads this and reports
+  frequency / dose against the HSP-induction threshold (≥20min @
+  ≥80°C, Laukkanen + mechanistic consensus); the target defaults to
+  4×/wk and can be overridden via `profile.csv`
+  `sauna_target_per_week`.
 - **Swim metrics live in `<Person>/data/swimming/`, split per month.**
   Per-workout aggregates (Pool Length, Strokes, SPL, Avg SWOLF, Stroke
   Mix, Location, Water Temp) on `YYYY.MM.workouts.csv`; per-lap detail

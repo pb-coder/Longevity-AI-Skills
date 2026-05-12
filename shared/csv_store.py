@@ -67,11 +67,13 @@ WORKOUT_SESSIONS_HEADERS_BY_SOURCE = {
     "xml": [
         "Date", "Start", "End", "Apple Type", "Duration (min)",
         "Avg HR (bpm)", "Max HR (bpm)", "Min HR (bpm)",
-        "Active Cal (kcal)", "Distance (km)", "Source", "Notes",
+        "Active Cal (kcal)", "Distance (km)", "Source", "Incidental",
+        "Notes",
     ],
     "hl_export": [
         "Date", "Start", "End", "Apple Type", "Duration (min)",
-        "Active Cal (kcal)", "Distance (km)", "Source", "Notes",
+        "Active Cal (kcal)", "Distance (km)", "Source", "Incidental",
+        "Notes",
     ],
 }
 
@@ -79,11 +81,11 @@ WORKOUT_SESSIONS_FIELDS_BY_SOURCE = {
     "xml": [
         "start", "end", "apple_type", "duration_min",
         "avg_hr", "max_hr", "min_hr",
-        "active_cal", "distance_km", "source", "notes",
+        "active_cal", "distance_km", "source", "incidental", "notes",
     ],
     "hl_export": [
         "start", "end", "apple_type", "duration_min",
-        "active_cal", "distance_km", "source", "notes",
+        "active_cal", "distance_km", "source", "incidental", "notes",
     ],
 }
 
@@ -114,13 +116,19 @@ def _parse_value(v: str | None):
     """Parse a CSV cell back into its native type.
 
     CSVs round-trip as strings; reverse the import-time coercion so
-    downstream consumers see ints, floats, and Nones rather than the
-    string ``"None"`` or numeric strings. Anything that can't be coerced
-    stays as the original string (notes, source labels, etc.).
+    downstream consumers see ints, floats, bools, and Nones rather than
+    the string ``"None"`` or numeric strings. Anything that can't be
+    coerced stays as the original string (notes, source labels, etc.).
     """
     if v is None or v == "":
         return None
     s = str(v)
+    # Boolean round-trip (``_serialize_value`` writes "true" / "false").
+    lower = s.strip().lower()
+    if lower == "true":
+        return True
+    if lower == "false":
+        return False
     # Try int, then float, then leave as string. Match openpyxl's
     # idiomatic typing so the rest of the pipeline doesn't care which
     # backend produced the value.
@@ -508,22 +516,43 @@ def read_workout_sessions(person: str) -> list[dict]:
 
     Each dict has ``date`` + the per-source field keys. Sorted DESC by
     (date, start). Missing file → empty list.
+
+    Header-name-aware: the on-disk header is matched by column name
+    against the expected schema, so adding columns to the schema in
+    code does not require migrating old rows. Fields whose header is
+    not present on disk read as None for every row. Used for the
+    ``Incidental`` column added 2026-05; pre-existing 12-col rows
+    read with ``incidental=None`` and the coach falls back to the
+    legacy Notes-prefix check.
     """
     source = _resolve_source(person)
     fields = WORKOUT_SESSIONS_FIELDS_BY_SOURCE[source]
+    expected_headers = WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source]
     path = workout_sessions_csv(person)
     header, rows = _read_csv_rows(path)
     if not header:
         return []
+    # Build {field_name: on_disk_column_index | None} using the field
+    # ↔ header position alignment in the schema constants. Skip index 0
+    # (Date).
+    field_to_disk_idx: dict[str, int | None] = {}
+    for schema_idx, fname in enumerate(fields, start=1):
+        header_name = expected_headers[schema_idx]
+        try:
+            field_to_disk_idx[fname] = header.index(header_name)
+        except ValueError:
+            field_to_disk_idx[fname] = None
     out: list[dict] = []
     for row in rows:
         d = _date_str(row[0]) if row else None
         if d is None:
             continue
         rec: dict = {"date": d}
-        for i, key in enumerate(fields, start=1):
-            v = row[i] if len(row) > i else None
-            rec[key] = _parse_value(v)
+        for fname, disk_idx in field_to_disk_idx.items():
+            if disk_idx is None or disk_idx >= len(row):
+                rec[fname] = None
+            else:
+                rec[fname] = _parse_value(row[disk_idx])
         out.append(rec)
     return out
 
@@ -560,7 +589,7 @@ def upsert_workout_sessions(person: str, entries: Iterable[dict]) -> list[str]:
         new_rec = {"date": d}
         for k in fields:
             new_rec[k] = e.get(k)
-        if (e.get("notes") or "").lower().startswith("incidental"):
+        if e.get("incidental") is True or (e.get("notes") or "").lower().startswith("incidental"):
             incidental += 1
         if key in by_key:
             if by_key[key] != new_rec:
@@ -1070,8 +1099,36 @@ THERMAL_SESSIONS_FIELDS = [
 
 # Enum constants. Kept here so the parser and the coach can import a
 # single source of truth and refuse unknown values.
-HEAT_TYPES = {"dry", "steam", "infrared", "banya", "none"}
+HEAT_TYPES = {"dry", "bio", "steam", "infrared", "banya", "none"}
 COLD_TYPES = {"none", "cold_air", "cold_shower", "cold_plunge", "cold_water"}
+
+# Hardcoded default heat temperature (°C) by type, anchored to Germany /
+# Holmes Place practice (the user's primary gym chain). When a /log
+# entry sets ``heat_type`` but leaves ``heat_temp_c`` blank, the upsert
+# fills the value from this table. Explicit user input always wins.
+#
+# Anchors:
+# - ``dry`` 90°C — Finnische Sauna at Holmes Place Potsdamer Platz;
+#   Bismarckstraße runs ~95°C. Range 80-100°C across German clubs.
+# - ``bio`` 55°C — Sanarium / Bio-Sauna, ~45-60°C / ~50% RH. Distinct
+#   German wellness type; Holmes Place Potsdamer Platz operates one.
+# - ``steam`` 45°C — Dampfbad. Warm-damp, ~40-50°C, ~100% RH.
+# - ``infrared`` 45°C — Infrarotkabine. Heat is radiant (IR rays
+#   warming the body, not the air); ambient ~40-50°C. Common
+#   misconception puts this at 60°C — the cabinet feels hotter than
+#   the air reads.
+# - ``banya`` 70°C — Russian banya; humid, löyly culture.
+#
+# A per-tracker override via ``profile.csv`` (e.g.
+# ``sauna_default_temp_c``) is a future-easy follow-up if needed.
+HEAT_TYPE_DEFAULT_TEMP_C: dict[str, int | None] = {
+    "dry":      90,
+    "bio":      55,
+    "steam":    45,
+    "infrared": 45,
+    "banya":    70,
+    "none":     None,
+}
 
 
 def _format_round_durations(value) -> str | None:
@@ -1226,10 +1283,18 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
                 _parse_value(e.get("heat_total_min"))
             )
 
+            # Auto-fill heat_temp_c from the type default when the user
+            # didn't supply one. Explicit user input always wins —
+            # e.transparent.get("heat_temp_c") only short-circuits if it
+            # was set on the incoming payload.
+            heat_temp = e.get("heat_temp_c")
+            if heat_temp is None and ht is not None and ht != "none":
+                heat_temp = HEAT_TYPE_DEFAULT_TEMP_C.get(ht)
+
             sanitized = {
                 "start":                   e.get("start"),
                 "heat_type":               ht,
-                "heat_temp_c":             e.get("heat_temp_c"),
+                "heat_temp_c":             heat_temp,
                 "heat_rounds":             (
                     e.get("heat_rounds")
                     if e.get("heat_rounds") is not None

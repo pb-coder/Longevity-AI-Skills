@@ -113,7 +113,10 @@ def workout_sessions_in_window(sessions: list[dict], today_d: date, days: int) -
         if d < cutoff:
             continue
         # Filter out incidental walks — those aren't training.
-        if (s.get("notes") or "").lower().startswith("incidental"):
+        # Post-2026-05 schema: typed ``incidental`` flag; legacy rows
+        # still carry the marker in ``notes``.
+        if s.get("incidental") is True \
+                or (s.get("notes") or "").lower().startswith("incidental"):
             continue
         out.append({
             "date":         s["date"],

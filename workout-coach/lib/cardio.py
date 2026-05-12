@@ -399,7 +399,11 @@ def daily_activity_28d(health_all: list[dict],
         sum(float(w.get("distance_km") or 0) for w in walking_workouts), 2)
     incidental_walks = sum(
         1 for w in walking_workouts
-        if (w.get("notes") or "").startswith("incidental"))
+        # Post-2026-05 schema: typed ``incidental`` column. Legacy
+        # rows pre-migration carry the marker in ``notes``; fall back
+        # so the count is stable across the schema flip.
+        if w.get("incidental") is True
+        or (w.get("notes") or "").startswith("incidental"))
 
     # Assessment basis: prefer Apple exercise_min when present, else use
     # walking minutes per day as a NEAT proxy. HL trackers still get a

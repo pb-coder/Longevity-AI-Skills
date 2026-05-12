@@ -145,14 +145,27 @@ If (and only if) the `/log` message contains an explicit `sauna` or `cold` line,
 
 | Form | Writes |
 |---|---|
-| `sauna 12min` | one round, no temp / type |
-| `sauna 12min 85C` | with temp |
-| `sauna 12+8min 85C` | two rounds (12 + 8 minutes), one row with `heat_round_durations_min: [12, 8]` |
-| `sauna 12+8+5min 85C dry` | three rounds, explicit type |
+| `sauna 12min` | one round; temp auto-fills from type default (dry → 90°C) |
+| `sauna 12min finnish` | named-alias for `dry`; temp falls through to dry default 90°C |
+| `sauna 12min 95C dry` | explicit temp + type (user input always wins) |
+| `sauna 12+8min` | two rounds (12 + 8 minutes), one row with `heat_round_durations_min: [12, 8]` |
+| `sauna 12+8+5min` | three rounds |
+| `sauna 10min bio` | Bio-Sauna / Sanarium (~55°C, ~50% humidity) |
+| `sauna 8min IR` | infrared cabin (~45°C ambient; heat is radiant) |
 
 - **Plus-shorthand for multi-round saunas.** `12+8min` means two rounds: 12 minutes + 8 minutes. The schema stores per-round durations on one row (NOT one row per round). The total is auto-derived.
-- **Heat types (case-insensitive):** `dry` (default), `steam`, `infrared` / `IR`, `banya`. Anything else falls through to `dry`.
-- **Temperature:** integer Celsius, suffixed `C` (e.g. `85C`). Optional.
+- **Heat-type aliases (case-insensitive):**
+
+  | Alias | Resolves to | Default temp (°C) |
+  |---|---|---|
+  | `finnish` / `dry` | `dry` | 90 (Holmes Place Finnische Sauna anchor) |
+  | `bio` / `sanarium` | `bio` | 55 (German Bio-Sauna / Sanarium, ~50% RH) |
+  | `steam` / `dampfbad` | `steam` | 45 (Dampfbad, warm-damp) |
+  | `infrared` / `IR` / `infrarot` | `infrared` | 45 (radiant heat, low ambient) |
+  | `banya` / `russian` | `banya` | 70 (löyly, humid) |
+
+  Anything else falls through to `dry`. `aufguss` is NOT a type — it's a ritual within a Finnish sauna; if it matters, write `"aufguss"` in Notes (a legitimate user annotation).
+- **Temperature:** integer Celsius, suffixed `C` (e.g. `90C`). **Optional** — if omitted, the upsert auto-fills the type default from the table above. Anchors target Germany / Holmes Place practice (the user's primary gym chain); the user can always override per-session.
 
 ### Cold line
 
@@ -197,7 +210,9 @@ Force separate rows by placing them under different workout headers (e.g. a morn
 }
 ```
 
-Omit any field the user didn't provide — sparse-merge applies. `heat_rounds` and `heat_total_min` are auto-derived from `heat_round_durations_min` inside `upsert_thermal_sessions` (don't bother computing them client-side). Default `notes` to `null` — only set it for an explicit user annotation on the same line (e.g. `sauna 10min 85C dry; felt overheated` → `"felt overheated"`).
+Omit any field the user didn't provide — sparse-merge applies. `heat_rounds` and `heat_total_min` are auto-derived from `heat_round_durations_min` inside `upsert_thermal_sessions` (don't bother computing them client-side). `heat_temp_c` is auto-filled from the type default (e.g. `dry` → 90°C) when the user didn't supply it.
+
+**Notes hygiene — never echo typed data.** Default `notes` to `null`. Only set `notes` when the user wrote a genuine annotation the schema can't encode (e.g. `sauna 10min 85C dry; felt overheated` → `"felt overheated"`; `sauna 5min finnish aufguss session` → `"aufguss session"`). **Don't reconstruct a description from the typed fields.** Writing `"Finnish sauna; cold exposure by sitting outside"` when `heat_type=dry` and `cold_type=cold_air` already capture that is pure boilerplate — invisible to filtering, clutters the column for real annotations, and forces the user to maintain the same fact in two places. If the structured fields already say it, leave Notes blank.
 
 ### Date attachment
 

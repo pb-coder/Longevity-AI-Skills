@@ -1,7 +1,7 @@
 # Skills
 
 Source for the Claude Code skills used by pb-coder. Cloned from
-[`pb-coder/Skills`](https://github.com/pb-coder/Skills); edit here and push.
+[`pb-coder/Longevity-AI-Skills`](https://github.com/pb-coder/Longevity-AI-Skills); edit here and push.
 
 ## Layout
 

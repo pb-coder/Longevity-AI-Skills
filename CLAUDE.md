@@ -254,6 +254,20 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
 
 ## Conventions
 
+- **Notes columns are for user-supplied, row-unique annotations only.**
+  Writers (importers, /log) must never stash pipeline-state strings in
+  Notes — anything that recurs as the same string across more than a
+  handful of rows is a category, not an annotation; it belongs in a
+  typed column or boolean flag. A repeated string is invisible to
+  filtering / sorting / aggregation and crowds out real annotations.
+  Two historic violations (cleaned up in the 2026-05 Notes-hygiene
+  pass): `"incidental walk"` on 68 workout_sessions rows became the
+  typed `Incidental` boolean column; `"auto-imported from Apple [ |
+  source: <Device>]"` on 24 monthly cardio rows became the typed
+  `Source` column with values `manual` / `apple` / `gymkit:<Device>`.
+  Same rule applies going forward: if a Note would be the same string
+  on every matching row, route it through a column instead. The rule
+  applies to every CSV in `<Person>/data/`.
 - **Python scripts** live under `scripts/` per skill and are invoked by the
   agent via Bash. Per-skill internal modules (when a skill outgrows a
   single file) live under `<skill>/lib/` as flat top-level scripts —

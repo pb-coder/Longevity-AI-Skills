@@ -61,13 +61,22 @@ MONTHLY_HEADERS = [
     "SESSION", "Date", "#", "Exercise", "Set", "Reps", "kg", "Volume", "Notes",
     "Distance (km)", "Duration (min)", "Pace (min/km)", "Avg HR",
     "Active Cal", "Total Cal", "Elevation (m)", "Elapsed",
+    "Source",
 ]
 
 # Internal keys mirroring header order, for dict↔row translation.
+# ``source`` (added 2026-05): one of ``manual`` / ``apple`` /
+# ``gymkit:<DeviceName>``. Replaces the historic anti-pattern of stashing
+# "auto-imported from Apple [ | source: <DeviceName>]" in the Notes
+# column — pipeline-state strings belong in typed columns, not Notes.
+# Pre-existing 17-col rows pad to None on read; canonicalize migrates
+# them in one pass (Notes prefix → Source column; Notes returns to
+# user-supplied annotations only).
 MONTHLY_FIELDS = [
     "session", "date", "num", "exercise", "set", "reps", "kg", "volume", "notes",
     "distance", "duration", "pace", "avg_hr",
     "active_cal", "total_cal", "elevation_m", "elapsed",
+    "source",
 ]
 
 TOTAL_LABEL = "TOTAL"
@@ -272,15 +281,91 @@ def _extract_deload_marker(notes) -> tuple[bool, str | None]:
     return True, cleaned or None
 
 
+def _migrate_source_from_notes(rd: dict) -> None:
+    """In-place migration: pre-2026-05 rows stashed the auto-import flag
+    in Notes (e.g. ``"auto-imported from Apple"`` or
+    ``"auto-imported from Apple | source: Matrix T7xi"``). The new
+    schema has a typed ``source`` column. This helper:
+
+      - If ``source`` is already set → no-op (already migrated).
+      - If Notes carries the legacy prefix → extract any gymkit tag
+        (after ``"source: "``) into ``source``, strip the prefix from
+        Notes (Notes returns to user-supplied annotations only).
+      - Else (manual row, no prefix) → set ``source = "manual"`` so
+        every row has an explicit origin.
+
+    Idempotent; runs on every canonicalize pass. The first pass cleans
+    the file; subsequent passes are no-ops.
+    """
+    if (rd.get("source") or "").strip():
+        return
+    notes_v = (rd.get("notes") or "")
+    notes_str = str(notes_v).strip()
+    if AUTO_IMPORT_NOTE.lower() in notes_str.lower():
+        # Try to extract a gymkit machine tag (after "source: ").
+        machine_tag: str | None = None
+        idx = notes_str.lower().find("source:")
+        if idx >= 0:
+            machine_tag = notes_str[idx + len("source:"):].strip()
+            # Trim leading pipes / whitespace that the prefix builder
+            # produced (``" | source: <tag>"``).
+            machine_tag = machine_tag.lstrip("| ").strip() or None
+        rd["source"] = f"gymkit:{machine_tag}" if machine_tag else "apple"
+        # Strip the legacy prefix from Notes. Anything that follows the
+        # auto-import marker (user annotation) is preserved.
+        lower = notes_str.lower()
+        marker_idx = lower.find(AUTO_IMPORT_NOTE.lower())
+        before = notes_str[:marker_idx].rstrip(" |;,")
+        end_of_marker = marker_idx + len(AUTO_IMPORT_NOTE)
+        # If the tail starts with "| source: <tag>", drop the whole tag
+        # segment (it's already captured in the new column).
+        after = notes_str[end_of_marker:]
+        if "source:" in after.lower():
+            cut = after.lower().find("source:")
+            # Find end-of-segment (next pipe / semicolon / end-of-string)
+            tail = after[cut + len("source:"):]
+            for sep in ("|", ";"):
+                p = tail.find(sep)
+                if p >= 0:
+                    tail = tail[p + 1:]
+                    break
+                else:
+                    tail = ""
+            # `before-of-source` was the whitespace/pipe between the
+            # marker and "source:" — discard.
+            after = tail
+        cleaned = " ".join(filter(None, [before, after.strip(" |;,")])).strip(" |;,")
+        rd["notes"] = cleaned or None
+    else:
+        rd["source"] = "manual"
+
+
+def _is_auto_imported(rd: dict) -> bool:
+    """True when a row was auto-imported from Apple Health.
+
+    Reads the ``source`` column (post-2026-05 schema). Falls back to
+    the legacy Notes prefix (``"auto-imported from Apple"``) for rows
+    that haven't been canonicalized to the new schema yet — first
+    canonicalize pass migrates them, so this fallback is a one-shot
+    guard, not permanent dual-write.
+    """
+    src = (rd.get("source") or "").strip().lower()
+    if src in ("apple",) or src.startswith("gymkit:"):
+        return True
+    notes_v = rd.get("notes") or ""
+    return AUTO_IMPORT_NOTE.lower() in str(notes_v).lower()
+
+
 def _classify_session_rows(rows: list[dict]) -> tuple[list[str], bool]:
     """Per-row strength/cardio/other classification + is_strength bool.
 
     A row is ``cardio`` if it has any of: positive distance, a populated
-    duration cell, or the auto-import note. The duration / auto-note
-    branches catch indoor / commute cycling and HIIT sessions where the
-    source provides time + calories but no distance — without them, those
-    rows would fall through to ``other`` and have their session-metadata
-    cells wiped on a mixed-day strength session (see ``_build_data_row``).
+    duration cell, or an auto-imported source flag. The duration /
+    source branches catch indoor / commute cycling and HIIT sessions
+    where the source provides time + calories but no distance — without
+    them, those rows would fall through to ``other`` and have their
+    session-metadata cells wiped on a mixed-day strength session (see
+    ``_build_data_row``).
     """
     kinds: list[str] = []
     for rd in rows:
@@ -296,8 +381,7 @@ def _classify_session_rows(rows: list[dict]) -> tuple[list[str], bool]:
         if _parse_duration_minutes(rd.get("duration")):
             kinds.append("cardio")
             continue
-        notes_v = rd.get("notes") or ""
-        if AUTO_IMPORT_NOTE.lower() in str(notes_v).lower():
+        if _is_auto_imported(rd):
             kinds.append("cardio")
             continue
         kinds.append("other")
@@ -462,6 +546,11 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
         "total_cal":   None,
         "elevation_m": None,
         "elapsed":     None,
+        # Preserve the row's origin tag through canonicalize. Set by
+        # the importer (``apple`` / ``gymkit:<Device>``) or the
+        # legacy-Notes migration helper (``manual`` for hand-logged
+        # rows). TOTAL rows leave this blank.
+        "source":      rd.get("source") or None,
     }
 
     if is_strength and kind == "cardio":
@@ -562,6 +651,10 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
         if (date_v in (None, "")) and (ex_v in (None, "")):
             continue
         rd["date"] = date_v
+        # Migrate legacy Notes-prefix → Source column on the fly. First
+        # canonicalize pass after the 2026-05 schema change cleans every
+        # row; subsequent passes are no-ops.
+        _migrate_source_from_notes(rd)
         if current is None or date_v != current["date"]:
             current = {"date": date_v, "rows": [], "total_meta": {}}
             sessions.append(current)
@@ -763,8 +856,7 @@ def upsert_monthly_cardio(person: str,
             if not date_v:
                 continue
             dur_f = _parse_duration_minutes(rd.get("duration"))
-            notes_v = rd.get("notes") or ""
-            is_auto = AUTO_IMPORT_NOTE.lower() in str(notes_v).lower()
+            is_auto = _is_auto_imported(rd)
             existing_index.setdefault((date_v, ex_str.lower()), []).append(
                 (idx, dur_f, is_auto)
             )
@@ -844,9 +936,8 @@ def upsert_monthly_cardio(person: str,
             distance = r.get("distance_km")
             avg_hr = r.get("avg_hr")
             machine_tag = r.get("machine_tag")
-            note_value = (
-                f"{AUTO_IMPORT_NOTE} | source: {machine_tag}"
-                if machine_tag else AUTO_IMPORT_NOTE
+            source_value = (
+                f"gymkit:{machine_tag}" if machine_tag else "apple"
             )
 
             # Per-date # auto-increment (re-uses an existing day's counter
@@ -868,7 +959,7 @@ def upsert_monthly_cardio(person: str,
                 "reps":        None,
                 "kg":          None,
                 "volume":      None,
-                "notes":       note_value,
+                "notes":       None,  # was auto-import boilerplate; now Source column
                 "distance":    _numeric_cell(distance),
                 "duration":    _format_duration_mmss(dur_f),
                 "pace":        _format_pace_min_per_km(dur_f, distance),
@@ -877,6 +968,7 @@ def upsert_monthly_cardio(person: str,
                 "total_cal":   int(round(r["total_cal"])) if isinstance(r.get("total_cal"), (int, float)) and r.get("total_cal") else None,
                 "elevation_m": int(round(r["elevation_m"])) if isinstance(r.get("elevation_m"), (int, float)) and r.get("elevation_m") else None,
                 "elapsed":     _format_elapsed_hms(r.get("elapsed_min")),
+                "source":      source_value,
             }
             new_rows_to_append.append(new_row)
             # Track the new row in the dedupe index too so two near-duration

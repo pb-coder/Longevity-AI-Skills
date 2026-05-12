@@ -409,6 +409,106 @@ def fix_distance_units(person: str, dry_run: bool = False) -> int:
     return 0
 
 
+def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
+    """One-shot 2026-05 migration: move the ``"incidental walk"`` Notes
+    string to the new ``Incidental`` boolean column on workout_sessions.csv.
+
+    Per the 2026-05 Notes-hygiene cleanup: pipeline-state strings don't
+    belong in Notes (they recur, are invisible to filtering, and crowd
+    out user annotations). Walks are now flagged via the typed
+    ``Incidental`` column; this function back-fills existing rows.
+
+    Idempotent — re-running on already-migrated rows is a no-op. Safe
+    to call from cron / re-imports.
+
+    Returns 0 on success.
+    """
+    from csv_store import read_workout_sessions, _resolve_source  # noqa
+    import csv
+
+    path = workout_sessions_csv(person)
+    if not path.exists():
+        print(f"workout_sessions.csv not found for {person}: {path}")
+        return 0
+
+    source = _resolve_source(person)
+    headers = WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source]
+    # Use the header-aware reader (handles legacy 12-col rows).
+    rows = read_workout_sessions(person)
+
+    migrated = 0
+    already = 0
+    untouched = 0
+    out_rows: list[list] = []
+    fields = list(headers[1:])  # everything except Date
+    field_keys: list[str] = []
+    # Map header → internal field key (same order as csv_store
+    # WORKOUT_SESSIONS_FIELDS_BY_SOURCE; explicit map for clarity).
+    HEADER_TO_FIELD = {
+        "Start": "start", "End": "end", "Apple Type": "apple_type",
+        "Duration (min)": "duration_min",
+        "Avg HR (bpm)": "avg_hr", "Max HR (bpm)": "max_hr",
+        "Min HR (bpm)": "min_hr",
+        "Active Cal (kcal)": "active_cal", "Distance (km)": "distance_km",
+        "Source": "source", "Incidental": "incidental", "Notes": "notes",
+    }
+    for h in fields:
+        field_keys.append(HEADER_TO_FIELD.get(h, h.lower().replace(" ", "_")))
+
+    for rec in rows:
+        notes = (rec.get("notes") or "")
+        already_flagged = rec.get("incidental") is True
+        looks_incidental = notes.lower().startswith("incidental")
+        if looks_incidental and not already_flagged:
+            rec["incidental"] = True
+            # Strip the prefix from Notes. The marker on every observed
+            # row is exactly "incidental walk" with no trailing
+            # annotation, but be defensive in case future text appears
+            # after the marker (e.g. "incidental walk; lower back").
+            after = notes[len("incidental"):].lstrip(" walk").lstrip(" -;,")
+            rec["notes"] = after.strip() or None
+            migrated += 1
+        elif already_flagged:
+            already += 1
+        else:
+            untouched += 1
+        # Build the output row in HEADER order.
+        out_row = [rec.get("date")]
+        for key in field_keys:
+            v = rec.get(key)
+            if v is None:
+                out_row.append("")
+            elif isinstance(v, bool):
+                out_row.append("true" if v else "false")
+            else:
+                out_row.append(v)
+        out_rows.append(out_row)
+
+    summary = (
+        f"workout_sessions.csv ({person}): {migrated} migrated to incidental=True, "
+        f"{already} already flagged, {untouched} untouched ({len(rows)} total)"
+    )
+    print(summary)
+    if dry_run:
+        print("Dry run — no writes performed.")
+        return 0
+    if migrated == 0:
+        print("No rows to migrate; file already clean.")
+        return 0
+
+    # Sort DESC by (date, start) to match the existing convention.
+    out_rows.sort(key=lambda r: (str(r[0] or ""), str(r[1] or "")), reverse=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(headers)
+        for r in out_rows:
+            w.writerow(r)
+    tmp.replace(path)
+    print(f"Wrote {len(out_rows)} rows back to {path.name}.")
+    return 0
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--person", required=True,
@@ -416,7 +516,13 @@ if __name__ == "__main__":
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--fix-distance-units", action="store_true",
                     help="Run the meter-as-km historical sweep across all CSVs")
+    ap.add_argument("--migrate-incidental-flag", action="store_true",
+                    help="One-shot 2026-05 migration: move 'incidental walk' "
+                         "from Notes to the new Incidental column on "
+                         "workout_sessions.csv. Idempotent.")
     args = ap.parse_args()
     if args.fix_distance_units:
         sys.exit(fix_distance_units(args.person, args.dry_run))
+    if args.migrate_incidental_flag:
+        sys.exit(migrate_incidental_flag(args.person, args.dry_run))
     sys.exit(run(args.person, args.dry_run))

@@ -640,8 +640,13 @@ def extract_workout(elem, since_date):
         apple_type = "Indoor" + apple_type
 
     notes = None
+    incidental = False
     if "Walking" in apple_type and duration is not None and duration < INCIDENTAL_WALK_MAX_MIN:
-        notes = "incidental walk"
+        # Short walk → flag as incidental via the typed column. Was
+        # previously stashed as the string "incidental walk" in Notes;
+        # moved to a typed flag per the 2026-05 Notes-hygiene cleanup
+        # (Notes returns to user-supplied, row-unique annotations).
+        incidental = True
 
     # Elapsed time (wall clock) = endDate - startDate. ``duration`` is
     # Apple's "Workout Time" — active movement only, paused intervals
@@ -695,6 +700,7 @@ def extract_workout(elem, since_date):
         "dt_start":     dt_start,
         "dt_end":       dt_end,
         "notes":        notes,
+        "incidental":   incidental,
         # Swim-only extras (None for non-swims).
         "pool_length_m":      pool_length_m,
         "stroke_count_total": stroke_count_total,
@@ -1157,7 +1163,7 @@ def main():
               f"(range {sleep_night_entries[0]['date'] if sleep_night_entries else '-'} → "
               f"{sleep_night_entries[-1]['date'] if sleep_night_entries else '-'})")
         print(f"Workout Sessions: {len(workout_rows)} sessions would be written "
-              f"({sum(1 for r in workout_rows if (r.get('notes') or '').startswith('incidental'))} walks flagged incidental)")
+              f"({sum(1 for r in workout_rows if r.get('incidental'))} walks flagged incidental)")
         return 0
 
     out_lines = []

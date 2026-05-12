@@ -505,7 +505,8 @@ def main() -> int:
             f"{metric_entries[-1]['date'] if metric_entries else '-'})"
         )
         incidental = sum(1 for r in workout_rows
-                         if (r.get('notes') or '').startswith('incidental'))
+                         if r.get('incidental') is True
+                         or (r.get('notes') or '').startswith('incidental'))
         print(f"Workout Sessions: {len(workout_rows)} sessions would be written "
               f"({incidental} walks flagged incidental)")
         return 0

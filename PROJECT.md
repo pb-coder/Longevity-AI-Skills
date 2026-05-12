@@ -135,7 +135,7 @@ Every set row's Volume cell is `reps × kg` written as a literal number, recompu
 
 ## Skills
 
-Skill source lives in [pb-coder/Skills](https://github.com/pb-coder/Skills), cloned locally at `Skills/`. Edit the unzipped source there and commit changes. See `Skills/CLAUDE.md` for the repo layout.
+Skill source lives in [pb-coder/Longevity-AI-Skills](https://github.com/pb-coder/Longevity-AI-Skills), cloned locally at `Skills/`. Edit the unzipped source there and commit changes. See `Skills/CLAUDE.md` for the repo layout.
 
 - `/coach` — reads the per-person CSVs, reports on training state, and generates new workout plans (`Skills/workout-coach/`). Each strength workout in the output has a `**Date:** ___________` placeholder under its heading; fill it in when you train so the date is visible when you later `/log` the session. The script (`scripts/read_tracker.py`) emits compact JSON by default with the per-set `rows` array gated behind `--include-rows`; the report sections shown to the user are gated on the per-tracker `capabilities` (so HL users don't see Recovery / per-workout-HR sections their data source can't fill).
 - `/log` — append a workout to the current monthly CSV (`Skills/workout-logger/`). Safe to backfill past dates — `canonicalize_monthly_csv` self-sorts every monthly file on every append, and non-contiguous same-date blocks merge back into one session automatically. After every run, the logger asks once whether to refresh Apple Health data; on confirm it dispatches `import_apple_health.py --person <Person>` for `.zip` exports or `import_hl_export.py --person <Person>` for `.txt` exports based on what's in the workout-tracker root. Both importers archive the source export to `<root>/.processed/` on success.

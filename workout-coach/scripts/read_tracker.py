@@ -79,6 +79,7 @@ from extract import (  # noqa: E402
     load_exercises_db,
     read_bodyweight,
     read_health_metrics,
+    read_sleep_nights,
     read_swim_laps,
     read_swim_workouts,
     read_workout_sessions,
@@ -111,6 +112,7 @@ from cardio import (  # noqa: E402
     training_load_summary,
     trimp_per_session,
 )
+from sleep import sleep_summary  # noqa: E402
 from swim import swim_summary  # noqa: E402
 
 
@@ -170,6 +172,7 @@ def main() -> int:
     workout_sessions_all = read_workout_sessions(person)
     swim_workouts_all = read_swim_workouts(person)
     swim_laps_all = read_swim_laps(person)
+    sleep_nights_all = read_sleep_nights(person)
 
     bw_all = read_bodyweight(person)
     bw_latest = (
@@ -238,6 +241,7 @@ def main() -> int:
     swim = swim_summary(
         swim_workouts_all, swim_laps_all, today_d, profile, max_hr,
     )
+    sleep = sleep_summary(sleep_nights_all, today_d)
 
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
@@ -259,6 +263,9 @@ def main() -> int:
         # ---- Swim summary (only present when there are swims in the
         # 28-day window; ``_compact`` drops None below). ----
         "swim_summary": swim,
+        # ---- Sleep summary (only present when XML tracker has nights in
+        # the 28-day window; ``_compact`` drops None for HL or no-data). ----
+        "sleep_summary": sleep,
         # ---- Daily activity (NEAT) — all-day movement beyond workouts. ----
         "daily_activity_28d": daily_activity,
         # ---- Recovery + training load (Python-derived, not raw metrics) ----

@@ -51,7 +51,7 @@ line. Don't search the filesystem.
 
 ## Flow
 
-1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log. If the message contains an explicit bodyweight line (see parsing rules), also parse that into a bodyweight entry. If the user includes `CSS test` on the header line of a 400m + 200m TT pair (see parsing rules), parse the two times and assemble a `css_test` payload field.
+1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log. If the message contains an explicit bodyweight line (see parsing rules), also parse that into a bodyweight entry. If the user includes `CSS test` on the header line of a 400m + 200m TT pair (see parsing rules), parse the two times and assemble a `css_test` payload field. If the message contains an explicit sleep line (see parsing rules), parse that into a `sleep` entry keyed to the session's date.
 
    **Unknown-exercise gate (REQUIRED before building the payload).** For every distinct exercise name in the parsed rows, run `python3 Skills/shared/exercises_database.py lookup "<name>"`. The script consults both the canonical catalog and the alias table (case-insensitive). Three branches:
 
@@ -71,11 +71,14 @@ line. Don't search the filesystem.
    {
      "rows": [ ... parsed row dicts ... ],
      "bodyweight": [ {"date": "YYYY-MM-DD", "kg": 78.4, "notes": null}, ... ],
+     "sleep": [ {"date": "YYYY-MM-DD", "total_h": 7.5, "deep_h": 1.2, "rem_h": 1.3,
+                 "core_h": null, "unspecified_h": null, "awake_h": null,
+                 "time_in_bed_h": 8.4, "efficiency_pct": null, "notes": null}, ... ],
      "css_test": {"date": "YYYY-MM-DD", "t400_sec": 450, "t200_sec": 210}
    }
    ```
-   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually; it comes from the Apple Health import only.
-3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), and mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date).
+   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `sleep` entirely if the user didn't include a sleep line — **never prompt for sleep**. Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually; it comes from the Apple Health import only. Per-night segment metadata (`n_segments`, `first_segment_start`, `last_segment_end`) also can't be entered manually — only the Apple importer populates those.
+3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), and dual-writes any sleep entries into both `<Person>/data/sleep/YYYY.MM.nights.csv` (rich per-night detail) and `<Person>/data/health_metrics.csv` (headline Total/Deep/REM/Time in Bed for the recovery score). Sleep Efficiency is auto-derived inside the upsert when both Total and Time in Bed are present.
 4. **Verify the write succeeded.** Capture the script's stdout and exit code:
    - If the exit code is non-zero, print the exact stderr output and stop. Do not report success.
    - If the exit code is 0 but stdout does not contain the word `Appended`, print the exact stdout and stop with: "Unexpected script output — please check the tracker manually."
@@ -125,9 +128,10 @@ The logger never imports Apple Health on its own — it shells out to one of two
 
 Both write into the same per-person CSV store under `<Person>/data/`:
 
-- `health_metrics.csv` — daily aggregates. Cells the active source can't fill stay None; sparse-merge protects any older values from a previous source.
+- `health_metrics.csv` — daily aggregates including the headline sleep fields (Sleep Total / Deep / REM / Time in Bed). Cells the active source can't fill stay None; sparse-merge protects any older values from a previous source.
 - `workout_sessions.csv` — one row per Apple `Workout`. HR columns are populated for XML, blank for HL.
-- (XML only) `swimming/swim_workouts.csv` + `swimming/swim_laps.csv` — per-swim aggregates (Pool Length, Strokes, SPL, Avg SWOLF, Stroke Mix, Location, Water Temp) and per-lap detail (Stroke, Duration, SWOLF). HL has no lap data, so HL trackers don't have a `swimming/` folder.
+- (XML only) `swimming/YYYY.MM.workouts.csv` + `swimming/YYYY.MM.laps.csv` — per-swim aggregates (Pool Length, Strokes, SPL, Avg SWOLF, Stroke Mix, Location, Water Temp) and per-lap detail (Stroke, Duration, SWOLF). HL has no lap data, so HL trackers don't have a `swimming/` folder.
+- (XML only) `sleep/YYYY.MM.nights.csv` — per-night sleep architecture: all 6 stages Apple exposes (Total, Core, Deep, REM, Unspecified, Awake) plus Time in Bed, Sleep Efficiency (derived), N Segments (fragmentation), and First/Last Segment Start clock times (bedtime / wake-up schedule). HL has no stage data, so HL trackers don't have a `sleep/` folder unless the user manually logs sleep via /log.
 
 Both also create / read `<Person>/data/profile.csv`, a 2-column key/value file pinning the per-tracker `source` (`xml` | `hl_export`), `auto_cardio` flag, `birthday`, and the swim CSS keys (`swim_css_sec_per_100m`, `swim_css_set_at`, `swim_pool_length_default`). The coach's `read_tracker.py` reads this to decide which sections of the report it can fill.
 
@@ -151,6 +155,25 @@ The standing convention is **morning, empty stomach**. If the user writes someth
 ### Bulk-seed (historical import)
 
 To back-fill many historical weights at once, call `append_workout.py` with a payload of only bodyweight entries: `{"rows": [], "bodyweight": [{"date": "...", "kg": ..., "notes": null}, ...]}`. The logger forwards each entry into `<person>/data/health_metrics.csv` via the sparse-merge `upsert_health_metrics` — same dedupe-by-date semantics, but the bodyweight is now stored on the Health Metrics row (col B) alongside the rest of that day's metrics.
+
+## Sleep (opt-in)
+
+Sleep is opt-in. Record it only when the user explicitly includes a sleep line in the `/log` message — see `references/parsing-rules.md` for the accepted formats. **No automatic prompts, no probing for missing sleep, no `AskUserQuestion`.** If the user didn't mention sleep, don't record it.
+
+Sleep entries are dual-written by `append_workout.py`:
+
+- **Rich detail** → `<person>/data/sleep/YYYY.MM.nights.csv` via the sparse-merge `upsert_sleep_nights`. Captures all 6 stages Apple exposes (Total, Core, Deep, REM, Unspecified, Awake) plus Time in Bed, derived Sleep Efficiency, fragmentation count (N Segments), and first/last segment clock times. Manual entries leave the segment-metadata columns blank — only the Apple importer populates those.
+- **Headline mirror** → `<person>/data/health_metrics.csv`, columns Sleep Total / Sleep Deep / Sleep REM / Time in Bed. Sparse-merge protects every other metric on the same date. This is the path the coach's `recovery_score` already reads, so a manual sleep entry flows into the recovery score on the next `/coach` run.
+
+If the user supplies only partial sleep info (e.g. just `sleep 7h30`), sparse-merge keeps the existing Apple-imported deep/REM/in-bed values on that date untouched and only updates the field(s) the user provided. The reverse is also true: a subsequent Apple import that fills in the missing fields won't overwrite the user's manual `total_h`.
+
+Sleep Efficiency is auto-derived inside the upsert when both `total_h` and `time_in_bed_h` are present and `efficiency_pct` wasn't supplied as a manual override.
+
+### Bulk-seed (historical sleep import)
+
+To back-fill many historical sleep nights at once, call `append_workout.py` with a payload of only sleep entries: `{"rows": [], "bodyweight": [], "sleep": [{"date": "...", "total_h": ..., ...}, ...]}`. The logger routes each entry to the right `sleep/YYYY.MM.nights.csv` and mirrors the headline fields into `health_metrics.csv`. Same dedupe-by-date semantics as bodyweight.
+
+XML trackers only — the `sleep/` folder is never populated for HL trackers (HLExport doesn't surface per-stage data). Manual sleep entries on an HL tracker still dual-write (the folder is created on demand), but the coach's stage-aware report sections gate on capabilities so the user-facing output stays coherent.
 
 ## Session-level flags
 
@@ -190,7 +213,7 @@ Rules:
 - Do NOT compute or include a `volume` field — `canonicalize_monthly_csv` recomputes Volume = reps × kg on every write and writes a literal sum on the TOTAL row. Skip the arithmetic.
 - The cardio fields (`distance_km`, `duration_min`, `pace`, `avg_hr`) are cardio-only. Leave null for strength rows.
 - `laps` is swim-specific: integer count of pool lengths (e.g. `22` for a `22 × 25 m = 550 m` swim). Leave null for non-swim rows. The Apple importer fills this from `HKWorkoutEventTypeLap` events; users can include it in `/log` via `<N> laps`, `<N> lengths`, or `<N> Bahnen`.
-- The monthly CSVs have 18 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed | Laps`. SESSION is filled in by `canonicalize_monthly_csv` (per-month session number repeated on every row of the same date); leave it out of the row dict.
+- The monthly CSVs have 17 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed`. SESSION is filled in by `canonicalize_monthly_csv` (per-month session number repeated on every row of the same date); leave it out of the row dict. The old `Laps` column was retired in 2026-05 — swim lap counts now live exclusively on `<Person>/data/swimming/YYYY.MM.workouts.csv`.
 - Sort rows in the JSON by date ascending, then `num`, then `set`. The script does not re-sort.
 
 ## Rules

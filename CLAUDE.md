@@ -27,6 +27,9 @@ keeps a forensic trail in case a downstream bug damages the CSVs.
 │       │   ├── 2026.05.workouts.csv       # per-month swim aggregates, (date,start)-keyed
 │       │   ├── 2026.05.laps.csv           # per-month per-lap detail, (date,workout_start,lap_num)-keyed
 │       │   └── …
+│       ├── sleep/                         # XML-only; absent on HL trackers (or when no sleep logged manually)
+│       │   ├── 2026.05.nights.csv         # per-night, date-keyed; all 6 stages + Time in Bed + Efficiency + N Segments + first/last segment clock times
+│       │   └── …
 │       └── longevity/                     # /longevity personal data (outside the Skills repo by design)
 │           ├── profile.md                 # slow-changing identity (DOB, height, family history)
 │           ├── state.md                   # current snapshot (conditions, meds; live metrics pulled from health_metrics.csv)
@@ -339,6 +342,27 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   strength workout heading is followed by `**Date:** ___________` on its
   own line so the user can fill in the date when they actually train and
   not lose track when `/log`-ing later.
+- **Sleep metrics live in `<Person>/data/sleep/`, per-month nights only.**
+  Per-night aggregates (Total / Core / Deep / REM / Unspecified / Awake
+  + Time in Bed + Sleep Efficiency + N Segments + First/Last Segment
+  Start clock times) on `YYYY.MM.nights.csv`, mirroring the
+  `monthly/YYYY.MM.csv` and `swimming/YYYY.MM.*.csv` per-month
+  pattern. Apple's sleep stage segments (`HKCategoryValueSleepAnalysis*`)
+  are the source. XML-only — HLExport doesn't supply per-stage data,
+  so HL trackers leave the folder absent (and `/coach` skips the
+  sleep section). Headline fields (Sleep Total / Deep / REM /
+  Time in Bed) are also mirrored to `health_metrics.csv` so the
+  existing recovery_score path reads them without a join.
+  `csv_store.read_sleep_nights` aggregates across all months on read;
+  `upsert_sleep_nights` is sparse-merge by date with manual-wins on
+  Notes — Sleep Efficiency is auto-derived when both Total and
+  Time in Bed are present and `efficiency_pct` wasn't supplied
+  explicitly. `n_segments`, `first_segment_start`, and
+  `last_segment_end` are Apple-importer-only (manual /log entries
+  leave them blank). Segment-level detail is NOT stored — only the
+  per-night aggregate; raw segments stay in the archived Apple XML
+  at `<root>/.processed/Export*.zip` and can be re-extracted if a
+  future need arises (hypnograms, sleep-latency derivation).
 - **Swim metrics live in `<Person>/data/swimming/`, split per month.**
   Per-workout aggregates (Pool Length, Strokes, SPL, Avg SWOLF, Stroke
   Mix, Location, Water Temp) on `YYYY.MM.workouts.csv`; per-lap detail

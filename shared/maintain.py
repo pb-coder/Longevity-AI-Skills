@@ -6,11 +6,14 @@ Idempotent. Safe to re-run. Performs:
   2. Validate all CSVs (header schema match, monotonic date order,
      row counts).
   3. Optional ``--fix-distance-units`` swim sweep (legacy meter-as-km
-     bug across monthly CSVs + workout_sessions.csv + swim_workouts.csv).
+     bug across monthly CSVs + workout_sessions.csv +
+     swimming/YYYY.MM.workouts.csv).
 
 Post-PR3a: there is no xlsx anywhere. Per-month workout data lives in
 ``<Person>/data/monthly/YYYY.MM.csv``. Health Metrics, Workout Sessions,
-Profile, swim_workouts, swim_laps live alongside in ``<Person>/data/``.
+and Profile live in ``<Person>/data/`` directly; per-month swim data
+lives in ``<Person>/data/swimming/YYYY.MM.{workouts,laps}.csv``;
+per-month sleep data in ``<Person>/data/sleep/YYYY.MM.nights.csv``.
 
 Usage (from the workout-tracker root):
     python3 Skills/shared/maintain.py --person Nihad
@@ -39,6 +42,7 @@ from monthly_csv import (  # noqa: E402
 )
 from csv_store import (  # noqa: E402
     HEALTH_METRICS_HEADERS_BY_SOURCE,
+    SLEEP_NIGHTS_HEADERS,
     SWIM_LAPS_HEADERS,
     SWIM_WORKOUTS_HEADERS,
     WORKOUT_SESSIONS_HEADERS_BY_SOURCE,
@@ -49,6 +53,7 @@ from person_paths import (  # noqa: E402
     monthly_csv as monthly_csv_path,
     monthly_dir,
     profile_csv,
+    sleep_nights_csv,
     swim_laps_csv,
     swim_workouts_csv,
     workout_sessions_csv,
@@ -126,7 +131,11 @@ def validate_csvs(person: str) -> list[str]:
                                  None),
     }
     # Per-month swim CSVs (XML trackers only — HL exports omit lap data).
-    from person_paths import list_swim_workout_months, list_swim_lap_months
+    from person_paths import (
+        list_sleep_night_months,
+        list_swim_lap_months,
+        list_swim_workout_months,
+    )
     for ym in list_swim_workout_months(person):
         targets[f"swimming/{ym}.workouts.csv"] = (
             swim_workouts_csv(person, ym), SWIM_WORKOUTS_HEADERS, "desc"
@@ -134,6 +143,12 @@ def validate_csvs(person: str) -> list[str]:
     for ym in list_swim_lap_months(person):
         targets[f"swimming/{ym}.laps.csv"] = (
             swim_laps_csv(person, ym), SWIM_LAPS_HEADERS, "asc"
+        )
+    # Per-month sleep CSVs (XML trackers only — HL exports omit per-stage data;
+    # also present on any tracker that has manual /log sleep entries).
+    for ym in list_sleep_night_months(person):
+        targets[f"sleep/{ym}.nights.csv"] = (
+            sleep_nights_csv(person, ym), SLEEP_NIGHTS_HEADERS, "desc"
         )
 
     for label, (path, expected_header, order) in targets.items():

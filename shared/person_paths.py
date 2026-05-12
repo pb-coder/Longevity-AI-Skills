@@ -14,11 +14,13 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │       ├── monthly/
     │       │   ├── 2026.05.csv
     │       │   └── …                      # one CSV per YYYY.MM
-    │       └── swimming/                  # XML-only; absent on HL trackers
-    │           ├── swim_workouts.csv
-    │           └── swim_laps.csv
+    │       ├── swimming/                  # XML-only; absent on HL trackers
+    │       │   ├── YYYY.MM.workouts.csv
+    │       │   └── YYYY.MM.laps.csv
+    │       └── sleep/                     # XML-only; absent on HL trackers
+    │           └── YYYY.MM.nights.csv
     ├── Fabian/
-    │   └── (same; no swimming/ for HL)
+    │   └── (same; no swimming/ or sleep/ for HL)
     ├── Skills/
     │   └── shared/                        ← this file
     ├── Export.zip / health_export_*.txt   (transient; archived on success)
@@ -84,9 +86,10 @@ def monthly_csv(person: str, year_month: str) -> Path:
     """Path to the per-month workout CSV (``YYYY.MM.csv``).
 
     ``year_month`` is the same ``YYYY.MM`` key the xlsx-era code used as
-    sheet name. The CSV preserves the 18-column monthly schema; rows
-    are sorted ASC by (Date, num, set), with a TOTAL row appended at
-    each strength session boundary.
+    sheet name. The CSV uses the canonical 17-column monthly schema
+    (Laps column retired 2026-05); rows are sorted ASC by
+    (Date, num, set), with a TOTAL row appended at each strength
+    session boundary.
     """
     return monthly_dir(person) / f"{year_month}.csv"
 
@@ -146,6 +149,37 @@ def list_swim_lap_months(person: str) -> list[str]:
         p.name[:-len(".laps.csv")]
         for p in d.glob("*.laps.csv")
         if _re.match(r"^\d{4}\.\d{2}\.laps\.csv$", p.name)
+    )
+
+
+def sleep_nights_csv(person: str, year_month: str) -> Path:
+    """Per-month sleep nights CSV under ``<person>/data/sleep/``.
+
+    ``<person>/data/sleep/YYYY.MM.nights.csv``. One row per wake-up
+    date with the full 6-stage breakdown, Time in Bed, Sleep
+    Efficiency, fragmentation count, and first/last segment clock
+    times.
+    """
+    return data_dir(person) / "sleep" / f"{year_month}.nights.csv"
+
+
+def ensure_sleep_dir(person: str) -> Path:
+    """Create ``<person>/data/sleep/`` if missing and return it."""
+    d = data_dir(person) / "sleep"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def list_sleep_night_months(person: str) -> list[str]:
+    """Return ``YYYY.MM`` keys for which a per-month sleep-nights CSV exists, ASC."""
+    d = data_dir(person) / "sleep"
+    if not d.exists():
+        return []
+    import re as _re
+    return sorted(
+        p.name[:-len(".nights.csv")]
+        for p in d.glob("*.nights.csv")
+        if _re.match(r"^\d{4}\.\d{2}\.nights\.csv$", p.name)
     )
 
 

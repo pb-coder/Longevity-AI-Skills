@@ -36,7 +36,7 @@ Pass the resolved name via `--person <Name>`. The sidecar `workout_plan.md` foll
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
 2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis. When `swim_summary` is present in the JSON, also read `references/swim-coaching.md` for SWOLF / SPL / CSS-zone interpretation, retest cadence, and what NOT to say about swim form.
-3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the per-person CSVs — `<Person>/data/monthly/YYYY.MM.csv` (per-month workout data), `health_metrics.csv`, `workout_sessions.csv`, `profile.csv`, and on XML trackers with recent swims also `swimming/swim_workouts.csv` + `swimming/swim_laps.csv` — and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `swim_summary` (only present when there are swims in the last 28 days — totals, avg pace per 100m, SPL, SWOLF, trends, CSS zones, stroke-mix outliers, retest prompt), `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the data folder isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
+3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the per-person CSVs — `<Person>/data/monthly/YYYY.MM.csv` (per-month workout data), `health_metrics.csv`, `workout_sessions.csv`, `profile.csv`, on XML trackers with recent swims also `swimming/YYYY.MM.{workouts,laps}.csv`, and on XML trackers with recent sleep data also `sleep/YYYY.MM.nights.csv` — and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `swim_summary` (only present when there are swims in the last 28 days), `sleep_summary` (only present when there are sleep nights in the last 28 days — all 6 stage means, efficiency mean + trend, fragmentation, schedule consistency, outlier nights), `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the data folder isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
    **Output is compact (no indentation) by default** — saves ~20% of tokens vs pretty-printed. Pass `--pretty` for human inspection.
 
@@ -67,6 +67,7 @@ The file structure:
 ### Deload status
 ### Recovery state
 ### Cardio check
+### Sleep                               <!-- only when sleep_summary is present in the JSON -->
 ### Swim                                <!-- only when swim_summary is present in the JSON -->
 
 ## Plan
@@ -104,7 +105,7 @@ What the JSON contains:
 
 **Source + capabilities (read first to gate sections):**
 - `data_source`: `xml` (Apple's zipped XML — Nihad) or `hl_export` (HLExport text — Fabian). Trust this string; don't override based on populated fields.
-- `capabilities`: per-source feature map (`hrv`, `wrist_temp`, `resting_hr_daily`, `walking_hr`, `sleep_stages`, `sleep_breath_dist`, `exercise_min_daily`, `per_workout_hr_strength`). **False = structurally unsupported.** Gate report sections on this, not on null fields. `per_workout_hr_strength` only describes strength-session HR — HL trackers still carry per-workout HR for cardio rows (hikes / runs), so cardio TRIMP and intensity_pct render normally on those.
+- `capabilities`: per-source feature map (`hrv`, `wrist_temp`, `resting_hr_daily`, `walking_hr`, `sleep_stages`, `sleep_breath_dist`, `sleep_nights`, `exercise_min_daily`, `per_workout_hr_strength`). **False = structurally unsupported.** Gate report sections on this, not on null fields. `per_workout_hr_strength` only describes strength-session HR — HL trackers still carry per-workout HR for cardio rows (hikes / runs), so cardio TRIMP and intensity_pct render normally on those. `sleep_nights` indicates the dedicated per-night CSV store is available (XML trackers + any tracker with manually-logged sleep) — when True, expect a `sleep_summary` block with the full sleep architecture; when False, sleep details are limited to the headline Total/Deep/REM on `health_metrics_weekly`.
 - `auto_cardio_enabled`: bool. True = Apple-recorded runs / hikes / HIIT auto-flow into the monthly sheets.
 - `today`: ISO date.
 - `estimated_max_hr`, `estimated_rest_hr`: derived once at the top. `max_hr` is the largest observed Apple max-HR (or 208 − 0.7×age fallback for HL). `rest_hr` is the 28-day mean of `resting_hr` (or 60 fallback for HL). Used by all HR-zone / TRIMP / load-band math below.
@@ -142,10 +143,13 @@ What the JSON contains:
 - `bodyweight_trend_kg_per_week`: slope over the last 8 clean fasted entries, or null.
 
 **Apple Health weekly aggregates:**
-- `health_metrics_weekly`: 4 weeks of Mon-anchored aggregates. Each entry: `{week_start, n_days, vo2max, resting_hr, hrv_sdnn, walking_hr, hr_recovery_1min, sleep_total_h, sleep_deep_h, sleep_rem_h, resp_rate, wrist_temp_c, exercise_min}`. Read this for trends; raw daily data is behind `--include-daily-health`.
+- `health_metrics_weekly`: 4 weeks of Mon-anchored aggregates. Each entry: `{week_start, n_days, vo2max, resting_hr, hrv_sdnn, walking_hr, hr_recovery_1min, sleep_total_h, sleep_deep_h, sleep_rem_h, time_in_bed_h, resp_rate, wrist_temp_c, exercise_min}`. Read this for trends; raw daily data is behind `--include-daily-health`. `time_in_bed_h` is the clinical denominator for Sleep Efficiency — pair it with `sleep_total_h` to compute "in-bed quality" when the dedicated `sleep_summary` block is absent.
 - `vo2max_latest`: `{date, value}` of the most recent VO2max.
 - `vo2max_trend_per_4w`: OLS slope per 4 weeks across all logged VO2max readings.
 - `health_metrics_recent`: raw daily rows (last 30). **Only present with `--include-daily-health`** — the weekly rollup is the default lens.
+
+**Sleep architecture (XML trackers only, 28-day window):**
+- `sleep_summary`: dedicated per-night analysis. Key absent when no nights in window (HL trackers, or XML trackers with no recent sleep data). Shape: `{n_nights_28d, means_h: {core, deep, rem, unspecified, awake, total, time_in_bed}, sleep_efficiency_pct: {mean, trend_per_week}, waso_h_mean, fragmentation: {n_segments_mean, n_segments_trend_per_week}, schedule_consistency: {bedtime_clock_stdev_min, waketime_clock_stdev_min}, outliers: [{date, reason, efficiency_pct, awake_h}, …]}`. Schedule stdevs are **circular** statistics (handle the midnight wraparound), so a 23:50 / 00:10 bedtime pair reports a 20-min stdev, not 23h. `outliers` lists last-14-day nights with efficiency<80% or WASO≥1h. Drives the `### Sleep` report section.
 
 **Debug deep-dive (off by default):**
 - `rows`: flat per-set list. Pass `--include-rows`. Use only for cross-sectional debugging the pre-aggregated keys can't answer.
@@ -426,6 +430,32 @@ VO2max: 48.0 ml/kg/min (2026-04-30), +1.2 / 4 weeks — trending up.
 
 If `vo2max_trend_per_4w` is null (fewer than 4 readings over 21+ days), drop the trend chunk: `VO2max: 48.0 ml/kg/min (2026-04-30) — not enough history for a trend yet.`
 
+### Sleep
+
+**REQUIRED when `sleep_summary` is in the JSON.** Skip the section entirely when the key is absent — that means HL trackers (no per-stage data) or XML trackers with no nights in the last 28 days, and silence is correct. The `### Recovery state` section already names sleep total / deep / REM as recovery_score drivers; this section is the architecture lens — efficiency, fragmentation, schedule consistency — that recovery_score doesn't yet weight.
+
+Hard template (3–5 lines, plain bullets):
+
+- **Stage means (last `n_nights_28d`).** `Total ~{total}h (Core {core} / Deep {deep} / REM {rem} / Awake {awake}h).` Pull from `sleep_summary.means_h`. Round each to 1 decimal. Cite `n_nights_28d` if it's <20 ("over {n} nights — sparse window, treat softly").
+- **Efficiency.** `Sleep efficiency mean {pct}%` from `sleep_summary.sleep_efficiency_pct.mean`. Add the trend chunk when `trend_per_week` is non-null: `(trend {sign}{abs}pp/wk)`. **Anchor**: >85% healthy adult, 80-85% borderline, <80% disturbed. Use the band name once if it informs a call ("borderline — fragmented enough to consider…"); don't lecture.
+- **Schedule consistency.** From `sleep_summary.schedule_consistency`: `bedtime ±{bedtime_clock_stdev_min}min, waketime ±{waketime_clock_stdev_min}min`. Skip the bullet entirely when both stdevs are null (insufficient data). The 28-day stdev is a circular stat — wraps midnight cleanly. **Anchor**: ±30min is tight, ±60min loose, ±90min+ erratic.
+- **Outlier flag.** If `sleep_summary.outliers` is non-empty, name the count + reason once: `Flag: {N} night(s) with efficiency<80% or WASO≥1h in the last 14d → look at pre-bed routine.` Don't list all dates; the user can drill in if they care.
+
+Source-honesty rules:
+- Don't claim a stage breakdown is "off" relative to population norms (e.g. "Deep should be 20% of total"). Apple's stage classifier is good enough for trend, not absolute. Stick to within-user comparison.
+- Don't act on a single bad night. Two-in-fourteen warrants a routine flag; one is noise.
+- `Unspecified` stage is Apple's "asleep but stage unknown" bucket. It's part of Total but isn't actionable on its own — don't surface it unless it's >25% of Total (signals stage-classifier failure, usually from a movement-heavy night).
+- Per global CLAUDE rule: when `n_nights_28d < 14`, soften every claim ("over {n} nights — early window, the trend isn't stable yet").
+
+Example (filled from a real `sleep_summary` with n_nights_28d=24):
+
+```
+- Total ~7.0h (Core 4.3 / Deep 1.0 / REM 1.3 / Awake 0.4h) over 24 nights.
+- Sleep efficiency mean 88% (trend +0.5pp/wk). Comfortably in the healthy band.
+- Bedtime ±18min, waketime ±12min — schedule is tight.
+- Flag: 2 nights with efficiency<80% in the last 14d → look at pre-bed routine.
+```
+
 ### Swim
 
 **REQUIRED when `swim_summary` is in the JSON.** Skip the section entirely when the key is absent — that means HL trackers (no lap data) or no swims in the last 28 days, and silence is correct. Read `references/swim-coaching.md` for SWOLF / SPL / CSS interpretation, retest cadence, and what NOT to say about swim form.
@@ -653,6 +683,7 @@ Source-honesty rules:
 | Calling a deload on TSB alone for HL trackers | TSB -10.7 from two big hikes triggers a "fatigued" prescription on Fabian even though strength load is invisible to TSB | When `capabilities.per_workout_hr_strength` is False, CTL/ATL/TSB are computed only from cardio TRIMPs — strength load is invisible. Don't treat a negative TSB as a unilateral deload trigger; cross-check with `recovery.score` and prefer recovery_score as the primary fatigue signal on these trackers. |
 | Citing `non_interval_minutes` as Zone-2 minutes | Cardio check section reports `cardio_last_28d.non_interval_minutes` (which is just "cardio time that wasn't intervals") as if it were a real Z2 measurement — a 3h Z1 hike inflates the number | Read `cardio_hr_zones_28d.z2` for true Zone-2 minutes (HRR-based). Use `cardio_last_28d.non_interval_minutes` only as a fallback when `cardio_hr_zones_28d` is empty (no avg_hr on cardio sessions). |
 | Skipping the Swim section when `swim_summary` is present | Fully-populated swim data emits zero coach output; the user sees a polished report that pretends they don't swim | Gate on `swim_summary` key presence. Write the REQUIRED 3–5 line block per `references/swim-coaching.md` (see `### Swim` in Phase 1). Skip cleanly only when the key is absent (HL trackers, or no swims in 28 days). |
+| Skipping the Sleep section when `sleep_summary` is present | Fully-populated sleep architecture (all 6 stages, efficiency, fragmentation, schedule stdev) gets zero coach output; the user only sees the headline Sleep total/Deep/REM lines under `### Recovery state` and misses the efficiency / schedule story | Gate on `sleep_summary` key presence. Write the REQUIRED 3–5 line block per the `### Sleep` template in Phase 1. Skip cleanly only when the key is absent (HL trackers, or no nights in 28 days). |
 | Treating a context-change row as a real strength regression | Cable Lateral Raise drops from 15kg to 7kg after a gym change; coach flags the lift as "going backwards" with a -32kg/4w slope, even though the user's Notes say "new gym, different cable weights" | Read `estimated_1rm[exercise].context_change_excluded` and `progression_summary[exercise].last_notes`. When `context_change_excluded ≥ 1`, write "Slope reset by gym/equipment change; trend resumes once 3+ sessions logged on the new equipment" instead of calling stall or regression. |
 | Trusting recovery `confidence: high` on under-sampled signals | A high-weight signal with `n_recent: 1` (one HR-Recovery reading) inflates confidence to "high" even though the score is hanging on one data point | Confidence is gated on per-signal sample sufficiency in `health.py`. When the JSON shows `confidence: medium` or `low` after a thin recent week, soften any rule that relies on the score band — and cite the under-sampled driver by name. |
 

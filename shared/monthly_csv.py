@@ -2,9 +2,10 @@
 
 Replaces the xlsx-era ``tracker_sheet.py`` for the monthly ``YYYY.MM``
 workout sheets. One CSV per month at
-``<person>/data/monthly/YYYY.MM.csv``, 18-column schema preserved
-verbatim from the xlsx layout. Header row 1; data rows ASC by
-(Date, #, Set); TOTAL rows interleaved at strength-session boundaries.
+``<person>/data/monthly/YYYY.MM.csv``, 17-column schema (the original
+xlsx layout minus the retired ``Laps`` column; see ``MONTHLY_HEADERS``
+below). Header row 1; data rows ASC by (Date, #, Set); TOTAL rows
+interleaved at strength-session boundaries.
 
 Computed cells are pre-evaluated on every canonicalize pass:
 - ``Volume = reps × kg`` (was ``=F*G`` formula).
@@ -53,7 +54,7 @@ from person_paths import (
 # Order matches the historical xlsx columns A..Q 1:1 — readers and
 # writers across the codebase still treat column index as semantic.
 # (PR4: ``Laps`` was removed in 2026-05; swim lap count is now sourced
-# exclusively from ``<Person>/data/swimming/swim_workouts.csv``. Old
+# exclusively from ``<Person>/data/swimming/YYYY.MM.workouts.csv``. Old
 # 18-col rows self-truncate on the next canonicalize pass because
 # ``_row_to_dict`` only iterates MONTHLY_FIELDS.)
 MONTHLY_HEADERS = [
@@ -692,7 +693,8 @@ def upsert_monthly_cardio(person: str,
     has the keys: ``date``, ``exercise``, ``duration_min``, ``distance_km``,
     ``avg_hr``, plus optional ``active_cal``, ``total_cal``, ``elevation_m``,
     ``elapsed_min``, ``machine_tag``. (``laps``, if present, is dropped
-    here — swim lap count is sourced from ``swim_workouts.csv`` only.)
+    here — swim lap count is sourced from
+    ``<Person>/data/swimming/YYYY.MM.workouts.csv`` only.)
 
     Dedupe rule:
     - Any existing manual row on (date, exercise) wins unconditionally.

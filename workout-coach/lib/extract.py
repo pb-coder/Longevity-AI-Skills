@@ -281,7 +281,8 @@ def read_health_metrics(person: str) -> list[dict]:
 
 
 def read_swim_workouts(person: str) -> list[dict]:
-    """Return per-swim aggregate rows from ``swimming/swim_workouts.csv``.
+    """Return per-swim aggregate rows aggregated across all per-month
+    ``swimming/YYYY.MM.workouts.csv`` files.
 
     Pass-through to ``csv_store.read_swim_workouts`` — the analytics
     layer doesn't reshape the schema, just consumes it.
@@ -290,8 +291,19 @@ def read_swim_workouts(person: str) -> list[dict]:
 
 
 def read_swim_laps(person: str) -> list[dict]:
-    """Return per-lap rows from ``swimming/swim_laps.csv``."""
+    """Return per-lap rows aggregated across all per-month
+    ``swimming/YYYY.MM.laps.csv`` files."""
     return _csv_store.read_swim_laps(person)
+
+
+def read_sleep_nights(person: str) -> list[dict]:
+    """Return per-night aggregate rows from ``sleep/YYYY.MM.nights.csv``.
+
+    Pass-through to ``csv_store.read_sleep_nights``. Empty list when
+    the sleep folder is absent (HL trackers, or XML trackers that
+    haven't imported / logged any sleep yet).
+    """
+    return _csv_store.read_sleep_nights(person)
 
 
 def read_workout_sessions(person: str) -> list[dict]:

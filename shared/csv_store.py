@@ -15,9 +15,11 @@ from typing import Iterable
 
 from person_paths import (
     ensure_data_dir,
+    ensure_sleep_dir,
     ensure_swimming_dir,
     health_metrics_csv,
     profile_csv,
+    sleep_nights_csv,
     swim_laps_csv,
     swim_workouts_csv,
     workout_sessions_csv,
@@ -33,8 +35,8 @@ HEALTH_METRICS_HEADERS_BY_SOURCE = {
     "xml": [
         "Date", "Bodyweight (kg)", "VO2max", "Resting HR", "HRV SDNN",
         "Walking HR", "HR Recovery 1min", "Sleep Total", "Sleep Deep",
-        "Sleep REM", "Resp Rate", "Wrist Temp", "Sleep Breath Dist",
-        "Exercise Min", "Notes",
+        "Sleep REM", "Time in Bed", "Resp Rate", "Wrist Temp",
+        "Sleep Breath Dist", "Exercise Min", "Notes",
     ],
     "hl_export": [
         "Date", "Bodyweight (kg)", "VO2max", "HR Recovery 1min",
@@ -50,8 +52,8 @@ HEALTH_METRICS_FIELDS_BY_SOURCE = {
     "xml": [
         "bodyweight_kg", "vo2max", "resting_hr", "hrv_sdnn",
         "walking_hr", "hr_recovery_1min", "sleep_total_h", "sleep_deep_h",
-        "sleep_rem_h", "resp_rate", "wrist_temp_c", "sleep_breath_dist",
-        "exercise_min",
+        "sleep_rem_h", "time_in_bed_h", "resp_rate", "wrist_temp_c",
+        "sleep_breath_dist", "exercise_min",
     ],
     "hl_export": [
         "bodyweight_kg", "vo2max", "hr_recovery_1min",
@@ -391,24 +393,46 @@ def read_health_metrics(person: str) -> list[dict]:
     ``resting_hr``, ``sleep_total_h``) plus ``date`` and ``notes``.
     Sorted DESC by date (matches the on-disk order). Missing file →
     empty list.
+
+    Header-name-aware: the on-disk header is matched by column name
+    against the expected schema, so adding columns to the schema in
+    code does not require migrating old rows. Fields whose header is
+    not present on disk read as None for every row.
     """
     source = _resolve_source(person)
     fields = HEALTH_METRICS_FIELDS_BY_SOURCE[source]
-    headers = HEALTH_METRICS_HEADERS_BY_SOURCE[source]
+    expected_headers = HEALTH_METRICS_HEADERS_BY_SOURCE[source]
     path = health_metrics_csv(person)
     header, rows = _read_csv_rows(path)
     if not header:
         return []
+    # Build {field_name: on_disk_column_index | None} using the field
+    # ↔ header position alignment in the schema constants. Skip index 0
+    # (Date) and the trailing Notes column.
+    field_to_disk_idx: dict[str, int | None] = {}
+    for schema_idx, fname in enumerate(fields, start=1):
+        header_name = expected_headers[schema_idx]
+        try:
+            field_to_disk_idx[fname] = header.index(header_name)
+        except ValueError:
+            field_to_disk_idx[fname] = None
+    # Locate Notes on disk by name (falls back to last column).
+    try:
+        notes_disk_idx = header.index("Notes")
+    except ValueError:
+        notes_disk_idx = len(header) - 1
     out: list[dict] = []
     for row in rows:
         d = _date_str(row[0]) if row else None
         if d is None:
             continue
         rec: dict = {"date": d}
-        for i, key in enumerate(fields, start=1):
-            v = row[i] if len(row) > i else None
-            rec[key] = _parse_value(v)
-        notes = row[len(headers) - 1] if len(row) >= len(headers) else None
+        for fname, disk_idx in field_to_disk_idx.items():
+            if disk_idx is None or disk_idx >= len(row):
+                rec[fname] = None
+            else:
+                rec[fname] = _parse_value(row[disk_idx])
+        notes = row[notes_disk_idx] if notes_disk_idx < len(row) else None
         rec["notes"] = notes if notes else None
         out.append(rec)
     return out
@@ -829,4 +853,187 @@ def upsert_swim_laps(person: str, entries: Iterable[dict]) -> list[str]:
         summaries.append(f"  {ym}: {written} written / {updated} updated")
 
     return [f"Swim Laps: {total_written} laps written / "
+            f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries
+
+
+# ============================================================ Sleep (per-night)
+# Per-night aggregate row. Dedupe key = ``Date`` (wake-up date). Sorted
+# DESC by date. Sparse-merge with manual-wins on Notes. Mirrors the
+# per-month-CSV pattern of ``monthly/YYYY.MM.csv`` and
+# ``swimming/YYYY.MM.workouts.csv`` for scalability. XML-only — HL
+# trackers never populate this folder. Segment-level detail is NOT
+# stored here; the per-night row captures fragmentation via N Segments
+# and schedule via First/Last Segment Start. Raw segments stay in the
+# archived Apple XML at ``<root>/.processed/Export*.zip`` and can be
+# re-extracted if a future need arises.
+SLEEP_NIGHTS_HEADERS = [
+    "Date",
+    "Sleep Total (h)", "Sleep Core (h)", "Sleep Deep (h)",
+    "Sleep REM (h)", "Sleep Unspecified (h)", "Sleep Awake (h)",
+    "Time in Bed (h)", "Sleep Efficiency (%)",
+    "N Segments", "First Segment Start", "Last Segment End",
+    "Notes",
+]
+
+SLEEP_NIGHTS_FIELDS = [
+    "total_h", "core_h", "deep_h", "rem_h", "unspecified_h",
+    "awake_h", "time_in_bed_h", "efficiency_pct",
+    "n_segments", "first_segment_start", "last_segment_end",
+]
+
+
+def _compute_sleep_efficiency(total_h, time_in_bed_h):
+    """Return Sleep Efficiency % rounded to 1dp, or None if either input
+    is missing / zero."""
+    if total_h is None or time_in_bed_h is None:
+        return None
+    try:
+        if float(time_in_bed_h) <= 0:
+            return None
+        return round(float(total_h) / float(time_in_bed_h) * 100.0, 1)
+    except (TypeError, ValueError):
+        return None
+
+
+def read_sleep_nights(person: str) -> list[dict]:
+    """Return per-night aggregate rows across all per-month sleep CSVs
+    (``<person>/data/sleep/YYYY.MM.nights.csv``). Sorted DESC by ``date``.
+
+    No sleep files → ``[]``. Each dict has ``date`` plus the fields in
+    ``SLEEP_NIGHTS_FIELDS`` plus ``notes``.
+    """
+    from person_paths import list_sleep_night_months
+    out: list[dict] = []
+    for ym in list_sleep_night_months(person):
+        path = sleep_nights_csv(person, ym)
+        header, rows = _read_csv_rows(path)
+        if not header:
+            continue
+        for row in rows:
+            d = _date_str(row[0]) if row else None
+            if d is None:
+                continue
+            rec: dict = {"date": d}
+            for i, key in enumerate(SLEEP_NIGHTS_FIELDS, start=1):
+                v = row[i] if len(row) > i else None
+                if key in ("first_segment_start", "last_segment_end"):
+                    rec[key] = v if v not in (None, "") else None
+                else:
+                    rec[key] = _parse_value(v)
+            notes_idx = len(SLEEP_NIGHTS_HEADERS) - 1
+            notes = row[notes_idx] if len(row) > notes_idx else None
+            rec["notes"] = notes if notes else None
+            out.append(rec)
+    out.sort(key=lambda r: r["date"], reverse=True)
+    return out
+
+
+def upsert_sleep_nights(person: str, entries: Iterable[dict]) -> list[str]:
+    """Sparse-merge per-night rows into the relevant
+    ``<person>/data/sleep/YYYY.MM.nights.csv``.
+
+    Each entry is routed to its month by ``date``. Dedupe by ``date``
+    within that month. Notes column is preserved untouched (manual
+    annotation wins). Incoming None never overwrites a populated cell.
+
+    Sleep Efficiency is auto-derived when ``total_h`` and
+    ``time_in_bed_h`` are both present and ``efficiency_pct`` wasn't
+    supplied explicitly. ``n_segments`` and the first/last segment
+    clock times stay blank on manual-only rows (only the Apple
+    importer carries that metadata).
+    """
+    entries = list(entries or [])
+    if not entries:
+        return ["Sleep Nights: 0 nights written / 0 updated"]
+
+    by_month_entries: dict[str, list[dict]] = {}
+    for e in entries:
+        d = _date_str(e.get("date"))
+        if not d:
+            continue
+        by_month_entries.setdefault(_date_to_year_month(d), []).append(e)
+
+    total_written = 0
+    total_updated = 0
+    summaries: list[str] = []
+    for ym, month_entries in sorted(by_month_entries.items()):
+        path = sleep_nights_csv(person, ym)
+        header, raw_rows = _read_csv_rows(path)
+        existing: list[dict] = []
+        for row in raw_rows if header else []:
+            d = _date_str(row[0]) if row else None
+            if d is None:
+                continue
+            rec: dict = {"date": d}
+            for i, key in enumerate(SLEEP_NIGHTS_FIELDS, start=1):
+                v = row[i] if len(row) > i else None
+                if key in ("first_segment_start", "last_segment_end"):
+                    rec[key] = v if v not in (None, "") else None
+                else:
+                    rec[key] = _parse_value(v)
+            notes_idx = len(SLEEP_NIGHTS_HEADERS) - 1
+            notes = row[notes_idx] if len(row) > notes_idx else None
+            rec["notes"] = notes if notes else None
+            existing.append(rec)
+
+        by_key: dict[str, dict] = {r["date"]: r for r in existing}
+
+        written = 0
+        updated = 0
+        for e in month_entries:
+            d = _date_str(e.get("date"))
+            if not d:
+                continue
+            cur = by_key.get(d)
+            if cur is None:
+                new_record = {"date": d, "notes": e.get("notes")}
+                for k in SLEEP_NIGHTS_FIELDS:
+                    new_record[k] = e.get(k)
+                # Auto-derive efficiency if both inputs known and not
+                # explicitly supplied.
+                if new_record.get("efficiency_pct") is None:
+                    new_record["efficiency_pct"] = _compute_sleep_efficiency(
+                        new_record.get("total_h"),
+                        new_record.get("time_in_bed_h"),
+                    )
+                by_key[d] = new_record
+                written += 1
+                continue
+            changed = False
+            for k in SLEEP_NIGHTS_FIELDS:
+                v = e.get(k)
+                if v is None:
+                    continue
+                if cur.get(k) != v:
+                    cur[k] = v
+                    changed = True
+            # Manual-wins on notes — only set if missing.
+            if e.get("notes") and not cur.get("notes"):
+                cur["notes"] = e["notes"]
+                changed = True
+            # Re-derive efficiency from the now-merged total/inbed
+            # whenever the supplied entry didn't override it explicitly.
+            if e.get("efficiency_pct") is None:
+                derived = _compute_sleep_efficiency(
+                    cur.get("total_h"), cur.get("time_in_bed_h"),
+                )
+                if derived is not None and cur.get("efficiency_pct") != derived:
+                    cur["efficiency_pct"] = derived
+                    changed = True
+            if changed:
+                updated += 1
+
+        ensure_sleep_dir(person)
+        rows = []
+        for d in sorted(by_key.keys(), reverse=True):
+            rec = by_key[d]
+            row = [rec["date"]] + [rec.get(field) for field in SLEEP_NIGHTS_FIELDS] \
+                + [rec.get("notes")]
+            rows.append(row)
+        _write_csv(sleep_nights_csv(person, ym), SLEEP_NIGHTS_HEADERS, rows)
+        total_written += written
+        total_updated += updated
+        summaries.append(f"  {ym}: {written} written / {updated} updated")
+
+    return [f"Sleep Nights: {total_written} nights written / "
             f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries

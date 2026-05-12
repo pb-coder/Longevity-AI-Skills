@@ -23,6 +23,8 @@ CSV under `<Person>/data/`, sibling to the skill repo:
 ├── swimming/                   # XML source only
 │   ├── YYYY.MM.workouts.csv
 │   └── YYYY.MM.laps.csv
+├── sleep/                      # XML source only (or manual /log entries)
+│   └── YYYY.MM.nights.csv      # per-night architecture (6 stages + InBed + Efficiency + segments + clock times)
 └── longevity/                  # personal data; never committed
     ├── profile.md
     ├── state.md

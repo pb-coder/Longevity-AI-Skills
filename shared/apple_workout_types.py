@@ -98,7 +98,7 @@ APPLE_TO_TRACKER_EXERCISE: dict[str, str] = {
 # ---------------------------------------------------- swim stroke-style enum
 # Apple's HKSwimmingStrokeStyle is a small int recorded per
 # ``HKWorkoutEventTypeLap`` event on swim workouts. We keep the enum value
-# verbatim in ``swim_laps.csv`` (Apple's mapping is the contract; future
+# verbatim in ``swimming/YYYY.MM.laps.csv`` (Apple's mapping is the contract; future
 # iOS versions may extend this) and decode at coach-read time. See:
 # https://developer.apple.com/documentation/healthkit/hkswimmingstrokestyle
 HK_SWIMMING_STROKE_STYLE: dict[int, str] = {

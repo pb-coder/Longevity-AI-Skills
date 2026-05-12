@@ -14,21 +14,24 @@ Two parallel trackers live in per-person folders inside this directory:
 │       ├── workout_sessions.csv         # one row per Apple Workout
 │       ├── profile.csv                  # source / auto_cardio / birthday / swim CSS
 │       ├── monthly/                     # one CSV per YYYY.MM workout month
-│       │   ├── 2026.05.csv              # 18-col schema, ASC by (Date,#,Set)
+│       │   ├── 2026.05.csv              # 17-col schema, ASC by (Date,#,Set)
 │       │   └── …                        # canonicalize rebuilds TOTAL rows + computed cells
-│       └── swimming/                    # XML-only; absent on HL trackers
-│           ├── swim_workouts.csv        # per-swim aggregates
-│           └── swim_laps.csv            # per-lap detail
-├── Fabian/                              # same shape (no swimming/ for HL)
+│       ├── swimming/                    # XML-only; absent on HL trackers
+│       │   ├── YYYY.MM.workouts.csv     # per-swim aggregates (per month)
+│       │   └── YYYY.MM.laps.csv         # per-lap detail (per month)
+│       └── sleep/                       # XML-only; absent on HL trackers
+│           └── YYYY.MM.nights.csv       # per-night architecture (per month)
+├── Fabian/                              # same shape (no swimming/ or sleep/ for HL)
 └── Skills/
 ```
 
 There is no xlsx anywhere post-PR3a. Per-month workout data lives in
-`<Person>/data/monthly/YYYY.MM.csv` — same 18-column schema the xlsx
-sheets used (`SESSION | Date | # | Exercise | Set | Reps | kg | Volume
-| Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR |
-Active Cal | Total Cal | Elevation (m) | Elapsed | Laps`), plus a
-TOTAL row per strength session. Computed cells (Volume, Pace, Total
+`<Person>/data/monthly/YYYY.MM.csv` — 17-column schema (`SESSION | Date
+| # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) |
+Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal |
+Elevation (m) | Elapsed`), plus a TOTAL row per strength session.
+The old `Laps` column was retired in 2026-05; swim lap counts now live
+exclusively in `<Person>/data/swimming/YYYY.MM.workouts.csv`. Computed cells (Volume, Pace, Total
 Cal, SESSION) are pre-evaluated on every canonicalize pass so the
 user can preview the CSV in macOS Quick Look or Numbers without
 needing Excel formulas. Health Metrics, Workout Sessions, and Profile
@@ -40,11 +43,11 @@ all strength sections, CARDIO (Hike, Swim, Walk, Outdoor Run, Outdoor
 Cycling, HIIT + indoor machines), and WELLNESS (Yoga, Stretching), so
 non-strength activities log without "(not in database)" warnings.
 
-`health_metrics.csv` and `workout_sessions.csv` are populated by one of two importers, dispatched by file extension. **Apple's native zipped XML export** (`Export.zip` / `Export - <Person>.zip`, dropped in the workout-tracker root) flows through `Skills/shared/import_apple_health.py`, which streams the XML and writes per-day aggregates (VO2max, RHR, HRV, sleep stages, wrist temp, exercise minutes, BodyMass) and per-workout rows with avg/max/min HR. **HLExport text dumps** (`health_export_<timestamp>.txt`, from the HLExport iOS app) flow through `Skills/shared/import_hl_export.py`, which line-parses the same fields HL provides — VO2max, HR Recovery, total sleep (stitched from `Sleep: Asleep` / `Awake` events), respiratory rate, bodyweight, workout duration / calories / distance. HL has no HRV, no wrist temp, no per-workout HR, no sleep stages by design. Both importers are idempotent; sparse-merge protects existing values, so switching a tracker between sources is non-destructive. **Both archive the source export to `<root>/.processed/` on success** — the CSVs are the persistent record now; the archive keeps a forensic trail if a downstream bug damages the CSVs.
+`health_metrics.csv` and `workout_sessions.csv` are populated by one of two importers, dispatched by file extension. **Apple's native zipped XML export** (`Export.zip` / `Export - <Person>.zip`, dropped in the workout-tracker root) flows through `Skills/shared/import_apple_health.py`, which streams the XML and writes per-day aggregates (VO2max, RHR, HRV, sleep stages, Time in Bed, wrist temp, exercise minutes, BodyMass) and per-workout rows with avg/max/min HR. The Apple importer also writes a per-night sleep architecture row to `sleep/YYYY.MM.nights.csv` (see Sleep section below). **HLExport text dumps** (`health_export_<timestamp>.txt`, from the HLExport iOS app) flow through `Skills/shared/import_hl_export.py`, which line-parses the same fields HL provides — VO2max, HR Recovery, total sleep (stitched from `Sleep: Asleep` / `Awake` events), respiratory rate, bodyweight, workout duration / calories / distance. HL has no HRV, no wrist temp, no per-workout HR, no per-stage sleep architecture, no Time in Bed by design. Both importers are idempotent; sparse-merge protects existing values, so switching a tracker between sources is non-destructive. **Both archive the source export to `<root>/.processed/` on success** — the CSVs are the persistent record now; the archive keeps a forensic trail if a downstream bug damages the CSVs.
 
 ### Per-person source profile
 
-Each person's `data/profile.csv` is a 2-column key/value file pinning three things:
+Each person's `data/profile.csv` is a 2-column key/value file pinning these settings:
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -55,18 +58,38 @@ Each person's `data/profile.csv` is a 2-column key/value file pinning three thin
 | `swim_css_set_at` | YYYY-MM-DD when CSS was last measured. Coach prompts a retest after 8 weeks | unset |
 | `swim_pool_length_default` | Fallback pool length (metres) for the rare workout where Apple omits `HKLapLength` | unset (importer only writes `Pool Length` when Apple provides it) |
 
-`/coach` reads `profile.csv`'s `source` to decide which sections of its report to write — HRV / wrist temp / per-workout-HR sections are gated on the matching capability flags. For HL users, the coach skips those sections entirely rather than printing "not enough data yet." The profile is bootstrapped on first import; manual override is supported by editing `<Person>/data/profile.csv` directly.
+`/coach` reads `profile.csv`'s `source` to decide which sections of its report to write — HRV / wrist temp / per-workout-HR / sleep-architecture sections are gated on the matching capability flags (`hrv`, `wrist_temp`, `per_workout_hr_strength`, `sleep_nights`, etc.). For HL users, the coach skips those sections entirely rather than printing "not enough data yet." The profile is bootstrapped on first import; manual override is supported by editing `<Person>/data/profile.csv` directly.
 
 ### Swim metrics
 
-Swim workouts get richer treatment than other cardio because Apple emits per-lap data (`HKWorkoutEventTypeLap` events) that's actionable for SWOLF / SPL / pace trends. The XML importer writes two extra CSVs in `<Person>/data/swimming/`:
+Swim workouts get richer treatment than other cardio because Apple emits per-lap data (`HKWorkoutEventTypeLap` events) that's actionable for SWOLF / SPL / pace trends. The XML importer writes two extra CSVs per month in `<Person>/data/swimming/`:
 
-- **`swim_workouts.csv`** — one row per swim. Aggregates: Pool Length, Strokes, SPL (`Strokes / Laps`), Avg SWOLF (mean of per-lap SWOLF), Stroke Mix (compact `"Free 21 / Fly 1"` summary), Location (Pool / Outdoor Pool / Open Water), Water Temp, Avg HR, Active Cal, Notes. Sources: `HKLapLength` metadata, `HKQuantityTypeIdentifierSwimmingStrokeCount.sum`, per-lap SWOLF averaging, `HKQuantityTypeIdentifierWaterTemperature.average`, derived from the `HKIndoorWorkout` + `HKSwimmingLocationType` flags. Dedupe by `(date, start)`. DESC by date+start.
-- **`swim_laps.csv`** — one row per lap event. Per-lap fields: Stroke (raw enum) + Stroke (decoded via `apple_workout_types.HK_SWIMMING_STROKE_STYLE`), Duration (sec), SWOLF, Source. Dedupe by `(date, workout_start, lap_num)`; replace-on-match (no sparse-merge — re-exports authoritatively replace stored lap data). ASC by (date, lap_num).
+- **`YYYY.MM.workouts.csv`** — one row per swim. Aggregates: Pool Length, Strokes, SPL (`Strokes / Laps`), Avg SWOLF (mean of per-lap SWOLF), Stroke Mix (compact `"Free 21 / Fly 1"` summary), Location (Pool / Outdoor Pool / Open Water), Water Temp, Avg HR, Active Cal, Notes. Sources: `HKLapLength` metadata, `HKQuantityTypeIdentifierSwimmingStrokeCount.sum`, per-lap SWOLF averaging, `HKQuantityTypeIdentifierWaterTemperature.average`, derived from the `HKIndoorWorkout` + `HKSwimmingLocationType` flags. Dedupe by `(date, start)`. DESC by date+start.
+- **`YYYY.MM.laps.csv`** — one row per lap event. Per-lap fields: Stroke (raw enum) + Stroke (decoded via `apple_workout_types.HK_SWIMMING_STROKE_STYLE`), Duration (sec), SWOLF, Source. Dedupe by `(date, workout_start, lap_num)`; replace-on-match (no sparse-merge — re-exports authoritatively replace stored lap data). ASC by (date, lap_num).
 
 HL .txt exports don't carry lap-event data, so HL trackers never have a `swimming/` folder — the coach skips the swim section automatically. The Apple Health zipped-XML importer is the only writer; `/log` cannot append per-lap detail manually.
 
 **CSS test workflow.** When the user logs a 400m + 200m time-trial pair on the same day with `CSS test` on the header line, `/log`'s parser includes a `css_test` field in the payload. `append_workout.py` computes `(t400_sec - t200_sec) / 2` and writes `swim_css_sec_per_100m` + `swim_css_set_at` to `profile.csv`. CSS detection is never automatic — only the explicit `CSS test` keyword triggers the write.
+
+### Sleep architecture
+
+Sleep gets a dedicated per-month store at `<Person>/data/sleep/YYYY.MM.nights.csv` (one CSV per month, parallel to `monthly/` and `swimming/`). The Apple XML importer writes every stage Apple emits (`HKCategoryValueSleepAnalysisAsleepCore` / `AsleepDeep` / `AsleepREM` / `AsleepUnspecified` / `Awake` / `InBed`); `/log` accepts an opt-in manual sleep payload (see below) that dual-writes to the same store. XML-only — HLExport doesn't supply per-stage data, so `Fabian/data/sleep/` never exists unless he manually logs sleep.
+
+Per-night schema (`Date` is dedupe key, sparse-merge with manual-wins on Notes):
+
+- **Stages (hours):** `Sleep Total` (sum of all `Asleep*` stages), `Sleep Core`, `Sleep Deep`, `Sleep REM`, `Sleep Unspecified`, `Sleep Awake` (WASO — wake-after-sleep-onset).
+- **Time in Bed (h):** total span of `HKCategoryValueSleepAnalysisInBed` segments. Source of the clinical sleep-efficiency denominator. The Apple Watch does NOT emit InBed records — only the legacy iPhone Sleep Schedule did, so this column is typically blank on Watch-only data. Users can fill it by re-enabling iOS Sleep Schedule or by typing `inbed X.X` in a `/log` message.
+- **Sleep Efficiency (%):** derived from `Sleep Total / Time in Bed × 100`, written on import for cheap reads. Auto-computed inside `csv_store.upsert_sleep_nights` when both inputs are present and no explicit override was supplied.
+- **N Segments:** fragmentation proxy. Count of `Asleep*` + `Awake` segments contributing to the night. Manual `/log` entries leave this blank (only the importer has segment metadata).
+- **First / Last Segment Start:** earliest sleep-onset and latest wake-up clock times across all `Asleep*` segments for the night. Bedtime / waketime schedule signal — `/coach`'s `sleep_summary` derives circular stdevs over a 28-day window (so a 23:50 / 00:10 bedtime pair correctly reports a 20-min stdev, not 23h).
+
+**Recovery-night bucketing.** Apple emits sleep segments tagged by `startDate` / `endDate`. The importer buckets each segment to its *recovery night* (the morning the user wakes up): if `endDate.hour < 18`, bucket to `endDate.date()`; if `endDate.hour ≥ 18`, bucket to `endDate.date() + 1`. Without the evening shift, a sleep period that starts 23:00 and ends 23:42 on the same calendar day would land on that day's row alongside the morning's actual sleep — combining two unrelated windows. Apple's own daily summary uses this same convention. **Side-effect on `health_metrics.csv`:** `sleep_total_h` / `sleep_deep_h` / `sleep_rem_h` values now also use this bucketing; pre-existing rows shifted slightly (usually <0.7h) on the first re-import that picked up the new logic. This is a correctness fix, not data damage.
+
+**Manual sleep via `/log` (opt-in).** The user types `sleep 7h25`, `sleep total 7.5 deep 1.2 rem 1.3`, `inbed 8.4`, or `efficiency 91` (manual override) on a header line. Parsing rules in `Skills/workout-logger/references/parsing-rules.md`. `append_workout.py` dual-writes: rich detail into `sleep/YYYY.MM.nights.csv` via `upsert_sleep_nights` (sparse-merge), headline fields (`Sleep Total` / `Sleep Deep` / `Sleep REM` / `Time in Bed`) mirrored into `health_metrics.csv` so `recovery_score` picks them up without a join. Sparse-merge throughout — partial input is fine.
+
+**Segment-level detail is intentionally NOT stored.** The per-night summary captures every actionable signal (stage durations + Efficiency + N Segments for fragmentation + First/Last clock times for schedule). Raw segments would be 7-11k rows/year with no current consumer. If a future need arises (hypnograms, sleep-latency derivation), re-extract from the archived Apple XML at `<root>/.processed/Export*.zip`.
+
+**Coach exposure.** `read_tracker.py` emits a `sleep_summary` block (gated on per-night data existing in the 28-day window) with stage means, efficiency mean + per-week trend, fragmentation, schedule consistency (circular stdev of bedtime / waketime), and last-14-day outliers (efficiency <80% or WASO ≥1h). `capabilities.sleep_nights` flags whether the dedicated store is available — False for HL trackers. `recovery_score` weights are unchanged for now; the plan-of-record is to watch 4-6 weeks of `sleep_summary` data before deciding whether Sleep Efficiency / Core / WASO earns its own driver. `health_metrics_weekly` now includes `time_in_bed_h` so the recovery layer can read it without a folder join.
 
 ### Auto-cardio (Apple → monthly CSV)
 
@@ -90,7 +113,7 @@ Never mix data across trackers in a single skill run.
 
 ## Monthly CSV format
 
-Columns (18, in order): `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed | Laps`. ASC by (Date, #, Set), TOTAL rows interleaved at strength-session boundaries.
+Columns (17, in order): `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed`. ASC by (Date, #, Set), TOTAL rows interleaved at strength-session boundaries. (The old `Laps` column was retired in 2026-05; out-of-date 18-col rows self-truncate on the next `canonicalize_monthly_csv` pass because `_row_to_dict` only iterates the 17 canonical fields.)
 
 Each set is one row. Date, #, and Exercise are populated on every row (no carry-forward shorthand). `#` restarts at 1 per date and is shared by all sets of the same exercise. Cardio rows use the cardio columns (Distance through Elapsed); strength rows leave them blank.
 
@@ -125,6 +148,7 @@ Skill source lives in [pb-coder/Skills](https://github.com/pb-coder/Skills), clo
 - New exercises get added to the canonical markdown at `Skills/shared/exercises-database.md` under the appropriate muscle → pattern section. There's no xlsx mirror anymore — both `/log` and `/coach` read the markdown directly. Plurals, synonyms, and old typo'd names go in `Skills/workout-logger/references/aliases.md` so `/log` auto-canonicalizes them.
 - Past monthly CSVs that contain old typo'd exercise names (e.g. "Deadhang", "Dips", "Stomach Press*") can be cleaned up retroactively with `python3 Skills/shared/canonicalize_logs.py --person <Person>`. The script renames typos to canonical names across every monthly CSV, strips stale "(not in database)" notes, and prints any ambiguous names (e.g. bare "Leg Curl") for manual decision rather than guessing.
 - **Bodyweight is opt-in.** `/log` no longer prompts. Include a line like `weight 76.5` (or `bw 76.5`, `bodyweight: 76.5`) in the `/log` message to record a morning weight for that session's date. The logger forwards it into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date). The standing convention is morning / empty-stomach; only annotate if the context differs (e.g. `weight 77.1 after dinner`).
+- **Sleep is opt-in.** `/log` never prompts for sleep either. Include a line like `sleep 7h25`, `sleep total 7.5 deep 1.2 rem 1.3`, `inbed 8.4`, or `efficiency 91` (manual override) on a header line and the logger parses it into a `sleep` payload entry keyed to that session's date (the wake-up date). `append_workout.py` dual-writes: rich per-night detail (all 6 stages + Time in Bed + N Segments + first/last segment clock times) into `<Person>/data/sleep/YYYY.MM.nights.csv`, and headline fields (Sleep Total / Deep / REM / Time in Bed) mirrored into `health_metrics.csv` for the recovery_score path. Sparse-merge throughout — partial input fine; Sleep Efficiency is auto-derived when both Total and Time in Bed are present and `efficiency_pct` wasn't supplied. Manual entries can't fill `n_segments` / first / last (Apple-importer only).
 - **Apple Health import.** `/log` offers to refresh on every run via an `AskUserQuestion` prompt — pick "Refresh now" or "Skip"; the prompt always fires. The importer auto-resolves the export file from the workout-tracker root in this priority order: (1) `./Export - <Person>.zip` (Apple zipped XML, per-person), (2) `./Export.zip` (single-user fallback), (3) `./health_export_*.txt` (HLExport text dump — most recent by mtime; the user drops one fresh file at a time without renaming). Dispatch is by extension: `.zip` → `import_apple_health.py --person <Person>`, `.txt` → `import_hl_export.py --person <Person>`. **Both archive the source export to `<root>/.processed/` on success** (CSVs are the persistent record; the archive is the rollback path if a downstream bug damages the CSVs). Re-runs are idempotent; sparse-merge upserts protect existing data, so switching a tracker between sources is non-destructive. If the resolved file's source disagrees with `profile.csv`'s `source`, the logger asks once before importing.
 
 ## Backups

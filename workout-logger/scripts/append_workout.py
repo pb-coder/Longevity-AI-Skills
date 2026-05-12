@@ -10,13 +10,26 @@ Input JSON is either a bare list of row dicts (legacy) or a wrapper object:
 
     {
       "rows": [ ... row dicts ... ],
-      "bodyweight": [ {"date": "YYYY-MM-DD", "kg": 78.4, "notes": ""}, ... ]
+      "bodyweight": [ {"date": "YYYY-MM-DD", "kg": 78.4, "notes": ""}, ... ],
+      "sleep": [ {"date": "YYYY-MM-DD", "total_h": 7.5,
+                  "deep_h": 1.2, "rem_h": 1.3, "core_h": null,
+                  "unspecified_h": null, "awake_h": null,
+                  "time_in_bed_h": 8.4, "efficiency_pct": null,
+                  "notes": null}, ... ]
     }
 
-The wrapper form allows /log to capture the user's morning weight alongside
-the workout. Both `rows` and `bodyweight` are optional within the wrapper.
-Bodyweight entries are upserted into the per-person Health Metrics CSV
-(``<person>/data/health_metrics.csv`` col ``Bodyweight (kg)``).
+The wrapper form allows /log to capture the user's morning weight and sleep
+alongside the workout. ``rows``, ``bodyweight``, and ``sleep`` are all
+optional within the wrapper.
+
+- Bodyweight entries are upserted into the per-person Health Metrics CSV
+  (``<person>/data/health_metrics.csv`` col ``Bodyweight (kg)``).
+- Sleep entries are dual-written: rich per-night detail goes into
+  ``<person>/data/sleep/YYYY.MM.nights.csv``; the headline fields
+  (Sleep Total / Deep / REM / Time in Bed) are mirrored into
+  ``health_metrics.csv`` so the recovery score path picks them up
+  without joining files. Both writes are sparse-merge — partial input
+  is fine, missing keys preserve whatever was there before.
 
 Row dict schema:
     {
@@ -35,10 +48,10 @@ Row dict schema:
     }
 
     Note: ``laps`` is no longer a monthly-CSV column. Swim lap counts live
-    on ``<Person>/data/swimming/swim_workouts.csv``; manual /log payloads
-    that include ``laps`` are silently dropped here. If the user types
-    ``<N> laps`` on a swim row, /log should route the value to the swim
-    store separately rather than passing it through this function.
+    on ``<Person>/data/swimming/YYYY.MM.workouts.csv``, populated by the
+    Apple Health importer. Manual /log payloads that include ``laps``
+    are silently dropped here — the canonical lap count is Apple-fed,
+    and a manual count has nowhere to go through this function.
 
 Rows must arrive pre-sorted: by date ascending, then by num ascending, then by set.
 The script does not re-sort — it trusts the caller.
@@ -59,7 +72,11 @@ from monthly_csv import (  # noqa: E402
     canonicalize_monthly_csv,
     upsert_rows as monthly_upsert_rows,
 )
-from csv_store import upsert_health_metrics, write_profile  # noqa: E402
+from csv_store import (  # noqa: E402
+    upsert_health_metrics,
+    upsert_sleep_nights,
+    write_profile,
+)
 from person_paths import monthly_csv as monthly_csv_path  # noqa: E402
 
 
@@ -142,6 +159,88 @@ def apply_css_test(person: str, css_test: dict | None) -> list[str]:
             f"swim_css_set_at={set_at} to profile.csv"]
 
 
+def upsert_sleep(person: str, entries: list[dict]) -> list[str]:
+    """Dual-write manual sleep entries into the per-night CSV + health_metrics.
+
+    Each entry shape (all fields except ``date`` optional; nulls accepted):
+
+        {
+          "date": "2026-05-11",
+          "total_h": 7.5, "core_h": 4.5, "deep_h": 1.2,
+          "rem_h": 1.3, "unspecified_h": null, "awake_h": 0.6,
+          "time_in_bed_h": 8.4, "efficiency_pct": null,
+          "notes": null
+        }
+
+    - Rich detail (all 6 stages + Time in Bed + Efficiency + Notes)
+      lands in ``<person>/data/sleep/YYYY.MM.nights.csv`` via
+      ``upsert_sleep_nights`` (sparse-merge, Notes manual-wins).
+      Sleep Efficiency is auto-derived inside the upsert when both
+      ``total_h`` and ``time_in_bed_h`` are present and
+      ``efficiency_pct`` wasn't supplied.
+    - Headline fields (``sleep_total_h``, ``sleep_deep_h``,
+      ``sleep_rem_h``, ``time_in_bed_h``) are mirrored into
+      ``health_metrics.csv`` so the existing recovery_score path
+      picks them up without a cross-file join. Sparse-merge on
+      Health Metrics protects any other metric on the same date.
+
+    ``n_segments``, ``first_segment_start``, and ``last_segment_end``
+    are left blank on manual rows — only the Apple importer can
+    populate those from segment-level XML.
+    """
+    if not entries:
+        return []
+
+    nights_payload: list[dict] = []
+    hm_payload: list[dict] = []
+    summary_parts: list[str] = []
+    for e in entries:
+        d = str(e.get("date") or "")[:10]
+        if not d:
+            continue
+        nights_payload.append({
+            "date":           d,
+            "total_h":        e.get("total_h"),
+            "core_h":         e.get("core_h"),
+            "deep_h":         e.get("deep_h"),
+            "rem_h":          e.get("rem_h"),
+            "unspecified_h":  e.get("unspecified_h"),
+            "awake_h":        e.get("awake_h"),
+            "time_in_bed_h":  e.get("time_in_bed_h"),
+            "efficiency_pct": e.get("efficiency_pct"),
+            "notes":          e.get("notes"),
+        })
+        hm = {"date": d}
+        for k_in, k_hm in (
+            ("total_h",       "sleep_total_h"),
+            ("deep_h",        "sleep_deep_h"),
+            ("rem_h",         "sleep_rem_h"),
+            ("time_in_bed_h", "time_in_bed_h"),
+        ):
+            if e.get(k_in) is not None:
+                hm[k_hm] = e[k_in]
+        if len(hm) > 1:  # at least one mirrored field
+            hm_payload.append(hm)
+        # Build a compact human summary for the run output.
+        bits = []
+        if e.get("total_h") is not None:
+            bits.append(f"total={e['total_h']}h")
+        if e.get("time_in_bed_h") is not None:
+            bits.append(f"inbed={e['time_in_bed_h']}h")
+        summary_parts.append(f"{d}({', '.join(bits) or 'no fields'})")
+
+    out: list[str] = []
+    if nights_payload:
+        out.extend(upsert_sleep_nights(person, nights_payload))
+    if hm_payload:
+        upsert_health_metrics(person, hm_payload)
+        out.append(
+            f"Sleep: mirrored to Health Metrics for {len(hm_payload)} "
+            f"date(s) ({', '.join(summary_parts)})"
+        )
+    return out
+
+
 def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
     """Mirror manual bodyweight entries into the Health Metrics CSV.
 
@@ -169,13 +268,14 @@ def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
 
 
 def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
-                  css_test: dict | None = None) -> list[str]:
-    """Apply rows + bodyweight entries + optional CSS test.
+                  css_test: dict | None = None,
+                  sleep: list[dict] | None = None) -> list[str]:
+    """Apply rows + bodyweight + sleep entries + optional CSS test.
 
     Routes per-set rows to the matching ``YYYY.MM.csv`` under
     ``<person>/data/monthly/``, then canonicalizes each touched month
-    (sort, recompute Volume / Pace / TOTAL rows). Bodyweight + css_test
-    flow through the existing CSV helpers.
+    (sort, recompute Volume / Pace / TOTAL rows). Bodyweight, sleep,
+    and css_test flow through the existing CSV helpers.
     """
     status: list[str] = []
 
@@ -201,19 +301,24 @@ def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
 
     # Bodyweight upserts the Health Metrics CSV.
     status.extend(upsert_bodyweight(person, bodyweight))
+    # Sleep dual-writes to sleep/YYYY.MM.nights.csv + health_metrics.csv.
+    status.extend(upsert_sleep(person, sleep or []))
     # CSS test writes to profile.csv. Independent of rows / bodyweight.
     status.extend(apply_css_test(person, css_test))
     return status
 
 
-def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None]:
-    """Return (rows, bodyweight_entries, css_test). Accepts bare list or wrapper dict.
+def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list[dict]]:
+    """Return (rows, bodyweight_entries, css_test, sleep_entries).
 
-    Wrapper dict accepts an optional ``css_test`` key whose value is
-    ``{"date": "YYYY-MM-DD", "t400_sec": float, "t200_sec": float}``.
-    The /log agent assembles this when the user types ``CSS test`` on
-    the header line of a 400m + 200m TT pair. Bare list (legacy form)
-    has no CSS-test path — returns None.
+    Accepts bare list (legacy — rows only) or wrapper dict. Wrapper
+    dict accepts optional ``bodyweight``, ``css_test``, and ``sleep``
+    keys; all are independent.
+
+    ``sleep`` entries each require ``date``; all other keys (``total_h``,
+    ``deep_h``, ``rem_h``, ``core_h``, ``unspecified_h``, ``awake_h``,
+    ``time_in_bed_h``, ``efficiency_pct``, ``notes``) are optional —
+    sparse-merge applies.
     """
     if source == "-":
         data = json.load(sys.stdin)
@@ -221,6 +326,7 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None]:
         data = json.loads(Path(source).read_text())
 
     css_test: dict | None = None
+    sleep_entries: list[dict] = []
     if isinstance(data, list):
         rows = data
         bw = []
@@ -232,6 +338,10 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None]:
             bw_raw = [bw_raw]
         bw = bw_raw
         css_test = data.get("css_test") or None
+        sleep_raw = data.get("sleep", []) or []
+        if isinstance(sleep_raw, dict):
+            sleep_raw = [sleep_raw]
+        sleep_entries = sleep_raw
     else:
         raise ValueError("payload must be a list of rows or a dict wrapper")
 
@@ -248,8 +358,11 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None]:
             raise ValueError(
                 f"css_test missing t400_sec / t200_sec: {css_test!r}"
             )
+    for e in sleep_entries:
+        if "date" not in e:
+            raise ValueError(f"sleep entry missing date: {e!r}")
 
-    return rows, bw, css_test
+    return rows, bw, css_test, sleep_entries
 
 
 def main() -> int:
@@ -261,12 +374,13 @@ def main() -> int:
                     help="Path to payload JSON, or '-' to read from stdin.")
     args = ap.parse_args()
 
-    rows, bodyweight, css_test = load_payload(args.payload)
-    if not rows and not bodyweight and not css_test:
-        print("No rows, bodyweight entries, or css_test to write.")
+    rows, bodyweight, css_test, sleep_entries = load_payload(args.payload)
+    if not rows and not bodyweight and not css_test and not sleep_entries:
+        print("No rows, bodyweight, sleep, or css_test entries to write.")
         return 0
     try:
-        for line in write_payload(args.person, rows, bodyweight, css_test):
+        for line in write_payload(args.person, rows, bodyweight, css_test,
+                                  sleep=sleep_entries):
             print(line)
     except FileNotFoundError as e:
         print(f"ERROR: {e}", file=sys.stderr)

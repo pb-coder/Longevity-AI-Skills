@@ -142,6 +142,7 @@ def health_metrics_weekly(health_all: list[dict],
     keys = [
         "vo2max", "resting_hr", "hrv_sdnn", "walking_hr",
         "hr_recovery_1min", "sleep_total_h", "sleep_deep_h", "sleep_rem_h",
+        "time_in_bed_h",
         "resp_rate", "wrist_temp_c", "exercise_min",
     ]
     by_week: dict[tuple[int, int], dict[str, list[float]]] = {}

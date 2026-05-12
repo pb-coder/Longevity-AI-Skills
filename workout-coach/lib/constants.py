@@ -36,6 +36,9 @@ SOURCE_CAPABILITIES = {
         "walking_hr":         True,
         "sleep_stages":       True,
         "sleep_breath_dist":  True,
+        "sleep_nights":       True,   # per-night architecture (all 6 stages +
+                                      # Time in Bed + Efficiency + N Segments +
+                                      # first/last segment clock times)
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
     },
@@ -46,6 +49,7 @@ SOURCE_CAPABILITIES = {
         "walking_hr":         False,
         "sleep_stages":       False,
         "sleep_breath_dist":  False,
+        "sleep_nights":       False,
         "exercise_min_daily": False,
         "per_workout_hr_strength": False,
     },

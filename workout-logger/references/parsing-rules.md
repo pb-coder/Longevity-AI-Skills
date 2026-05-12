@@ -52,16 +52,15 @@ Extended columns activate for the entire workout if any cardio row is present.
 | Pace | `MM:SS` min/km | `10:16` |
 | Distance | km | `5` |
 | Avg HR | bpm | `155` |
-| Laps | integer (swim) | `22 laps`, `22 lengths`, `22 Bahnen` |
 
 Convert pace input: `8'53"` → `8:53`. Never use decimal for time fields.
 Leave fields blank if not provided.
 
 **Distance unit:** the tracker stores distance in km. If the user writes `Swim 550m` or `Run 800m`, convert (`550m` → `0.55`, `800m` → `0.8`). The Apple Health importer is unit-aware (reads the `unit` attribute from the XML) — never log `550` for a 550 m swim, that landed as `550 km` in the historical bug.
 
-**Laps (swim):** recognise `<N> laps`, `<N> lengths`, or `<N> bahnen` (case-insensitive) anywhere on a swim row. Set `laps=N`. Pool length × laps should match `distance_km × 1000`; if the user gives both and they're inconsistent, prefer what they typed and flag the mismatch in Notes.
+**Laps (swim) — no longer manually written.** The old `Laps` column on the monthly CSV was retired in 2026-05. Swim lap counts now live exclusively on `<Person>/data/swimming/YYYY.MM.workouts.csv`, populated by the Apple Health importer. If the user types `<N> laps` / `<N> lengths` / `<N> Bahnen` on a swim row, the parser may silently ignore it — the value has nowhere to go through `/log`, and the Apple importer will fill the canonical count post-hoc on the matching session.
 
-**Per-lap swim detail (Stroke / SWOLF / per-lap pace) is NOT manually parseable.** Apple Health is the only source — the importer reads `HKWorkoutEventTypeLap` events and writes them to `<Person>/data/swimming/swim_laps.csv`. A manual `/log` swim row records distance + duration + (optionally) `<N> laps`; that's the full surface.
+**Per-lap swim detail (Stroke / SWOLF / per-lap pace) is NOT manually parseable.** Apple Health is the only source — the importer reads `HKWorkoutEventTypeLap` events and writes them to `<Person>/data/swimming/YYYY.MM.laps.csv`. A manual `/log` swim row records distance + duration only.
 
 ## CSS test (Critical Swim Speed)
 
@@ -93,3 +92,45 @@ Default `notes` to `null`. Only set `notes` when the user gave an explicit non-m
 For multi-date logs, attach the weight to the date on whose header line it appears. If the user wrote the weight on the top-level `/log` header, attach it to every date in the message.
 
 Never invent or guess a weight. If no bodyweight line is present, omit `bodyweight` from the payload entirely.
+
+## Sleep (opt-in)
+
+If (and only if) the `/log` message contains an explicit sleep line, parse it into a `sleep` entry keyed to the session's date (the wake-up date — same date the workout happened, since the sleep precedes the morning workout). All forms case-insensitive.
+
+**Bare duration** (`sleep <duration>`) → writes `total_h` only:
+
+- `sleep 7h25`, `sleep 7:25`, `sleep 7.42h`, `sleep 7.42`, `sleep 450m`, `sleep 450 min`
+
+**Per-stage breakdown** (`sleep [total <h>] [core <h>] [deep <h>] [rem <h>] [unspecified <h>] [awake <h>] [inbed <h>] [efficiency <pct>]`) → writes each named stage:
+
+- `sleep total 7.5 deep 1.2 rem 1.3`
+- `sleep total 7.5 deep 1.2 rem 1.3 core 4.5 awake 0.6 inbed 8.4`
+- `inbed 8.4` (standalone, writes only `time_in_bed_h`)
+- `efficiency 91` (standalone, writes only `efficiency_pct` as a manual override)
+
+Time grammar (each duration): `7h25` (h+m), `7:25` (h:m), `7.42h` or `7.42` (decimal hours), `450m` or `450 min` (minutes). All convert to decimal hours.
+
+Field aliases (case-insensitive): `light` → `core`, `waso` → `awake`, `tib` → `inbed`, `eff` → `efficiency`.
+
+The payload entry shape:
+
+```json
+{
+  "date": "2026-05-12",
+  "total_h": 7.5,
+  "core_h": 4.5,
+  "deep_h": 1.2,
+  "rem_h": 1.3,
+  "unspecified_h": null,
+  "awake_h": 0.6,
+  "time_in_bed_h": 8.4,
+  "efficiency_pct": null,
+  "notes": null
+}
+```
+
+Omit any field the user didn't type — sparse-merge applies, so partial input is fine. Sleep Efficiency is auto-derived inside the upsert when both `total_h` and `time_in_bed_h` are present and `efficiency_pct` wasn't supplied. Default `notes` to `null` — only set it for an explicit user-supplied annotation on the same line (e.g. `sleep 6h woke up 3am` → `"woke up 3am"`).
+
+For multi-date logs, attach the sleep entry to the date on whose header line it appears. If the user wrote the sleep line on the top-level `/log` header, attach it to every date in the message.
+
+Never invent or guess sleep numbers. If no sleep line is present, omit `sleep` from the payload entirely. Never prompt for missing sleep data.

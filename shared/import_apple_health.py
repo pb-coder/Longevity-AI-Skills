@@ -8,9 +8,12 @@ into ``<person>/data/workout_sessions.csv``. Auto-cardio rows flow into
 the matching ``<person>/data/monthly/YYYY.MM.csv`` via the pure-CSV
 ``upsert_monthly_cardio`` in ``monthly_csv.py``. For swim workouts
 (XML only), per-swim aggregates land in
-``<person>/data/swimming/swim_workouts.csv`` and per-lap detail in
-``swim_laps.csv``. Sparse-merge upserts protect existing data on re-run;
-idempotent.
+``<person>/data/swimming/YYYY.MM.workouts.csv`` and per-lap detail in
+``YYYY.MM.laps.csv`` (per-month files). For sleep (XML only), per-night
+architecture (all 6 stages + Time in Bed + Sleep Efficiency + N Segments
++ first/last segment clock times) lands in
+``<person>/data/sleep/YYYY.MM.nights.csv``. Sparse-merge upserts protect
+existing data on re-run; idempotent.
 
 The export file is **archived to ``<root>/.processed/`` on success** —
 the CSVs are the persistent record; the archive keeps a forensic trail
@@ -43,6 +46,7 @@ from csv_store import (  # noqa: E402
     ensure_profile,
     read_profile,
     upsert_health_metrics,
+    upsert_sleep_nights,
     upsert_swim_laps,
     upsert_swim_workouts,
     upsert_workout_sessions,
@@ -86,8 +90,18 @@ SLEEP_ASLEEP_VALUES = {
     "HKCategoryValueSleepAnalysisAsleepREM",
     "HKCategoryValueSleepAnalysisAsleepUnspecified",
 }
-SLEEP_DEEP_VALUE = "HKCategoryValueSleepAnalysisAsleepDeep"
-SLEEP_REM_VALUE = "HKCategoryValueSleepAnalysisAsleepREM"
+SLEEP_CORE_VALUE   = "HKCategoryValueSleepAnalysisAsleepCore"
+SLEEP_DEEP_VALUE   = "HKCategoryValueSleepAnalysisAsleepDeep"
+SLEEP_REM_VALUE    = "HKCategoryValueSleepAnalysisAsleepREM"
+SLEEP_UNSPEC_VALUE = "HKCategoryValueSleepAnalysisAsleepUnspecified"
+SLEEP_AWAKE_VALUE  = "HKCategoryValueSleepAnalysisAwake"
+SLEEP_IN_BED_VALUE = "HKCategoryValueSleepAnalysisInBed"
+
+# Every stage that contributes a per-segment count to the per-night
+# fragmentation tally + first/last-segment clock-time accumulator.
+# (Asleep* stages + Awake; InBed is the overarching span and is
+# tracked separately, not as a segment.)
+SLEEP_SEGMENT_VALUES = SLEEP_ASLEEP_VALUES | {SLEEP_AWAKE_VALUE}
 
 # Walking sessions shorter than this get the "incidental" tag. The coach
 # filters these out when reasoning about training load — a 5-minute stroll
@@ -197,10 +211,20 @@ class DayAggregator:
         self.wrist_temp_c      = {}  # latest of day
         self.sleep_breath      = {}
         self.exercise_min      = defaultdict(float)  # sum within a day
-        # sleep buckets keyed by wake-up date
+        # sleep buckets keyed by wake-up date — every stage Apple emits.
+        # Total = sum of all Asleep* stages (Core + Deep + REM + Unspec).
+        # Awake = wake-after-sleep-onset; InBed = full bed span.
         self.sleep_total_min   = defaultdict(float)
+        self.sleep_core_min    = defaultdict(float)
         self.sleep_deep_min    = defaultdict(float)
         self.sleep_rem_min     = defaultdict(float)
+        self.sleep_unspec_min  = defaultdict(float)
+        self.sleep_awake_min   = defaultdict(float)
+        self.sleep_in_bed_min  = defaultdict(float)
+        # Per-night segment metadata for the sleep nights store.
+        self.sleep_n_segments      = defaultdict(int)
+        self.sleep_first_seg_start = {}   # date -> earliest segment dt_start
+        self.sleep_last_seg_end    = {}   # date -> latest segment dt_end
 
         # Dispatch table: record type → bound handler. Each handler takes
         # (attrib, d_start, dt_start) — d_start/dt_start are pre-parsed by
@@ -308,21 +332,58 @@ class DayAggregator:
     def _add_sleep(self, value, dt_start, dt_end, d_start, d_end):
         if value is None or dt_start is None or dt_end is None:
             return
-        if value not in SLEEP_ASLEEP_VALUES:
-            # Skip InBed and Awake — they don't count as time asleep.
-            return
         minutes = (dt_end - dt_start).total_seconds() / 60.0
         if minutes <= 0:
             return
-        # Bucket by wake-up date — the date of the segment's endDate.
-        # A segment ending at 07:00 the next morning belongs to that
-        # morning's recovery, not the previous evening's "training day".
-        bucket = d_end
-        self.sleep_total_min[bucket] += minutes
-        if value == SLEEP_DEEP_VALUE:
-            self.sleep_deep_min[bucket] += minutes
-        elif value == SLEEP_REM_VALUE:
-            self.sleep_rem_min[bucket] += minutes
+        # Bucket by recovery-night date: the date of the morning the
+        # user wakes up after this segment. Apple emits ``endDate`` in
+        # local time, so a segment that ends in the early morning
+        # (before ~18:00) belongs to that morning's recovery day —
+        # ``bucket = d_end``. But a segment that ends in the evening
+        # (≥18:00) is the START of the NEXT recovery night — bedtime,
+        # not wake-up — so it buckets to ``d_end + 1``. Without this
+        # shift, a sleep period that starts at 23:00 and ends at 23:42
+        # on the same evening would be added to the wrong night's
+        # total alongside that morning's actual sleep. Apple's own
+        # daily summary uses this same "recovery night" convention.
+        from datetime import timedelta
+        if dt_end.hour >= 18:
+            shifted = dt_end.date() + timedelta(days=1)
+            bucket = shifted.isoformat()
+        else:
+            bucket = d_end
+        if value == SLEEP_IN_BED_VALUE:
+            # InBed is the overarching span; doesn't contribute to Total
+            # and isn't counted as a segment for fragmentation.
+            self.sleep_in_bed_min[bucket] += minutes
+            return
+        if value == SLEEP_AWAKE_VALUE:
+            self.sleep_awake_min[bucket] += minutes
+        elif value in SLEEP_ASLEEP_VALUES:
+            self.sleep_total_min[bucket] += minutes
+            if value == SLEEP_CORE_VALUE:
+                self.sleep_core_min[bucket] += minutes
+            elif value == SLEEP_DEEP_VALUE:
+                self.sleep_deep_min[bucket] += minutes
+            elif value == SLEEP_REM_VALUE:
+                self.sleep_rem_min[bucket] += minutes
+            elif value == SLEEP_UNSPEC_VALUE:
+                self.sleep_unspec_min[bucket] += minutes
+        else:
+            return
+        # Fragmentation count includes Asleep* + Awake (every segment Apple
+        # writes to the sleep period). First/last segment tracking restricts
+        # to Asleep* — those mark the user's actual sleep window. Pre-bed or
+        # post-wake Awake segments would otherwise drag the bedtime /
+        # waketime clock-time stat by hours.
+        self.sleep_n_segments[bucket] += 1
+        if value in SLEEP_ASLEEP_VALUES:
+            cur_start = self.sleep_first_seg_start.get(bucket)
+            if cur_start is None or dt_start < cur_start:
+                self.sleep_first_seg_start[bucket] = dt_start
+            cur_end = self.sleep_last_seg_end.get(bucket)
+            if cur_end is None or dt_end > cur_end:
+                self.sleep_last_seg_end[bucket] = dt_end
 
     def emit(self, since_date):
         """Yield per-date Health Metrics dicts (≥ since_date)."""
@@ -335,6 +396,7 @@ class DayAggregator:
         all_dates.update(self.resp_rate_acc.keys())
         all_dates.update(self.exercise_min.keys())
         all_dates.update(self.sleep_total_min.keys())
+        all_dates.update(self.sleep_in_bed_min.keys())
 
         cutoff = since_date.isoformat() if since_date else None
         for d in sorted(all_dates):
@@ -351,9 +413,10 @@ class DayAggregator:
             rr_sum, rr_n = self.resp_rate_acc.get(d, [0.0, 0])
             rr = round(rr_sum / rr_n, 2) if rr_n else None
 
-            sleep_total_min = self.sleep_total_min.get(d, 0.0)
-            sleep_deep_min  = self.sleep_deep_min.get(d, 0.0)
-            sleep_rem_min   = self.sleep_rem_min.get(d, 0.0)
+            sleep_total_min  = self.sleep_total_min.get(d, 0.0)
+            sleep_deep_min   = self.sleep_deep_min.get(d, 0.0)
+            sleep_rem_min    = self.sleep_rem_min.get(d, 0.0)
+            sleep_in_bed_min = self.sleep_in_bed_min.get(d, 0.0)
 
             yield {
                 "date": d,
@@ -366,10 +429,66 @@ class DayAggregator:
                 "sleep_total_h":     round(sleep_total_min / 60.0, 2) if sleep_total_min else None,
                 "sleep_deep_h":      round(sleep_deep_min / 60.0, 2) if sleep_deep_min else None,
                 "sleep_rem_h":       round(sleep_rem_min / 60.0, 2) if sleep_rem_min else None,
+                "time_in_bed_h":     round(sleep_in_bed_min / 60.0, 2) if sleep_in_bed_min else None,
                 "resp_rate":         rr,
                 "wrist_temp_c":      round(lat(self.wrist_temp_c), 3) if lat(self.wrist_temp_c) is not None else None,
                 "sleep_breath_dist": round(lat(self.sleep_breath), 4) if lat(self.sleep_breath) is not None else None,
                 "exercise_min":      round(self.exercise_min[d], 1) if d in self.exercise_min else None,
+            }
+
+    def emit_sleep_nights(self, since_date):
+        """Yield per-wake-up-date Sleep Nights dicts (≥ since_date).
+
+        One row per date whenever ANY sleep stage (Asleep*, Awake, or
+        InBed) was observed for that date. Each dict carries every
+        stage duration, Time in Bed, derived Sleep Efficiency, the
+        fragmentation count (N Segments — number of Asleep*/Awake
+        segments contributing), and the first/last segment clock
+        times (bedtime / wake-up signals for schedule consistency).
+        """
+        all_dates = set()
+        all_dates.update(self.sleep_total_min.keys())
+        all_dates.update(self.sleep_in_bed_min.keys())
+        all_dates.update(self.sleep_awake_min.keys())
+
+        cutoff = since_date.isoformat() if since_date else None
+        for d in sorted(all_dates):
+            if cutoff and d < cutoff:
+                continue
+
+            total_min  = self.sleep_total_min.get(d, 0.0)
+            core_min   = self.sleep_core_min.get(d, 0.0)
+            deep_min   = self.sleep_deep_min.get(d, 0.0)
+            rem_min    = self.sleep_rem_min.get(d, 0.0)
+            unspec_min = self.sleep_unspec_min.get(d, 0.0)
+            awake_min  = self.sleep_awake_min.get(d, 0.0)
+            in_bed_min = self.sleep_in_bed_min.get(d, 0.0)
+
+            total_h     = round(total_min  / 60.0, 2) if total_min  else None
+            in_bed_h    = round(in_bed_min / 60.0, 2) if in_bed_min else None
+            efficiency  = (
+                round(total_h / in_bed_h * 100.0, 1)
+                if total_h is not None and in_bed_h is not None and in_bed_h > 0
+                else None
+            )
+
+            first_seg = self.sleep_first_seg_start.get(d)
+            last_seg  = self.sleep_last_seg_end.get(d)
+            n_seg = self.sleep_n_segments.get(d, 0) or None
+
+            yield {
+                "date": d,
+                "total_h":              total_h,
+                "core_h":               round(core_min   / 60.0, 2) if core_min   else None,
+                "deep_h":               round(deep_min   / 60.0, 2) if deep_min   else None,
+                "rem_h":                round(rem_min    / 60.0, 2) if rem_min    else None,
+                "unspecified_h":        round(unspec_min / 60.0, 2) if unspec_min else None,
+                "awake_h":              round(awake_min  / 60.0, 2) if awake_min  else None,
+                "time_in_bed_h":        in_bed_h,
+                "efficiency_pct":       efficiency,
+                "n_segments":           n_seg,
+                "first_segment_start":  first_seg.strftime("%Y-%m-%d %H:%M:%S") if first_seg else None,
+                "last_segment_end":     last_seg.strftime("%Y-%m-%d %H:%M:%S")  if last_seg  else None,
             }
 
 
@@ -405,8 +524,8 @@ def extract_workout(elem, since_date):
     indoor = False
     laps: int = 0
     # Swim-only extras. Captured for every workout to keep the loop simple,
-    # but the importer only writes them to swim_workouts.csv when the
-    # canonical activity type is "Swimming".
+    # but the importer only writes them to swimming/YYYY.MM.workouts.csv
+    # when the canonical activity type is "Swimming".
     pool_length_m: int | None = None
     stroke_count_total: int | None = None
     water_temp_c: float | None = None
@@ -447,7 +566,7 @@ def extract_workout(elem, since_date):
             # value to the Laps column on swim rows.
             if child.attrib.get("type") == "HKWorkoutEventTypeLap":
                 laps += 1
-                # Capture per-lap detail for swim_laps.csv. Stroke style
+                # Capture per-lap detail for swimming/YYYY.MM.laps.csv. Stroke style
                 # and SWOLF are nested MetadataEntry children of the lap
                 # event. Filter on lap events ONLY — Apple also emits
                 # HKWorkoutEventTypeSegment events with SWOLF that would
@@ -889,9 +1008,10 @@ def build_swim_csv_payloads(
     """Build per-swim and per-lap CSV payloads from extracted workout rows.
 
     Filters ``workout_rows`` to swims and produces:
-      - one ``swim_workouts.csv`` entry per swim with computed SPL / Avg
-        SWOLF / Stroke Mix.
-      - per-lap ``swim_laps.csv`` entries with decoded stroke names.
+      - one ``swimming/YYYY.MM.workouts.csv`` entry per swim with
+        computed SPL / Avg SWOLF / Stroke Mix.
+      - per-lap ``swimming/YYYY.MM.laps.csv`` entries with decoded
+        stroke names.
     Workouts without lap events still produce a per-swim row (with SPL /
     Avg SWOLF blank) so the totals line up with workout_sessions.csv.
 
@@ -1027,11 +1147,15 @@ def main():
     consume_apple_export(zip_path, since, aggregator, workout_rows)
 
     metric_entries = list(aggregator.emit(since))
+    sleep_night_entries = list(aggregator.emit_sleep_nights(since))
 
     if args.dry_run:
         print(f"Health Metrics: {len(metric_entries)} dates would be written "
               f"(range {metric_entries[0]['date'] if metric_entries else '-'} → "
               f"{metric_entries[-1]['date'] if metric_entries else '-'})")
+        print(f"Sleep Nights: {len(sleep_night_entries)} dates would be written "
+              f"(range {sleep_night_entries[0]['date'] if sleep_night_entries else '-'} → "
+              f"{sleep_night_entries[-1]['date'] if sleep_night_entries else '-'})")
         print(f"Workout Sessions: {len(workout_rows)} sessions would be written "
               f"({sum(1 for r in workout_rows if (r.get('notes') or '').startswith('incidental'))} walks flagged incidental)")
         return 0
@@ -1051,9 +1175,15 @@ def main():
     out_lines.extend(upsert_health_metrics(person, metric_entries))
     out_lines.extend(upsert_workout_sessions(person, workout_rows))
 
+    # Sleep nights CSV pipeline. XML only — HL exports don't carry
+    # per-stage data, so this folder never exists on HL trackers.
+    if profile.get("source") == "xml" and sleep_night_entries:
+        out_lines.extend(upsert_sleep_nights(person, sleep_night_entries))
+
     # Swim CSV pipeline. XML only — HL .txt exports don't carry per-lap
-    # data, so an HL run leaves swim_workouts.csv / swim_laps.csv empty
-    # and the coach skips the swim section.
+    # data, so an HL run leaves swimming/YYYY.MM.workouts.csv /
+    # YYYY.MM.laps.csv empty (folder absent) and the coach skips the
+    # swim section.
     if profile.get("source") == "xml":
         swim_rows, swim_lap_rows = build_swim_csv_payloads(workout_rows, profile)
         if swim_rows:
@@ -1107,7 +1237,8 @@ def main():
                 # Pass through the metadata extras for the structured note
                 # builder. None-safe on the consumer side; XML always fills
                 # active/basal/elapsed when present. Lap count is no longer
-                # written to monthly — swim_workouts.csv is the sole record.
+                # written to monthly — swimming/YYYY.MM.workouts.csv is the
+                # sole record.
                 "active_cal":   w.get("active_cal"),
                 "total_cal":    w.get("total_cal"),
                 "elevation_m":  w.get("elevation_m"),

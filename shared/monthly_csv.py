@@ -2,9 +2,9 @@
 
 Replaces the xlsx-era ``tracker_sheet.py`` for the monthly ``YYYY.MM``
 workout sheets. One CSV per month at
-``<person>/data/monthly/YYYY.MM.csv``, 17-column schema (the original
-xlsx layout minus the retired ``Laps`` column; see ``MONTHLY_HEADERS``
-below). Header row 1; data rows ASC by (Date, #, Set); TOTAL rows
+``<person>/data/monthly/YYYY.MM.csv``, 18-column schema (the original
+xlsx layout minus the retired ``Laps`` column, plus typed ``Source``;
+see ``MONTHLY_HEADERS`` below). Header row 1; data rows ASC by (Date, #, Set); TOTAL rows
 interleaved at strength-session boundaries.
 
 Computed cells are pre-evaluated on every canonicalize pass:
@@ -36,12 +36,17 @@ Public surface:
 """
 from __future__ import annotations
 
-import csv
 import re
 import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tracker.csv_table import (  # noqa: E402
+    read_csv_rows as _table_read_csv_rows,
+    write_csv_atomic as _table_write_csv_atomic,
+)
 
 from person_paths import (
     ensure_monthly_dir,
@@ -51,12 +56,12 @@ from person_paths import (
 
 
 # ============================================================ Schema
-# Order matches the historical xlsx columns A..Q 1:1 — readers and
+# Order matches the historical xlsx columns A..Q plus Source — readers and
 # writers across the codebase still treat column index as semantic.
 # (PR4: ``Laps`` was removed in 2026-05; swim lap count is now sourced
 # exclusively from ``<Person>/data/swimming/YYYY.MM.workouts.csv``. Old
-# 18-col rows self-truncate on the next canonicalize pass because
-# ``_row_to_dict`` only iterates MONTHLY_FIELDS.)
+# 17-col rows pad Source to None on read and self-migrate on the next
+# canonicalize pass.)
 MONTHLY_HEADERS = [
     "SESSION", "Date", "#", "Exercise", "Set", "Reps", "kg", "Volume", "Notes",
     "Distance (km)", "Duration (min)", "Pace (min/km)", "Avg HR",
@@ -439,15 +444,7 @@ def _serialize_value(v) -> str:
 
 def _read_csv_rows(path: Path) -> tuple[list[str], list[list[str]]]:
     """Return ``(header, rows)``. Missing or empty file → ``([], [])``."""
-    if not path.exists():
-        return [], []
-    with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.reader(f)
-        try:
-            header = next(reader)
-        except StopIteration:
-            return [], []
-        return header, [row for row in reader if any(c.strip() for c in row)]
+    return _table_read_csv_rows(path)
 
 
 def _row_to_dict(row: list[str]) -> dict:
@@ -470,14 +467,7 @@ def _dict_to_row(d: dict) -> list[str]:
 
 def _write_csv_atomic(path: Path, rows: list[list[str]]) -> None:
     """Write header + rows atomically (tmp + rename)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(MONTHLY_HEADERS)
-        for row in rows:
-            writer.writerow(row)
-    tmp.replace(path)
+    _table_write_csv_atomic(path, MONTHLY_HEADERS, rows)
 
 
 # ============================================================ read_monthly

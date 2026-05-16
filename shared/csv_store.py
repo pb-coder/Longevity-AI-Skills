@@ -9,9 +9,19 @@ write). Post-PR3a everything is flat CSV — the monthly
 from __future__ import annotations
 
 import csv
+import sys
 from datetime import date as date_cls
 from pathlib import Path
 from typing import Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tracker.csv_table import (  # noqa: E402
+    CsvTableSpec,
+    read_csv_rows as _table_read_csv_rows,
+    replace_upsert_records,
+    sparse_upsert_records,
+    write_csv_atomic as _table_write_csv_atomic,
+)
 
 from person_paths import (
     ensure_data_dir,
@@ -363,15 +373,7 @@ def _resolve_source(person: str) -> str:
 
 def _read_csv_rows(path: Path) -> tuple[list[str], list[list[str]]]:
     """Return ``(header, rows)`` from a CSV. Empty file → ``([], [])``."""
-    if not path.exists():
-        return [], []
-    with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.reader(f)
-        try:
-            header = next(reader)
-        except StopIteration:
-            return [], []
-        return header, [row for row in reader if any(c.strip() for c in row)]
+    return _table_read_csv_rows(path)
 
 
 def _write_csv(path: Path, header: list[str], rows: list[list]) -> None:
@@ -381,14 +383,7 @@ def _write_csv(path: Path, header: list[str], rows: list[list]) -> None:
     empty cells, booleans become lowercase strings, and numbers retain
     their native repr.
     """
-    ensure_data_dir_for(path)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(header)
-        for row in rows:
-            writer.writerow([_serialize_value(v) for v in row])
-    tmp.replace(path)
+    _table_write_csv_atomic(path, header, rows)
 
 
 def ensure_data_dir_for(path: Path) -> None:
@@ -652,6 +647,73 @@ def _date_to_year_month(date_str: str) -> str:
     return f"{date_str[:4]}.{date_str[5:7]}"
 
 
+def _group_entries_by_month(entries: Iterable[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for e in entries or []:
+        d = _date_str(e.get("date"))
+        if not d:
+            continue
+        item = dict(e)
+        item["date"] = d
+        grouped.setdefault(_date_to_year_month(d), []).append(item)
+    return grouped
+
+
+def _read_periodic_records(path: Path,
+                           fields: list[str],
+                           headers: list[str],
+                           *,
+                           string_fields: set[str] | None = None,
+                           field_parsers: dict[str, callable] | None = None,
+                           include_notes: bool = True) -> list[dict]:
+    string_fields = string_fields or set()
+    field_parsers = field_parsers or {}
+    header, rows = _read_csv_rows(path)
+    if not header:
+        return []
+    out: list[dict] = []
+    for row in rows:
+        d = _date_str(row[0]) if row else None
+        if d is None:
+            continue
+        rec: dict = {"date": d}
+        for i, key in enumerate(fields, start=1):
+            v = row[i] if len(row) > i else None
+            if key in field_parsers:
+                rec[key] = field_parsers[key](v)
+            elif key in string_fields:
+                rec[key] = v if v not in (None, "") else None
+            else:
+                rec[key] = _parse_value(v)
+        if include_notes:
+            notes_idx = len(headers) - 1
+            notes = row[notes_idx] if len(row) > notes_idx else None
+            rec["notes"] = notes if notes else None
+        out.append(rec)
+    return out
+
+
+def _write_periodic_records(path: Path,
+                            headers: list[str],
+                            fields: list[str],
+                            records: list[dict],
+                            *,
+                            field_serializers: dict[str, callable] | None = None,
+                            include_notes: bool = True) -> None:
+    field_serializers = field_serializers or {}
+    row_fields = ["date"] + fields + (["notes"] if include_notes else [])
+    rows = []
+    for rec in records:
+        row = []
+        for field in row_fields:
+            v = rec.get(field)
+            if field in field_serializers:
+                v = field_serializers[field](v)
+            row.append(v)
+        rows.append(row)
+    _write_csv(path, headers, rows)
+
+
 def read_swim_workouts(person: str) -> list[dict]:
     """Return per-swim aggregate rows aggregated across all per-month
     swim CSVs (``<person>/data/swimming/YYYY.MM.workouts.csv``).
@@ -663,25 +725,12 @@ def read_swim_workouts(person: str) -> list[dict]:
     from person_paths import list_swim_workout_months
     out: list[dict] = []
     for ym in list_swim_workout_months(person):
-        path = swim_workouts_csv(person, ym)
-        header, rows = _read_csv_rows(path)
-        if not header:
-            continue
-        for row in rows:
-            d = _date_str(row[0]) if row else None
-            if d is None:
-                continue
-            rec: dict = {"date": d}
-            for i, key in enumerate(SWIM_WORKOUTS_FIELDS, start=1):
-                v = row[i] if len(row) > i else None
-                if key in ("start", "end", "stroke_mix", "location"):
-                    rec[key] = v if v not in (None, "") else None
-                else:
-                    rec[key] = _parse_value(v)
-            notes_idx = len(SWIM_WORKOUTS_HEADERS) - 1
-            notes = row[notes_idx] if len(row) > notes_idx else None
-            rec["notes"] = notes if notes else None
-            out.append(rec)
+        out.extend(_read_periodic_records(
+            swim_workouts_csv(person, ym),
+            SWIM_WORKOUTS_FIELDS,
+            SWIM_WORKOUTS_HEADERS,
+            string_fields={"start", "end", "stroke_mix", "location"},
+        ))
     out.sort(key=lambda r: (r["date"], str(r.get("start") or "")), reverse=True)
     return out
 
@@ -699,75 +748,29 @@ def upsert_swim_workouts(person: str, entries: Iterable[dict]) -> list[str]:
     if not entries:
         return ["Swim Workouts: 0 sessions written / 0 updated"]
 
-    # Group entries by year-month.
-    by_month_entries: dict[str, list[dict]] = {}
-    for e in entries:
-        d = _date_str(e.get("date"))
-        if not d:
-            continue
-        by_month_entries.setdefault(_date_to_year_month(d), []).append(e)
+    by_month_entries = _group_entries_by_month(entries)
 
     total_written = 0
     total_updated = 0
     summaries: list[str] = []
+    spec = CsvTableSpec(
+        headers=SWIM_WORKOUTS_HEADERS,
+        fields=["date"] + SWIM_WORKOUTS_FIELDS + ["notes"],
+        key_fields=("date", "start"),
+        sort_fields=("date", "start"),
+        sort_reverse=True,
+    )
     for ym, month_entries in sorted(by_month_entries.items()):
-        # Load existing rows for this month only (not the whole history).
         path = swim_workouts_csv(person, ym)
-        header, raw_rows = _read_csv_rows(path)
-        existing: list[dict] = []
-        for row in raw_rows if header else []:
-            d = _date_str(row[0]) if row else None
-            if d is None:
-                continue
-            rec: dict = {"date": d}
-            for i, key in enumerate(SWIM_WORKOUTS_FIELDS, start=1):
-                v = row[i] if len(row) > i else None
-                if key in ("start", "end", "stroke_mix", "location"):
-                    rec[key] = v if v not in (None, "") else None
-                else:
-                    rec[key] = _parse_value(v)
-            notes_idx = len(SWIM_WORKOUTS_HEADERS) - 1
-            notes = row[notes_idx] if len(row) > notes_idx else None
-            rec["notes"] = notes if notes else None
-            existing.append(rec)
-
-        by_key: dict[tuple, dict] = {(r["date"], r.get("start")): r for r in existing}
-
-        written = 0
-        updated = 0
-        for e in month_entries:
-            d = _date_str(e.get("date"))
-            s = e.get("start")
-            if not d or s is None:
-                continue
-            key = (d, str(s))
-            cur = by_key.get(key)
-            if cur is None:
-                new_record = {"date": d, "notes": None}
-                for k in SWIM_WORKOUTS_FIELDS:
-                    new_record[k] = e.get(k)
-                by_key[key] = new_record
-                written += 1
-                continue
-            changed = False
-            for k in SWIM_WORKOUTS_FIELDS:
-                v = e.get(k)
-                if v is None:
-                    continue
-                if cur.get(k) != v:
-                    cur[k] = v
-                    changed = True
-            if changed:
-                updated += 1
-
+        existing = _read_periodic_records(
+            path,
+            SWIM_WORKOUTS_FIELDS,
+            SWIM_WORKOUTS_HEADERS,
+            string_fields={"start", "end", "stroke_mix", "location"},
+        )
+        records, written, updated = sparse_upsert_records(existing, month_entries, spec)
         ensure_swimming_dir(person)
-        rows = []
-        for k in sorted(by_key.keys(), reverse=True):
-            rec = by_key[k]
-            row = [rec["date"]] + [rec.get(field) for field in SWIM_WORKOUTS_FIELDS] \
-                + [rec.get("notes")]
-            rows.append(row)
-        _write_csv(swim_workouts_csv(person, ym), SWIM_WORKOUTS_HEADERS, rows)
+        _write_periodic_records(path, SWIM_WORKOUTS_HEADERS, SWIM_WORKOUTS_FIELDS, records)
         total_written += written
         total_updated += updated
         summaries.append(f"  {ym}: {written} written / {updated} updated")
@@ -787,22 +790,13 @@ def read_swim_laps(person: str) -> list[dict]:
     from person_paths import list_swim_lap_months
     out: list[dict] = []
     for ym in list_swim_lap_months(person):
-        path = swim_laps_csv(person, ym)
-        header, rows = _read_csv_rows(path)
-        if not header:
-            continue
-        for row in rows:
-            d = _date_str(row[0]) if row else None
-            if d is None:
-                continue
-            rec: dict = {"date": d}
-            for i, key in enumerate(SWIM_LAPS_FIELDS, start=1):
-                v = row[i] if len(row) > i else None
-                if key in ("workout_start", "stroke_decoded", "source"):
-                    rec[key] = v if v not in (None, "") else None
-                else:
-                    rec[key] = _parse_value(v)
-            out.append(rec)
+        out.extend(_read_periodic_records(
+            swim_laps_csv(person, ym),
+            SWIM_LAPS_FIELDS,
+            SWIM_LAPS_HEADERS,
+            string_fields={"workout_start", "stroke_decoded", "source"},
+            include_notes=False,
+        ))
     out.sort(key=lambda r: (r["date"], r.get("lap_num") or 0))
     return out
 
@@ -820,65 +814,47 @@ def upsert_swim_laps(person: str, entries: Iterable[dict]) -> list[str]:
     if not entries:
         return ["Swim Laps: 0 laps written / 0 updated"]
 
-    by_month_entries: dict[str, list[dict]] = {}
-    for e in entries:
-        d = _date_str(e.get("date"))
-        if not d:
-            continue
-        by_month_entries.setdefault(_date_to_year_month(d), []).append(e)
+    by_month_entries = _group_entries_by_month(entries)
 
     total_written = 0
     total_updated = 0
     summaries: list[str] = []
+    spec = CsvTableSpec(
+        headers=SWIM_LAPS_HEADERS,
+        fields=["date"] + SWIM_LAPS_FIELDS,
+        key_fields=("date", "workout_start", "lap_num"),
+        sort_fields=("date", "lap_num"),
+        sort_reverse=False,
+        notes_field=None,
+    )
+
+    def _sanitize_lap(e: dict) -> dict | None:
+        if e.get("workout_start") is None or e.get("lap_num") is None:
+            return None
+        out = {"date": e["date"]}
+        for k in SWIM_LAPS_FIELDS:
+            out[k] = e.get(k)
+        out["workout_start"] = str(out["workout_start"])
+        out["lap_num"] = int(out["lap_num"])
+        return out
+
     for ym, month_entries in sorted(by_month_entries.items()):
         path = swim_laps_csv(person, ym)
-        header, raw_rows = _read_csv_rows(path)
-        existing: list[dict] = []
-        for row in raw_rows if header else []:
-            d = _date_str(row[0]) if row else None
-            if d is None:
-                continue
-            rec: dict = {"date": d}
-            for i, key in enumerate(SWIM_LAPS_FIELDS, start=1):
-                v = row[i] if len(row) > i else None
-                if key in ("workout_start", "stroke_decoded", "source"):
-                    rec[key] = v if v not in (None, "") else None
-                else:
-                    rec[key] = _parse_value(v)
-            existing.append(rec)
-
-        by_key: dict[tuple, dict] = {
-            (r["date"], r.get("workout_start"), r.get("lap_num")): r
-            for r in existing
-        }
-
-        written = 0
-        updated = 0
-        for e in month_entries:
-            d = _date_str(e.get("date"))
-            ws = e.get("workout_start")
-            ln = e.get("lap_num")
-            if not d or ws is None or ln is None:
-                continue
-            key = (d, str(ws), int(ln))
-            new_rec = {"date": d}
-            for k in SWIM_LAPS_FIELDS:
-                new_rec[k] = e.get(k)
-            if key in by_key:
-                if by_key[key] != new_rec:
-                    by_key[key] = new_rec
-                    updated += 1
-            else:
-                by_key[key] = new_rec
-                written += 1
-
+        existing = _read_periodic_records(
+            path,
+            SWIM_LAPS_FIELDS,
+            SWIM_LAPS_HEADERS,
+            string_fields={"workout_start", "stroke_decoded", "source"},
+            include_notes=False,
+        )
+        records, written, updated = replace_upsert_records(
+            existing, month_entries, spec, sanitize=_sanitize_lap,
+        )
         ensure_swimming_dir(person)
-        rows = []
-        for k in sorted(by_key.keys(), key=lambda t: (t[0], t[2])):
-            rec = by_key[k]
-            row = [rec["date"]] + [rec.get(field) for field in SWIM_LAPS_FIELDS]
-            rows.append(row)
-        _write_csv(swim_laps_csv(person, ym), SWIM_LAPS_HEADERS, rows)
+        _write_periodic_records(
+            path, SWIM_LAPS_HEADERS, SWIM_LAPS_FIELDS, records,
+            include_notes=False,
+        )
         total_written += written
         total_updated += updated
         summaries.append(f"  {ym}: {written} written / {updated} updated")
@@ -936,25 +912,12 @@ def read_sleep_nights(person: str) -> list[dict]:
     from person_paths import list_sleep_night_months
     out: list[dict] = []
     for ym in list_sleep_night_months(person):
-        path = sleep_nights_csv(person, ym)
-        header, rows = _read_csv_rows(path)
-        if not header:
-            continue
-        for row in rows:
-            d = _date_str(row[0]) if row else None
-            if d is None:
-                continue
-            rec: dict = {"date": d}
-            for i, key in enumerate(SLEEP_NIGHTS_FIELDS, start=1):
-                v = row[i] if len(row) > i else None
-                if key in ("first_segment_start", "last_segment_end"):
-                    rec[key] = v if v not in (None, "") else None
-                else:
-                    rec[key] = _parse_value(v)
-            notes_idx = len(SLEEP_NIGHTS_HEADERS) - 1
-            notes = row[notes_idx] if len(row) > notes_idx else None
-            rec["notes"] = notes if notes else None
-            out.append(rec)
+        out.extend(_read_periodic_records(
+            sleep_nights_csv(person, ym),
+            SLEEP_NIGHTS_FIELDS,
+            SLEEP_NIGHTS_HEADERS,
+            string_fields={"first_segment_start", "last_segment_end"},
+        ))
     out.sort(key=lambda r: r["date"], reverse=True)
     return out
 
@@ -977,91 +940,41 @@ def upsert_sleep_nights(person: str, entries: Iterable[dict]) -> list[str]:
     if not entries:
         return ["Sleep Nights: 0 nights written / 0 updated"]
 
-    by_month_entries: dict[str, list[dict]] = {}
-    for e in entries:
-        d = _date_str(e.get("date"))
-        if not d:
-            continue
-        by_month_entries.setdefault(_date_to_year_month(d), []).append(e)
+    by_month_entries = _group_entries_by_month(entries)
 
     total_written = 0
     total_updated = 0
     summaries: list[str] = []
+    spec = CsvTableSpec(
+        headers=SLEEP_NIGHTS_HEADERS,
+        fields=["date"] + SLEEP_NIGHTS_FIELDS + ["notes"],
+        key_fields=("date",),
+        sort_fields=("date",),
+        sort_reverse=True,
+    )
+
+    def _derive_sleep(rec: dict, entry: dict | None) -> None:
+        if entry and entry.get("efficiency_pct") is not None:
+            return
+        derived = _compute_sleep_efficiency(
+            rec.get("total_h"), rec.get("time_in_bed_h"),
+        )
+        if derived is not None:
+            rec["efficiency_pct"] = derived
+
     for ym, month_entries in sorted(by_month_entries.items()):
         path = sleep_nights_csv(person, ym)
-        header, raw_rows = _read_csv_rows(path)
-        existing: list[dict] = []
-        for row in raw_rows if header else []:
-            d = _date_str(row[0]) if row else None
-            if d is None:
-                continue
-            rec: dict = {"date": d}
-            for i, key in enumerate(SLEEP_NIGHTS_FIELDS, start=1):
-                v = row[i] if len(row) > i else None
-                if key in ("first_segment_start", "last_segment_end"):
-                    rec[key] = v if v not in (None, "") else None
-                else:
-                    rec[key] = _parse_value(v)
-            notes_idx = len(SLEEP_NIGHTS_HEADERS) - 1
-            notes = row[notes_idx] if len(row) > notes_idx else None
-            rec["notes"] = notes if notes else None
-            existing.append(rec)
-
-        by_key: dict[str, dict] = {r["date"]: r for r in existing}
-
-        written = 0
-        updated = 0
-        for e in month_entries:
-            d = _date_str(e.get("date"))
-            if not d:
-                continue
-            cur = by_key.get(d)
-            if cur is None:
-                new_record = {"date": d, "notes": e.get("notes")}
-                for k in SLEEP_NIGHTS_FIELDS:
-                    new_record[k] = e.get(k)
-                # Auto-derive efficiency if both inputs known and not
-                # explicitly supplied.
-                if new_record.get("efficiency_pct") is None:
-                    new_record["efficiency_pct"] = _compute_sleep_efficiency(
-                        new_record.get("total_h"),
-                        new_record.get("time_in_bed_h"),
-                    )
-                by_key[d] = new_record
-                written += 1
-                continue
-            changed = False
-            for k in SLEEP_NIGHTS_FIELDS:
-                v = e.get(k)
-                if v is None:
-                    continue
-                if cur.get(k) != v:
-                    cur[k] = v
-                    changed = True
-            # Manual-wins on notes — only set if missing.
-            if e.get("notes") and not cur.get("notes"):
-                cur["notes"] = e["notes"]
-                changed = True
-            # Re-derive efficiency from the now-merged total/inbed
-            # whenever the supplied entry didn't override it explicitly.
-            if e.get("efficiency_pct") is None:
-                derived = _compute_sleep_efficiency(
-                    cur.get("total_h"), cur.get("time_in_bed_h"),
-                )
-                if derived is not None and cur.get("efficiency_pct") != derived:
-                    cur["efficiency_pct"] = derived
-                    changed = True
-            if changed:
-                updated += 1
-
+        existing = _read_periodic_records(
+            path,
+            SLEEP_NIGHTS_FIELDS,
+            SLEEP_NIGHTS_HEADERS,
+            string_fields={"first_segment_start", "last_segment_end"},
+        )
+        records, written, updated = sparse_upsert_records(
+            existing, month_entries, spec, derive=_derive_sleep,
+        )
         ensure_sleep_dir(person)
-        rows = []
-        for d in sorted(by_key.keys(), reverse=True):
-            rec = by_key[d]
-            row = [rec["date"]] + [rec.get(field) for field in SLEEP_NIGHTS_FIELDS] \
-                + [rec.get("notes")]
-            rows.append(row)
-        _write_csv(sleep_nights_csv(person, ym), SLEEP_NIGHTS_HEADERS, rows)
+        _write_periodic_records(path, SLEEP_NIGHTS_HEADERS, SLEEP_NIGHTS_FIELDS, records)
         total_written += written
         total_updated += updated
         summaries.append(f"  {ym}: {written} written / {updated} updated")
@@ -1185,27 +1098,13 @@ def read_thermal_sessions(person: str) -> list[dict]:
     from person_paths import list_thermal_session_months
     out: list[dict] = []
     for ym in list_thermal_session_months(person):
-        path = thermal_sessions_csv(person, ym)
-        header, rows = _read_csv_rows(path)
-        if not header:
-            continue
-        for row in rows:
-            d = _date_str(row[0]) if row else None
-            if d is None:
-                continue
-            rec: dict = {"date": d}
-            for i, key in enumerate(THERMAL_SESSIONS_FIELDS, start=1):
-                v = row[i] if len(row) > i else None
-                if key in ("start", "heat_type", "cold_type"):
-                    rec[key] = v if v not in (None, "") else None
-                elif key == "heat_round_durations_min":
-                    rec[key] = _parse_round_durations(v)
-                else:
-                    rec[key] = _parse_value(v)
-            notes_idx = len(THERMAL_SESSIONS_HEADERS) - 1
-            notes = row[notes_idx] if len(row) > notes_idx else None
-            rec["notes"] = notes if notes else None
-            out.append(rec)
+        out.extend(_read_periodic_records(
+            thermal_sessions_csv(person, ym),
+            THERMAL_SESSIONS_FIELDS,
+            THERMAL_SESSIONS_HEADERS,
+            string_fields={"start", "heat_type", "cold_type"},
+            field_parsers={"heat_round_durations_min": _parse_round_durations},
+        ))
     out.sort(key=lambda r: (r["date"], str(r.get("start") or "")), reverse=True)
     return out
 
@@ -1228,128 +1127,80 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
     if not entries:
         return ["Thermal Sessions: 0 sessions written / 0 updated"]
 
-    by_month_entries: dict[str, list[dict]] = {}
-    for e in entries:
-        d = _date_str(e.get("date"))
-        if not d:
-            continue
-        by_month_entries.setdefault(_date_to_year_month(d), []).append(e)
+    by_month_entries = _group_entries_by_month(entries)
 
     total_written = 0
     total_updated = 0
     summaries: list[str] = []
-    for ym, month_entries in sorted(by_month_entries.items()):
-        path = thermal_sessions_csv(person, ym)
-        header, raw_rows = _read_csv_rows(path)
-        existing: list[dict] = []
-        for row in raw_rows if header else []:
-            d = _date_str(row[0]) if row else None
-            if d is None:
-                continue
-            rec: dict = {"date": d}
-            for i, key in enumerate(THERMAL_SESSIONS_FIELDS, start=1):
-                v = row[i] if len(row) > i else None
-                if key in ("start", "heat_type", "cold_type"):
-                    rec[key] = v if v not in (None, "") else None
-                elif key == "heat_round_durations_min":
-                    rec[key] = _parse_round_durations(v)
-                else:
-                    rec[key] = _parse_value(v)
-            notes_idx = len(THERMAL_SESSIONS_HEADERS) - 1
-            notes = row[notes_idx] if len(row) > notes_idx else None
-            rec["notes"] = notes if notes else None
-            existing.append(rec)
+    spec = CsvTableSpec(
+        headers=THERMAL_SESSIONS_HEADERS,
+        fields=["date"] + THERMAL_SESSIONS_FIELDS + ["notes"],
+        key_fields=("date", "start"),
+        sort_fields=("date", "start"),
+        sort_reverse=True,
+    )
 
-        by_key: dict[tuple, dict] = {
-            (r["date"], r.get("start") or ""): r for r in existing
+    def _sanitize_thermal(e: dict) -> dict:
+        ht = e.get("heat_type")
+        if ht is not None and ht not in HEAT_TYPES:
+            ht = None
+        ct = e.get("cold_type")
+        if ct is not None and ct not in COLD_TYPES:
+            ct = None
+
+        durations = _parse_round_durations(e.get("heat_round_durations_min"))
+        heat_total = _sum_round_durations(durations) if durations else (
+            _parse_value(e.get("heat_total_min"))
+        )
+        heat_temp = e.get("heat_temp_c")
+        if heat_temp is None and ht is not None and ht != "none":
+            heat_temp = HEAT_TYPE_DEFAULT_TEMP_C.get(ht)
+
+        return {
+            "date": e["date"],
+            "start": e.get("start") or "",
+            "heat_type": ht,
+            "heat_temp_c": heat_temp,
+            "heat_rounds": (
+                e.get("heat_rounds")
+                if e.get("heat_rounds") is not None
+                else (len(durations) if durations else None)
+            ),
+            "heat_round_durations_min": durations,
+            "heat_total_min": heat_total,
+            "cold_type": ct,
+            "cold_duration_sec": e.get("cold_duration_sec"),
+            "cold_temp_c": e.get("cold_temp_c"),
+            "notes": e.get("notes"),
         }
 
-        written = 0
-        updated = 0
-        for e in month_entries:
-            d = _date_str(e.get("date"))
-            if not d:
-                continue
-            # Sanitize enum values; unknown → None (silently dropped).
-            ht = e.get("heat_type")
-            if ht is not None and ht not in HEAT_TYPES:
-                ht = None
-            ct = e.get("cold_type")
-            if ct is not None and ct not in COLD_TYPES:
-                ct = None
+    def _derive_thermal(rec: dict, _entry: dict | None) -> None:
+        derived = _sum_round_durations(rec.get("heat_round_durations_min"))
+        if derived is not None:
+            rec["heat_total_min"] = derived
 
-            durations = _parse_round_durations(e.get("heat_round_durations_min"))
-            heat_total = _sum_round_durations(durations) if durations else (
-                _parse_value(e.get("heat_total_min"))
-            )
-
-            # Auto-fill heat_temp_c from the type default when the user
-            # didn't supply one. Explicit user input always wins —
-            # e.transparent.get("heat_temp_c") only short-circuits if it
-            # was set on the incoming payload.
-            heat_temp = e.get("heat_temp_c")
-            if heat_temp is None and ht is not None and ht != "none":
-                heat_temp = HEAT_TYPE_DEFAULT_TEMP_C.get(ht)
-
-            sanitized = {
-                "start":                   e.get("start"),
-                "heat_type":               ht,
-                "heat_temp_c":             heat_temp,
-                "heat_rounds":             (
-                    e.get("heat_rounds")
-                    if e.get("heat_rounds") is not None
-                    else (len(durations) if durations else None)
-                ),
-                "heat_round_durations_min": durations,
-                "heat_total_min":          heat_total,
-                "cold_type":               ct,
-                "cold_duration_sec":       e.get("cold_duration_sec"),
-                "cold_temp_c":             e.get("cold_temp_c"),
-            }
-
-            key = (d, sanitized["start"] or "")
-            cur = by_key.get(key)
-            if cur is None:
-                new_record = {"date": d, "notes": e.get("notes")}
-                for k in THERMAL_SESSIONS_FIELDS:
-                    new_record[k] = sanitized.get(k)
-                by_key[key] = new_record
-                written += 1
-                continue
-            changed = False
-            for k in THERMAL_SESSIONS_FIELDS:
-                v = sanitized.get(k)
-                if v is None:
-                    continue
-                if cur.get(k) != v:
-                    cur[k] = v
-                    changed = True
-            if e.get("notes") and not cur.get("notes"):
-                cur["notes"] = e["notes"]
-                changed = True
-            # Recompute heat_total from the now-merged durations so the
-            # invariant ``heat_total_min == sum(heat_round_durations_min)``
-            # always holds on write.
-            derived = _sum_round_durations(cur.get("heat_round_durations_min"))
-            if derived is not None and cur.get("heat_total_min") != derived:
-                cur["heat_total_min"] = derived
-                changed = True
-            if changed:
-                updated += 1
-
+    for ym, month_entries in sorted(by_month_entries.items()):
+        path = thermal_sessions_csv(person, ym)
+        existing = _read_periodic_records(
+            path,
+            THERMAL_SESSIONS_FIELDS,
+            THERMAL_SESSIONS_HEADERS,
+            string_fields={"start", "heat_type", "cold_type"},
+            field_parsers={"heat_round_durations_min": _parse_round_durations},
+        )
+        records, written, updated = sparse_upsert_records(
+            existing, month_entries, spec,
+            sanitize=_sanitize_thermal,
+            derive=_derive_thermal,
+        )
         ensure_thermal_dir(person)
-        rows = []
-        for k in sorted(by_key.keys(), reverse=True):
-            rec = by_key[k]
-            row = [rec["date"]]
-            for field in THERMAL_SESSIONS_FIELDS:
-                v = rec.get(field)
-                if field == "heat_round_durations_min":
-                    v = _format_round_durations(v)
-                row.append(v)
-            row.append(rec.get("notes"))
-            rows.append(row)
-        _write_csv(thermal_sessions_csv(person, ym), THERMAL_SESSIONS_HEADERS, rows)
+        _write_periodic_records(
+            path,
+            THERMAL_SESSIONS_HEADERS,
+            THERMAL_SESSIONS_FIELDS,
+            records,
+            field_serializers={"heat_round_durations_min": _format_round_durations},
+        )
         total_written += written
         total_updated += updated
         summaries.append(f"  {ym}: {written} written / {updated} updated")

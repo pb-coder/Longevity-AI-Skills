@@ -14,7 +14,7 @@ Two parallel trackers live in per-person folders inside this directory:
 │       ├── workout_sessions.csv         # one row per Apple Workout
 │       ├── profile.csv                  # source / auto_cardio / birthday / swim CSS
 │       ├── monthly/                     # one CSV per YYYY.MM workout month
-│       │   ├── 2026.05.csv              # 17-col schema, ASC by (Date,#,Set)
+│       │   ├── 2026.05.csv              # 18-col schema, ASC by (Date,#,Set)
 │       │   └── …                        # canonicalize rebuilds TOTAL rows + computed cells
 │       ├── swimming/                    # XML-only; absent on HL trackers
 │       │   ├── YYYY.MM.workouts.csv     # per-swim aggregates (per month)
@@ -28,10 +28,10 @@ Two parallel trackers live in per-person folders inside this directory:
 ```
 
 There is no xlsx anywhere post-PR3a. Per-month workout data lives in
-`<Person>/data/monthly/YYYY.MM.csv` — 17-column schema (`SESSION | Date
+`<Person>/data/monthly/YYYY.MM.csv` — 18-column schema (`SESSION | Date
 | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) |
 Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal |
-Elevation (m) | Elapsed`), plus a TOTAL row per strength session.
+Elevation (m) | Elapsed | Source`), plus a TOTAL row per strength session.
 The old `Laps` column was retired in 2026-05; swim lap counts now live
 exclusively in `<Person>/data/swimming/YYYY.MM.workouts.csv`. Computed cells (Volume, Pace, Total
 Cal, SESSION) are pre-evaluated on every canonicalize pass so the
@@ -131,7 +131,7 @@ Never mix data across trackers in a single skill run.
 
 ## Monthly CSV format
 
-Columns (17, in order): `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed`. ASC by (Date, #, Set), TOTAL rows interleaved at strength-session boundaries. (The old `Laps` column was retired in 2026-05; out-of-date 18-col rows self-truncate on the next `canonicalize_monthly_csv` pass because `_row_to_dict` only iterates the 17 canonical fields.)
+Columns (18, in order): `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed | Source`. ASC by (Date, #, Set), TOTAL rows interleaved at strength-session boundaries. (The old `Laps` column was retired in 2026-05; older 17-col rows pad `Source` to blank and self-migrate on the next `canonicalize_monthly_csv` pass.)
 
 Each set is one row. Date, #, and Exercise are populated on every row (no carry-forward shorthand). `#` restarts at 1 per date and is shared by all sets of the same exercise. Cardio rows use the cardio columns (Distance through Elapsed); strength rows leave them blank.
 

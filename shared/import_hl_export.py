@@ -52,7 +52,11 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+SKILLS_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILLS_ROOT))
+sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+from tracker import TrackerContext  # noqa: E402
+from tracker.importing import build_auto_cardio_payload  # noqa: E402
 from monthly_csv import (  # noqa: E402
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
@@ -466,7 +470,8 @@ def main() -> int:
                     help="Parse and aggregate; do not write anything.")
     args = ap.parse_args()
 
-    person = args.person
+    ctx = TrackerContext(args.person)
+    person = ctx.person
 
     pattern = args.txt or str(WORKOUT_TRACKER_ROOT / "health_export_*.txt")
     txt_path = resolve_txt(pattern)
@@ -607,27 +612,11 @@ def main() -> int:
         # we hand it every eligible workout in the --since window and the
         # helper drops anything outside the current calendar month. Past
         # months are "finished" and never re-scanned.
-        cardio_payload: list[dict] = []
-        for w in workout_rows:
-            apple_type = w.get("apple_type") or ""
-            if apple_type not in CARDIO_AUTOLOG_TYPES:
-                continue
-            tracker_name = APPLE_TO_TRACKER_EXERCISE.get(apple_type)
-            if not tracker_name:
-                continue
-            cardio_payload.append({
-                "date":         w.get("date"),
-                "exercise":     tracker_name,
-                "duration_min": w.get("duration_min"),
-                "distance_km":  w.get("distance_km"),
-                "avg_hr":       w.get("avg_hr"),
-                # HL doesn't supply basal/elevation/effort. active_cal +
-                # elapsed_min are present; the note builder skips the rest.
-                "active_cal":   w.get("active_cal"),
-                "total_cal":    w.get("total_cal"),
-                "elevation_m":  w.get("elevation_m"),
-                "elapsed_min":  w.get("elapsed_min"),
-            })
+        cardio_payload = build_auto_cardio_payload(
+            workout_rows,
+            eligible_types=CARDIO_AUTOLOG_TYPES,
+            type_to_exercise=APPLE_TO_TRACKER_EXERCISE,
+        )
         out_lines.extend(upsert_monthly_cardio(
             person, cardio_payload, allow_past_months=args.allow_past_months,
         ))

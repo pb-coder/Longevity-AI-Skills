@@ -27,11 +27,11 @@ import csv
 import sys
 from pathlib import Path
 
-# Sibling-only imports (this script now lives in shared/ next to the modules
-# it imports). Python prepends the script directory to sys.path when run as
-# ``python3 Skills/shared/maintain.py …``; the explicit insert below keeps
-# imports working under module-load paths that don't seed sys.path[0].
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# This file lives in ``Skills/shared``; Skills root is one level up.
+SKILLS_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILLS_ROOT))
+sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+from tracker import TrackerContext  # noqa: E402
 from monthly_csv import (  # noqa: E402
     MONTHLY_HEADERS,
     TOTAL_LABEL,
@@ -509,7 +509,7 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
     return 0
 
 
-if __name__ == "__main__":
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--person", required=True,
                     help="Tracker owner (e.g. Nihad or Fabian).")
@@ -521,8 +521,13 @@ if __name__ == "__main__":
                          "from Notes to the new Incidental column on "
                          "workout_sessions.csv. Idempotent.")
     args = ap.parse_args()
+    ctx = TrackerContext(args.person)
     if args.fix_distance_units:
-        sys.exit(fix_distance_units(args.person, args.dry_run))
+        return fix_distance_units(ctx.person, args.dry_run)
     if args.migrate_incidental_flag:
-        sys.exit(migrate_incidental_flag(args.person, args.dry_run))
-    sys.exit(run(args.person, args.dry_run))
+        return migrate_incidental_flag(ctx.person, args.dry_run)
+    return run(ctx.person, args.dry_run)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

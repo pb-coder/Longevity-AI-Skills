@@ -81,7 +81,10 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+SKILLS_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(SKILLS_ROOT))
+sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+from tracker import TrackerContext  # noqa: E402
 from monthly_csv import (  # noqa: E402
     canonicalize_monthly_csv,
     upsert_rows as monthly_upsert_rows,
@@ -466,13 +469,14 @@ def main() -> int:
     ap.add_argument("payload", type=str,
                     help="Path to payload JSON, or '-' to read from stdin.")
     args = ap.parse_args()
+    ctx = TrackerContext(args.person)
 
     rows, bodyweight, css_test, sleep_entries, thermal_entries = load_payload(args.payload)
     if not rows and not bodyweight and not css_test and not sleep_entries and not thermal_entries:
         print("No rows, bodyweight, sleep, thermal, or css_test entries to write.")
         return 0
     try:
-        for line in write_payload(args.person, rows, bodyweight, css_test,
+        for line in write_payload(ctx.person, rows, bodyweight, css_test,
                                   sleep=sleep_entries,
                                   thermal=thermal_entries):
             print(line)

@@ -61,12 +61,12 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-# Bring in the shared/ tracker schemas + the local lib/ analytics modules.
-# Each lib/ module also self-bootstraps its own sys.path so it can be
-# imported in isolation (REPL, unit tests); the entry-point doing it
-# here makes the imports work even before any lib/ module loads.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+# Bring in shared tracker schemas, package utilities, and coach analytics.
+SKILLS_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(SKILLS_ROOT))
+sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+sys.path.insert(0, str(SKILLS_ROOT / "workout-coach" / "lib"))
+from tracker import TrackerContext  # noqa: E402
 from csv_store import read_profile  # noqa: E402
 from person_paths import monthly_dir  # noqa: E402
 from constants import DEFAULT_DATA_SOURCE, SOURCE_CAPABILITIES  # noqa: E402
@@ -142,15 +142,15 @@ def main() -> int:
                          "tokens for the LLM consumer. Use for human inspection.")
     args = ap.parse_args()
 
-    person = args.person
+    today_d = (
+        datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
+    )
+    ctx = TrackerContext(args.person, today=today_d)
+    person = ctx.person
     md = monthly_dir(person)
     if not md.exists():
         print(f"ERROR: monthly CSVs not found: {md}", file=sys.stderr)
         return 1
-
-    today_d = (
-        datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
-    )
 
     rows, session_totals, session_summaries = extract_rows(person, args.months, today_d)
     deloads = find_deloads(person)

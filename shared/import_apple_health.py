@@ -37,7 +37,11 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+SKILLS_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILLS_ROOT))
+sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+from tracker import TrackerContext  # noqa: E402
+from tracker.importing import build_auto_cardio_payload  # noqa: E402
 from monthly_csv import (  # noqa: E402
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
@@ -1138,7 +1142,8 @@ def main():
                     help="Parse and aggregate; do not write anything.")
     args = ap.parse_args()
 
-    person = args.person
+    ctx = TrackerContext(args.person)
+    person = ctx.person
 
     zip_path = args.zip or _resolve_export_zip(person)
     if zip_path is None or not zip_path.exists():
@@ -1219,38 +1224,15 @@ def main():
         eligible, dedupe_notes = _drop_watch_overlapping_machine(eligible)
         out_lines.extend(dedupe_notes)
 
-        cardio_payload: list[dict] = []
-        for w in eligible:
-            apple_type = w.get("apple_type") or ""
-            tracker_name = APPLE_TO_TRACKER_EXERCISE.get(apple_type)
-            if not tracker_name:
-                continue
-            # Tag machine-recorded rows on the Notes column so the user
-            # can tell at a glance which rows came from the gym equipment
-            # vs the watch. The note is appended to the auto-cardio
-            # marker by the consumer; pass the device label here.
-            machine_tag = None
-            if w.get("is_machine"):
-                # Pull the human-readable name out of "...name:Matrix..." —
-                # falls back to "fitness machine" when Apple omits it.
-                machine_tag = _extract_device_name(w.get("device") or "") or "fitness machine"
-            cardio_payload.append({
-                "date":         w.get("date"),
-                "exercise":     tracker_name,
-                "duration_min": w.get("duration_min"),
-                "distance_km":  w.get("distance_km"),
-                "avg_hr":       w.get("avg_hr"),
-                # Pass through the metadata extras for the structured note
-                # builder. None-safe on the consumer side; XML always fills
-                # active/basal/elapsed when present. Lap count is no longer
-                # written to monthly — swimming/YYYY.MM.workouts.csv is the
-                # sole record.
-                "active_cal":   w.get("active_cal"),
-                "total_cal":    w.get("total_cal"),
-                "elevation_m":  w.get("elevation_m"),
-                "elapsed_min":  w.get("elapsed_min"),
-                "machine_tag":  machine_tag,
-            })
+        cardio_payload = build_auto_cardio_payload(
+            eligible,
+            eligible_types=CARDIO_AUTOLOG_TYPES,
+            type_to_exercise=APPLE_TO_TRACKER_EXERCISE,
+            machine_tag_for=lambda w: (
+                (_extract_device_name(w.get("device") or "") or "fitness machine")
+                if w.get("is_machine") else None
+            ),
+        )
         out_lines.extend(upsert_monthly_cardio(
             person, cardio_payload, allow_past_months=args.allow_past_months,
         ))

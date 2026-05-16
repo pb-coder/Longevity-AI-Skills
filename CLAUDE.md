@@ -20,7 +20,7 @@ keeps a forensic trail in case a downstream bug damages the CSVs.
 │       ├── workout_sessions.csv           # (date,start)-keyed
 │       ├── profile.csv                    # key,value (source, auto_cardio, birthday, swim CSS)
 │       ├── monthly/                       # one CSV per YYYY.MM
-│       │   ├── 2026.05.csv                # 17-col schema, ASC by (Date,#,Set)
+│       │   ├── 2026.05.csv                # 18-col schema, ASC by (Date,#,Set)
 │       │   ├── 2026.04.csv
 │       │   └── …                          # canonicalize rebuilds TOTAL rows + computed cells
 │       ├── swimming/                      # XML-only; absent on HL trackers
@@ -288,14 +288,13 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   post-write on the current month; `shared/maintain.py` calls it on
   every monthly CSV for cross-month sweeps. An out-of-order CSV (e.g.
   after a backfill) self-heals on the next pass. The
-  monthly CSV has 17 columns:
+  monthly CSV has 18 columns:
   `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes |
   Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal |
-  Total Cal | Elevation (m) | Elapsed`. The old `Laps` column was
+  Total Cal | Elevation (m) | Elapsed | Source`. The old `Laps` column was
   removed (2026-05); swim lap count is now sourced exclusively from
-  `<Person>/data/swimming/YYYY.MM.workouts.csv`. Old 18-col rows
-  self-truncate on the next canonicalize pass because `_row_to_dict`
-  only iterates MONTHLY_FIELDS.
+  `<Person>/data/swimming/YYYY.MM.workouts.csv`. Older 17-col rows
+  pad `Source` to blank and self-migrate on the next canonicalize pass.
 - **Computed cells are pre-evaluated on canonicalize.** `Volume =
   reps × kg`, `Pace = duration/distance` (MM:SS, blank outside
   [0.5, 60] min/km), and per-month SESSION counters are written as

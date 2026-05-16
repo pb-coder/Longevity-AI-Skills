@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+SKILLS_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SKILLS_ROOT))
+sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+
+import person_paths  # noqa: E402
+import csv_store  # noqa: E402
+
+
+class StorageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old_root = person_paths.WORKOUT_TRACKER_ROOT
+        person_paths.WORKOUT_TRACKER_ROOT = Path(self.tmp.name)
+        csv_store.write_profile("Test", source="xml", auto_cardio=True)
+
+    def tearDown(self) -> None:
+        person_paths.WORKOUT_TRACKER_ROOT = self.old_root
+        self.tmp.cleanup()
+
+    def test_health_metrics_sparse_merge_preserves_existing_values(self) -> None:
+        csv_store.upsert_health_metrics("Test", [{"date": "2026-05-01", "vo2max": 42.0}])
+        csv_store.upsert_health_metrics(
+            "Test",
+            [{"date": "2026-05-01", "vo2max": None, "resting_hr": 58}],
+        )
+        row = csv_store.read_health_metrics("Test")[0]
+        self.assertEqual(row["vo2max"], 42.0)
+        self.assertEqual(row["resting_hr"], 58)
+
+    def test_sleep_efficiency_and_notes_are_manual_wins(self) -> None:
+        csv_store.upsert_sleep_nights(
+            "Test",
+            [{"date": "2026-05-02", "total_h": 8.0, "time_in_bed_h": 10.0, "notes": "manual"}],
+        )
+        csv_store.upsert_sleep_nights(
+            "Test",
+            [{"date": "2026-05-02", "deep_h": 1.2, "notes": "overwrite"}],
+        )
+        row = csv_store.read_sleep_nights("Test")[0]
+        self.assertEqual(row["efficiency_pct"], 80.0)
+        self.assertEqual(row["deep_h"], 1.2)
+        self.assertEqual(row["notes"], "manual")
+
+    def test_thermal_defaults_and_heat_total_invariant(self) -> None:
+        csv_store.upsert_thermal_sessions(
+            "Test",
+            [{
+                "date": "2026-05-03",
+                "start": "18:30",
+                "heat_type": "dry",
+                "heat_round_durations_min": [12, 8],
+                "cold_type": "cold_air",
+                "cold_duration_sec": 300,
+            }],
+        )
+        row = csv_store.read_thermal_sessions("Test")[0]
+        self.assertEqual(row["heat_temp_c"], 90)
+        self.assertEqual(row["heat_rounds"], 2)
+        self.assertEqual(row["heat_total_min"], 20)
+
+    def test_swim_laps_replace_on_match(self) -> None:
+        base = {
+            "date": "2026-05-04",
+            "workout_start": "07:00:00",
+            "lap_num": 1,
+            "duration_sec": 30,
+            "swolf": 45,
+            "stroke_raw": 2,
+            "stroke_decoded": "Free",
+            "source": "xml",
+        }
+        csv_store.upsert_swim_laps("Test", [base])
+        changed = dict(base, swolf=46)
+        csv_store.upsert_swim_laps("Test", [changed])
+        rows = csv_store.read_swim_laps("Test")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["swolf"], 46)
+
+
+if __name__ == "__main__":
+    unittest.main()

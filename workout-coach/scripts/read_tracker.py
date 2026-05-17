@@ -145,7 +145,7 @@ def main() -> int:
     today_d = (
         datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
     )
-    ctx = TrackerContext(args.person, today=today_d)
+    ctx = TrackerContext(args.person, today_d)
     person = ctx.person
     md = monthly_dir(person)
     if not md.exists():

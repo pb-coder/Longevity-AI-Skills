@@ -1,0 +1,4 @@
+Date,Start,End,Apple Type,Duration (min),Avg HR (bpm),Max HR (bpm),Min HR (bpm),Active Cal (kcal),Distance (km),Source,Incidental,Notes
+2026-05-14,07:00:00,07:45:00,Swimming,45,132,170,95,360,1.5,xml,false,
+2026-05-12,18:00:00,19:00:00,Hiking,60,128,176,88,420,5.2,xml,false,
+2026-05-01,17:00:00,17:55:00,TraditionalStrengthTraining,55,120,185,82,320,,xml,false,

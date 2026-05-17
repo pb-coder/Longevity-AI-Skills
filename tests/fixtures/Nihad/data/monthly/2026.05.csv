@@ -1,0 +1,8 @@
+SESSION,Date,#,Exercise,Set,Reps,kg,Volume,Notes,Distance (km),Duration (min),Pace (min/km),Avg HR,Active Cal,Total Cal,Elevation (m),Elapsed,Source
+1,2026-05-01,1,Flat Barbell Bench Press,1,5,80,400,,,,,,,,,,manual
+1,2026-05-01,1,Flat Barbell Bench Press,2,5,82.5,412.5,,,,,,,,,,manual
+1,2026-05-01,,TOTAL,,,,812.5,,,55:00,,120,320,380,,55:00,manual
+2,2026-05-08,1,Barbell Back Squat,1,5,100,500,,,,,,,,,,manual
+2,2026-05-08,1,Barbell Back Squat,2,5,105,525,,,,,,,,,,manual
+2,2026-05-08,,TOTAL,,,,1025,,,60:00,,126,360,430,,60:00,manual
+3,2026-05-12,1,Hike,1,,,,,5.2,60:00,11:32,128,420,,120,60:00,apple

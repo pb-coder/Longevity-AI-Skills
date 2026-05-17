@@ -34,12 +34,15 @@ module. No raw filesystem paths in the CLI surface.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 
 # This file lives at Workout Tracker/Skills/shared/person_paths.py.
 # parents[0] = shared, [1] = Skills, [2] = Workout Tracker root.
-WORKOUT_TRACKER_ROOT = Path(__file__).resolve().parents[2]
+WORKOUT_TRACKER_ROOT = Path(
+    os.environ.get("WORKOUT_TRACKER_ROOT", Path(__file__).resolve().parents[2])
+).resolve()
 
 
 def person_dir(person: str) -> Path:

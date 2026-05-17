@@ -323,9 +323,9 @@ def extract_hl_workout(d: str, ts: datetime, raw: str) -> dict | None:
     end_dt = ts
     start_dt = end_dt - timedelta(minutes=duration) if duration else end_dt
 
-    notes = None
+    incidental = False
     if "Walking" in apple_type and duration is not None and duration < INCIDENTAL_WALK_MAX_MIN:
-        notes = "incidental walk"
+        incidental = True
 
     # HL emits the workout at end-time and we computed start_dt above as
     # ``end - duration``. Without pause data, elapsed equals duration here —
@@ -348,7 +348,8 @@ def extract_hl_workout(d: str, ts: datetime, raw: str) -> dict | None:
         "elapsed_min":  elapsed_min,
         "distance_km":  round(distance, 2) if distance is not None else None,
         "source":       "HLExport",
-        "notes":        notes,
+        "incidental":   incidental,
+        "notes":        None,
     }
 
 
@@ -509,9 +510,7 @@ def main() -> int:
             f"{metric_entries[0]['date'] if metric_entries else '-'} → "
             f"{metric_entries[-1]['date'] if metric_entries else '-'})"
         )
-        incidental = sum(1 for r in workout_rows
-                         if r.get('incidental') is True
-                         or (r.get('notes') or '').startswith('incidental'))
+        incidental = sum(1 for r in workout_rows if r.get('incidental') is True)
         print(f"Workout Sessions: {len(workout_rows)} sessions would be written "
               f"({incidental} walks flagged incidental)")
         return 0

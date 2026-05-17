@@ -5,9 +5,9 @@ Used by both importers:
 - ``import_apple_health.py`` (XML): Apple emits ``HKWorkoutActivityTypeRunning``
   style strings; the importer strips the prefix and the canonical names below
   are the result (``Running``, ``Hiking``, ...).
-- ``import_hl_export.py`` (HLExport text): Apple emits
-  ``HKWorkoutActivityType(rawValue: 35)``; ``RAWVALUE_TO_TYPE`` maps the int
-  back to the same canonical name string.
+- ``import_health_auto_export.py`` (HealthAutoExport): workout names are
+  mapped to the same canonical name string before reaching downstream stores.
+  ``RAWVALUE_TO_TYPE`` is retained for legacy Apple raw-value compatibility.
 
 Both importers feed the same downstream:
 

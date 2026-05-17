@@ -22,12 +22,9 @@ from __future__ import annotations
 import re
 
 # Per-source capability map. The coach reads this to decide which sections of
-# the report to write. ``xml`` is Apple's native zipped export (Nihad);
-# ``hl_export`` is the HLExport text dump (Fabian) — much lighter, but no HRV,
-# no wrist temp, no per-workout HR, no sleep stages, no Apple-aggregate RHR /
-# walking HR / exercise-minute. The coach should distinguish ``unsupported``
-# (data source can't provide it) from ``not yet collected`` (data source can,
-# but the user hasn't logged enough yet).
+# the report to write. ``xml`` is Apple's native zipped export; HealthAutoExport
+# has the same tracker-facing health/workout surface. ``hl_export`` is retained
+# only for old trackers during migration and stays capability-limited.
 SOURCE_CAPABILITIES = {
     "xml": {
         "hrv":                True,
@@ -47,6 +44,18 @@ SOURCE_CAPABILITIES = {
         # (data-presence gating, like ``sleep_summary`` and ``swim_summary``).
         "thermal_log":        True,
     },
+    "health_auto_export": {
+        "hrv":                True,
+        "wrist_temp":         True,
+        "resting_hr_daily":   True,
+        "walking_hr":         True,
+        "sleep_stages":       True,
+        "sleep_breath_dist":  True,
+        "sleep_nights":       True,
+        "exercise_min_daily": True,
+        "per_workout_hr_strength": True,
+        "thermal_log":        True,
+    },
     "hl_export": {
         "hrv":                False,
         "wrist_temp":         False,
@@ -64,7 +73,8 @@ SOURCE_CAPABILITIES = {
 # Applied when the Profile sheet is missing or unset — treat the data as
 # coming from XML so existing Nihad trackers (created before the Profile
 # sheet existed) keep their full capability surface. New Fabian trackers
-# get bootstrapped to ``hl_export`` by ``import_hl_export.py``.
+# get bootstrapped to ``health_auto_export`` by
+# ``import_health_auto_export.py``.
 DEFAULT_DATA_SOURCE = "xml"
 
 MONTHLY_RE = re.compile(r"^\d{4}\.\d{2}$")

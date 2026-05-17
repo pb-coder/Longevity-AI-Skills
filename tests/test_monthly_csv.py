@@ -61,6 +61,95 @@ class MonthlyCsvTests(unittest.TestCase):
         self.assertEqual(rows[1][3], monthly_csv.TOTAL_LABEL)
         self.assertEqual(rows[1][7], "200")
 
+    def test_canonicalize_places_total_between_strength_and_cardio_rows(self) -> None:
+        rows = [
+            ["", "2026-05-12", "1", "Hack Squat",      "1", "6", "40", "",
+             "", "", "", "", "", "", "", "", "", "manual"],
+            ["", "2026-05-12", "2", "Leg Extension",   "1", "10", "35", "",
+             "", "", "", "", "", "", "", "", "", "manual"],
+            ["", "2026-05-12", "3", "Outdoor Cycling", "1", "", "", "",
+             "", "4.3", "13:54", "", "150", "124", "147", "7", "13:54", "apple"],
+            ["", "2026-05-12", "4", "Outdoor Cycling", "1", "", "", "",
+             "", "2.7", "10:12", "", "127", "74",  "90",  "3", "10:12", "apple"],
+        ]
+        path = self.write_month("2026.05", monthly_csv.MONTHLY_HEADERS, rows)
+        monthly_csv.canonicalize_monthly_csv("Test", "2026.05")
+        _, out = self.read_rows(path)
+
+        exercises = [r[3] for r in out]
+        self.assertEqual(
+            exercises,
+            ["Hack Squat", "Leg Extension", monthly_csv.TOTAL_LABEL,
+             "Outdoor Cycling", "Outdoor Cycling"],
+        )
+
+    def test_canonicalize_keeps_manual_isometric_holds_with_strength_rows(self) -> None:
+        rows = [
+            ["", "2026-05-14", "1", "Jumping Jacks",     "1", "50", "0", "",
+             "", "", "", "", "", "", "", "", "", "manual"],
+            ["", "2026-05-14", "2", "Dead Hang",         "1", "0",  "0", "",
+             "", "", "0:30", "", "", "", "", "", "", "manual"],
+            ["", "2026-05-14", "3", "Cable Lat Pulldown","1", "8",  "57.5", "",
+             "", "", "", "", "", "", "", "", "", "manual"],
+        ]
+        path = self.write_month("2026.05", monthly_csv.MONTHLY_HEADERS, rows)
+        monthly_csv.canonicalize_monthly_csv("Test", "2026.05")
+        _, out = self.read_rows(path)
+
+        exercises = [r[3] for r in out]
+        self.assertEqual(
+            exercises,
+            ["Jumping Jacks", "Dead Hang", "Cable Lat Pulldown",
+             monthly_csv.TOTAL_LABEL],
+        )
+
+    def test_canonicalize_keeps_isometric_hold_duration_on_row(self) -> None:
+        rows = [
+            ["", "2026-05-14", "1", "Dead Hang",         "1", "0",  "0", "",
+             "", "", "0:30", "", "", "", "", "", "", "manual"],
+            ["", "2026-05-14", "2", "Cable Lat Pulldown","1", "8",  "57.5", "",
+             "", "", "", "", "", "", "", "", "", "manual"],
+        ]
+        path = self.write_month("2026.05", monthly_csv.MONTHLY_HEADERS, rows)
+        monthly_csv.canonicalize_monthly_csv("Test", "2026.05")
+        _, out = self.read_rows(path)
+
+        dead_hang = [r for r in out if r[3] == "Dead Hang"][0]
+        total = [r for r in out if r[3] == monthly_csv.TOTAL_LABEL][0]
+        # Per-set hold time stays on the Dead Hang row.
+        self.assertEqual(dead_hang[10], "0:30")
+        # And does NOT bubble up to the strength session's TOTAL row.
+        self.assertEqual(total[10], "")
+
+    def test_canonicalize_renumbers_duplicate_num_across_strength_and_cardio(self) -> None:
+        # Strength /log-ged AFTER cardio importer ran: both numbered 1..N
+        # from their respective writers. Canonicalize must renumber.
+        rows = [
+            ["", "2026-05-11", "1", "Outdoor Cycling",     "1", "",  "",  "",
+             "", "3.7", "14:06", "", "150", "120", "150", "20", "14:06", "apple"],
+            ["", "2026-05-11", "2", "Outdoor Cycling",     "1", "",  "",  "",
+             "", "0.9", "6:18",  "", "138", "46",  "56",  "8",  "6:18",  "apple"],
+            ["", "2026-05-11", "1", "Hack Squat",          "1", "8", "40", "",
+             "", "", "", "", "", "", "", "", "", "manual"],
+            ["", "2026-05-11", "2", "Leg Extension",       "1", "10","35", "",
+             "", "", "", "", "", "", "", "", "", "manual"],
+        ]
+        path = self.write_month("2026.05", monthly_csv.MONTHLY_HEADERS, rows)
+        monthly_csv.canonicalize_monthly_csv("Test", "2026.05")
+        _, out = self.read_rows(path)
+
+        # Expected emit order: 2 strength exercises, TOTAL, 2 cardio
+        # rides (cardio rows get fresh num per row — each ride is its
+        # own workout even with the same exercise name).
+        nums = [r[2] for r in out]
+        exercises = [r[3] for r in out]
+        self.assertEqual(exercises, [
+            "Hack Squat", "Leg Extension",
+            monthly_csv.TOTAL_LABEL,
+            "Outdoor Cycling", "Outdoor Cycling",
+        ])
+        self.assertEqual(nums, ["1", "2", "", "3", "4"])
+
     def test_auto_cardio_respects_manual_row_and_current_month_gate(self) -> None:
         manual = [
             "", "2026-05-11", "1", "Hike", "1", "", "", "",

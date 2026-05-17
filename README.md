@@ -42,7 +42,7 @@ The exercise catalog, alias table, training-science reference, and longevity fra
 
 `canonicalize_monthly_csv` is idempotent. Out-of-order rows and stale schema columns self-heal on the next pass.
 
-Apple Health and HLExport sources have different feature surfaces. The coach gates report sections on a `capabilities` dict so a tracker on the slimmer source doesn't see "missing HRV data" prompts for metrics that source can't provide.
+Apple native XML and HealthAutoExport both populate the full health/sleep/workout schema used by the coach. The coach still gates report sections on a `capabilities` dict so legacy or partially populated trackers don't see prompts for metrics their source can't provide.
 
 Recovery is a personal z-score against the user's own rolling baseline. 5/10 means average for this person. Weights renormalize over signals that are actually present.
 

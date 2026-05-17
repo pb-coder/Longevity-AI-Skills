@@ -34,6 +34,7 @@ if str(_LIB) not in sys.path:
 
 from health import _values_in_window
 from parsing import _parse_iso_date
+from sessions import _is_cardio_row
 
 
 # Karvonen / HR-zone definitions (% of HRR — heart rate reserve).
@@ -97,7 +98,7 @@ def cardio_last_28d(rows: list[dict], today_d: date) -> dict:
             continue
         dur = r.get("duration_min") or 0
         dist = r.get("distance_km") or 0
-        if dur == 0 and dist == 0:
+        if not _is_cardio_row(r):
             continue
         sessions += 1
         distance += dist

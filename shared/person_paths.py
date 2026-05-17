@@ -14,18 +14,18 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │       ├── monthly/
     │       │   ├── 2026.05.csv
     │       │   └── …                      # one CSV per YYYY.MM
-    │       ├── swimming/                  # XML-only; absent on HL trackers
+    │       ├── swimming/                  # native XML lap detail only
     │       │   ├── YYYY.MM.workouts.csv
     │       │   └── YYYY.MM.laps.csv
-    │       ├── sleep/                     # XML-only; absent on HL trackers
+    │       ├── sleep/                     # XML / HealthAutoExport sleep nights
     │       │   └── YYYY.MM.nights.csv
     │       └── thermal/                   # manual /log only; absent until first sauna / cold log
     │           └── YYYY.MM.sessions.csv
     ├── Fabian/
-    │   └── (same; no swimming/, sleep/, or thermal/ until populated)
+    │   └── (same; no swimming/ or thermal/ until populated)
     ├── Skills/
     │   └── shared/                        ← this file
-    ├── Export.zip / health_export_*.txt   (transient; archived on success)
+    ├── Export.zip / HealthAutoExport*.zip (transient; archived on success)
     └── .processed/                        ← consumed export archive
 
 Every importer / logger / coach / maintain script accepts ``--person
@@ -219,13 +219,13 @@ def list_thermal_session_months(person: str) -> list[str]:
 
 
 def archive_processed_export(path: Path) -> Path:
-    """Move a consumed Apple/HL export into ``<root>/.processed/`` and
+    """Move a consumed Apple/HealthAutoExport export into ``<root>/.processed/`` and
     return its new path.
 
     Used in place of ``unlink()`` so a downstream bug that damages the
     monthly CSVs leaves the source file recoverable. On basename
     collision the archived copy is suffixed with the move timestamp
-    (``health_export_….txt`` → ``health_export_….txt.20260509T114205``).
+    (``HealthAutoExport….zip`` → ``HealthAutoExport….zip.20260509T114205``).
     Idempotent in spirit — the destination directory is created on
     demand.
     """

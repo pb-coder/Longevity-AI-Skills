@@ -23,11 +23,11 @@ keeps a forensic trail in case a downstream bug damages the CSVs.
 │       │   ├── 2026.05.csv                # 18-col schema, ASC by (Date,#,Set)
 │       │   ├── 2026.04.csv
 │       │   └── …                          # canonicalize rebuilds TOTAL rows + computed cells
-│       ├── swimming/                      # XML-only; absent on HL trackers
+│       ├── swimming/                      # native XML lap detail only
 │       │   ├── 2026.05.workouts.csv       # per-month swim aggregates, (date,start)-keyed
 │       │   ├── 2026.05.laps.csv           # per-month per-lap detail, (date,workout_start,lap_num)-keyed
 │       │   └── …
-│       ├── sleep/                         # XML-only; absent on HL trackers (or when no sleep logged manually)
+│       ├── sleep/                         # XML / HealthAutoExport sleep nights
 │       │   ├── 2026.05.nights.csv         # per-night, date-keyed; all 6 stages + Time in Bed + Efficiency + N Segments + first/last segment clock times
 │       │   └── …
 │       ├── thermal/                       # manual /log only; absent until first sauna / cold session is logged
@@ -38,7 +38,7 @@ keeps a forensic trail in case a downstream bug damages the CSVs.
 │           ├── state.md                   # current snapshot (conditions, meds; live metrics pulled from health_metrics.csv)
 │           ├── interventions.md           # daily/weekly protocol (supplements, diet, training, skincare) + status tracker
 │           └── biomarkers.md              # append-only lab history
-├── Fabian/                                # same shape (no swimming/ for HL; no longevity/ until populated)
+├── Fabian/                                # same shape (no swimming/ unless native XML lap data exists)
 └── Skills/
     └── shared/
         └── exercises-database.md          # canonical catalog (markdown is truth)
@@ -124,25 +124,24 @@ shared/               # Code + docs imported by multiple skills
                           # Usage: python3 shared/import_apple_health.py
                           #          --person Nihad [--since YYYY-MM-DD]
                           #          [--dry-run] [--keep-export]
-  import_hl_export.py     # HLExport text dump importer (Fabian). Same upsert
-                          # pipeline as import_apple_health.py, but parses
-                          # line-event text instead of XML. Lighter feature
-                          # surface — VO2max, HR Recovery, total sleep
-                          # (stitched from Sleep: Asleep/Awake events),
-                          # respiratory rate, bodyweight, workout duration /
-                          # cal / distance. No HRV, wrist temp, per-workout
-                          # HR, or sleep stages — those depend on Apple
-                          # watch-side aggregation HL doesn't replicate.
-                          # Bootstraps profile.csv with source=hl_export,
-                          # auto_cardio=true. HL workout records (Hike,
-                          # Outdoor Run, Outdoor Cycling, Swim, HIIT) have
-                          # proven reliable; flip auto_cardio=false on a
-                          # per-tracker basis if manual-only logging is
-                          # preferred. Deletes the export txt on success.
-                          # Usage: python3 shared/import_hl_export.py
-                          #          --person Fabian [--txt PATH_OR_GLOB]
-                          #          [--since YYYY-MM-DD] [--dry-run]
-                          #          [--keep-export]
+  import_health_auto_export.py
+                          # HealthAutoExport ZIP importer (Fabian). Same
+                          # full tracker surface as import_apple_health.py
+                          # where HealthAutoExport exposes it: VO2max, RHR,
+                          # HRV, walking HR, wrist temp, breathing
+                          # disturbances, exercise minutes, sleep stages,
+                          # workout duration / cal / distance, and
+                          # per-workout HR. Bootstraps profile.csv with
+                          # source=health_auto_export, auto_cardio=true.
+                          # --replace-range clears old machine-imported
+                          # rows in the selected date range before writing
+                          # the HealthAutoExport rows. Archives the source
+                          # ZIP on success.
+                          # Usage: python3 shared/import_health_auto_export.py
+                          #          --person Fabian [--zip PATH_OR_GLOB]
+                          #          [--since YYYY-MM-DD] [--until YYYY-MM-DD]
+                          #          [--allow-past-months] [--replace-range]
+                          #          [--dry-run] [--keep-export]
   apple_workout_types.py  # Single source of truth for Apple's workout-type
                           # enum: rawValue → canonical name (RAWVALUE_TO_TYPE),
                           # the auto-cardio eligibility set
@@ -180,7 +179,7 @@ workout-logger/       # /log — append a parsed workout to the tracker.
 workout-coach/        # /coach — read tracker, report, plan next workout.
   SKILL.md            # Report template includes a REQUIRED ### Swim
                       # subsection that fires when swim_summary is in the
-                      # JSON; gated on presence, never on HL trackers.
+                      # JSON; gated on data presence.
   lib/                # Internal analytics modules (not directly invoked).
                       # Each is a flat top-level script, sys.path-importable
                       # both from the entry point and in isolation.
@@ -225,8 +224,8 @@ workout-coach/        # /coach — read tracker, report, plan next workout.
                       #     unknown_exercises, deloads, auto_deload_candidates
                       #   - cardio_last_28d + cardio_hr_zones_28d (HRR-based
                       #     time-in-zone using Karvonen)
-                      #   - swim_summary (only when there are swims in the
-                      #     last 28 days; HL trackers omit it entirely):
+                      #   - swim_summary (only when there are swims with lap
+                      #     detail in the last 28 days):
                       #     totals, avg pace per 100m, avg SPL, avg SWOLF,
                       #     SPL/SWOLF trends, per-session CSS-zone
                       #     classification, stroke-mix outliers, CSS retest
@@ -344,16 +343,16 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   `cardio_last_28d` (where applicable) without contributing to the
   weekly hard-set volume model.
 - **Multi-source Apple Health**: each person's `data/profile.csv`
-  pins `source` (`xml` / `hl_export`) and `auto_cardio` (bool).
-  `import_apple_health.py` handles `.zip` (Apple's native export);
-  `import_hl_export.py` handles `health_export_*.txt` (HLExport iOS
-  app). The /log skill dispatches by extension; /coach gates report
-  sections on `capabilities` so HL users don't see "not enough HRV
-  data yet" prompts for metrics their source structurally can't
-  provide. `auto_cardio` defaults to true on both sources (XML and
-  HL); when on, eligible Apple workouts (Running / Hiking / Cycling /
-  Swimming / HIIT) flow into the matching `monthly/YYYY.MM.csv`,
-  with manual-wins dedupe (date + exercise, ±1min duration tolerance).
+  pins `source` (`xml` / `health_auto_export`) and `auto_cardio` (bool).
+  `import_apple_health.py` handles `Export*.zip` (Apple's native XML);
+  `import_health_auto_export.py` handles `HealthAutoExport*.zip`.
+  The /log skill dispatches by filename; /coach gates report sections
+  on `capabilities`. Both active sources expose the full recovery,
+  sleep, and per-workout-HR capability surface. `auto_cardio` defaults
+  to true on both sources; when on, eligible Apple workouts (Running /
+  Hiking / Cycling / Swimming / HIIT) flow into the matching
+  `monthly/YYYY.MM.csv`, with manual-wins dedupe (date + exercise,
+  ±1min duration tolerance).
 - **Coach plan output includes a per-workout DATE placeholder**: every
   strength workout heading is followed by `**Date:** ___________` on its
   own line so the user can fill in the date when they actually train and
@@ -364,9 +363,8 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   Start clock times) on `YYYY.MM.nights.csv`, mirroring the
   `monthly/YYYY.MM.csv` and `swimming/YYYY.MM.*.csv` per-month
   pattern. Apple's sleep stage segments (`HKCategoryValueSleepAnalysis*`)
-  are the source. XML-only — HLExport doesn't supply per-stage data,
-  so HL trackers leave the folder absent (and `/coach` skips the
-  sleep section). Headline fields (Sleep Total / Deep / REM /
+  are the source for native exports; HealthAutoExport writes matching
+  daily sleep-stage aggregates. Headline fields (Sleep Total / Deep / REM /
   Time in Bed) are also mirrored to `health_metrics.csv` so the
   existing recovery_score path reads them without a join.
   `csv_store.read_sleep_nights` aggregates across all months on read;
@@ -408,9 +406,10 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   (Stroke, Duration, SWOLF) on `YYYY.MM.laps.csv`. Mirrors the
   `monthly/YYYY.MM.csv` pattern so the swim store scales with usage.
   Apple's lap events (`HKWorkoutEventTypeLap`) are the source. The
-  Apple Health XML importer populates both on every run; HL doesn't
-  supply lap data, so HL trackers leave the folder absent (and
-  `/coach` skips the swim section). `csv_store.read_swim_workouts` /
+  Apple Health XML importer populates both on every run. HealthAutoExport
+  does not currently provide the per-lap payload this tracker consumes,
+  so `/coach` skips the swim section unless `swim_summary` exists.
+  `csv_store.read_swim_workouts` /
   `read_swim_laps` aggregate across all months on read;
   `upsert_swim_workouts` / `upsert_swim_laps` route entries to the
   correct month by date. Stroke style enum → string map lives in
@@ -431,7 +430,7 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   date-keyed). `state.md` therefore doesn't freeze a bodyweight number
   — it points at health_metrics.csv as the live source. The same
   pattern applies to RHR, HRV, VO2max, sleep, HR Recovery: those flow
-  from the Apple Health / HL importers into health_metrics.csv and the
+  from the Apple Health / HealthAutoExport importers into health_metrics.csv and the
   longevity skill reads them on demand via the coach's
   `read_tracker.py`.
 - **CSS (Critical Swim Speed)** lives on `profile.csv`:

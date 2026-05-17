@@ -35,6 +35,24 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(row["vo2max"], 42.0)
         self.assertEqual(row["resting_hr"], 58)
 
+    def test_health_auto_export_uses_full_schema(self) -> None:
+        csv_store.write_profile("Test", source="health_auto_export", auto_cardio=True)
+        csv_store.upsert_health_metrics(
+            "Test",
+            [{
+                "date": "2026-05-01",
+                "vo2max": 42.0,
+                "resting_hr": 58,
+                "hrv_sdnn": 55,
+                "sleep_deep_h": 1.2,
+                "wrist_temp_c": 36.1,
+            }],
+        )
+        row = csv_store.read_health_metrics("Test")[0]
+        self.assertEqual(row["hrv_sdnn"], 55)
+        self.assertEqual(row["sleep_deep_h"], 1.2)
+        self.assertEqual(row["wrist_temp_c"], 36.1)
+
     def test_sleep_efficiency_and_notes_are_manual_wins(self) -> None:
         csv_store.upsert_sleep_nights(
             "Test",

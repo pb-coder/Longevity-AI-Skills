@@ -19,10 +19,12 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │       │   └── YYYY.MM.laps.csv
     │       ├── sleep/                     # XML / HealthAutoExport sleep nights
     │       │   └── YYYY.MM.nights.csv
-    │       └── thermal/                   # manual /log only; absent until first sauna / cold log
+    │       ├── thermal/                   # manual /log only; absent until first sauna / cold log
+    │       │   └── YYYY.MM.sessions.csv
+    │       └── light_therapy/             # manual /log only; absent until first RLT / PBM log
     │           └── YYYY.MM.sessions.csv
     ├── Fabian/
-    │   └── (same; no swimming/ or thermal/ until populated)
+    │   └── (same; no swimming/, thermal/, or light_therapy/ until populated)
     ├── Skills/
     │   └── shared/                        ← this file
     ├── Export.zip / HealthAutoExport*.zip (transient; archived on success)
@@ -208,6 +210,36 @@ def ensure_thermal_dir(person: str) -> Path:
 def list_thermal_session_months(person: str) -> list[str]:
     """Return ``YYYY.MM`` keys for which a per-month thermal-sessions CSV exists, ASC."""
     d = data_dir(person) / "thermal"
+    if not d.exists():
+        return []
+    import re as _re
+    return sorted(
+        p.name[:-len(".sessions.csv")]
+        for p in d.glob("*.sessions.csv")
+        if _re.match(r"^\d{4}\.\d{2}\.sessions\.csv$", p.name)
+    )
+
+
+def light_therapy_sessions_csv(person: str, year_month: str) -> Path:
+    """Per-month light-therapy / photobiomodulation sessions CSV.
+
+    ``<person>/data/light_therapy/YYYY.MM.sessions.csv``. One row per
+    light-therapy session (RLT cabin, panel, mask, blue-light SAD lamp,
+    etc.). Manual-/log-only — Apple Health doesn't classify these.
+    """
+    return data_dir(person) / "light_therapy" / f"{year_month}.sessions.csv"
+
+
+def ensure_light_therapy_dir(person: str) -> Path:
+    """Create ``<person>/data/light_therapy/`` if missing and return it."""
+    d = data_dir(person) / "light_therapy"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def list_light_therapy_session_months(person: str) -> list[str]:
+    """Return ``YYYY.MM`` keys for which a per-month light-therapy CSV exists, ASC."""
+    d = data_dir(person) / "light_therapy"
     if not d.exists():
         return []
     import re as _re

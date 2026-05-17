@@ -36,7 +36,7 @@ Pass the resolved name via `--person <Name>`. The sidecar `workout_plan.md` foll
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
 2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis. When `swim_summary` is present in the JSON, also read `references/swim-coaching.md` for SWOLF / SPL / CSS-zone interpretation, retest cadence, and what NOT to say about swim form.
-3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the per-person CSVs — `<Person>/data/monthly/YYYY.MM.csv` (per-month workout data), `health_metrics.csv`, `workout_sessions.csv`, `profile.csv`, on XML trackers with recent swims also `swimming/YYYY.MM.{workouts,laps}.csv`, on XML trackers with recent sleep data also `sleep/YYYY.MM.nights.csv`, and on any tracker with manual sauna / cold logs also `thermal/YYYY.MM.sessions.csv` — and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `swim_summary` (only present when there are swims in the last 28 days), `sleep_summary` (only present when there are sleep nights in the last 28 days — all 6 stage means, efficiency mean + trend, fragmentation, schedule consistency, outlier nights), `thermal_summary` (only present when there are sauna / cold sessions in the last 28 days — heat dose, HSP-threshold adherence, cold dominant type), `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the data folder isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
+3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the per-person CSVs — `<Person>/data/monthly/YYYY.MM.csv` (per-month workout data), `health_metrics.csv`, `workout_sessions.csv`, `profile.csv`, on XML trackers with recent swims also `swimming/YYYY.MM.{workouts,laps}.csv`, on XML trackers with recent sleep data also `sleep/YYYY.MM.nights.csv`, on any tracker with manual sauna / cold logs also `thermal/YYYY.MM.sessions.csv`, and on any tracker with manual light-therapy logs also `light_therapy/YYYY.MM.sessions.csv` — and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `swim_summary` (only present when there are swims in the last 28 days), `sleep_summary` (only present when there are sleep nights in the last 28 days — all 6 stage means, efficiency mean + trend, fragmentation, schedule consistency, outlier nights), `thermal_summary` (only present when there are sauna / cold sessions in the last 28 days — heat dose, HSP-threshold adherence, cold dominant type), `light_therapy_summary` (only present when there are light-therapy sessions in the last 28 days — adherence vs. target, per-session dose, light_type / modality distribution), `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the data folder isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
    **Output is compact (no indentation) by default** — saves ~20% of tokens vs pretty-printed. Pass `--pretty` for human inspection.
 
@@ -75,7 +75,7 @@ The file structure:
 
 ### Workout 1: <TYPE>
 **Date:** ___________
-**Sauna / cold:** ___________
+**Recovery (sauna / cold / light):** ___________
 
 <quick list — plain bullets, one line per set>
 
@@ -85,7 +85,7 @@ The file structure:
 
 ### Workout 2: <TYPE>
 **Date:** ___________
-**Sauna / cold:** ___________
+**Recovery (sauna / cold / light):** ___________
 ...
 
 ### Cardio 1: Zone 2 (optional, only if behind §10 target)
@@ -108,7 +108,7 @@ What the JSON contains:
 
 **Source + capabilities (read first to gate sections):**
 - `data_source`: `xml` (Apple's zipped XML — Nihad) or `health_auto_export` (HealthAutoExport ZIP — Fabian). Trust this string; don't override based on populated fields.
-- `capabilities`: per-source feature map (`hrv`, `wrist_temp`, `resting_hr_daily`, `walking_hr`, `sleep_stages`, `sleep_breath_dist`, `sleep_nights`, `exercise_min_daily`, `per_workout_hr_strength`, `thermal_log`). **False = structurally unsupported.** Gate report sections on this, not on null fields. Native XML and HealthAutoExport both expose the full recovery, sleep, and per-workout-HR surface. `sleep_nights` indicates the dedicated per-night CSV store is available — when True, expect a `sleep_summary` block with the full sleep architecture; when False, sleep details are limited to the headline Total/Deep/REM on `health_metrics_weekly`. `thermal_log` is always True — sauna + cold exposure are manual-/log-only, not source-dependent — but the actual `thermal_summary` block is gated on data-presence (rendered only when ≥1 session was logged in the last 28d).
+- `capabilities`: per-source feature map (`hrv`, `wrist_temp`, `resting_hr_daily`, `walking_hr`, `sleep_stages`, `sleep_breath_dist`, `sleep_nights`, `exercise_min_daily`, `per_workout_hr_strength`, `thermal_log`, `light_therapy_log`). **False = structurally unsupported.** Gate report sections on this, not on null fields. Native XML and HealthAutoExport both expose the full recovery, sleep, and per-workout-HR surface. `sleep_nights` indicates the dedicated per-night CSV store is available — when True, expect a `sleep_summary` block with the full sleep architecture; when False, sleep details are limited to the headline Total/Deep/REM on `health_metrics_weekly`. `thermal_log` and `light_therapy_log` are always True — sauna + cold + light therapy are manual-/log-only, not source-dependent — but the actual `thermal_summary` / `light_therapy_summary` blocks are gated on data-presence (rendered only when ≥1 session was logged in the last 28d).
 - `auto_cardio_enabled`: bool. True = Apple-recorded runs / hikes / HIIT auto-flow into the monthly sheets.
 - `today`: ISO date.
 - `estimated_max_hr`, `estimated_rest_hr`: derived once at the top. `max_hr` is the largest observed Apple max-HR (or 208 − 0.7×age fallback if none is observable). `rest_hr` is the 28-day mean of `resting_hr` (or 60 fallback if missing). Used by all HR-zone / TRIMP / load-band math below.
@@ -156,6 +156,9 @@ What the JSON contains:
 
 **Heat + cold exposure (manual /log, 28-day window):**
 - `thermal_summary`: dedicated per-session analysis. Key absent when no manual sauna / cold sessions were logged in the last 28d. Shape: `{n_sessions_28d, heat: {n_sessions_28d, n_sessions_per_week, total_minutes_28d, minutes_per_week, minutes_above_hsp_threshold_per_week, type_distribution, multi_round_sessions_pct, avg_temp_c, avg_session_minutes}, cold: {n_sessions_28d, n_sessions_per_week, type_distribution, paired_with_heat_pct, dominant_type}, adherence: {heat_target_per_week, heat_actual_per_week, heat_status, duration_status}}`. The `heat` and `cold` sub-blocks are independent — a row with heat-only contributes to `heat` only; a row with cold-only contributes to `cold` only. `adherence.heat_status` is `below-target` / `on-target` / `above-target` against `profile.csv`'s `sauna_target_per_week` (default 4×/wk). `adherence.duration_status` is `below-HSP-threshold` / `in-band` / `above-band` against the Laukkanen + mechanistic-HSP consensus band (≥80°C AND ≥20min per session). Drives the `### Heat / Cold exposure` report section.
+
+**Light therapy (manual /log, 28-day window):**
+- `light_therapy_summary`: dedicated per-session analysis. Key absent when no manual light-therapy sessions (RLT / near-IR / PBM / blue light) were logged in the last 28d. Shape: `{n_sessions_28d, n_sessions_per_week, total_minutes_28d, minutes_per_week, avg_session_minutes, light_type_distribution, modality_distribution, body_area_distribution, dominant_light_type, dominant_modality, adherence: {target_per_week, actual_per_week, status, target_min_per_session, session_dose_status}}`. `adherence.status` is `below-target` / `on-target` / `above-target` against `profile.csv`'s `light_therapy_target_per_week` (default 3×/wk). `adherence.session_dose_status` is `below-min` / `on-target` / `above-min` against `light_therapy_target_min_per_session` (default 10 min). Drives the `### Light therapy` report section. The store is broad — covers red, near-IR, blue, etc. Don't make claims about wavelength efficacy the data can't support.
 
 **Debug deep-dive (off by default):**
 - `rows`: flat per-set list. Pass `--include-rows`. Use only for cross-sectional debugging the pre-aggregated keys can't answer.
@@ -487,6 +490,28 @@ Example (filled from a real `thermal_summary`):
 - Cold: 16 sessions (4.0/wk). Dominant: cold_air. Paired with sauna 88% of the time.
 ```
 
+### Light therapy
+
+**REQUIRED when `light_therapy_summary` is in the JSON.** Skip the section entirely when the key is absent — that means no light-therapy sessions logged in the last 28 days (`/log` is the only writer; Apple Health doesn't classify these). Silence is correct; never say "no light-therapy data" as a finding.
+
+Hard template (2–4 lines, plain bullets):
+
+- **Light therapy last 28d.** `{n_sessions_28d} sessions ({n_sessions_per_week}/wk, target {adherence.target_per_week}). Avg {avg_session_minutes}min, dominant {dominant_light_type} via {dominant_modality}.` Pull from `light_therapy_summary` top-level + `adherence`; cite `adherence.status` ("below-target" / "on-target" / "above-target") as a one-word verdict.
+- **Per-session dose.** `Avg {avg_session_minutes}min vs {adherence.target_min_per_session}min target — {adherence.session_dose_status}.` Skip when `session_dose_status` is `unknown` (no `duration_min` recorded on any row). When `below-min`, the call is: "duration is short; push toward target". When `above-min`, no comment needed.
+- **Mix.** Optional. If `light_type_distribution` has more than one entry, name the split (e.g. "split: red+ir 80%, blue 20%"). Otherwise skip.
+
+Source-honesty rules:
+- The evidence base for light-therapy dosing is far less settled than sauna's HSP induction. Don't quote sham-controlled effect sizes the JSON doesn't carry; the protocol metric is "did it happen" + "at roughly what duration."
+- Wavelength efficacy claims are out of scope. The store captures `light_type` and (optionally) `wavelength_nm`; don't extrapolate "X nm is better than Y nm" from the user's own data.
+- Adherence target defaults to 3×/wk + 10min/session. User can override via `profile.csv` (`light_therapy_target_per_week`, `light_therapy_target_min_per_session`). Don't invent a higher target unless the JSON shows it.
+
+Example (filled from a real `light_therapy_summary`):
+
+```
+- Light therapy last 28d: 8 sessions (2.0/wk, target 3) — below-target. Avg 6min, dominant red+ir via cabin.
+- Per-session dose: 6min vs 10min target — below-min. Push toward 10min when the cabin has space.
+```
+
 ### Swim
 
 **REQUIRED when `swim_summary` is in the JSON.** Skip the section entirely when the key is absent — that means no lap data or no swims in the last 28 days, and silence is correct. Read `references/swim-coaching.md` for SWOLF / SPL / CSS interpretation, retest cadence, and what NOT to say about swim form.
@@ -579,7 +604,7 @@ For each workout, output the quick list immediately followed by the table for th
 
 Correct order: Quick List WO1 → Table WO1 → Quick List WO2 → Table WO2 → etc.
 
-Each workout heading is immediately followed by `**Date:** ___________` on its own line, then `**Sauna / cold:** ___________` on its own line, then a blank line, then the quick list. The user fills in the date when they actually train (so the session can be logged later without guessing) and the sauna/cold slot if they did a post-workout heat / cold protocol. The sauna/cold slot is free-text — the user can write `sauna 12+8min 85C / cold 5min air`, `sauna 10min 85C`, `skipped`, or leave it blank. `/log` parses it (or its absence) per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)`). Both lines apply to every strength workout — cardio sections do not need them.
+Each workout heading is immediately followed by `**Date:** ___________` on its own line, then `**Recovery (sauna / cold / light):** ___________` on its own line, then a blank line, then the quick list. The user fills in the date when they actually train (so the session can be logged later without guessing) and the recovery slot if they did any post-workout protocol. The recovery slot is free-text — the user can write `sauna 12+8min 85C / cold 5min air`, `sauna 10min 85C`, `rlt 10min 45C`, `sauna 10min / rlt 5min`, `skipped`, or leave it blank. `/log` parses each modality independently per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)` for sauna/cold; `## Light therapy (opt-in)` for RLT / blue light / PBM). Sauna+RLT in one line emits two payload entries — one `thermal`, one `light_therapy` — both keyed to the same date. Both lines apply to every strength workout — cardio sections do not need them.
 
 **Quick list** — what the user reads on their phone. One line per set, plain markdown bullets. No code fences. Format:
 - Bodyweight or single-rep: `Exercise Name : reps` (e.g., `Plank : 45s hold`)
@@ -716,6 +741,8 @@ Source-honesty rules:
 | Skipping the Swim section when `swim_summary` is present | Fully-populated swim data emits zero coach output; the user sees a polished report that pretends they don't swim | Gate on `swim_summary` key presence. Write the REQUIRED 3–5 line block per `references/swim-coaching.md` (see `### Swim` in Phase 1). Skip cleanly only when the key is absent (no lap data or no swims in 28 days). |
 | Skipping the Sleep section when `sleep_summary` is present | Fully-populated sleep architecture (all 6 stages, efficiency, fragmentation, schedule stdev) gets zero coach output; the user only sees the headline Sleep total/Deep/REM lines under `### Recovery state` and misses the efficiency / schedule story | Gate on `sleep_summary` key presence. Write the REQUIRED 3–5 line block per the `### Sleep` template in Phase 1. Skip cleanly only when the key is absent (no nights in 28 days). |
 | Skipping the Heat / Cold section when `thermal_summary` is present | The user logged sauna / cold sessions but the coach silently ignores them. Adherence call (on-target / below-target) and HSP-threshold call are exactly the actionable bits the user needs to see. | Gate on `thermal_summary` key presence. Write the REQUIRED 3–5 line block per the `### Heat / Cold exposure` template in Phase 1. Skip cleanly only when the key is absent (no sauna / cold sessions logged in the last 28 days). |
+| Skipping the Light therapy section when `light_therapy_summary` is present | The user logged RLT / blue-light sessions but the coach silently ignores them. Adherence + per-session dose are the only actionable bits. | Gate on `light_therapy_summary` key presence. Write the REQUIRED 2–4 line block per the `### Light therapy` template in Phase 1. Skip cleanly only when the key is absent (no light-therapy sessions logged in 28d). |
+| Inventing wavelength efficacy claims from light-therapy data | "660nm boosts mitochondrial ATP — push more red-light sessions." Source-honesty fails: the user's tracker only stores whether they did it and roughly how long; it has no individual response data. | Stay in protocol-adherence language: did the session happen, at roughly what duration. Don't extrapolate dose-response from N=user's own log. The reference for wavelength claims is the scientific literature, not the JSON. |
 | Treating a context-change row as a real strength regression | Cable Lateral Raise drops from 15kg to 7kg after a gym change; coach flags the lift as "going backwards" with a -32kg/4w slope, even though the user's Notes say "new gym, different cable weights" | Read `estimated_1rm[exercise].context_change_excluded` and `progression_summary[exercise].last_notes`. When `context_change_excluded ≥ 1`, write "Slope reset by gym/equipment change; trend resumes once 3+ sessions logged on the new equipment" instead of calling stall or regression. |
 | Trusting recovery `confidence: high` on under-sampled signals | A high-weight signal with `n_recent: 1` (one HR-Recovery reading) inflates confidence to "high" even though the score is hanging on one data point | Confidence is gated on per-signal sample sufficiency in `health.py`. When the JSON shows `confidence: medium` or `low` after a thin recent week, soften any rule that relies on the score band — and cite the under-sampled driver by name. |
 

@@ -43,6 +43,7 @@ SOURCE_CAPABILITIES = {
         # gates the report section on ``thermal_summary`` presence
         # (data-presence gating, like ``sleep_summary`` and ``swim_summary``).
         "thermal_log":        True,
+        "light_therapy_log":  True,
     },
     "health_auto_export": {
         "hrv":                True,
@@ -55,6 +56,7 @@ SOURCE_CAPABILITIES = {
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
         "thermal_log":        True,
+        "light_therapy_log":  True,
     },
     "hl_export": {
         "hrv":                False,
@@ -67,6 +69,7 @@ SOURCE_CAPABILITIES = {
         "exercise_min_daily": False,
         "per_workout_hr_strength": False,
         "thermal_log":        True,
+        "light_therapy_log":  True,
     },
 }
 

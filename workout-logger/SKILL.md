@@ -51,7 +51,7 @@ line. Don't search the filesystem.
 
 ## Flow
 
-1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log. If the message contains an explicit bodyweight line (see parsing rules), also parse that into a bodyweight entry. If the user includes `CSS test` on the header line of a 400m + 200m TT pair (see parsing rules), parse the two times and assemble a `css_test` payload field. If the message contains an explicit sleep line (see parsing rules), parse that into a `sleep` entry keyed to the session's date. If the message contains explicit `sauna` and/or `cold` lines (see parsing rules), parse them into `thermal` entries — a `sauna` + `cold` pair under the same workout header pairs into one entry; standalone lines become their own entry.
+1. Parse the message into row dicts — one per set — using the references above. Collect the set of dates touched by this log. If the message contains an explicit bodyweight line (see parsing rules), also parse that into a bodyweight entry. If the user includes `CSS test` on the header line of a 400m + 200m TT pair (see parsing rules), parse the two times and assemble a `css_test` payload field. If the message contains an explicit sleep line (see parsing rules), parse that into a `sleep` entry keyed to the session's date. If the message contains explicit `sauna` and/or `cold` lines (see parsing rules), parse them into `thermal` entries — a `sauna` + `cold` pair under the same workout header pairs into one entry; standalone lines become their own entry. If the message contains explicit light-therapy lines (`rlt`, `red light`, `near-ir`, `blue light`, `pbm`, `light therapy`, etc., see parsing rules), parse them into `light_therapy` entries keyed to the session's date — independent of any thermal entry on the same date.
 
    **Unknown-exercise gate (REQUIRED before building the payload).** For every distinct exercise name in the parsed rows, run `python3 Skills/shared/exercises_database.py lookup "<name>"`. The script consults both the canonical catalog and the alias table (case-insensitive). Three branches:
 
@@ -79,11 +79,16 @@ line. Don't search the filesystem.
                    "heat_rounds": 2, "heat_round_durations_min": [12, 8],
                    "cold_type": "cold_air", "cold_duration_sec": 300,
                    "cold_temp_c": null, "notes": null}, ... ],
+     "light_therapy": [ {"date": "YYYY-MM-DD", "start": null,
+                         "duration_min": 5, "light_type": "red+ir",
+                         "wavelength_nm": null, "body_area": "full_body",
+                         "modality": "cabin", "ambient_temp_c": 45,
+                         "notes": null}, ... ],
      "css_test": {"date": "YYYY-MM-DD", "t400_sec": 450, "t200_sec": 210}
    }
    ```
-   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `sleep` entirely if the user didn't include a sleep line — **never prompt for sleep**. Omit `thermal` entirely if the user didn't include a `sauna` / `cold` line — **never prompt for thermal**. Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually; it comes from the Apple Health import only. Per-night segment metadata (`n_segments`, `first_segment_start`, `last_segment_end`) also can't be entered manually — only the Apple importer populates those.
-3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), dual-writes any sleep entries into both `<Person>/data/sleep/YYYY.MM.nights.csv` (rich per-night detail) and `<Person>/data/health_metrics.csv` (headline Total/Deep/REM/Time in Bed for the recovery score), and writes any thermal entries to `<Person>/data/thermal/YYYY.MM.sessions.csv` (sparse-merge; `heat_total_min` auto-derived from the per-round durations). Sleep Efficiency is auto-derived inside the upsert when both Total and Time in Bed are present.
+   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `sleep` entirely if the user didn't include a sleep line — **never prompt for sleep**. Omit `thermal` entirely if the user didn't include a `sauna` / `cold` line — **never prompt for thermal**. Omit `light_therapy` entirely if the user didn't include a light-therapy line — **never prompt for light therapy**. Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually; it comes from the Apple Health import only. Per-night segment metadata (`n_segments`, `first_segment_start`, `last_segment_end`) also can't be entered manually — only the Apple importer populates those.
+3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), dual-writes any sleep entries into both `<Person>/data/sleep/YYYY.MM.nights.csv` (rich per-night detail) and `<Person>/data/health_metrics.csv` (headline Total/Deep/REM/Time in Bed for the recovery score), writes any thermal entries to `<Person>/data/thermal/YYYY.MM.sessions.csv` (sparse-merge; `heat_total_min` auto-derived from the per-round durations), and writes any light-therapy entries to `<Person>/data/light_therapy/YYYY.MM.sessions.csv` (sparse-merge; `modality` auto-defaults to `cabin` when `ambient_temp_c ≥ 30`). Sleep Efficiency is auto-derived inside the upsert when both Total and Time in Bed are present.
 4. **Verify the write succeeded.** Capture the script's stdout and exit code:
    - If the exit code is non-zero, print the exact stderr output and stop. Do not report success.
    - If the exit code is 0 but stdout does not contain the word `Appended`, print the exact stdout and stop with: "Unexpected script output — please check the tracker manually."
@@ -191,6 +196,20 @@ Thermal entries are written to `<Person>/data/thermal/YYYY.MM.sessions.csv` (man
 ### Bulk-seed (historical thermal import)
 
 To back-fill historical thermal sessions, call `append_workout.py` with a payload of only thermal entries: `{"rows": [], "thermal": [{"date": "...", "heat_type": "dry", "heat_round_durations_min": [12], "heat_temp_c": 85, "cold_type": "cold_air", "cold_duration_sec": 300}, ...]}`. The logger routes each entry to the right `thermal/YYYY.MM.sessions.csv`. Same dedupe-by-`(date, start)` semantics as the per-month swim store.
+
+## Light therapy (opt-in)
+
+Light therapy is opt-in. The user includes a light-therapy line (`rlt`, `red light`, `near-ir`, `blue light`, `pbm`, `light therapy`, etc.) in the `/log` message — see `references/parsing-rules.md` for the syntax (keyword → light_type defaults, optional wavelength / ambient temp / body area / modality, alias tables). **No automatic prompts, no probing, no `AskUserQuestion`.** Absent ≡ didn't happen.
+
+The module is broad on purpose: it stores red-light cabins, near-IR probes, blue-light SAD lamps, and any future photobiomodulation modality under one schema. Pick the keyword that matches what the user wrote and let the upsert apply the defaults.
+
+Light-therapy entries are written to `<Person>/data/light_therapy/YYYY.MM.sessions.csv` (manual-/log-only — Apple Health doesn't classify light-therapy sessions). Sparse-merge by `(date, start)`; `Notes` is manual-wins. `modality` is auto-defaulted to `cabin` inside `upsert_light_therapy_sessions` when `ambient_temp_c ≥ 30` and the user didn't specify a modality (heated walk-in inference, e.g. Holmes Place-style RLT cabins).
+
+**No pairing with thermal.** A sauna+RLT session in real life lands as **two payload entries** (one in `thermal`, one in `light_therapy`), both keyed to the same date. They live in two stores. If the user actually used a sauna-integrated red-light panel, set `modality: "sauna_integrated"` on the light-therapy entry.
+
+### Bulk-seed (historical light-therapy import)
+
+To back-fill historical light-therapy sessions, call `append_workout.py` with a payload of only light-therapy entries: `{"rows": [], "light_therapy": [{"date": "...", "duration_min": 5, "light_type": "red+ir", "ambient_temp_c": 45}, ...]}`. The logger routes each entry to the right `light_therapy/YYYY.MM.sessions.csv`. Same dedupe-by-`(date, start)` semantics as the per-month thermal store.
 
 ## Session-level flags
 

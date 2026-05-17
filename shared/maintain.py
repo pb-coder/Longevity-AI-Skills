@@ -42,6 +42,7 @@ from monthly_csv import (  # noqa: E402
 )
 from csv_store import (  # noqa: E402
     HEALTH_METRICS_HEADERS_BY_SOURCE,
+    LIGHT_THERAPY_SESSIONS_HEADERS,
     SLEEP_NIGHTS_HEADERS,
     SWIM_LAPS_HEADERS,
     SWIM_WORKOUTS_HEADERS,
@@ -51,6 +52,7 @@ from csv_store import (  # noqa: E402
 )
 from person_paths import (  # noqa: E402
     health_metrics_csv,
+    light_therapy_sessions_csv,
     monthly_csv as monthly_csv_path,
     monthly_dir,
     profile_csv,
@@ -134,6 +136,7 @@ def validate_csvs(person: str) -> list[str]:
     }
     # Per-month swim CSVs (XML trackers only — HL exports omit lap data).
     from person_paths import (
+        list_light_therapy_session_months,
         list_sleep_night_months,
         list_swim_lap_months,
         list_swim_workout_months,
@@ -158,6 +161,13 @@ def validate_csvs(person: str) -> list[str]:
     for ym in list_thermal_session_months(person):
         targets[f"thermal/{ym}.sessions.csv"] = (
             thermal_sessions_csv(person, ym), THERMAL_SESSIONS_HEADERS, "desc"
+        )
+    # Per-month light-therapy (RLT / PBM / blue light) CSVs — manual
+    # /log only; absent until first light-therapy session is logged.
+    for ym in list_light_therapy_session_months(person):
+        targets[f"light_therapy/{ym}.sessions.csv"] = (
+            light_therapy_sessions_csv(person, ym),
+            LIGHT_THERAPY_SESSIONS_HEADERS, "desc"
         )
 
     for label, (path, expected_header, order) in targets.items():

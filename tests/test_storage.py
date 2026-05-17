@@ -96,6 +96,45 @@ class StorageTests(unittest.TestCase):
                 }],
             )
 
+    def test_light_therapy_defaults_and_roundtrip(self) -> None:
+        csv_store.upsert_light_therapy_sessions(
+            "Test",
+            [{
+                "date": "2026-05-14",
+                "duration_min": 5,
+                "light_type": "red+ir",
+                "ambient_temp_c": 45,
+                "body_area": "full_body",
+            }],
+        )
+        row = csv_store.read_light_therapy_sessions("Test")[0]
+        self.assertEqual(row["duration_min"], 5)
+        self.assertEqual(row["light_type"], "red+ir")
+        self.assertEqual(row["ambient_temp_c"], 45)
+        self.assertEqual(row["modality"], "cabin")  # auto-defaulted from heated-cabin temp
+
+        # Sparse-merge: a later write only updates the column it touches.
+        csv_store.upsert_light_therapy_sessions(
+            "Test",
+            [{"date": "2026-05-14", "wavelength_nm": 660}],
+        )
+        row = csv_store.read_light_therapy_sessions("Test")[0]
+        self.assertEqual(row["wavelength_nm"], 660)
+        self.assertEqual(row["duration_min"], 5)
+        self.assertEqual(row["light_type"], "red+ir")
+
+    def test_light_therapy_unknown_enum_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            csv_store.upsert_light_therapy_sessions(
+                "Test",
+                [{"date": "2026-05-14", "duration_min": 10, "light_type": "ultraviolet"}],
+            )
+        with self.assertRaises(ValueError):
+            csv_store.upsert_light_therapy_sessions(
+                "Test",
+                [{"date": "2026-05-14", "duration_min": 10, "modality": "laser_pointer"}],
+            )
+
     def test_swim_laps_replace_on_match(self) -> None:
         base = {
             "date": "2026-05-04",

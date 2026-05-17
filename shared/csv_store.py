@@ -27,10 +27,12 @@ from tracker.csv_table import (  # noqa: E402
 
 from person_paths import (
     ensure_data_dir,
+    ensure_light_therapy_dir,
     ensure_sleep_dir,
     ensure_swimming_dir,
     ensure_thermal_dir,
     health_metrics_csv,
+    light_therapy_sessions_csv,
     profile_csv,
     sleep_nights_csv,
     swim_laps_csv,
@@ -143,14 +145,17 @@ def _strength_metadata_drifts(existing, incoming) -> bool:
 PROFILE_KEYS = (
     "source", "auto_cardio", "birthday",
     "swim_css_sec_per_100m", "swim_css_set_at", "swim_pool_length_default",
+    "light_therapy_target_per_week", "light_therapy_target_min_per_session",
 )
 PROFILE_DEFAULTS = {
-    "source":                   None,
-    "auto_cardio":              False,
-    "birthday":                 None,
-    "swim_css_sec_per_100m":    None,
-    "swim_css_set_at":          None,
-    "swim_pool_length_default": None,
+    "source":                              None,
+    "auto_cardio":                         False,
+    "birthday":                            None,
+    "swim_css_sec_per_100m":               None,
+    "swim_css_set_at":                     None,
+    "swim_pool_length_default":            None,
+    "light_therapy_target_per_week":       None,
+    "light_therapy_target_min_per_session": None,
 }
 
 
@@ -1157,4 +1162,160 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
         summaries.append(f"  {ym}: {written} written / {updated} updated")
 
     return [f"Thermal Sessions: {total_written} sessions written / "
+            f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries
+
+
+# ============================================================ Light therapy (photobiomodulation)
+# Per-session row for any light-based recovery / wellness protocol —
+# red-light therapy (RLT) cabins, near-IR probes, blue-light SAD lamps,
+# etc. Manual-/log-only — Apple Health doesn't classify these.
+#
+# Schema is intentionally lean: ``duration_min`` is the only required
+# operational field. Wavelength, body area, modality, and ambient temp
+# are optional descriptors most users won't bother to record. The store
+# is broad enough to cover future wavelengths (blue/green/white)
+# without schema churn.
+LIGHT_THERAPY_SESSIONS_HEADERS = [
+    "Date", "Start",
+    "Duration (min)",
+    "Light Type", "Wavelength (nm)",
+    "Body Area", "Modality",
+    "Ambient Temp (°C)",
+    "Notes",
+]
+
+LIGHT_THERAPY_SESSIONS_FIELDS = [
+    "start",
+    "duration_min",
+    "light_type", "wavelength_nm",
+    "body_area", "modality",
+    "ambient_temp_c",
+]
+
+# Enum constants. Imported by the logger parser and the coach so all
+# three layers refuse unknown values from a single source of truth.
+LIGHT_TYPES = {
+    "red", "near_ir", "red+ir", "far_ir",
+    "blue", "green", "white", "other",
+}
+LIGHT_BODY_AREAS = {
+    "full_body", "face", "back", "torso",
+    "arms", "legs", "head", "localized",
+}
+LIGHT_MODALITIES = {
+    "panel", "mask", "wand", "cabin", "device", "sauna_integrated",
+}
+
+# Threshold above which a session is assumed to be in a heated walk-in
+# cabin (commercial RLT cabins typically run ~40-50°C). When the user
+# logs an ambient temp at/above this and didn't specify a modality, the
+# upsert defaults ``modality`` to ``cabin``.
+HEATED_CABIN_AMBIENT_TEMP_C = 30
+
+
+def read_light_therapy_sessions(person: str) -> list[dict]:
+    """Return per-session light-therapy rows across all per-month CSVs.
+
+    Sorted DESC by ``(date, start)``. Each dict has ``date`` plus the
+    fields in ``LIGHT_THERAPY_SESSIONS_FIELDS`` plus ``notes``. Empty
+    when the ``light_therapy/`` folder is absent.
+    """
+    from person_paths import list_light_therapy_session_months
+    out: list[dict] = []
+    for ym in list_light_therapy_session_months(person):
+        out.extend(_read_periodic_records(
+            light_therapy_sessions_csv(person, ym),
+            LIGHT_THERAPY_SESSIONS_FIELDS,
+            LIGHT_THERAPY_SESSIONS_HEADERS,
+            string_fields={"start", "light_type", "body_area", "modality"},
+        ))
+    out.sort(key=lambda r: (r["date"], str(r.get("start") or "")), reverse=True)
+    return out
+
+
+def upsert_light_therapy_sessions(person: str, entries: Iterable[dict]) -> list[str]:
+    """Sparse-merge per-session light-therapy rows into the right
+    ``<person>/data/light_therapy/YYYY.MM.sessions.csv``.
+
+    Dedupe key = ``(date, start)`` within the month. Notes is manual-wins.
+    ``modality`` defaults to ``cabin`` when the user supplied an ambient
+    temp at/above the heated-cabin threshold and left modality blank.
+
+    Validates ``light_type`` against ``LIGHT_TYPES``, ``body_area``
+    against ``LIGHT_BODY_AREAS``, and ``modality`` against
+    ``LIGHT_MODALITIES``. Unknown values raise ``ValueError`` so bad
+    parser output doesn't disappear into the CSV.
+    """
+    entries = list(entries or [])
+    if not entries:
+        return ["Light Therapy Sessions: 0 sessions written / 0 updated"]
+
+    by_month_entries = _group_entries_by_month(entries)
+
+    total_written = 0
+    total_updated = 0
+    summaries: list[str] = []
+    spec = CsvTableSpec(
+        headers=LIGHT_THERAPY_SESSIONS_HEADERS,
+        fields=["date"] + LIGHT_THERAPY_SESSIONS_FIELDS + ["notes"],
+        key_fields=("date", "start"),
+        sort_fields=("date", "start"),
+        sort_reverse=True,
+    )
+
+    def _sanitize_light(e: dict) -> dict:
+        lt = e.get("light_type")
+        if lt is not None and lt not in LIGHT_TYPES:
+            raise ValueError(f"unknown light_type: {lt!r}")
+        ba = e.get("body_area")
+        if ba is not None and ba not in LIGHT_BODY_AREAS:
+            raise ValueError(f"unknown body_area: {ba!r}")
+        md = e.get("modality")
+        if md is not None and md not in LIGHT_MODALITIES:
+            raise ValueError(f"unknown modality: {md!r}")
+
+        ambient = e.get("ambient_temp_c")
+        if md is None and ambient is not None:
+            try:
+                if float(ambient) >= HEATED_CABIN_AMBIENT_TEMP_C:
+                    md = "cabin"
+            except (TypeError, ValueError):
+                pass
+
+        return {
+            "date": e["date"],
+            "start": e.get("start") or "",
+            "duration_min": e.get("duration_min"),
+            "light_type": lt,
+            "wavelength_nm": e.get("wavelength_nm"),
+            "body_area": ba,
+            "modality": md,
+            "ambient_temp_c": ambient,
+            "notes": e.get("notes"),
+        }
+
+    for ym, month_entries in sorted(by_month_entries.items()):
+        path = light_therapy_sessions_csv(person, ym)
+        existing = _read_periodic_records(
+            path,
+            LIGHT_THERAPY_SESSIONS_FIELDS,
+            LIGHT_THERAPY_SESSIONS_HEADERS,
+            string_fields={"start", "light_type", "body_area", "modality"},
+        )
+        records, written, updated = sparse_upsert_records(
+            existing, month_entries, spec,
+            sanitize=_sanitize_light,
+        )
+        ensure_light_therapy_dir(person)
+        _write_periodic_records(
+            path,
+            LIGHT_THERAPY_SESSIONS_HEADERS,
+            LIGHT_THERAPY_SESSIONS_FIELDS,
+            records,
+        )
+        total_written += written
+        total_updated += updated
+        summaries.append(f"  {ym}: {written} written / {updated} updated")
+
+    return [f"Light Therapy Sessions: {total_written} sessions written / "
             f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries

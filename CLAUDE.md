@@ -33,12 +33,15 @@ keeps a forensic trail in case a downstream bug damages the CSVs.
 │       ├── thermal/                       # manual /log only; absent until first sauna / cold session is logged
 │       │   ├── 2026.05.sessions.csv       # per-session, (date,start)-keyed; heat (type/temp/rounds/durations/total) + cold (type/duration/temp)
 │       │   └── …
+│       ├── light_therapy/                 # manual /log only; absent until first RLT / PBM / blue light session is logged
+│       │   ├── 2026.05.sessions.csv       # per-session, (date,start)-keyed; duration, light_type, wavelength_nm, body_area, modality, ambient_temp_c
+│       │   └── …
 │       └── longevity/                     # /longevity personal data (outside the Skills repo by design)
 │           ├── profile.md                 # slow-changing identity (DOB, height, family history)
 │           ├── state.md                   # current snapshot (conditions, meds; live metrics pulled from health_metrics.csv)
 │           ├── interventions.md           # daily/weekly protocol (supplements, diet, training, skincare) + status tracker
 │           └── biomarkers.md              # append-only lab history
-├── Fabian/                                # same shape (no swimming/ unless native XML lap data exists)
+├── Fabian/                                # same shape (no swimming/, thermal/, or light_therapy/ until populated)
 └── Skills/
     └── shared/
         └── exercises-database.md          # canonical catalog (markdown is truth)
@@ -400,6 +403,34 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   ≥80°C, Laukkanen + mechanistic consensus); the target defaults to
   4×/wk and can be overridden via `profile.csv`
   `sauna_target_per_week`.
+- **Light therapy (RLT / PBM / blue light) lives in `<Person>/data/light_therapy/YYYY.MM.sessions.csv`, per-month.**
+  Per-session aggregates: Date, Start, Duration (min), Light Type
+  (`red` / `near_ir` / `red+ir` / `far_ir` / `blue` / `green` /
+  `white` / `other`), Wavelength (nm), Body Area (`full_body` /
+  `face` / `back` / `torso` / `arms` / `legs` / `head` /
+  `localized`), Modality (`panel` / `mask` / `wand` / `cabin` /
+  `device` / `sauna_integrated`), Ambient Temp (°C), Notes. **Manual
+  /log only** — Apple Health doesn't classify light-therapy sessions;
+  the `light_therapy/` folder is absent until the user logs their
+  first session. Dedupe by `(date, start)`. Duration is the only
+  required field; everything else is optional. Independent of the
+  thermal store — sauna + RLT in one real-life session lands as two
+  rows in two stores (the schemas don't mix). The store is broad on
+  purpose: it captures red-light cabins (Holmes Place-style ~45°C
+  heated walk-ins), near-IR probes, blue-light SAD lamps, and any
+  future photobiomodulation modality.
+  `csv_store.read_light_therapy_sessions` aggregates across all
+  months on read; `upsert_light_therapy_sessions` is sparse-merge by
+  `(date, start)` with manual-wins on Notes; `modality` defaults to
+  `cabin` inside the upsert when `ambient_temp_c >= 30` and the user
+  didn't supply a modality (heated walk-in inference). **Never
+  prompts.** `/coach`'s `light_therapy_summary` block reads this and
+  reports frequency + per-session dose against the (looser) defaults
+  of 3×/wk and 10min/session; overrideable via `profile.csv`
+  `light_therapy_target_per_week` and
+  `light_therapy_target_min_per_session`. No wavelength-efficacy
+  claims — the evidence base is far less settled than sauna's HSP
+  induction; stay in protocol-adherence language.
 - **Swim metrics live in `<Person>/data/swimming/`, split per month.**
   Per-workout aggregates (Pool Length, Strokes, SPL, Avg SWOLF, Stroke
   Mix, Location, Water Temp) on `YYYY.MM.workouts.csv`; per-lap detail

@@ -219,3 +219,106 @@ Omit any field the user didn't provide — sparse-merge applies. `heat_rounds` a
 For multi-date logs, attach the thermal entry to the date on whose header line the sauna / cold line appears. If the user wrote it on the top-level `/log` header, attach to every date in the message (rare; typically one heat session per workout day).
 
 Never invent sauna or cold sessions. Never prompt for missing data. If the user didn't type a sauna / cold line, they didn't do one — no row.
+
+## Light therapy (opt-in)
+
+If (and only if) the `/log` message contains an explicit light-therapy line, parse it into a `light_therapy` entry keyed to that session's date. All forms case-insensitive. **Absent ≡ didn't happen** — if no light-therapy line appears, omit `light_therapy` from the payload entirely. **Never prompt.**
+
+This module is broad on purpose: it covers red-light therapy (RLT) cabins, near-IR probes, blue-light SAD lamps, and any future photobiomodulation modality. Pick the keyword that matches what the user wrote — the keyword sets the `light_type` default.
+
+### Keywords (case-insensitive)
+
+| Keyword(s) | Default `light_type` |
+|---|---|
+| `rlt`, `red light`, `redlight` | `red+ir` |
+| `near-ir`, `near ir`, `infrared light`, `nir` | `near_ir` |
+| `blue light`, `bluelight` | `blue` |
+| `light therapy`, `pbm`, `photobiomodulation` | *(leave null; user must specify `light_type`)* |
+
+### Syntax
+
+`<keyword> <duration>min [<wavelength>nm] [<temp>C] [<light_type>] [<body_area>] [<modality>]`
+
+| Form | Writes |
+|---|---|
+| `rlt 5min` | duration=5; `light_type=red+ir` |
+| `rlt 5min 45C` | duration=5, ambient_temp_c=45; `light_type=red+ir`, modality auto-defaults to `cabin` (heated walk-in) |
+| `rlt 10min 660nm panel face` | duration=10, wavelength_nm=660, modality=panel, body_area=face |
+| `red light 15min full_body` | duration=15, body_area=full_body, `light_type=red+ir` |
+| `blue light 30min SAD` | duration=30, `light_type=blue`, notes=`"SAD"` (or leave blank — see Notes hygiene) |
+| `near-ir 12min 850nm localized device` | duration=12, wavelength_nm=850, `light_type=near_ir`, body_area=localized, modality=device |
+| `pbm 8min red 660nm` | duration=8, `light_type=red`, wavelength_nm=660 |
+
+- **Duration**: integer or decimal minutes. Required.
+- **Wavelength**: integer nanometers (e.g. `660`, `850`). Optional.
+- **Ambient temp**: integer Celsius, suffix `C`. Optional. Captures heated RLT cabins (Holmes Place-style ~45°C). When set at/above 30°C and the user didn't specify a modality, the upsert defaults `modality=cabin`.
+- **Light type aliases (case-insensitive)**:
+
+  | Alias | Resolves to |
+  |---|---|
+  | `red`, `red light` | `red` |
+  | `nir`, `near-ir`, `near_ir` | `near_ir` |
+  | `red+ir`, `red+nir`, `combo` | `red+ir` |
+  | `far_ir`, `far-ir`, `fir` | `far_ir` |
+  | `blue` | `blue` |
+  | `green` | `green` |
+  | `white` | `white` |
+
+  Anything else falls through to `other`.
+- **Body area aliases (case-insensitive)**:
+
+  | Alias | Resolves to |
+  |---|---|
+  | `full`, `full_body`, `full body`, `whole body` | `full_body` |
+  | `face` | `face` |
+  | `back` | `back` |
+  | `torso`, `chest` | `torso` |
+  | `arm`, `arms` | `arms` |
+  | `leg`, `legs` | `legs` |
+  | `head` | `head` |
+  | `localized`, `local`, `spot` | `localized` |
+
+- **Modality aliases (case-insensitive)**:
+
+  | Alias | Resolves to |
+  |---|---|
+  | `panel`, `pad` | `panel` |
+  | `mask` | `mask` |
+  | `wand`, `torch` | `wand` |
+  | `cabin`, `booth`, `room` | `cabin` |
+  | `device`, `unit` | `device` |
+  | `sauna_integrated`, `sauna-integrated`, `in sauna` | `sauna_integrated` |
+
+### Payload entry shape (one row → one entry)
+
+```json
+{
+  "date": "2026-05-14",
+  "start": null,
+  "duration_min": 5,
+  "light_type": "red+ir",
+  "wavelength_nm": null,
+  "body_area": "full_body",
+  "modality": "cabin",
+  "ambient_temp_c": 45,
+  "notes": null
+}
+```
+
+Omit any field the user didn't provide — sparse-merge applies. `modality` is auto-filled to `cabin` inside `upsert_light_therapy_sessions` when `ambient_temp_c >= 30` and the user didn't supply a modality.
+
+### Pairing with thermal — none
+
+Light therapy is **independent** of the sauna/cold pairing rule. A `/log` session that includes both `sauna` and `rlt` lines emits **two payload entries** — one in `thermal`, one in `light_therapy` — both keyed to the same date. They land in two stores. No nullable bloat on either schema; same-session feel preserved by the shared date.
+
+If the user actually used a sauna-integrated red-light panel (some commercial saunas have one), set `modality: "sauna_integrated"` on the light-therapy entry and keep the heat session in the thermal entry as usual.
+
+### Notes hygiene
+
+Same rule as thermal: default `notes` to `null`. Only set when the user typed a genuine annotation the schema can't encode (e.g. `rlt 5min felt warm` → `"felt warm"`). **Don't reconstruct typed fields in Notes.** Writing `"red light therapy 5min at 45C"` when `light_type=red+ir`, `duration_min=5`, `ambient_temp_c=45` already capture it is pure boilerplate — invisible to filtering, clutters the column for real annotations.
+
+### Date attachment
+
+For multi-date logs, attach the light-therapy entry to the date on whose header line the line appears. If on the top-level `/log` header, attach to every date in the message (rare).
+
+Never invent light-therapy sessions. Never prompt for missing data.

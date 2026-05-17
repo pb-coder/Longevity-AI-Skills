@@ -17,7 +17,7 @@ description: >
 
 Two trackers live in per-person folders inside the workout directory:
 - `Nihad/data/` (CSV store: monthly/ + dense + swimming/)
-- `Fabian/data/` (same shape; no swimming/ for HL trackers)
+- `Fabian/data/` (same shape; HealthAutoExport-backed, no swim-lap store unless native XML data exists)
 
 Resolve which person this log is for BEFORE running the script:
 - If the user names a person ("log Fabian's push day", "this is for Nihad"), use that name.
@@ -100,16 +100,16 @@ line. Don't search the filesystem.
 
    1. `./Export - <Person>.zip` (Apple's native XML, per-person)
    2. `./Export.zip` (Apple's native XML, single-user fallback)
-   3. `./health_export_*.txt` (HLExport text dump — globbed; **most recent by mtime wins**)
+   3. `./HealthAutoExport*.zip` (HealthAutoExport ZIP; **most recent by mtime wins**)
 
    If none exists, the script prints `ERROR: no Apple Health export found …` and exits 1 — surface that one line to the user.
 
-   Dispatch by file extension:
+   Dispatch by filename:
 
-   - `.zip` → `python3 Skills/shared/import_apple_health.py --person <Person>`
-   - `.txt` → `python3 Skills/shared/import_hl_export.py --person <Person>`
+   - `HealthAutoExport*.zip` → `python3 Skills/shared/import_health_auto_export.py --person <Person>`
+   - `Export*.zip` → `python3 Skills/shared/import_apple_health.py --person <Person>`
 
-   Both default to 6 months back (no `--since` needed). Both **archive the source export to `<root>/.processed/` on success** — the per-person CSVs are the persistent record now; the archive keeps a forensic trail if a downstream bug damages the CSVs. Capture stdout and append the importer's `Health Metrics: …` and `Workout Sessions: …` summary lines (and any `Auto-cardio: …` / `Profile: …` / `Archived source export: …` lines) to the user-facing summary printed in step 5.
+   Both default to 6 months back (no `--since` needed). Both **archive the source export to `<root>/.processed/` on success** — the per-person CSVs are the persistent record now; the archive keeps a forensic trail if a downstream bug damages the CSVs. Capture stdout and append the importer's `Health Metrics: …`, `Sleep Nights: …`, and `Workout Sessions: …` summary lines (and any `Auto-cardio: …` / `Strength sessions: …` / `Profile: …` / `Archived source export: …` lines) to the user-facing summary printed in step 5.
 
    **Source-mismatch guardrail.** Before dispatching, peek at the tracker's `Profile.source` value via `csv_store.read_profile(person)`. If the file extension implies a different source than the tracker is configured for, stop and ask once via `AskUserQuestion` before importing:
 
@@ -129,25 +129,25 @@ The tracker itself is the output. No markdown tables, no files presented, no nar
 The logger never imports Apple Health on its own — it shells out to one of two importers based on the file extension found in the working directory:
 
 - `Skills/shared/import_apple_health.py` for `Export*.zip` (Apple's native XML; full feature surface — VO2max, RHR, HRV, wrist temp, sleep stages, per-workout HR).
-- `Skills/shared/import_hl_export.py` for `health_export_*.txt` (HLExport text dump; lighter feature surface — VO2max, HR Recovery, total sleep, resp rate, bodyweight, workout durations / distance / calories. No HRV, no wrist temp, no per-workout HR, no sleep stages.)
+- `Skills/shared/import_health_auto_export.py` for `HealthAutoExport*.zip` (HealthAutoExport ZIP; full feature surface — VO2max, RHR, HRV, walking HR, wrist temp, breathing disturbances, exercise minutes, sleep stages, per-workout HR).
 
 Both write into the same per-person CSV store under `<Person>/data/`:
 
 - `health_metrics.csv` — daily aggregates including the headline sleep fields (Sleep Total / Deep / REM / Time in Bed). Cells the active source can't fill stay None; sparse-merge protects any older values from a previous source.
-- `workout_sessions.csv` — one row per Apple `Workout`. HR columns are populated for XML, blank for HL.
-- (XML only) `swimming/YYYY.MM.workouts.csv` + `swimming/YYYY.MM.laps.csv` — per-swim aggregates (Pool Length, Strokes, SPL, Avg SWOLF, Stroke Mix, Location, Water Temp) and per-lap detail (Stroke, Duration, SWOLF). HL has no lap data, so HL trackers don't have a `swimming/` folder.
-- (XML only) `sleep/YYYY.MM.nights.csv` — per-night sleep architecture: all 6 stages Apple exposes (Total, Core, Deep, REM, Unspecified, Awake) plus Time in Bed, Sleep Efficiency (derived), N Segments (fragmentation), and First/Last Segment Start clock times (bedtime / wake-up schedule). HL has no stage data, so HL trackers don't have a `sleep/` folder unless the user manually logs sleep via /log.
+- `workout_sessions.csv` — one row per Apple `Workout`. HR columns are populated for both native XML and HealthAutoExport.
+- (XML only) `swimming/YYYY.MM.workouts.csv` + `swimming/YYYY.MM.laps.csv` — per-swim aggregates (Pool Length, Strokes, SPL, Avg SWOLF, Stroke Mix, Location, Water Temp) and per-lap detail (Stroke, Duration, SWOLF). HealthAutoExport currently does not provide lap payloads to this tracker, so swim lap files remain XML-only.
+- `sleep/YYYY.MM.nights.csv` — per-night sleep architecture: all stages the source exposes (Total, Core, Deep, REM, Unspecified, Awake) plus Time in Bed, Sleep Efficiency (derived), N Segments (fragmentation), and First/Last Segment Start clock times (bedtime / wake-up schedule). Native XML and HealthAutoExport both write this store.
 
-Both also create / read `<Person>/data/profile.csv`, a 2-column key/value file pinning the per-tracker `source` (`xml` | `hl_export`), `auto_cardio` flag, `birthday`, and the swim CSS keys (`swim_css_sec_per_100m`, `swim_css_set_at`, `swim_pool_length_default`). The coach's `read_tracker.py` reads this to decide which sections of the report it can fill.
+Both also create / read `<Person>/data/profile.csv`, a 2-column key/value file pinning the per-tracker `source` (`xml` | `health_auto_export`), `auto_cardio` flag, `birthday`, and the swim CSS keys (`swim_css_sec_per_100m`, `swim_css_set_at`, `swim_pool_length_default`). The coach's `read_tracker.py` reads this to decide which sections of the report it can fill.
 
 **File-naming conventions.**
 
 - XML: each person drops their own export into the workout tracker folder, named `Export - <Person>.zip`. If only `Export.zip` exists (single-user setup), fall back to that.
-- HL: drop the export from the HLExport iOS app as `health_export_<timestamp>.txt`. Don't rename — the resolver globs by pattern and picks the most recent by mtime, so dropping a fresh export and walking away is the intended flow. Different people each work with one file at a time; if both Nihad and Fabian want HL exports active simultaneously, swap one out before running the logger for the other.
+- HealthAutoExport: drop the app-generated `HealthAutoExport*.zip` into the workout tracker folder. Don't rename — the resolver globs by pattern and picks the most recent by mtime.
 
-**Idempotency.** Re-running with the same export is a no-op. Sparse-merge upserts protect existing values — incoming `None` never overwrites a populated cell, so a partial export (e.g. just last week) won't erase older history. Switching a tracker from XML to HL (or vice versa) mid-stream is safe: the new source only fills cells it can, and old XML-derived HRV / wrist temp etc. stay put.
+**Idempotency.** Re-running with the same export is a no-op. Sparse-merge upserts protect existing values — incoming `None` never overwrites a populated cell, so a partial export (e.g. just last week) won't erase older history. Switching between native XML and HealthAutoExport mid-stream is safe: both use the full tracker schema, and the new source only fills cells it can.
 
-**Auto-cardio.** When the importer ingests cardio workouts (Running, Hiking, Cycling, Swimming, HIIT) AND `auto_cardio` in `profile.csv` is True, those workouts also flow into the matching `<Person>/data/monthly/YYYY.MM.csv` as cardio rows tagged `auto-imported from Apple`. Manually-logged rows always win — the dedupe rule (date + exercise + duration ±1 min) skips Apple workouts that match an existing manual entry. Default: `auto_cardio = true` on both XML and HL trackers (the old conservative HL opt-in was retired once HL workout records proved reliable). Flip to `false` per-tracker by editing `profile.csv` if a user prefers manual-only logging.
+**Auto-cardio.** When the importer ingests cardio workouts (Running, Hiking, Cycling, Swimming, HIIT) AND `auto_cardio` in `profile.csv` is True, those workouts also flow into the matching `<Person>/data/monthly/YYYY.MM.csv` as cardio rows tagged `auto-imported from Apple`. Manually-logged rows always win — the dedupe rule (date + exercise + duration ±1 min) skips Apple workouts that match an existing manual entry. Default: `auto_cardio = true` on both native XML and HealthAutoExport trackers. Flip to `false` per-tracker by editing `profile.csv` if a user prefers manual-only logging.
 
 **Step 6 always asks.** No watchers, no cron, no auto-detection. The user picked this flow explicitly: ask every time, accept "Skip" cleanly. Never silently skip just because no export is in the folder.
 
@@ -178,7 +178,7 @@ Sleep Efficiency is auto-derived inside the upsert when both `total_h` and `time
 
 To back-fill many historical sleep nights at once, call `append_workout.py` with a payload of only sleep entries: `{"rows": [], "bodyweight": [], "sleep": [{"date": "...", "total_h": ..., ...}, ...]}`. The logger routes each entry to the right `sleep/YYYY.MM.nights.csv` and mirrors the headline fields into `health_metrics.csv`. Same dedupe-by-date semantics as bodyweight.
 
-XML trackers only — the `sleep/` folder is never populated for HL trackers (HLExport doesn't surface per-stage data). Manual sleep entries on an HL tracker still dual-write (the folder is created on demand), but the coach's stage-aware report sections gate on capabilities so the user-facing output stays coherent.
+Native XML and HealthAutoExport imports populate the `sleep/` folder when sleep-stage data exists. Manual sleep entries still dual-write there on demand, and the coach's stage-aware report sections gate on capabilities plus data presence so the user-facing output stays coherent.
 
 ## Sauna + cold exposure (opt-in)
 

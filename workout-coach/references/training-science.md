@@ -251,7 +251,7 @@ Different exercises grow different regions of the same muscle. Running the same 
 
 ## §18 Recovery Signals
 
-**Source dependency.** This section's HRV, wrist-temperature, and per-workout-HR levers require Apple's native zipped XML export. HLExport users get a `recovery.score` driven by sleep + HR Recovery + VO2max only — accurate within its scope, but lower confidence; the score's `confidence` field surfaces this. Standard re-entry / deload heuristics still apply on either source.
+**Source dependency.** This section's HRV, wrist-temperature, and per-workout-HR levers require a full Apple Health source: native zipped XML or HealthAutoExport. The score's `confidence` field surfaces missing or sparse signals. Standard re-entry / deload heuristics still apply on any source.
 
 Apple Health provides six daily signals that materially change the recovery picture: HRV (SDNN), resting HR, total sleep, wrist temperature, HR Recovery 1-min, and VO2max trend. Single-day values are noisy; the score below uses 7-day means against 60-day baselines (or 28-day for RHR).
 
@@ -272,7 +272,7 @@ The score sums clamped contributions from each driver against a baseline of 5. D
 | HR Recovery 1-min | recent (5d) vs 28d typical | ±0.75 | Higher = recovered. ±5 bpm drop = ±0.75. |
 | VO2max trend | per-4w slope | ±0.75 | Positive = building fitness. ±2 ml/kg/min over 4w = ±0.75. |
 
-Maximum positive: ~9.0; maximum negative: ~1.0; clamped to [0, 10]. `confidence`: high (≥4 signals available), medium (3), low (≤2). HL trackers max out at medium when all four core signals available.
+Maximum positive: ~9.0; maximum negative: ~1.0; clamped to [0, 10]. `confidence`: high (≥4 signals available), medium (3), low (≤2).
 
 **Programming consequences** (applied by SKILL.md "Recovery-aware adjustments"):
 - `recovery.score < 4` → next session is re-entry (drop a working set, "leave 3-4 reps in tank"); lead with the dominant negative driver in "Why this plan".
@@ -285,7 +285,7 @@ Maximum positive: ~9.0; maximum negative: ~1.0; clamped to [0, 10]. `confidence`
 
 ## §19 Per-Session HR
 
-**Source dependency.** This section requires Apple's native zipped XML export for strength rows. HLExport strength workouts carry duration / calories / distance only — the avg/max/min HR statistics Apple computes inside the watch aren't included in the text dump for strength sessions. The capability gate in `read_tracker.py` (`capabilities.per_workout_hr_strength`) short-circuits the cross-check for HL users on strength; the standard load-progression rules (rep-range completion, perceived exertion) still drive their plans. Cardio rows on HL trackers do carry avg_hr from HL's workout extractor, so per-cardio-session TRIMP and intensity_pct render normally.
+**Source dependency.** This section requires a full Apple Health source for strength rows: native zipped XML or HealthAutoExport. The capability gate in `read_tracker.py` (`capabilities.per_workout_hr_strength`) short-circuits the cross-check on legacy or partial trackers; the standard load-progression rules (rep-range completion, perceived exertion) still drive their plans.
 
 Apple emits per-workout HR statistics (avg / max / min) on every `Workout` record. The importer matches these to logged training by date. `read_tracker.py` folds avg_hr + max_hr onto each `monthly_sessions[*]` entry and exposes per-muscle HR-creep flags via `hr_at_volume_divergence`.
 
@@ -309,7 +309,7 @@ NEAT — non-exercise activity thermogenesis — captures everything that isn't 
 
 **Why it matters for the coach.** Two users with identical workout volume can have very different aerobic-load pictures. A user who walks 90 min/day to and from the gym is already getting Zone-1-to-2 stimulus from those walks; prescribing 3x weekly Zone 2 sessions on top doubles down on what they have. A user who drives to the gym and works at a desk gets zero passive aerobic load — for them, the §10 cardio targets are the floor, not the ceiling.
 
-**Apple's `exercise_min` is the canonical NEAT signal** when available. It counts minutes of brisk movement (heart rate elevated above resting), which is roughly the same threshold as Apple's Exercise Ring. Apple's recommended baseline is 30 min/day; 45+ min/day is "active". When `exercise_min` is unavailable (HL trackers), `walking_minutes_28d / 28` is a reasonable NEAT proxy — daily walking is the dominant non-exercise movement signal and HL imports walking workouts.
+**Apple's `exercise_min` is the canonical NEAT signal** when available. It counts minutes of brisk movement (heart rate elevated above resting), which is roughly the same threshold as Apple's Exercise Ring. Apple's recommended baseline is 30 min/day; 45+ min/day is "active". When `exercise_min` is unavailable, `walking_minutes_28d / 28` is a reasonable NEAT proxy — daily walking is the dominant non-exercise movement signal.
 
 **Assessment thresholds** (from `daily_activity_28d.assessment`):
 - `low` (<15 min/day) — sedentary baseline. Cardio prescription becomes more important, not less. Add at least one Zone 2 session even if 28d cardio targets are nominally met.
@@ -332,14 +332,14 @@ Total sleep hours is the headline metric, but two users sleeping 7h/night can ha
 
 **Sleep consistency** is its own signal. Stdev of nightly totals over a 7-night window: <1.0h is regular, 1.0-1.5h is acceptable, >1.5h is irregular and stressful regardless of average. The body adapts to consistent timing — a 6h/6h/6h/6h/6h/9h/9h week is worse than 6.5h/6.5h/6.5h/6.5h/6.5h/6.5h/6.5h despite the same total.
 
-**Source dependency.** Apple's XML export carries deep / REM / core / awake breakdowns from watch-side sleep staging (calibrated against PSG). HLExport surfaces total sleep only — stages aren't part of the text dump. The capability gate `sleep_stages` in `read_tracker.py` short-circuits the deep/REM drivers for HL trackers; sleep_total_h and sleep consistency still apply on both sources.
+**Source dependency.** Native Apple XML and HealthAutoExport carry deep / REM / core / awake breakdowns from watch-side sleep staging (calibrated against PSG). The capability gate `sleep_stages` in `read_tracker.py` short-circuits the deep/REM drivers on legacy or partial trackers; sleep_total_h and sleep consistency still apply whenever present.
 
 **Programming consequences** (applied by `recovery_score`):
 - `sleep_deep_pct < 13%` and persisting → -0.4 contribution to recovery score. Combined with low total hours, prefer a deload window.
 - `sleep_rem_pct < 20%` and persisting → -0.4 contribution. Less impact on strength sessions; bigger impact on technical-skill work and complex compounds.
 - `sleep_consistency_7d_stdev_h > 1.5h` → -0.4 contribution. The fix is bedtime regularity, not more total hours.
 
-**What NOT to do:** weight a single night's poor depth heavily (1-2 bad nights are normal); recommend "sleep more" when consistency is the actual issue; ask HL users to "track sleep stages better" — that's a source limitation, not a tracking gap.
+**What NOT to do:** weight a single night's poor depth heavily (1-2 bad nights are normal); recommend "sleep more" when consistency is the actual issue; ask users to "track sleep stages better" when `capabilities.sleep_stages` is False — that's a source limitation, not a tracking gap.
 
 ## §22 Cold Exposure & Hypertrophy
 

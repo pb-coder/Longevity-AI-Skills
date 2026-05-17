@@ -41,9 +41,11 @@ from person_paths import (
 
 # ============================================================ Schema (HM + WS)
 # Source-aware column sets. ``xml`` is Apple's native export (full HRV /
-# Resting HR / Wrist Temp / sleep stages / per-workout HR). ``hl_export``
-# is HLExport's text dump — a structurally lighter feed; the unsupported
-# columns simply aren't part of the slim schema.
+# Resting HR / Wrist Temp / sleep stages / per-workout HR).
+# ``health_auto_export`` is HealthAutoExport's ZIP export; for the tracker
+# fields we consume, it has the same rich surface as ``xml``. ``hl_export``
+# is the retired HLExport text dump — kept only so old CSVs can still be read
+# during migration.
 
 HEALTH_METRICS_HEADERS_BY_SOURCE = {
     "xml": [
@@ -100,6 +102,12 @@ WORKOUT_SESSIONS_FIELDS_BY_SOURCE = {
         "active_cal", "distance_km", "source", "incidental", "notes",
     ],
 }
+
+# HealthAutoExport stores the same tracker fields as the native Apple XML path.
+HEALTH_METRICS_HEADERS_BY_SOURCE["health_auto_export"] = HEALTH_METRICS_HEADERS_BY_SOURCE["xml"]
+HEALTH_METRICS_FIELDS_BY_SOURCE["health_auto_export"] = HEALTH_METRICS_FIELDS_BY_SOURCE["xml"]
+WORKOUT_SESSIONS_HEADERS_BY_SOURCE["health_auto_export"] = WORKOUT_SESSIONS_HEADERS_BY_SOURCE["xml"]
+WORKOUT_SESSIONS_FIELDS_BY_SOURCE["health_auto_export"] = WORKOUT_SESSIONS_FIELDS_BY_SOURCE["xml"]
 
 # Strength-metadata drift threshold (preserved verbatim from
 # ``tracker_sheet.STRENGTH_METADATA_DRIFT_THRESHOLD``). Used by Workout
@@ -234,7 +242,7 @@ def read_profile(person: str) -> dict:
                 if v is None or v == "":
                     continue
                 s = str(v).strip().lower()
-                if s in ("xml", "hl_export"):
+                if s in ("xml", "health_auto_export", "hl_export"):
                     out["source"] = s
             elif k == "auto_cardio":
                 b = _coerce_bool(v)
@@ -312,7 +320,7 @@ def _resolve_source(person: str) -> str:
     by default.
     """
     src = read_profile(person).get("source")
-    return src if src in ("xml", "hl_export") else "xml"
+    return src if src in HEALTH_METRICS_HEADERS_BY_SOURCE else "xml"
 
 
 def _read_csv_rows(path: Path) -> tuple[list[str], list[list[str]]]:

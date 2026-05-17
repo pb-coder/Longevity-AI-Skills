@@ -1,7 +1,8 @@
 """Shared importer transforms.
 
 Parsers stay source-specific, but transforms that turn canonical workout rows
-into tracker write payloads belong here so Apple XML and HLExport do not drift.
+into tracker write payloads belong here so Apple XML and HealthAutoExport do
+not drift.
 """
 from __future__ import annotations
 

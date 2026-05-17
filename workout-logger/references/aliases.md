@@ -23,6 +23,9 @@
 | Romain Chair Sit-Up, Romain Chair | Roman Chair Sit-Up | — |
 | Belt Squad Machine | Belt Squat Machine | — |
 | Abdominal crunch | Ab Crunch Machine | — |
+| abductor machine | Hip Abductor Machine | — |
+| seated abductor | Hip Abductor Machine | — |
+| row machine without chest support | Seated Row Machine | — |
 
 ## Modifier Handling
 

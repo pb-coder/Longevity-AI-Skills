@@ -48,11 +48,14 @@ class CliSemanticTests(unittest.TestCase):
 
     def test_read_tracker_fabian_semantic_golden(self) -> None:
         data = self.read_tracker("Fabian")
+        self.assertEqual(data["data_source"], "health_auto_export")
         self.assertEqual(len(data["monthly_sessions"]), 2)
         self.assertEqual(len(data["estimated_1rm"]), 1)
         self.assertEqual(data["unknown_exercises"], [])
-        self.assertNotIn("sleep_summary", data)
+        self.assertIn("sleep_summary", data)
         self.assertNotIn("swim_summary", data)
+        self.assertTrue(data["capabilities"]["hrv"])
+        self.assertTrue(data["capabilities"]["per_workout_hr_strength"])
         self.assertGreater(data["estimated_max_hr"], 150)
 
     def test_maintain_dry_run_is_read_only_and_explainable(self) -> None:
@@ -65,7 +68,7 @@ class CliSemanticTests(unittest.TestCase):
         fabian = self.run_cmd(maintain, "--person", "Fabian", "--dry-run")
         self.assertEqual(fabian.returncode, 0, fabian.stderr)
         self.assertIn("Dry run", fabian.stdout)
-        self.assertIn("header mismatch", fabian.stdout)
+        self.assertIn("health_metrics.csv", fabian.stdout)
 
 
 if __name__ == "__main__":

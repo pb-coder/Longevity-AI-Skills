@@ -1,2 +1,2 @@
-Date,Start,End,Apple Type,Duration (min),Active Cal (kcal),Distance (km),Source,Incidental,Notes
-2026-05-10,08:00:00,08:45:00,Running,45,400,8.0,HLExport,false,
+Date,Start,End,Apple Type,Duration (min),Avg HR (bpm),Max HR (bpm),Min HR (bpm),Active Cal (kcal),Distance (km),Source,Incidental,Notes
+2026-05-10,08:00:00,08:45:00,Running,45,145,170,110,400,8.0,HealthAutoExport,false,

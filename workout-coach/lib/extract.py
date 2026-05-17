@@ -187,6 +187,7 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
                 "total_cal":   to_float(total_cal) if total_cal not in (None, "") else None,
                 "elevation_m": to_float(elevation_m) if elevation_m not in (None, "") else None,
                 "elapsed":     str(elapsed).strip() if elapsed not in (None, "") else None,
+                "source":      (str(rd.get("source")).strip().lower() if rd.get("source") not in (None, "") else None),
             })
 
     rows.sort(key=lambda r: (r["date"], r["num"] or 0, r["set"] or 0))
@@ -321,8 +322,8 @@ def read_workout_sessions(person: str) -> list[dict]:
     """Return Workout Sessions rows from the per-person CSV, ASC by date+start.
 
     Reads ``<person>/data/workout_sessions.csv`` via ``csv_store``. The
-    schema follows ``Profile.source`` (xml: 12 cols including
-    Avg/Max/Min HR; hl_export: 9 cols, HR fields absent).
+    schema follows ``Profile.source`` (xml / health_auto_export include
+    Avg/Max/Min HR; legacy hl_export rows omit HR fields).
     """
     rows = _csv_store.read_workout_sessions(person)
     if not rows:

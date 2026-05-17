@@ -33,6 +33,25 @@ if str(_LIB) not in sys.path:
 from parsing import _parse_iso_date
 
 
+def _is_cardio_row(r: dict) -> bool:
+    """A row is cardio if it has positive distance, OR a duration paired
+    with cardio context (avg HR or auto-import source). A manual
+    isometric hold (Dead Hang 0:30, Plank 1:00) has duration but no HR
+    and no auto-import source — that's a strength-session "other" row,
+    not cardio.
+    """
+    if (r.get("distance_km") or 0) > 0:
+        return True
+    if (r.get("duration_min") or 0) <= 0:
+        return False
+    if (r.get("avg_hr") or 0) > 0:
+        return True
+    src = (r.get("source") or "").strip().lower()
+    if src in ("apple",) or src.startswith("gymkit:"):
+        return True
+    return False
+
+
 def progression_summary(rows: list[dict]) -> list[dict]:
     """Last and previous best working set per exercise (warmups excluded)."""
     by_ex: dict[str, list[dict]] = {}
@@ -134,13 +153,15 @@ def build_monthly_sessions(rows: list[dict],
         if mh and mh > by_date_apple.get(d, 0):
             by_date_apple[d] = mh
 
+    # Pass 1: classify each date by what kinds of rows it contains, and
+    # capture each row's first-appearance order for ``exercise_first``.
     by_date: dict[str, dict] = {}
     for r in rows:
         d = r.get("date")
         if not d:
             continue
         is_strength_row = (r.get("kg") or 0) * (r.get("reps") or 0) > 0
-        is_cardio_row = (r.get("distance_km") or 0) > 0 or (r.get("duration_min") or 0) > 0
+        is_cardio_row = _is_cardio_row(r)
 
         s = by_date.get(d)
         if s is None:
@@ -163,15 +184,25 @@ def build_monthly_sessions(rows: list[dict],
             if is_cardio_row:
                 s["_has_cardio"] = True
 
-        # For cardio-only sessions: fill metadata from each cardio row.
-        # For mixed/strength sessions, the TOTAL row summary is canonical
-        # and is folded in below.
-        if is_cardio_row and not is_strength_row:
-            for k in ("active_cal", "total_cal", "elevation_m", "elapsed", "avg_hr"):
-                if s.get(k) in (None, "") and r.get(k) not in (None, ""):
-                    s[k] = r.get(k)
-            if s.get("duration_min") in (None, "") and r.get("duration_min"):
-                s["duration_min"] = r.get("duration_min")
+    # Pass 2: fill metadata from cardio rows ONLY when the date has no
+    # strength rows. Mixed/strength sessions get their metadata
+    # exclusively from the TOTAL row summary (folded in below); allowing
+    # cardio rows to seed the metadata first causes the cycling ride's
+    # duration / elevation / HR to masquerade as the strength session's.
+    for r in rows:
+        d = r.get("date")
+        if not d:
+            continue
+        s = by_date.get(d)
+        if s is None or s["_has_strength"]:
+            continue
+        if not _is_cardio_row(r):
+            continue
+        for k in ("active_cal", "total_cal", "elevation_m", "elapsed", "avg_hr"):
+            if s.get(k) in (None, "") and r.get(k) not in (None, ""):
+                s[k] = r.get(k)
+        if s.get("duration_min") in (None, "") and r.get("duration_min"):
+            s["duration_min"] = r.get("duration_min")
 
     # Fold TOTAL-row session summaries (strength sessions only — TOTAL
     # rows are not emitted for pure cardio).

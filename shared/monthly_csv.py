@@ -345,6 +345,49 @@ def _migrate_source_from_notes(rd: dict) -> None:
         rd["source"] = "manual"
 
 
+def _renumber_in_emit_order(
+    strength_built: list[dict], cardio_built: list[dict]
+) -> None:
+    """Rewrite each row's ``num`` so it's sequential in emit order.
+
+    Strength + other rows share a num across consecutive sets of the
+    same exercise (one num per exercise — the canonical strength
+    convention). Cardio rows get a fresh num per row (each Apple
+    workout is its own session, even when two cycling rides share the
+    "Outdoor Cycling" exercise name). In-place.
+
+    Self-heals duplicate ``#`` values that occur when ``/log`` writes a
+    strength session with fresh `num=1..N` after the auto-cardio importer
+    has already written cardio rows with their own `num=1..M`. A clean
+    pre-canonicalize file is a no-op.
+    """
+    current_ex: str | None = None
+    counter = 0
+    for row in strength_built:
+        ex = row.get("exercise")
+        if ex != current_ex:
+            counter += 1
+            current_ex = ex
+        row["num"] = counter
+    for row in cardio_built:
+        counter += 1
+        row["num"] = counter
+
+
+def _is_isometric_hold(rd: dict) -> bool:
+    """A manual hold (Dead Hang, Plank, etc.): reps=0, kg=0, no distance,
+    but a populated duration. The duration is per-set hold time and must
+    stay on the row rather than being hoisted to the strength TOTAL.
+    """
+    if _to_num(rd.get("reps")) > 0:
+        return False
+    if _to_num(rd.get("kg")) > 0:
+        return False
+    if _to_num(rd.get("distance")) > 0:
+        return False
+    return _parse_duration_minutes(rd.get("duration")) is not None
+
+
 def _is_auto_imported(rd: dict) -> bool:
     """True when a row was auto-imported from Apple Health.
 
@@ -364,13 +407,13 @@ def _is_auto_imported(rd: dict) -> bool:
 def _classify_session_rows(rows: list[dict]) -> tuple[list[str], bool]:
     """Per-row strength/cardio/other classification + is_strength bool.
 
-    A row is ``cardio`` if it has any of: positive distance, a populated
-    duration cell, or an auto-imported source flag. The duration /
-    source branches catch indoor / commute cycling and HIIT sessions
-    where the source provides time + calories but no distance — without
-    them, those rows would fall through to ``other`` and have their
-    session-metadata cells wiped on a mixed-day strength session (see
-    ``_build_data_row``).
+    A row is ``cardio`` if it has positive distance, OR is auto-imported
+    (Apple/GymKit) — including the duration-only auto-imported case for
+    indoor cycling / HIIT where the source provides time + calories but
+    no distance. Manual duration-only rows (isometric holds like Dead
+    Hang, Plank, farmer carries) are ``other``: they're part of the
+    strength session, not cardio, and must sort with the strength rows
+    rather than being demoted below the TOTAL row.
     """
     kinds: list[str] = []
     for rd in rows:
@@ -381,9 +424,6 @@ def _classify_session_rows(rows: list[dict]) -> tuple[list[str], bool]:
             continue
         dist_v = _to_num(rd.get("distance"))
         if dist_v > 0:
-            kinds.append("cardio")
-            continue
-        if _parse_duration_minutes(rd.get("duration")):
             kinds.append("cardio")
             continue
         if _is_auto_imported(rd):
@@ -555,7 +595,10 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
         out["elapsed"] = rd.get("elapsed")
     elif is_strength:
         # Strength / other rows: session metadata moved to TOTAL row.
-        pass
+        # Exception: isometric holds (reps=0, kg=0 + duration) keep
+        # their per-set duration — it's hold time, not session time.
+        if _is_isometric_hold(rd) and duration_min is not None:
+            out["duration"] = _format_duration_mmss(duration_min)
     else:
         # Pure cardio session — every row keeps its own metadata.
         out["duration"] = _format_duration_mmss(duration_min) \
@@ -690,9 +733,15 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
 
         # Hoist from data rows where the TOTAL row didn't already carry
         # the value (legacy rows had warmup-row session metadata).
+        # Skip isometric-hold rows (reps=0, kg=0, distance=0 + duration):
+        # their Duration cell is per-set hold time (e.g. "Dead Hang 0:30"),
+        # not the session total. Those keep duration on the row in
+        # ``_build_data_row``.
         if is_strength:
             for i, rd in enumerate(sess["rows"]):
                 if kinds[i] == "cardio":
+                    continue
+                if _is_isometric_hold(rd):
                     continue
                 if hoist["duration"] in (None, "") and rd.get("duration") not in (None, ""):
                     hoist["duration"] = rd["duration"]
@@ -722,21 +771,42 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
             )
 
         # Emit data rows + accumulate volume sum for strength sessions.
-        volume_sum = 0.0
-        for idx, rd in enumerate(sess["rows"]):
-            data_row = _build_data_row(session_num, rd, kinds[idx], is_strength)
-            v = data_row.get("volume")
-            if v:
-                volume_sum += float(v)
-            out_rows.append(_dict_to_row(data_row))
+        # On mixed strength+cardio days, the TOTAL row summarizes the
+        # strength session only (volume + hoisted strength-watch metadata),
+        # so it goes immediately after the last strength/other row and
+        # before any auto-imported cardio rows — anchoring it visually
+        # to the session it describes.
+        built = [
+            _build_data_row(session_num, rd, kinds[idx], is_strength)
+            for idx, rd in enumerate(sess["rows"])
+        ]
+        volume_sum = sum(
+            float(b["volume"]) for b in built if b.get("volume")
+        )
+
+        # Renumber ``#`` in emit order: strength/other rows first, then
+        # cardio rows. Same exercise shares a num across all its sets.
+        # Self-heals duplicates that arise when /log writes strength
+        # after the auto-cardio importer has already numbered cardio
+        # rows on the same date.
+        strength_built = [b for idx, b in enumerate(built) if kinds[idx] != "cardio"]
+        cardio_built = [b for idx, b in enumerate(built) if kinds[idx] == "cardio"]
+        _renumber_in_emit_order(strength_built, cardio_built)
 
         if is_strength:
+            for data_row in strength_built:
+                out_rows.append(_dict_to_row(data_row))
             total_row = _build_total_row(
                 session_num, sess, hoist,
                 volume_sum if volume_sum else None,
                 deload_present,
             )
             out_rows.append(_dict_to_row(total_row))
+            for data_row in cardio_built:
+                out_rows.append(_dict_to_row(data_row))
+        else:
+            for data_row in strength_built + cardio_built:
+                out_rows.append(_dict_to_row(data_row))
 
     ensure_monthly_dir(person)
     _write_csv_atomic(path, out_rows)
@@ -894,6 +964,12 @@ def upsert_monthly_cardio(person: str,
 
             if matched_auto_idx is not None:
                 claimed_rows.add(matched_auto_idx)
+                if matched_auto_idx >= len(existing_dicts):
+                    # Match is against a row queued earlier in this same
+                    # batch, not one already stored on disk. Treat as an
+                    # in-batch duplicate; the queued row will be written once.
+                    skipped_dup += 1
+                    continue
                 cur = existing_dicts[matched_auto_idx]
                 incoming_meta = {
                     "active_cal":  int(round(r["active_cal"])) if isinstance(r.get("active_cal"), (int, float)) and r.get("active_cal") else None,
@@ -999,13 +1075,15 @@ def upsert_monthly_cardio(person: str,
 # ============================================================ upsert strength
 def upsert_monthly_strength_session(person: str,
                                     sessions: list[dict],
-                                    today_d: date | None = None) -> list[str]:
+                                    today_d: date | None = None,
+                                    allow_past_months: bool = False) -> list[str]:
     """Annotate the TOTAL row of each matching strength session with
     Apple-watch session metadata (Duration, Avg HR, Active/Total Cal,
     Elevation, Elapsed). Sparse-merge + 5% drift guard preserves manual edits.
 
     Same contract as the xlsx-era ``upsert_monthly_strength_session``;
-    only the storage backend changed. Current-month gate enforced.
+    only the storage backend changed. Current-month gate enforced unless
+    ``allow_past_months=True`` for a deliberate source backfill.
     """
     if not sessions:
         return ["Strength sessions: 0 considered"]
@@ -1025,7 +1103,7 @@ def upsert_monthly_strength_session(person: str,
         if not d or len(d) != 10:
             continue
         month_key = f"{d[:4]}.{d[5:7]}"
-        if month_key != current_month:
+        if not allow_past_months and month_key != current_month:
             skipped_past_month += 1
             continue
 

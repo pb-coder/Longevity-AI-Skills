@@ -1,2 +1,2 @@
-Date,VO2max,Bodyweight (kg),HR Recovery 1min,Sleep Total,Resp Rate,Notes
-2026-05-16,45.0,75.0,25,7.0,14.0,
+Date,Bodyweight (kg),VO2max,Resting HR,HRV SDNN,Walking HR,HR Recovery 1min,Sleep Total,Sleep Deep,Sleep REM,Time in Bed,Resp Rate,Wrist Temp,Sleep Breath Dist,Exercise Min,Notes
+2026-05-16,75.0,45.0,61,55,103,25,7.0,1.0,2.0,,14.0,36.1,1.2,75,

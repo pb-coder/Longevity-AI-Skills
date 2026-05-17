@@ -1,0 +1,2 @@
+Date,Start,Heat Type,Heat Temp (°C),Heat Rounds,Heat Round Durations (min),Heat Total (min),Cold Type,Cold Duration (sec),Cold Temp (°C),Notes
+2026-05-15,19:00,dry,90,2,"12,10",22,cold_shower,120,12,

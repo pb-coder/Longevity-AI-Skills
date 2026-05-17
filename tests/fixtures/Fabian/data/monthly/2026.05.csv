@@ -1,0 +1,5 @@
+SESSION,Date,#,Exercise,Set,Reps,kg,Volume,Notes,Distance (km),Duration (min),Pace (min/km),Avg HR,Active Cal,Total Cal,Elevation (m),Elapsed,Source
+1,2026-05-03,1,Barbell Row,1,8,60,480,,,,,,,,,,manual
+1,2026-05-03,1,Barbell Row,2,7,62.5,437.5,,,,,,,,,,manual
+1,2026-05-03,,TOTAL,,,,917.5,,,40:00,,112,220,260,,40:00,manual
+2,2026-05-10,1,Outdoor Run,1,,,,,8.0,45:00,5:38,145,400,,30,45:00,apple

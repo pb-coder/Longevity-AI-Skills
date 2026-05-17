@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
-from datetime import date as date_cls
+from datetime import date as date_cls, datetime as datetime_cls
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -27,6 +27,8 @@ class CsvTableSpec:
 def date_str(value) -> str | None:
     if value in (None, ""):
         return None
+    if isinstance(value, datetime_cls):
+        return value.date().isoformat()
     if isinstance(value, date_cls):
         return value.isoformat()
     s = str(value).strip()

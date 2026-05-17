@@ -10,15 +10,17 @@ from __future__ import annotations
 
 import csv
 import sys
-from datetime import date as date_cls
 from pathlib import Path
 from typing import Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tracker.csv_table import (  # noqa: E402
     CsvTableSpec,
+    date_str as _date_str,
+    parse_value as _parse_value,
     read_csv_rows as _table_read_csv_rows,
     replace_upsert_records,
+    serialize_value as _serialize_value,
     sparse_upsert_records,
     write_csv_atomic as _table_write_csv_atomic,
 )
@@ -106,64 +108,6 @@ STRENGTH_METADATA_DRIFT_THRESHOLD = 0.05
 
 
 # ============================================================ Helpers
-def _date_str(v) -> str | None:
-    """Coerce a date-shaped value to ``YYYY-MM-DD`` or return None.
-
-    Accepts datetime/date objects, an already-formatted ``YYYY-MM-DD``
-    string, and a ``YYYY-MM-DD ...`` prefix (Apple's full ISO datetime).
-    """
-    if v in (None, ""):
-        return None
-    if isinstance(v, date_cls):
-        return v.isoformat()
-    s = str(v).strip()
-    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
-        return s[:10]
-    return None
-
-
-def _parse_value(v: str | None):
-    """Parse a CSV cell back into its native type.
-
-    CSVs round-trip as strings; reverse the import-time coercion so
-    downstream consumers see ints, floats, bools, and Nones rather than
-    the string ``"None"`` or numeric strings. Anything that can't be
-    coerced stays as the original string (notes, source labels, etc.).
-    """
-    if v is None or v == "":
-        return None
-    s = str(v)
-    # Boolean round-trip (``_serialize_value`` writes "true" / "false").
-    lower = s.strip().lower()
-    if lower == "true":
-        return True
-    if lower == "false":
-        return False
-    # Try int, then float, then leave as string. Match openpyxl's
-    # idiomatic typing so the rest of the pipeline doesn't care which
-    # backend produced the value.
-    try:
-        if "." not in s and "e" not in s and "E" not in s:
-            return int(s)
-    except ValueError:
-        pass
-    try:
-        return float(s)
-    except ValueError:
-        return s
-
-
-def _serialize_value(v) -> str:
-    """Inverse of ``_parse_value``: CSV-friendly string for any value."""
-    if v is None:
-        return ""
-    if isinstance(v, bool):
-        # str(True) = "True" — keep the lowercase form so the file
-        # remains diffable across runs.
-        return "true" if v else "false"
-    return str(v)
-
-
 def _strength_metadata_drifts(existing, incoming) -> bool:
     """5% threshold check for the manual-wins guard.
 
@@ -584,7 +528,7 @@ def upsert_workout_sessions(person: str, entries: Iterable[dict]) -> list[str]:
         new_rec = {"date": d}
         for k in fields:
             new_rec[k] = e.get(k)
-        if e.get("incidental") is True or (e.get("notes") or "").lower().startswith("incidental"):
+        if e.get("incidental") is True:
             incidental += 1
         if key in by_key:
             if by_key[key] != new_rec:
@@ -1119,9 +1063,8 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
     supplied it or not) so the file is internally consistent.
 
     Validates ``heat_type`` against ``HEAT_TYPES`` and ``cold_type``
-    against ``COLD_TYPES``; unknown values are silently dropped to None
-    (parser is the gate; the store is forgiving on read but strict on
-    write).
+    against ``COLD_TYPES``. Unknown values raise ``ValueError`` so bad
+    parser output does not disappear during a write.
     """
     entries = list(entries or [])
     if not entries:
@@ -1143,10 +1086,10 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
     def _sanitize_thermal(e: dict) -> dict:
         ht = e.get("heat_type")
         if ht is not None and ht not in HEAT_TYPES:
-            ht = None
+            raise ValueError(f"unknown heat_type: {ht!r}")
         ct = e.get("cold_type")
         if ct is not None and ct not in COLD_TYPES:
-            ct = None
+            raise ValueError(f"unknown cold_type: {ct!r}")
 
         durations = _parse_round_durations(e.get("heat_round_durations_min"))
         heat_total = _sum_round_durations(durations) if durations else (

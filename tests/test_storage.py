@@ -66,6 +66,18 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(row["heat_rounds"], 2)
         self.assertEqual(row["heat_total_min"], 20)
 
+    def test_thermal_unknown_enum_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            csv_store.upsert_thermal_sessions(
+                "Test",
+                [{
+                    "date": "2026-05-03",
+                    "start": "18:30",
+                    "heat_type": "mystery_sauna",
+                    "heat_round_durations_min": [10],
+                }],
+            )
+
     def test_swim_laps_replace_on_match(self) -> None:
         base = {
             "date": "2026-05-04",

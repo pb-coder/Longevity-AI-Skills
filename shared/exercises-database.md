@@ -282,6 +282,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Seated Calf Raise [Machine]
 - Donkey Calf Raise Machine [Machine] ◆
 - Cable Standing Calf Raise [Cable]
+- Dumbbell Standing Calf Raise [DB] ◆
 
 ---
 

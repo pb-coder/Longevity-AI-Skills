@@ -44,6 +44,11 @@ class CliSemanticTests(unittest.TestCase):
         self.assertIn("sleep_summary", data)
         self.assertIn("swim_summary", data)
         self.assertIn("thermal_summary", data)
+        self.assertIn("light_therapy_summary", data)
+        self.assertEqual(data["light_therapy_summary"]["n_sessions_28d"], 1)
+        self.assertEqual(data["light_therapy_summary"]["dominant_light_type"], "red+ir")
+        self.assertEqual(data["light_therapy_summary"]["dominant_modality"], "cabin")
+        self.assertTrue(data["capabilities"]["light_therapy_log"])
         self.assertGreater(data["estimated_max_hr"], 150)
 
     def test_read_tracker_fabian_semantic_golden(self) -> None:
@@ -54,8 +59,11 @@ class CliSemanticTests(unittest.TestCase):
         self.assertEqual(data["unknown_exercises"], [])
         self.assertIn("sleep_summary", data)
         self.assertNotIn("swim_summary", data)
+        # Fabian has no light_therapy/ folder yet → key absent.
+        self.assertNotIn("light_therapy_summary", data)
         self.assertTrue(data["capabilities"]["hrv"])
         self.assertTrue(data["capabilities"]["per_workout_hr_strength"])
+        self.assertTrue(data["capabilities"]["light_therapy_log"])
         self.assertGreater(data["estimated_max_hr"], 150)
 
     def test_maintain_dry_run_is_read_only_and_explainable(self) -> None:

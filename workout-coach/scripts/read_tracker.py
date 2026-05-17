@@ -82,6 +82,7 @@ from extract import (  # noqa: E402
     read_sleep_nights,
     read_swim_laps,
     read_swim_workouts,
+    read_light_therapy_sessions,
     read_thermal_sessions,
     read_workout_sessions,
 )
@@ -116,6 +117,7 @@ from cardio import (  # noqa: E402
 from sleep import sleep_summary  # noqa: E402
 from swim import swim_summary  # noqa: E402
 from thermal import thermal_summary  # noqa: E402
+from light_therapy import light_therapy_summary  # noqa: E402
 
 
 def main() -> int:
@@ -176,6 +178,7 @@ def main() -> int:
     swim_laps_all = read_swim_laps(person)
     sleep_nights_all = read_sleep_nights(person)
     thermal_sessions_all = read_thermal_sessions(person)
+    light_therapy_sessions_all = read_light_therapy_sessions(person)
 
     bw_all = read_bodyweight(person)
     bw_latest = (
@@ -253,6 +256,21 @@ def main() -> int:
         sauna_target = 4
     thermal = thermal_summary(thermal_sessions_all, today_d,
                               target_per_week=sauna_target)
+    # Light-therapy targets read from profile.csv if set; otherwise the
+    # module defaults (3×/wk, 10min/session).
+    try:
+        lt_target = int(profile.get("light_therapy_target_per_week") or 3)
+    except (TypeError, ValueError):
+        lt_target = 3
+    try:
+        lt_dose = int(profile.get("light_therapy_target_min_per_session") or 10)
+    except (TypeError, ValueError):
+        lt_dose = 10
+    light_therapy = light_therapy_summary(
+        light_therapy_sessions_all, today_d,
+        target_per_week=lt_target,
+        target_min_per_session=lt_dose,
+    )
 
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
@@ -281,6 +299,10 @@ def main() -> int:
         # at least one manual /log session in the 28-day window;
         # ``_compact`` drops None when absent). ----
         "thermal_summary": thermal,
+        # ---- Light-therapy summary (RLT / PBM / blue light, only
+        # present when at least one manual /log session in the 28-day
+        # window; ``_compact`` drops None when absent). ----
+        "light_therapy_summary": light_therapy,
         # ---- Daily activity (NEAT) — all-day movement beyond workouts. ----
         "daily_activity_28d": daily_activity,
         # ---- Recovery + training load (Python-derived, not raw metrics) ----

@@ -318,6 +318,17 @@ def read_thermal_sessions(person: str) -> list[dict]:
     return _csv_store.read_thermal_sessions(person)
 
 
+def read_light_therapy_sessions(person: str) -> list[dict]:
+    """Return per-session light-therapy (RLT / PBM / blue light) rows
+    from ``light_therapy/YYYY.MM.sessions.csv``.
+
+    Pass-through to ``csv_store.read_light_therapy_sessions``. Empty
+    list when the light_therapy folder is absent (no manual /log
+    light-therapy entries yet).
+    """
+    return _csv_store.read_light_therapy_sessions(person)
+
+
 def read_workout_sessions(person: str) -> list[dict]:
     """Return Workout Sessions rows from the per-person CSV, ASC by date+start.
 

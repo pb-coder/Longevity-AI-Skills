@@ -36,24 +36,42 @@ from pathlib import Path
 # coach text. The renderer auto-wraps them. The coach is encouraged
 # to use the plain-English equivalent instead.
 KNOWN_TERMS = {
-    "CTL":  ("Chronic Training Load", "A 42-day exponentially weighted average of training stress. Think of it as your fitness."),
-    "ATL":  ("Acute Training Load", "A 7-day exponentially weighted average of training stress. Think of it as your current fatigue."),
-    "TSB":  ("Training Stress Balance", "CTL minus ATL. Positive means fresh, negative means accumulating fatigue. Above +5 you are fresh, below -10 you are tired."),
-    "e1RM": ("Estimated 1-rep max", "Your single-rep capacity extrapolated from your working sets. Lets you track strength without 1-rep testing."),
-    "MEV":  ("Minimum Effective Volume", "The lower bound for any growth response. Below this you are not stimulating the muscle enough to adapt."),
-    "MAV":  ("Maximum Adaptive Volume", "The upper bound of the productive range. Above this you start to accumulate fatigue faster than you adapt."),
-    "MRV":  ("Maximum Recoverable Volume", "The upper limit before junk volume and overtraining risk."),
-    "SDNN": ("Standard Deviation of NN intervals", "The 'spread' of your beat-to-beat heart-rate intervals overnight. Higher is generally better; it tracks parasympathetic recovery."),
-    "HRR":  ("Heart-rate Recovery", "How fast your heart rate drops in the minute after exercise. Higher means better autonomic recovery."),
-    "RHR":  ("Resting Heart Rate", "Your average heart rate at rest. Lower is generally better; a rise of 5+ bpm vs baseline can signal under-recovery or illness."),
-    "HRV":  ("Heart Rate Variability", "The variation in time between heartbeats. Measured here as SDNN. Higher relative to your baseline is generally a favorable signal."),
-    "Z2":   ("Zone 2", "Aerobic cardio at 60-70% of maximum heart rate. Sustainable for 45-60+ minutes. Builds mitochondrial density."),
-    "Z5":   ("Zone 5", "Maximal-effort intervals at 90%+ of maximum heart rate. The most efficient zone for raising VO2max."),
-    "VO2max": ("VO2max", "Your peak rate of oxygen uptake. A standard fitness ceiling indicator; higher correlates with longer healthspan."),
-    "HSP":  ("Heat Shock Protein", "Molecular chaperones induced by heat exposure. Linked to many of sauna's longevity associations. Production threshold roughly 20 minutes above 80 C."),
-    "PR":   ("Personal Record", "Your best lift to date for that rep range."),
-    "RPE":  ("Rate of Perceived Exertion", "Self-reported effort. A 10 is all-out; an 8 means roughly two reps left in the tank."),
-    "RIR":  ("Reps In Reserve", "How many reps you could still do at the end of a set. RIR 2 means you stopped two reps short of failure."),
+    "CTL":    ("Chronic Training Load",
+               "A 42-day moving average of your training stress. It moves slowly and represents your fitness baseline. On this dashboard the chart's blue line is your CTL."),
+    "ATL":    ("Acute Training Load",
+               "A 7-day moving average of your training stress. It moves quickly and represents your current fatigue. On this dashboard the chart's orange dashed line is your ATL."),
+    "TSB":    ("Training Stress Balance",
+               "Your fitness minus your current fatigue. Positive numbers mean you are fresh and ready, negative numbers mean fatigue is accumulating. Above +5 is fresh, below -10 starts to be tired."),
+    "e1RM":   ("Estimated one-rep max",
+               "Your single-rep capacity extrapolated from your working sets. It lets you track strength changes without ever doing a true one-rep test."),
+    "MEV":    ("Minimum Effective Volume",
+               "The smallest weekly set count that still drives growth in a muscle. Below this number, training does not produce a meaningful adaptation."),
+    "MAV":    ("Maximum Adaptive Volume",
+               "The upper end of the productive range for a muscle. Beyond this, extra sets cost more fatigue than they give back in growth."),
+    "MRV":    ("Maximum Recoverable Volume",
+               "The most weekly sets a muscle can take and still recover from. Above this you accumulate fatigue you cannot pay back, raising injury and overtraining risk."),
+    "SDNN":   ("Standard deviation of NN intervals",
+               "A measure of overnight heart-rate variability. It tracks how relaxed your nervous system was during sleep. Higher relative to your baseline is favorable."),
+    "HRR":    ("Heart-rate recovery",
+               "How many beats per minute your heart rate drops in the first minute after exercise. Higher means your autonomic system shifts back to rest faster."),
+    "RHR":    ("Resting heart rate",
+               "Your heart rate at rest, measured overnight. Lower relative to your 60-day baseline is favorable. A sustained rise of 5+ bpm often signals under-recovery or illness."),
+    "HRV":    ("Heart rate variability",
+               "The variation in the time between heartbeats overnight, measured here as SDNN. Higher relative to your baseline is favorable. Lower can mean under-recovery or stress."),
+    "Z2":     ("Zone 2",
+               "Aerobic cardio at roughly 60-70 percent of your maximum heart rate. You can hold a conversation. It builds mitochondrial density and the aerobic base."),
+    "Z5":     ("Zone 5",
+               "Near-maximal intervals at 90 percent or more of your maximum heart rate. The most efficient zone for raising your peak oxygen uptake."),
+    "VO2max": ("Peak oxygen uptake",
+               "The maximum rate at which your body can use oxygen during intense exercise. A standard fitness ceiling and one of the strongest predictors of long-term healthspan."),
+    "HSP":    ("Heat Shock Proteins",
+               "Molecular chaperones induced by heat exposure. They are linked to many of sauna's longevity-associated effects. Induction needs roughly 20 minutes at or above 80 degrees Celsius."),
+    "PR":     ("Personal record",
+               "Your best lift to date for the rep range in question. A new PR usually means a real strength gain rather than a noisy session."),
+    "RPE":    ("Rate of perceived exertion",
+               "Self-reported effort on a 1 to 10 scale. A 10 is all-out; an 8 means you could have done about two more reps."),
+    "RIR":    ("Reps in reserve",
+               "How many more reps you could still do at the end of a set. RIR 2 means you stopped two reps short of failure."),
 }
 
 EM_DASH = "—"
@@ -331,7 +349,16 @@ def metric_tip(key):
 
 
 def driver_bars(drivers):
-    """Diverging horizontal bars centered on z=0."""
+    """Diverging horizontal bars centered on z=0.
+
+    Penalty-only signals (where the recovery-score module emits z=None
+    because the driver is a 'no penalty' placeholder, e.g.
+    sleep_consistency when the schedule is stable) are filtered out.
+    They don't represent movement and would render as empty rows.
+    """
+    if not drivers:
+        return ""
+    drivers = [d for d in drivers if d.get("z") is not None]
     if not drivers:
         return ""
     drivers = sorted(drivers, key=lambda d: abs(d.get("z") or 0), reverse=True)[:8]
@@ -401,31 +428,44 @@ def muscle_bars(weekly_volume):
         mev = lm.get("mev", 0)
         mav = lm.get("mav", 0)
         mrv = lm.get("mrv", 0)
+        muscle_title = m.replace("_", " ").title()
         if v < mev:
             bar_class = "warn"
-            status = "below productive"
+            status = "not enough"
             icon = "▼"
+            tip = (
+                f"{muscle_title}: {v:.1f} sets per week. Below the productive range "
+                f"(starts at {mev}). Add 1 to 2 sets next week to enter the productive band."
+            )
         elif v <= mav:
             bar_class = "good"
-            status = "in productive range"
+            status = "productive"
             icon = "✓"
+            tip = (
+                f"{muscle_title}: {v:.1f} sets per week. In the productive range "
+                f"({mev} to {mav}). Stay here, or push toward the upper band when recovery permits."
+            )
         elif v <= mrv:
             bar_class = "amber"
-            status = "above productive"
+            status = "pushing limit"
             icon = "▲"
+            tip = (
+                f"{muscle_title}: {v:.1f} sets per week. Above the productive range, "
+                f"approaching your recoverable ceiling at {mrv}. You can grow here, but fatigue "
+                f"costs rise. Watch recovery and don't add more."
+            )
         else:
             bar_class = "warn"
-            status = "over recoverable limit"
-            icon = "!"
+            status = "too much, cut back"
+            icon = "⚠"
+            tip = (
+                f"{muscle_title}: {v:.1f} sets per week. Above your recoverable ceiling at {mrv}. "
+                f"This volume costs more than it gives back. Drop 1 to 2 sets per week."
+            )
 
         mev_x = (mev / xmax) * 100
         mav_x = (mav / xmax) * 100
         actual_x = (v / xmax) * 100
-        tip = (
-            f"{m.replace('_',' ').title()}: {v:.1f} sets/week. "
-            f"Productive range {mev} to {mav}; recoverable limit {mrv}. "
-            f"Status: {status}."
-        )
         rows.append(f'''
 <div class="bar-row" data-tip="{esc(tip)}">
   <span class="bar-label">{esc(m.replace("_", " "))}</span>
@@ -487,8 +527,6 @@ STYLESHEET = """
   --amber: #ff9f0a;
   --warn: #ff3b30;
   --accent: #0a84ff;
-  --coach-bg: rgba(10,132,255,0.05);
-  --coach-border: #0a84ff;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text);
@@ -502,7 +540,11 @@ header.page-head h1 { margin: 0; font-size: 28px; font-weight: 600;
   letter-spacing: -0.01em; }
 header.page-head .meta { color: var(--muted); margin-top: 4px;
   font-size: 14px; }
-.headline { margin: 18px 0 22px; font-size: 16px; line-height: 1.6;
+/* Coach's summary card sits above the hero. Same chrome as other cards.
+   It uses the standard card style; the body just gets a slightly larger
+   line-height for readability. */
+.summary { margin-bottom: 14px; }
+.summary .body { font-size: 16px; line-height: 1.6;
   color: var(--text); max-width: 760px; }
 
 /* tabs */
@@ -536,14 +578,13 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .metric.amber .value { color: var(--amber); }
 .metric.warn .value { color: var(--warn); }
 
-/* coach callout */
-.coach { margin-top: 14px; padding: 12px 14px;
-  background: var(--coach-bg);
-  border-left: 3px solid var(--coach-border);
-  border-radius: 4px; }
-.coach .label { font-size: 11px; font-weight: 600;
-  letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--accent); margin-bottom: 4px; }
+/* coach callout — typographic differentiation only; no box, no border,
+   no tint. A thin hairline rule and a small-caps label do the work. */
+.coach { margin-top: 18px; padding-top: 14px;
+  border-top: 1px solid #f0f0f1; }
+.coach .label { font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.10em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 4px; }
 .coach .text { font-size: 14px; line-height: 1.55; color: var(--text); }
 
 /* tooltip system */
@@ -694,22 +735,35 @@ td.arrow { font-size: 16px; font-weight: 600; }
   border-top: 1px solid var(--border); font-size: 12px;
   color: var(--muted); }
 
-/* workout tab */
+/* workout tab — each `## Workout N: TYPE` becomes a card. */
 .workout-card { background: var(--card); border: 1px solid var(--border);
-  border-radius: 14px; padding: 18px 22px; }
-.workout-card h2 { margin: 0 0 10px; font-size: 16px;
+  border-radius: 14px; padding: 18px 22px; margin-bottom: 14px; }
+.workout-card h2 { margin: 0 0 12px; font-size: 17px;
   font-weight: 600; letter-spacing: -0.01em; color: var(--text);
   text-transform: none; }
 .workout-card .placeholders { color: var(--muted); font-size: 13px;
-  margin-bottom: 12px; }
+  margin-bottom: 14px; padding-bottom: 12px;
+  border-bottom: 1px solid #f4f4f6; }
+.workout-card .placeholder-row { padding: 2px 0;
+  font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+  font-size: 12.5px; }
 .workout-card ul { list-style: none; padding: 0; margin: 0; }
-.workout-card li { padding: 4px 0; font-size: 14px; color: var(--text);
-  font-variant-numeric: tabular-nums; }
-.workout-card li ul { padding-left: 14px; margin-top: 2px; }
-.workout-card li ul li { color: var(--muted); font-size: 13px;
-  font-style: italic; }
-.workout-link { color: var(--accent); font-size: 12px;
-  text-decoration: none; }
+.workout-card > ul > li { padding: 5px 0 5px 18px; font-size: 14px;
+  color: var(--text); font-variant-numeric: tabular-nums;
+  position: relative; line-height: 1.5; }
+.workout-card > ul > li::before { content: "•";
+  position: absolute; left: 4px; color: var(--muted);
+  font-weight: 700; }
+.workout-card ul.sub { margin-top: 4px; padding-left: 0; }
+.workout-card ul.sub li { padding: 2px 0 2px 18px;
+  font-size: 13px; color: var(--muted); font-style: italic;
+  position: relative; line-height: 1.5;
+  font-variant-numeric: normal; }
+.workout-card ul.sub li::before { content: "";
+  position: absolute; left: 0; top: 12px; width: 10px;
+  border-top: 1px solid #e0e0e2; }
+.workout-card .workout-prose { color: var(--muted); font-size: 13px;
+  line-height: 1.5; padding: 4px 0; }
 
 footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 50px;
   color: var(--muted); font-size: 12px; }
@@ -865,104 +919,121 @@ INLINE_JS = r"""
   }
 
   // -------- markdown viewer for the Workout tab --------
+  // The workout markdown contains:
+  //   # Workout plan — DATE       (dropped: date is in the page header)
+  //   Assessment: ./...html       (dropped: we are already on that file)
+  //   ## Workout N: TYPE          (becomes a card)
+  //   ## Cardio N: ...            (becomes a card)
+  //   Date: ___                    (placeholder line at top of card)
+  //   Recovery (...): ___         (placeholder line at top of card)
+  //   - Exercise: weight x reps   (bullet)
+  //     - sub note  (or `  — sub note` with em-dash)
   function renderMarkdownInto(elt, md) {
     elt.innerHTML = '';
-    // Tiny markdown subset: # / ## headings, bullets (- and  -), and
-    // paragraph lines. No bold/italic/links/code; the workout file
-    // does not use them.
     var lines = md.split('\n');
     var i = 0;
     var card = null;
-    var ul = null;
-    function ensureUl(level) {
-      if (!card) {
-        card = document.createElement('div');
-        card.className = 'workout-card';
-        elt.appendChild(card);
+    var ul = null;        // current top-level <ul>
+    var lastLi = null;    // last top-level <li> (for nesting sub-bullets)
+    function newCard(title) {
+      card = document.createElement('section');
+      card.className = 'workout-card';
+      if (title) {
+        var h = document.createElement('h2');
+        h.textContent = title;
+        card.appendChild(h);
       }
-      if (!ul || ul.dataset.level !== String(level)) {
+      elt.appendChild(card);
+      ul = null;
+      lastLi = null;
+    }
+    function ensureCard() {
+      if (!card) newCard(null);
+    }
+    function ensureUl() {
+      ensureCard();
+      if (!ul) {
         ul = document.createElement('ul');
-        ul.dataset.level = String(level);
-        if (level === 0) {
-          card.appendChild(ul);
-        } else {
-          var last = card.querySelector('ul > li:last-child');
-          if (!last) { card.appendChild(ul); }
-          else {
-            var nestedUl = document.createElement('ul');
-            nestedUl.dataset.level = '1';
-            last.appendChild(nestedUl);
-            ul = nestedUl;
-          }
-        }
+        card.appendChild(ul);
       }
+    }
+    function addPlaceholder(line) {
+      ensureCard();
+      var ph = card.querySelector('.placeholders');
+      if (!ph) {
+        ph = document.createElement('div');
+        ph.className = 'placeholders';
+        // Insert at top, right after the h2 if present
+        var h2 = card.querySelector('h2');
+        if (h2 && h2.nextSibling) card.insertBefore(ph, h2.nextSibling);
+        else card.appendChild(ph);
+      }
+      var row = document.createElement('div');
+      row.className = 'placeholder-row';
+      row.textContent = line;
+      ph.appendChild(row);
     }
     while (i < lines.length) {
       var raw = lines[i]; i++;
       var line = raw.replace(/\s+$/, '');
-      if (!line.trim()) { ul = null; continue; }
-      if (/^#\s+/.test(line)) {
-        // top-level title; render as a small subtitle once
-        var h = document.createElement('div');
-        h.className = 'headline';
-        h.style.marginTop = '4px';
-        h.textContent = line.replace(/^#\s+/, '');
-        elt.appendChild(h);
-        card = null; ul = null;
-        continue;
-      }
-      if (/^Assessment:/.test(line)) {
-        var p = document.createElement('div');
-        p.className = 'workout-link';
-        var url = line.replace(/^Assessment:\s*/, '');
-        var a = document.createElement('a');
-        a.href = url; a.textContent = 'Back to assessment';
-        a.className = 'workout-link';
-        p.appendChild(a);
-        elt.appendChild(p);
-        continue;
-      }
+      if (!line.trim()) { ul = null; lastLi = null; continue; }
+
+      // Drop the top-level title line and the Assessment link line.
+      if (/^#\s+/.test(line) && !/^##/.test(line)) continue;
+      if (/^Assessment:/i.test(line)) continue;
+
+      // ## Workout / Cardio section → new card
       if (/^##\s+/.test(line)) {
-        card = document.createElement('div');
-        card.className = 'workout-card';
-        var h2 = document.createElement('h2');
-        h2.textContent = line.replace(/^##\s+/, '');
-        card.appendChild(h2);
-        elt.appendChild(card);
-        ul = null;
+        newCard(line.replace(/^##\s+/, ''));
         continue;
       }
-      // Date / Recovery placeholder lines
-      if (/^Date:/.test(line) || /^Recovery /.test(line)) {
-        if (!card) { card = document.createElement('div'); card.className='workout-card'; elt.appendChild(card); }
-        var pl = card.querySelector('.placeholders') ||
-          (function(){ var d = document.createElement('div'); d.className='placeholders'; card.appendChild(d); return d; })();
-        if (pl.textContent) pl.appendChild(document.createElement('br'));
-        pl.appendChild(document.createTextNode(line));
-        ul = null;
+
+      // Date: ___  /  Recovery (...): ___  → placeholder rows
+      if (/^Date:/i.test(line) || /^Recovery\s*\(/i.test(line)) {
+        addPlaceholder(line);
         continue;
       }
-      var m = line.match(/^(\s*)-\s+(.*)$/);
-      if (m) {
-        var indent = m[1].length;
-        var level = indent >= 2 ? 1 : 0;
-        ensureUl(level);
-        var li = document.createElement('li');
-        li.textContent = m[2];
-        ul.appendChild(li);
+
+      // Sub-bullet: 2+ leading spaces followed by `-` or `—` (em-dash)
+      // or `–` (en-dash). Nests under the previous top-level <li>.
+      var sub = line.match(/^\s{2,}(?:[-—–])\s*(.*)$/);
+      if (sub) {
+        ensureUl();
+        if (!lastLi) {
+          // No parent — render as italic muted item on its own
+          lastLi = document.createElement('li');
+          ul.appendChild(lastLi);
+        }
+        var subUl = lastLi.querySelector('ul');
+        if (!subUl) {
+          subUl = document.createElement('ul');
+          subUl.className = 'sub';
+          lastLi.appendChild(subUl);
+        }
+        var sli = document.createElement('li');
+        sli.textContent = sub[1];
+        subUl.appendChild(sli);
         continue;
       }
-      // bare paragraph in a card
-      if (!card) {
-        card = document.createElement('div');
-        card.className = 'workout-card';
-        elt.appendChild(card);
+
+      // Top-level bullet
+      var top = line.match(/^-\s+(.*)$/);
+      if (top) {
+        ensureUl();
+        lastLi = document.createElement('li');
+        lastLi.textContent = top[1];
+        ul.appendChild(lastLi);
+        continue;
       }
-      var p2 = document.createElement('div');
-      p2.style.fontSize = '13px'; p2.style.color = 'var(--muted)';
-      p2.textContent = line;
-      card.appendChild(p2);
+
+      // Bare prose under a card (e.g. cardio details)
+      ensureCard();
+      var p = document.createElement('div');
+      p.className = 'workout-prose';
+      p.textContent = line;
+      card.appendChild(p);
       ul = null;
+      lastLi = null;
     }
   }
   var mdScript = document.getElementById('workout-md');
@@ -987,9 +1058,9 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
     <div class="sub">{esc(confidence or "—")} confidence</div>
   </article>
   <article class="card metric {tsb_cls}">
-    <h2><span class="term" data-tip="Training Stress Balance. CTL minus ATL. Positive means fresh, negative means accumulating fatigue. Above +5 is fresh, below -10 is tired.">Freshness</span></h2>
+    <h2><span class="term" data-tip="Your fitness minus your current fatigue. Positive numbers mean you are fresh and ready to train hard; negative numbers mean fatigue is accumulating. Above +5 is fresh, below -10 starts to be tired.">Freshness</span></h2>
     <div class="value">{esc(signed(tsb, 1))}</div>
-    <div class="sub">{esc(tsb_label)}. <span class="term" data-tip="Chronic Training Load: 42-day average of training stress. Think fitness.">Fitness</span> {fmt(ctl, 1)}, <span class="term" data-tip="Acute Training Load: 7-day average of training stress. Think fatigue.">fatigue</span> {fmt(atl, 1)}.</div>
+    <div class="sub">{esc(tsb_label)}. <span class="term" data-tip="Your training stress over the last 42 days. This number moves slowly and represents your fitness baseline.">Fitness</span> {fmt(ctl, 1)}, <span class="term" data-tip="Your training stress over the last 7 days. This number moves quickly and represents your current fatigue.">fatigue</span> {fmt(atl, 1)}.</div>
     <div class="sub" style="margin-top:6px; color: var(--{arrow_cls});">{arrow} {signed(tsb_trend, 1)} over the last 7 days</div>
   </article>
 </section>
@@ -1000,10 +1071,10 @@ def card_drivers(drivers, coach_text):
     body = driver_bars(drivers)
     return f'''
 <section class="card">
-  <h2>Why recovery moved (z-scores vs your 60-day baseline)</h2>
+  <h2>Why recovery moved (how each signal compares to your 60-day baseline)</h2>
   <div class="driver-axis-row">
     <span></span>
-    <span class="axis-labels"><span>−</span><span>0</span><span>+</span></span>
+    <span class="axis-labels"><span>−</span><span class="term" data-tip="Zero means equal to your 60-day baseline. Each step to the right or left is one standard deviation, a unit that lets us compare signals that live on different scales (heart rate variability in milliseconds, sleep in hours, etc.).">0</span><span>+</span></span>
     <span></span>
   </div>
   {body}
@@ -1029,9 +1100,9 @@ def card_training_load(series, ctl, atl, tsb, tsb_trend, coach_text):
   <h2>Training load over 90 days</h2>
   {svg}
   <div class="load-legend">
-    <span><span class="sw sw-ctl"></span><span class="term" data-tip="Chronic Training Load. 42-day moving average of session-by-session stress. Treat it as fitness.">fitness</span></span>
-    <span><span class="sw sw-atl"></span><span class="term" data-tip="Acute Training Load. 7-day moving average of stress. Treat it as fatigue.">fatigue</span></span>
-    <span><span class="sw sw-tsb"></span><span class="term" data-tip="Training Stress Balance. Fitness minus fatigue. Positive means fresh, negative means tired.">freshness</span></span>
+    <span><span class="sw sw-ctl"></span><span class="term" data-tip="A 42-day moving average of your session-by-session training stress. It moves slowly and represents your fitness baseline. The blue line.">fitness</span></span>
+    <span><span class="sw sw-atl"></span><span class="term" data-tip="A 7-day moving average of your training stress. It moves quickly and represents your current fatigue. The orange dashed line.">fatigue</span></span>
+    <span><span class="sw sw-tsb"></span><span class="term" data-tip="Fitness minus fatigue. Positive means fresh, negative means accumulating fatigue. The shaded band on the chart.">freshness</span></span>
   </div>
   <div class="load-stats">
     <div class="stat"><strong>{fmt(ctl, 1)}</strong>fitness</div>
@@ -1050,11 +1121,11 @@ def card_muscle_volume(weekly_volume, coach_text):
 <section class="card">
   <h2>Per-muscle weekly volume</h2>
   <div class="muscle-legend">
-    <span><span class="swatch band"></span><span class="term" data-tip="Productive range. Between minimum effective volume (MEV) and maximum adaptive volume (MAV). The sweet spot for growth.">productive range</span></span>
-    <span><span class="swatch warn"></span>below productive</span>
-    <span><span class="swatch good"></span>in productive range</span>
-    <span><span class="swatch amber"></span>above productive</span>
-    <span><span class="swatch warn"></span>over recoverable limit</span>
+    <span><span class="swatch band"></span><span class="term" data-tip="The productive range for growth. Between MEV (the minimum set count that still drives adaptation) and MAV (the upper bound of the productive band). Sitting in this band means you are stimulating growth without paying excess fatigue.">productive range</span></span>
+    <span><span class="swatch warn"></span>not enough</span>
+    <span><span class="swatch good"></span>productive</span>
+    <span><span class="swatch amber"></span>pushing limit</span>
+    <span><span class="swatch warn"></span>too much, cut back</span>
   </div>
   {bars}
   {coach_block(coach_text)}
@@ -1399,14 +1470,17 @@ def render(j, coach, workout_md, person):
     <h1>{esc(person)}</h1>
     <div class="meta">{esc(today)}</div>
   </header>
-  <p class="headline">{auto_wrap_terms(headline)}</p>
 
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" data-tab="assessment">Assessment</button>
-    <button class="tab" role="tab" data-tab="workout">Workout</button>
+    <button class="tab" role="tab" data-tab="workout">Workout Plan</button>
   </div>
 
   <div class="tab-panel" data-tab="assessment">
+    <section class="card summary">
+      <h2>Coach&rsquo;s summary</h2>
+      <div class="body">{auto_wrap_terms(headline)}</div>
+    </section>
     {card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend)}
     {card_drivers(recovery.get("drivers"), coach_cards.get("recovery_drivers"))}
     {card_rings(rings_html, coach_cards.get("activity_rings"))}
@@ -1421,7 +1495,7 @@ def render(j, coach, workout_md, person):
   <div class="tab-panel" data-tab="workout"></div>
 </div>
 
-<footer>{esc(person)} &middot; generated {esc(datetime.now().strftime("%Y-%m-%d %H:%M"))}</footer>
+<footer>generated at {esc(datetime.now().strftime("%Y-%m-%d %H:%M"))}</footer>
 
 {embed_workout_markdown(workout_md)}
 <script>{INLINE_JS}</script>

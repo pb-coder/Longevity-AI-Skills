@@ -13,24 +13,26 @@ The renderer reads both, validates the coach text, and writes the final HTML to 
 
 ```
 plans/<Person>/<date>-assessment.html
-├── header                          name, date, plain-English headline
-├── tabs                            Assessment / Workout
-└── tab: Assessment
-    ├── hero                        Recovery score, Freshness (TSB)
-    ├── recovery drivers            diverging-bar chart, z-scores
-    ├── activity rings              4 rings: strength / Z2 cardio / recovery practices / sleep
-    ├── training load (90d)         interactive CTL/ATL/TSB chart
-    ├── per-muscle volume           horizontal bars with productive-range band, legend
-    ├── strength progression        e1RM table with sparkline + slope
-    ├── health vitals               compact table: HRV, RHR, wrist temp, sleep, deep+REM, VO2max, bodyweight
-    ├── recovery practices          3 sub-cards: sauna / cold / light therapy
-    └── week over week              this-wk / last-wk / 4-wk-avg table
-tab: Workout
-    └── rendered from <date>-workout.md (markdown → cards client-side)
-footer                              "<Person> · generated YYYY-MM-DD HH:MM"
+├── header                          name, date
+├── tabs                            Assessment / Workout Plan
+├── tab: Assessment
+│   ├── coach's summary             top card, label "COACH'S SUMMARY", body text
+│   ├── hero                        Recovery score, Freshness
+│   ├── recovery drivers            diverging-bar chart (z=null drivers filtered out)
+│   ├── activity rings              4 rings: strength / Z2 cardio / recovery practices / sleep
+│   ├── training load (90d)         interactive fitness/fatigue/freshness chart
+│   ├── per-muscle volume           horizontal bars, productive-range band, action labels
+│   ├── strength progression        e1RM table with sparkline + slope
+│   ├── health vitals               compact table: HRV, RHR, wrist temp, sleep, deep+REM, VO2max, bodyweight
+│   ├── recovery practices          3 sub-cards: sauna / cold / light therapy
+│   └── week over week              this-wk / last-wk / 4-wk-avg table
+└── tab: Workout Plan
+    └── rendered from <date>-workout.md (the H1 + Assessment link line are dropped,
+        each ## becomes a card, em-dash sub-bullets nest under their parent exercise)
+footer                              "generated at YYYY-MM-DD HH:MM"
 ```
 
-Every card with actionable signal carries a **Coach callout** below the data: blue left-border, "Coach" label, action-focused one-liner.
+Every card with actionable signal carries a **Coach callout** below the data: thin hairline rule above, small-caps "COACH" label in muted color, body text in normal color. **No box, no border, no tinted background.** Typography does the work.
 
 ## Coach-reads schema
 
@@ -72,10 +74,10 @@ All keys under `cards` are optional. If a key is missing or empty, the card rend
 | --- | --- | --- |
 | Hero · Recovery | `recovery.score`, `recovery.confidence` | Status class by score band: ≥6.5 good, 4.5-6.5 amber, <4.5 warn |
 | Hero · Freshness | `training_load.{ctl, atl, tsb, trend_7d}` | Label: Balanced (\|TSB\|≤5), Carrying load (-10<TSB<-5), Fresh (5<TSB≤15), Fatigued (≤-10), Detrained (>15) |
-| Recovery drivers | `recovery.drivers[*]` | Diverging horizontal bar chart, sorted by \|z\| desc, capped at 8 rows. Positive z = green (favorable, the metric module already sign-flips RHR/wrist temp). |
+| Recovery drivers | `recovery.drivers[*]` | Diverging horizontal bar chart, sorted by \|z\| desc, capped at 8 rows. **Penalty-only drivers (those with `z=None`) are filtered out** — they are "no-penalty" placeholders, not signals of movement. Positive z = green (favorable; the metric module already sign-flips RHR/wrist temp). |
 | Activity rings | `week_over_week.rows` (strength count), `cardio_hr_zones_28d.z2`, `thermal_summary` + `light_therapy_summary` (recovery sessions), `health_metrics_weekly` (sleep avg) | Targets: 4 strength sess, 150 min Z2, 4 recovery sess, 7 h sleep. Ring color: good when ≥ target, amber otherwise. Never red. |
 | Training load (90d) | computed locally from `monthly_sessions[*].trimp` via 42-day / 7-day EWMA, seeded from sessions older than the window | Interactive: mouse / touch reveals scrubber + values at the hovered day. |
-| Per-muscle volume | `weekly_volume_per_muscle.current` and `.landmarks` | Bar color: warn (below MEV or over MRV), good (MEV..MAV), amber (MAV..MRV). Background band shows productive range. Hover tooltip per row. |
+| Per-muscle volume | `weekly_volume_per_muscle.current` and `.landmarks` | Status labels in action voice: `not enough` (below MEV, warn), `productive` (MEV..MAV, good), `pushing limit` (MAV..MRV, amber), `too much, cut back` (above MRV, warn). Background band shows productive range. Per-row tooltip spells out the action. |
 | Strength progression | `estimated_1rm[*]` filtered to entries with non-null `slope_kg_per_4w` + `current_e1rm_kg`, sorted by \|slope\|, capped at 8 | Arrow class: good (slope ≥ +0.5), warn (≤ -0.5), muted otherwise. e1RM and slope column headers have tooltips. |
 | Health vitals | `health_metrics_weekly` (HRV / RHR / wrist temp / sleep / deep / REM / VO2max series), `vo2max_latest`, `vo2max_trend_per_4w`, `bodyweight_latest`, `bodyweight_trend_kg_per_week` | One clean table, no inline coach rows. Sparklines colored by per-row status. Sparkline column hides at ≤ 480 px. |
 | Recovery practices | `thermal_summary.heat`, `thermal_summary.cold`, `thermal_summary.cold.recent_sessions`, `thermal_summary.adherence`, `light_therapy_summary` | Three sub-cards, identical layout. Cold sub-card lists recent sessions with their temperature (the `dose_hint: "amber"` flag for cold_air ≥ 18 °C tags weak doses). |

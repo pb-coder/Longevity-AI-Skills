@@ -174,8 +174,9 @@ If (and only if) the `/log` message contains an explicit `sauna` or `cold` line,
 | Form | Writes |
 |---|---|
 | `cold 30s shower` | cold_shower, 30 seconds |
-| `cold 5min air` | cold_air, 5 minutes (= 300 seconds) |
-| `cold 5min air 4C` | cold_air with ambient temp |
+| `cold 5min air` | cold_air, 5 minutes (= 300 seconds), temp null — logger will ask once |
+| `cold 5min outside -2C` | cold_air with ambient temp −2°C (winter dose) |
+| `cold 5min outside 22C` | cold_air with ambient temp 22°C (habit, weak dose) |
 | `cold 90s plunge 8C` | cold_plunge with water temp |
 | `cold 12min water 14C` | open-water swim / lake / sea |
 
@@ -185,7 +186,8 @@ If (and only if) the `/log` message contains an explicit `sauna` or `cold` line,
   - `plunge` / `bath` / `ice` → `cold_plunge`
   - `water` / `lake` / `sea` / `swim` → `cold_water`
 - **Duration unit:** `s` / `sec` / `seconds` stays in seconds (typical for showers); `m` / `min` / `minutes` converts to seconds (×60). The store column is `cold_duration_sec`.
-- **Temperature:** integer Celsius, optional. Ambient air temp for `cold_air`; water temp for `cold_shower` / `cold_plunge` / `cold_water`.
+- **Temperature:** Celsius, optional, signed (`-2`, `0`, `12.5`). Ambient air temp for `cold_air`; water temp for `cold_shower` / `cold_plunge` / `cold_water`.
+- **Outdoor temp matters.** A `cold_air` session at −5°C is a fundamentally different stimulus than one at 25°C — they're not the same dose. Always include the temperature on outdoor cold lines when you know it. **If a `cold_air` line is logged without a temperature, the logger asks once before writing** (`SKILL.md` § "Sauna + cold exposure"). Answer with a number in °C or `skip`. Apple Health does not export ambient air temperature in workout XML, so this datum can only come from you.
 
 ### Pairing rule
 

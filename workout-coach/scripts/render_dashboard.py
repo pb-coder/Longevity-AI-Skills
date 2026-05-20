@@ -1404,7 +1404,7 @@ def card_strength(items, coach_text):
 '''
 
 
-def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, coach_text):
+def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
     hrv_series = [w.get("hrv_sdnn") for w in weekly]
     rhr_series = [w.get("resting_hr") for w in weekly]
     wt_series  = [w.get("wrist_temp_c") for w in weekly]
@@ -1433,6 +1433,25 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, coach_text):
         mean = sum(prior) / len(prior)
         return "good" if v <= mean else ("amber" if v <= mean * 1.05 else "warn")
 
+    def wt_status_label(v):
+        """Wrist temp: higher relative to baseline is the warning direction
+        (persistent elevation can precede illness). Mirrors the HRV/RHR
+        z-score pattern with stdev-based bands instead of percent."""
+        prior = [x for x in wt_series[:-1] if x]
+        if v is None or len(prior) < 2:
+            return ("insufficient data", "muted")
+        mean = sum(prior) / len(prior)
+        var = sum((x - mean) ** 2 for x in prior) / (len(prior) - 1)
+        sd = var ** 0.5
+        if sd == 0:
+            return ("stable", "good")
+        z = (v - mean) / sd
+        if z > 1.0:
+            return ("elevated", "warn")
+        if z > 0.5:
+            return ("rising", "amber")
+        return ("stable", "good")
+
     def sleep_status(v):
         if v is None: return "muted"
         if v >= 7: return "good"
@@ -1457,9 +1476,9 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, coach_text):
          rhr_status(latest_rhr),
          "Resting Heart Rate. Lower than your 60-day baseline is favorable."),
         ("Wrist temp", f'{fmt(latest_wt, 2)} <span class="muted">°C</span>',
-         sparkline(wt_series, "good"),
-         "stable",
-         "good",
+         sparkline(wt_series, wt_status_label(latest_wt)[1]),
+         wt_status_label(latest_wt)[0],
+         wt_status_label(latest_wt)[1],
          "Overnight wrist temperature. Persistent elevation can precede illness."),
         ("VO2max", f'{fmt(vo2max.get("value"), 2)} <span class="muted">ml/kg/min</span>',
          sparkline(vo2_series, vo2_status(vo2_trend)),
@@ -1467,8 +1486,8 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, coach_text):
          vo2_status(vo2_trend),
          "Peak rate of oxygen uptake. A standard fitness ceiling indicator."),
         ("Bodyweight", f'{fmt(bw.get("kg"), 2)} <span class="muted">kg</span>',
-         "",
-         signed(bw_trend, 2) + " kg/wk" if bw_trend is not None else "—",
+         sparkline(bw_weekly or [], "amber" if (bw_trend or 0) < -0.1 else "muted"),
+         signed(bw_trend, 2) + " kg/wk" if bw_trend is not None else "no trend",
          "amber" if (bw_trend or 0) < -0.1 else "muted",
          "Morning bodyweight, sparse-merge by date."),
     ]
@@ -1899,7 +1918,7 @@ def render(j, coach, workout_md, person):
     {card_training_load(series, ctl, atl, tsb, tsb_trend, coach_cards.get("training_load"))}
     {card_muscle_volume(weekly_volume, coach_cards.get("muscle_volume"))}
     {card_strength(e_items, coach_cards.get("strength"))}
-    {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, coach_cards.get("vitals"))}
+    {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"))}
     {card_sleep(j.get("sleep_summary"), coach_cards.get("sleep"))}
     {card_recovery_practices(thermal, light, coach_cards.get("recovery_practices"))}
     {card_wow(wow)}

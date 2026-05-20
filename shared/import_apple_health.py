@@ -470,15 +470,29 @@ class DayAggregator:
 
             total_h     = round(total_min  / 60.0, 2) if total_min  else None
             in_bed_h    = round(in_bed_min / 60.0, 2) if in_bed_min else None
+
+            first_seg = self.sleep_first_seg_start.get(d)
+            last_seg  = self.sleep_last_seg_end.get(d)
+            n_seg = self.sleep_n_segments.get(d, 0) or None
+
+            # Fallback: newer iOS (iOS 16+) often stops emitting explicit
+            # InBed segments, so ``in_bed_h`` is None despite the night
+            # being fully tracked. Derive an in-bed window from the
+            # earliest segment start to the latest segment end. Skip the
+            # fallback if the derived window is shorter than the total
+            # sleep (segment timestamps are inconsistent) or shorter
+            # than 2 h (likely a nap, not an overnight session).
+            if in_bed_h is None and first_seg and last_seg and last_seg > first_seg:
+                derived = (last_seg - first_seg).total_seconds() / 3600.0
+                if derived > 0 and (total_h is None or total_h <= derived + 0.05) \
+                        and (total_h is None or total_h >= 2.0):
+                    in_bed_h = round(derived, 2)
+
             efficiency  = (
                 round(total_h / in_bed_h * 100.0, 1)
                 if total_h is not None and in_bed_h is not None and in_bed_h > 0
                 else None
             )
-
-            first_seg = self.sleep_first_seg_start.get(d)
-            last_seg  = self.sleep_last_seg_end.get(d)
-            n_seg = self.sleep_n_segments.get(d, 0) or None
 
             yield {
                 "date": d,

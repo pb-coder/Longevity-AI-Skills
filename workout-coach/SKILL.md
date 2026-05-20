@@ -257,7 +257,7 @@ The dashboard is produced by **`scripts/render_dashboard.py`**. The script owns 
 
 ### Pipeline (4 steps)
 
-1. **Read tracker data:** `python3 Skills/workout-coach/scripts/read_tracker.py --person <Name> > /tmp/tracker.json`
+1. **Read tracker data, 6 months back:** `python3 Skills/workout-coach/scripts/read_tracker.py --person <Name> --months 6 > /tmp/tracker.json`. Six months is required so the 90-day training-load chart's 42-day CTL EWMA is properly warmed up before the visible window begins (anything less and the chart shows a cold-start ramp that is not real fitness movement).
 2. **Author the coach reads** (`plans/<Person>/<date>-coach_reads.json`). See "Coach-reads schema" below and the full spec in `references/assessment-dashboard.md`. Strict copy rules — no em-dashes, ≤ 280 chars per card string, ≤ 560 for the headline. The renderer validates and refuses to write the HTML on violation.
 3. **Author the workout markdown** (`plans/<Person>/<date>-workout.md`). Lean exercise list, sparse `— note` sub-bullets, per-set parentheticals where needed. Rules in the "Per-workout format in the file" section below — unchanged from before.
 4. **Render:**
@@ -269,6 +269,10 @@ The dashboard is produced by **`scripts/render_dashboard.py`**. The script owns 
      --out plans/<Person>/<date>-assessment.html \
      --person <Person>
    ```
+
+### Common manual reruns
+
+If only the coach text needs editing, edit `coach_reads.json` and re-run step 4 — the tracker.json and workout markdown stay valid as long as the JSON shape hasn't changed (it almost never does). The renderer is idempotent and fails fast on copy-rule violations, so the typical loop is: edit → re-run → reload the browser tab.
 
 Use the path resolvers (`plans_dir`, `workout_plan_md`, `assessment_html` in `shared/person_paths.py`) when building these paths. Never hand-assemble. Never write to the repo root.
 
@@ -284,6 +288,7 @@ Use the path resolvers (`plans_dir`, `workout_plan_md`, `assessment_html` in `sh
     "muscle_volume":      "one sentence",
     "strength":           "one or two sentences (signal + action)",
     "vitals":             "one or two sentences",
+    "sleep":              "one or two sentences (architecture + action)",
     "recovery_practices": "one sentence"
   }
 }

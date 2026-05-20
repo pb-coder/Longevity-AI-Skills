@@ -26,6 +26,7 @@
 | abductor machine | Hip Abductor Machine | — |
 | seated abductor | Hip Abductor Machine | — |
 | row machine without chest support | Seated Row Machine | — |
+| Pulley | Cable Seated Row | — |
 
 ## Modifier Handling
 

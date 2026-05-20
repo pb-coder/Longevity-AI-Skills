@@ -151,11 +151,13 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .ring-label { font-size: 13px; color: var(--text); }
 .ring-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-/* NEAT card: three equal stat cells. The primary metric (exercise
-   min/day) appends a colored status word against the upstream band
-   below its caption; the other two cells are descriptive numbers. */
+/* NEAT card: three equal stat cells, centered. All three cells frame
+   their numbers per day so the units read consistently. Cell 1
+   (exercise minutes) appends a colored status word against the
+   upstream band; cells 2 and 3 are descriptive. */
 .neat-stats { display: grid; grid-template-columns: repeat(3, 1fr);
   gap: 18px; }
+.neat-stat { text-align: center; }
 .neat-stat-num { font-size: 22px; font-weight: 600; line-height: 1.1;
   color: var(--text); font-variant-numeric: tabular-nums; }
 .neat-stat-unit { font-size: 11px; color: var(--muted); font-weight: 400;

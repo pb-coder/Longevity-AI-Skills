@@ -107,18 +107,22 @@ def card_rings(rings_html, coach_text):
 
 
 def card_neat(daily_activity):
-    """Dedicated NEAT card with three stat cells.
+    """Dedicated NEAT card with three stat cells, all framed per day so
+    the user reads consistent units across cells.
 
     NEAT = Non-Exercise Activity Thermogenesis: all-day movement
-    outside structured workouts. Primary metric (exercise min/day)
-    color-codes the status word against the upstream `assessment`
-    band; the other two stats are descriptive. Returns empty string
-    if no data."""
+    outside structured workouts. Cell 1 (exercise minutes/day) carries
+    a colored status word against the upstream ``assessment`` band;
+    cells 2 and 3 (walking minutes/day, walking distance/day) are
+    descriptive daily averages over the last 28 days. Returns empty
+    string if no data."""
     if not daily_activity:
         return ""
     avg_min = daily_activity.get("exercise_min_daily_avg")
-    walk_km = daily_activity.get("walking_distance_km_28d")
-    incidental = daily_activity.get("incidental_walks_count")
+    walk_min_28 = daily_activity.get("walking_minutes_28d")
+    walk_km_28 = daily_activity.get("walking_distance_km_28d")
+    walk_min_daily = (walk_min_28 / 28.0) if walk_min_28 is not None else None
+    walk_km_daily = (walk_km_28 / 28.0) if walk_km_28 is not None else None
     assess = (daily_activity.get("assessment") or "").lower()
     status_cls = {"high": "good", "moderate": "amber",
                   "low": "warn"}.get(assess, "muted")
@@ -127,19 +131,19 @@ def card_neat(daily_activity):
                    "low": "low"}.get(assess, "no signal")
     return f'''
 <section class="card">
-  <h2><span class="term" data-tip="Non-Exercise Activity Thermogenesis. All-day movement outside structured workouts. Strongly tied to long-term metabolic health and longevity.">NEAT</span></h2>
+  <h2><span class="term" data-tip="Non-Exercise Activity Thermogenesis. All-day movement outside structured workouts, averaged over the last 28 days. Strongly tied to long-term metabolic health and longevity.">NEAT</span></h2>
   <div class="neat-stats">
     <div class="neat-stat">
       <div class="neat-stat-num">{fmt(avg_min, 0)}<span class="neat-stat-unit">min/day</span></div>
       <div class="neat-stat-desc">exercise minutes · <span class="neat-stat-status {status_cls}">{esc(status_word)}</span></div>
     </div>
     <div class="neat-stat">
-      <div class="neat-stat-num">{fmt(walk_km, 1)}<span class="neat-stat-unit">km</span></div>
-      <div class="neat-stat-desc">walking, last 28 days</div>
+      <div class="neat-stat-num">{fmt(walk_min_daily, 0)}<span class="neat-stat-unit">min/day</span></div>
+      <div class="neat-stat-desc">time spent walking</div>
     </div>
     <div class="neat-stat">
-      <div class="neat-stat-num">{fmt(incidental, 0)}</div>
-      <div class="neat-stat-desc">incidental walks</div>
+      <div class="neat-stat-num">{fmt(walk_km_daily, 1)}<span class="neat-stat-unit">km/day</span></div>
+      <div class="neat-stat-desc">walking distance</div>
     </div>
   </div>
 </section>

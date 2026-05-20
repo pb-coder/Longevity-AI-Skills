@@ -66,12 +66,6 @@ KNOWN_TERMS = {
                "The maximum rate at which your body can use oxygen during intense exercise. A standard fitness ceiling and one of the strongest predictors of long-term healthspan."),
     "HSP":    ("Heat Shock Proteins",
                "Molecular chaperones induced by heat exposure. They are linked to many of sauna's longevity-associated effects. Induction needs roughly 20 minutes at or above 80 degrees Celsius."),
-    "PR":     ("Personal record",
-               "Your best lift to date for the rep range in question. A new PR usually means a real strength gain rather than a noisy session."),
-    "RPE":    ("Rate of perceived exertion",
-               "Self-reported effort on a 1 to 10 scale. A 10 is all-out; an 8 means you could have done about two more reps."),
-    "RIR":    ("Reps in reserve",
-               "How many more reps you could still do at the end of a set. RIR 2 means you stopped two reps short of failure."),
 }
 
 EM_DASH = "—"
@@ -119,9 +113,12 @@ _TERM_PATTERN = re.compile(
 
 
 def auto_wrap_terms(text: str) -> str:
-    """Wrap each known abbreviation in a tooltip span. The first
-    occurrence per term in the string is wrapped; later ones are left
-    plain to avoid visual noise."""
+    """Wrap each known abbreviation in a tooltip span.
+
+    Only the FIRST occurrence of each term per string is wrapped; later
+    occurrences are left plain. This is intentional, not a bug: wrapping
+    every occurrence creates dotted-underline visual noise on lines that
+    repeat a term. Do not 'fix' this to wrap all occurrences."""
     seen: set[str] = set()
 
     def _sub(m):
@@ -486,12 +483,11 @@ def confidence_dots(conf):
     'high' / 'medium' / 'low' (anything else renders as 0 filled).
     """
     level = {"high": 3, "medium": 2, "low": 1}.get((conf or "").lower(), 0)
-    tip = f"{(conf or 'unknown').capitalize()} confidence. Three dots = high, two = medium, one = low."
     dots = "".join(
         f'<span class="dot {"on" if i < level else "off"}"></span>'
         for i in range(3)
     )
-    return f'<span class="confdots" data-tip="{esc(tip)}">{dots}</span>'
+    return f'<span class="confdots">{dots}</span>'
 
 
 def sparkline(values, status_class=None, w=80, h=24):
@@ -591,7 +587,8 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
   letter-spacing: -0.02em; line-height: 1; }
 .metric .value .denom { font-size: 22px; color: var(--muted);
   font-weight: 400; }
-.metric .sub { color: var(--muted); margin-top: 8px; font-size: 14px; }
+.metric .sub { color: var(--muted); margin-top: 12px; font-size: 14px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .metric.good .value { color: var(--good); }
 .metric.amber .value { color: var(--amber); }
 .metric.warn .value { color: var(--warn); }
@@ -641,7 +638,7 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .driver-value.warn { color: var(--warn); }
 .driver-value.muted { color: var(--muted); }
 .driver-axis-row { display: grid; grid-template-columns: 150px 1fr 60px;
-  font-size: 11px; color: var(--muted); padding-bottom: 4px; }
+  font-size: 11px; color: var(--muted); padding-bottom: 10px; }
 .driver-axis-row .axis-labels { display: flex; justify-content: space-between; }
 
 /* rings */
@@ -683,12 +680,15 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 /* muscle bars, four distinct band colors, fixed-width dots, two thin
    tick marks per row showing MEV and MAV. No background band — that
    was causing the 3-color confusion on under-MEV rows. */
-.muscle-legend { display: flex; gap: 14px; flex-wrap: wrap;
-  align-items: center; font-size: 12px; color: var(--muted);
+.muscle-legend { font-size: 12px; color: var(--muted);
   margin-bottom: 14px; padding-bottom: 12px;
   border-bottom: 1px solid #f4f4f6; }
+.muscle-legend-chips { display: flex; gap: 20px; flex-wrap: wrap;
+  align-items: center; }
+.muscle-legend-chip { display: inline-flex; align-items: center; gap: 6px; }
+.muscle-legend-explain { margin-top: 10px; line-height: 1.5; }
 
-.bar-row { display: grid; grid-template-columns: 120px 1fr 210px;
+.bar-row { display: grid; grid-template-columns: 140px 1fr 240px;
   align-items: center; gap: 14px; padding: 7px 0;
   font-size: 13px; cursor: help; }
 .bar-label { color: var(--text); text-transform: capitalize; }
@@ -716,22 +716,43 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
   color: var(--text); margin-left: auto; }
 
 /* 3-dot confidence indicator. Three dots = high, two = medium,
-   one = low. Tooltip on hover gives the word. */
+   one = low. No tooltip; the dots are self-explanatory. */
 .confdots { display: inline-flex; align-items: center; gap: 3px;
-  vertical-align: middle; cursor: help; }
+  vertical-align: middle; }
 .confdots .dot { display: inline-block; width: 7px; height: 7px;
   border-radius: 50%; }
 .confdots .dot.on  { background: var(--accent); }
 .confdots .dot.off { background: #dadadc; }
 
 /* tables */
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px;
+  table-layout: fixed; }
 th, td { text-align: left; padding: 8px 10px 8px 0;
   border-bottom: 1px solid #f4f4f6; }
 th { font-weight: 500; color: var(--muted); font-size: 11px;
   text-transform: uppercase; letter-spacing: 0.06em; }
 td.num { font-variant-numeric: tabular-nums; }
 td.arrow { font-size: 16px; font-weight: 600; }
+
+/* Explicit column widths per data table so long labels in column 1
+   don't absorb all the slack and squeeze the numeric columns. */
+.strength-table th:nth-child(1), .strength-table td:nth-child(1) { width: auto; }
+.strength-table th:nth-child(2), .strength-table td:nth-child(2) { width: 110px; }
+.strength-table th:nth-child(3), .strength-table td:nth-child(3) { width: 140px; }
+.strength-table th:nth-child(4), .strength-table td:nth-child(4) { width: 60px; }
+.strength-table th:nth-child(5), .strength-table td:nth-child(5) { width: 70px; }
+
+.vitals-table th:nth-child(1), .vitals-table td:nth-child(1) { width: auto; }
+.vitals-table th:nth-child(2), .vitals-table td:nth-child(2) { width: 120px; }
+.vitals-table th:nth-child(3), .vitals-table td:nth-child(3) { width: 90px; }
+.vitals-table th:nth-child(4), .vitals-table td:nth-child(4) { width: 130px; }
+
+.wow-table th:nth-child(1), .wow-table td:nth-child(1) { width: auto; }
+.wow-table th:nth-child(2), .wow-table td:nth-child(2) { width: 80px; }
+.wow-table th:nth-child(3), .wow-table td:nth-child(3) { width: 80px; }
+.wow-table th:nth-child(4), .wow-table td:nth-child(4) { width: 80px; }
+.wow-table th:nth-child(5), .wow-table td:nth-child(5) { width: 30px; }
+.wow-table th:nth-child(6), .wow-table td:nth-child(6) { width: 40px; }
 .arrow.good { color: var(--good); }
 .arrow.warn { color: var(--warn); }
 .arrow.muted { color: var(--muted); }
@@ -761,8 +782,8 @@ td.arrow { font-size: 16px; font-weight: 600; }
   margin-right: 5px; }
 .sleep-rows { display: grid; gap: 6px;
   padding-top: 14px; border-top: 1px solid #f4f4f6; }
-.sleep-row { display: grid; grid-template-columns: 12px 180px 1fr 130px;
-  align-items: center; gap: 12px; padding: 6px 0; font-size: 13px;
+.sleep-row { display: grid; grid-template-columns: 12px 200px 1fr 150px;
+  align-items: center; gap: 14px; padding: 6px 0; font-size: 13px;
   cursor: help; }
 .sleep-row-label { color: var(--text); }
 .sleep-row-value { color: var(--text); }
@@ -829,7 +850,7 @@ td.arrow { font-size: 16px; font-weight: 600; }
 .workout-card .workout-prose { color: var(--muted); font-size: 13px;
   line-height: 1.5; padding: 4px 0; }
 
-footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 50px;
+footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   color: var(--muted); font-size: 12px; }
 
 /* responsive */
@@ -837,7 +858,7 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 50px;
   .page { padding: 20px 14px 50px; }
   .card { padding: 16px 16px; }
   .hero { grid-template-columns: 1fr; }
-  .rings { grid-template-columns: repeat(3, 1fr); }
+  .rings { grid-template-columns: repeat(2, 1fr); }
   .sleep-hero { grid-template-columns: 1fr; gap: 14px; }
   .sleep-row { grid-template-columns: 12px 1fr; gap: 8px; }
   .sleep-row-value, .sleep-row-status { grid-column: 2 / span 1; }
@@ -1117,11 +1138,15 @@ INLINE_JS = r"""
 def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend):
     arrow = "▲" if (tsb_trend or 0) > 0 else ("▼" if (tsb_trend or 0) < 0 else "→")
     arrow_cls = "good" if (tsb_trend or 0) > 0 else ("warn" if (tsb_trend or 0) < 0 else "muted")
+    if score is None:
+        score_value_html = '<div class="value muted" style="font-size:22px;">not enough data</div>'
+    else:
+        score_value_html = f'<div class="value">{esc(fmt(score, 1))}<span class="denom"> / 10</span></div>'
     return f'''
 <section class="hero">
   <article class="card metric {score_cls}">
     <h2>Recovery</h2>
-    <div class="value">{esc(fmt(score, 1))}<span class="denom"> / 10</span></div>
+    {score_value_html}
     <div class="sub">confidence {confidence_dots(confidence)}</div>
   </article>
   <article class="card metric {tsb_cls}">
@@ -1188,11 +1213,13 @@ def card_muscle_volume(weekly_volume, coach_text):
 <section class="card">
   <h2>Per-muscle weekly volume</h2>
   <div class="muscle-legend">
-    <span><span class="bar-dot band-low"></span>not enough</span>
-    <span><span class="bar-dot band-prod"></span>productive</span>
-    <span><span class="bar-dot band-push"></span>pushing limit</span>
-    <span><span class="bar-dot band-over"></span>too much, cut back</span>
-    <span class="muted">vertical marks on each bar show <span class="term" data-tip="Minimum Effective Volume. The smallest weekly set count that still drives growth in a muscle. Below this number, training does not produce a meaningful adaptation.">MEV</span> and <span class="term" data-tip="Maximum Adaptive Volume. The upper end of the productive range for a muscle. Beyond this, extra sets cost more fatigue than they give back in growth.">MAV</span></span>
+    <div class="muscle-legend-chips">
+      <span class="muscle-legend-chip"><span class="bar-dot band-low"></span>not enough</span>
+      <span class="muscle-legend-chip"><span class="bar-dot band-prod"></span>productive</span>
+      <span class="muscle-legend-chip"><span class="bar-dot band-push"></span>pushing limit</span>
+      <span class="muscle-legend-chip"><span class="bar-dot band-over"></span>too much, cut back</span>
+    </div>
+    <div class="muscle-legend-explain muted">the two thin marks on each bar show the start of the productive range (<span class="term" data-tip="Minimum Effective Volume. The smallest weekly set count that still drives growth in a muscle. Below this number, training does not produce a meaningful adaptation.">MEV</span>) and its upper edge (<span class="term" data-tip="Maximum Adaptive Volume. The upper end of the productive range for a muscle. Beyond this, extra sets cost more fatigue than they give back in growth.">MAV</span>)</div>
   </div>
   {bars}
   {coach_block(coach_text)}
@@ -1223,7 +1250,7 @@ def card_strength(items, coach_text):
     return f'''
 <section class="card">
   <h2>Are you getting stronger?</h2>
-  <table>
+  <table class="strength-table">
     <thead>
       <tr>
         <th>Lift</th>
@@ -1322,7 +1349,7 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, coach_text):
     return f'''
 <section class="card">
   <h2>Health vitals</h2>
-  <table>
+  <table class="vitals-table">
     <thead><tr><th>Metric</th><th>Value</th><th class="vitals-spark-col">Trend</th><th>State</th></tr></thead>
     <tbody>{"".join(body)}</tbody>
   </table>
@@ -1605,7 +1632,7 @@ def card_wow(wow):
     return f'''
 <section class="card">
   <h2>This week vs last vs 4-week average</h2>
-  <table>
+  <table class="wow-table">
     <thead><tr><th>Metric</th><th>This wk</th><th>Last wk</th><th>4-wk avg</th><th></th><th></th></tr></thead>
     <tbody>{"".join(body)}</tbody>
   </table>

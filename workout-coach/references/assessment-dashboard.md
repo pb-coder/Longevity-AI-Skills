@@ -67,7 +67,7 @@ All keys under `cards` are optional. If a key is missing or empty, the card rend
 
 - **Action voice is imperative.** "Target 7.5 h tonight" not "you should consider targeting 7.5 h".
 - **Action only when actionable.** If nothing meaningful changes, the read is *"On track, hold course."* or *"Steady, no change."* Do not invent urgency.
-- **Plain English.** The renderer automatically wraps abbreviations (CTL, ATL, TSB, e1RM, MEV, MAV, MRV, SDNN, HRR, RHR, HRV, Z2, Z5, VO2max, HSP, PR, RPE, RIR) in dotted-underline tooltips when they appear, so the coach is *allowed* to use them. But prefer the plain-English equivalent when it reads more naturally ("fitness" instead of CTL, "freshness" instead of TSB).
+- **Plain English.** The renderer automatically wraps abbreviations (CTL, ATL, TSB, e1RM, MEV, MAV, MRV, SDNN, HRR, RHR, HRV, Z2, Z5, VO2max, HSP) in dotted-underline tooltips when they appear, so the coach is *allowed* to use them. But prefer the plain-English equivalent when it reads more naturally ("fitness" instead of CTL, "freshness" instead of TSB).
 - **One sentence per card.** Two sentences only when there are two distinct actions.
 
 ## Card spec (data sources)
@@ -90,7 +90,7 @@ All keys under `cards` are optional. If a key is missing or empty, the card rend
 
 Maintained in code at `Skills/workout-coach/scripts/render_dashboard.py::KNOWN_TERMS`. Adding a new abbreviation: add the entry there. Both expansion and a one-sentence plain-English explanation are required.
 
-Currently covered: CTL, ATL, TSB, e1RM, MEV, MAV, MRV, SDNN, HRR, RHR, HRV, Z2, Z5, VO2max, HSP, PR, RPE, RIR.
+Currently covered: CTL, ATL, TSB, e1RM, MEV, MAV, MRV, SDNN, HRR, RHR, HRV, Z2, Z5, VO2max, HSP.
 
 ## Mobile breakpoints
 

@@ -551,7 +551,7 @@ def freshness_scale(tsb):
     )
     return f'''
 <div class="fresh-scale">
-  <svg viewBox="0 0 600 60" preserveAspectRatio="xMidYMid meet" class="fresh-scale-svg" aria-hidden="true">
+  <svg viewBox="-30 0 660 60" preserveAspectRatio="xMidYMid meet" class="fresh-scale-svg" aria-hidden="true">
     {labels_svg}
     <line x1="0" y1="24" x2="600" y2="24" class="fresh-axis"/>
     {tick_lines}
@@ -559,6 +559,55 @@ def freshness_scale(tsb):
     <polygon points="{x-5:.1f},14 {x+5:.1f},14 {x:.1f},22" class="fresh-marker-tri {marker_cls}"/>
     <line x1="{x:.1f}" y1="22" x2="{x:.1f}" y2="30" class="fresh-marker {marker_cls}"/>
     <text x="{x:.1f}" y="56" text-anchor="middle" class="fresh-marker-val {marker_cls}">{signed(tsb, 1)}</text>
+  </svg>
+</div>'''
+
+
+def recovery_scale(score):
+    """Horizontal 0..10 scale strip with a position marker.
+
+    Three band labels match the dashboard spec for recovery score bands:
+    depleted (<4.5, warn), moderate (4.5..6.5, amber), ready (>=6.5, good).
+    Same visual structure as `freshness_scale()` so the two cards in the
+    hero read as siblings. Returns empty string when score is None."""
+    if score is None:
+        return ""
+    s = max(0.0, min(10.0, float(score)))
+    x = (s / 10.0) * 600.0
+    if s < 4.5:
+        marker_cls = "warn"
+    elif s < 6.5:
+        marker_cls = "amber"
+    else:
+        marker_cls = "good"
+    band_labels = [
+        ("depleted",   135),   # midpoint of 0..4.5 → x=135
+        ("moderate",   330),   # midpoint of 4.5..6.5 → x=330
+        ("ready",      495),   # midpoint of 6.5..10 → x=495
+    ]
+    labels_svg = "".join(
+        f'<text x="{lx}" y="10" text-anchor="middle" class="fresh-band-lbl">{lbl}</text>'
+        for lbl, lx in band_labels
+    )
+    # Ticks at 0, 2, 4, 6, 8, 10 (x=0, 120, 240, 360, 480, 600).
+    tick_lines = "".join(
+        f'<line x1="{i*120}" y1="20" x2="{i*120}" y2="28" class="fresh-tick"/>'
+        for i in range(6)
+    )
+    tick_numbers = "".join(
+        f'<text x="{i*120}" y="42" text-anchor="middle" class="fresh-tick-num">{n}</text>'
+        for i, n in enumerate(["0","2","4","6","8","10"])
+    )
+    return f'''
+<div class="fresh-scale">
+  <svg viewBox="-30 0 660 60" preserveAspectRatio="xMidYMid meet" class="fresh-scale-svg" aria-hidden="true">
+    {labels_svg}
+    <line x1="0" y1="24" x2="600" y2="24" class="fresh-axis"/>
+    {tick_lines}
+    {tick_numbers}
+    <polygon points="{x-5:.1f},14 {x+5:.1f},14 {x:.1f},22" class="fresh-marker-tri {marker_cls}"/>
+    <line x1="{x:.1f}" y1="22" x2="{x:.1f}" y2="30" class="fresh-marker {marker_cls}"/>
+    <text x="{x:.1f}" y="56" text-anchor="middle" class="fresh-marker-val {marker_cls}">{fmt(score, 1)}</text>
   </svg>
 </div>'''
 
@@ -655,12 +704,8 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 
 /* hero */
-.hero { display: grid; grid-template-columns: 5fr 7fr; gap: 14px; }
+.hero { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
 .hero .metric { display: flex; flex-direction: column; }
-/* Recovery card has only a few lines of content; center it vertically so
-   the score doesn't sit stranded at the top of a card that stretches to
-   match the taller Freshness card. */
-.hero .metric--compact { justify-content: center; }
 .metric .value { font-size: 48px; font-weight: 600;
   letter-spacing: -0.02em; line-height: 1; }
 .metric .value .denom { font-size: 22px; color: var(--muted);
@@ -728,24 +773,17 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .ring-label { font-size: 13px; color: var(--text); }
 .ring-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-/* NEAT sub-section under the activity rings. Subsection header + pill
-   at the top, three equal stat cells below. Hairline rule above so it
-   reads as a related sub-row of the rings card, not a new card. */
-.neat-section { margin-top: 16px; padding-top: 14px;
+/* NEAT card: primary metric uses the bar-row pattern from muscle
+   volume (consistent visual vocabulary); supporting metrics below
+   are simple stat cells. */
+.neat-stats { display: grid; grid-template-columns: repeat(2, 1fr);
+  gap: 18px; margin-top: 14px; padding-top: 14px;
   border-top: 1px solid #f0f0f1; }
-.neat-head { display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 12px; }
-.neat-head-label { font-size: 11px; font-weight: 600;
-  letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--muted); }
-.neat-cells { display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 18px; }
-.neat-cell { font-size: 13px; }
-.neat-num { font-size: 20px; font-weight: 600; line-height: 1.1;
+.neat-stat-num { font-size: 20px; font-weight: 600; line-height: 1.1;
   color: var(--text); font-variant-numeric: tabular-nums; }
-.neat-unit { font-size: 11px; color: var(--muted); font-weight: 400;
+.neat-stat-unit { font-size: 11px; color: var(--muted); font-weight: 400;
   margin-left: 4px; }
-.neat-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.neat-stat-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
 /* training-load chart */
 .load-chart { width: 100%; height: auto; cursor: crosshair; }
@@ -757,13 +795,19 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
    relationship ambiguous. */
 .load-summary { display: grid; grid-template-columns: repeat(4, 1fr);
   gap: 18px; margin-top: 14px; }
-.load-summary-cell { display: flex; flex-direction: column; gap: 4px; }
-.load-summary-name { display: inline-flex; align-items: center; gap: 8px;
-  font-size: 12px; color: var(--muted); }
-.load-summary-name .sw { display: inline-block; width: 18px; height: 2px;
+/* Per cell: swatch in a fixed 22px left column spanning both rows, name
+   in the right column row 1, value in the right column row 2. Name and
+   value share the same column so they are left-aligned to each other
+   regardless of swatch presence. */
+.load-summary-cell { display: grid; grid-template-columns: 22px 1fr;
+  column-gap: 8px; row-gap: 4px; align-items: center; }
+.load-summary-cell .sw { grid-column: 1; grid-row: 1 / span 2;
+  align-self: center; }
+.load-summary-name { grid-column: 2; font-size: 12px; color: var(--muted); }
+.load-summary-value { grid-column: 2; font-size: 20px; font-weight: 600;
+  color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.load-summary-cell .sw { display: inline-block; width: 18px; height: 2px;
   vertical-align: middle; }
-.load-summary-value { font-size: 20px; font-weight: 600; color: var(--text);
-  font-variant-numeric: tabular-nums; line-height: 1.1; }
 /* Line/band swatches reused by both the summary row and the floating
    tooltip on the chart, so they stay top-level. */
 .sw-ctl { background: #0a84ff; }
@@ -916,16 +960,15 @@ td.arrow { font-size: 16px; font-weight: 600; }
   margin-right: 5px; }
 .sleep-rows { display: grid; gap: 6px;
   padding-top: 14px; border-top: 1px solid #f4f4f6; }
-.sleep-row { display: grid; grid-template-columns: 12px 200px 1fr 150px;
+.sleep-row { display: grid; grid-template-columns: 12px 200px 1fr;
   align-items: center; gap: 14px; padding: 6px 0; font-size: 13px;
   cursor: help; }
 .sleep-row-label { color: var(--text); }
-.sleep-row-value { color: var(--text); }
-.sleep-row-status { text-align: right; font-size: 12px;
-  color: var(--muted); }
-.sleep-row-status.good  { color: var(--good); }
-.sleep-row-status.amber { color: var(--amber); }
-.sleep-row-status.warn  { color: var(--warn); }
+.sleep-row-value { color: var(--text); font-variant-numeric: tabular-nums; }
+.sleep-row-value.good  { color: var(--good); }
+.sleep-row-value.amber { color: var(--amber); }
+.sleep-row-value.warn  { color: var(--warn); }
+.sleep-row-value.muted { color: var(--muted); }
 .sleep-outliers { margin-top: 14px; padding: 10px 12px;
   background: #fafafa; border-radius: 6px;
   font-size: 13px; color: var(--text); }
@@ -993,13 +1036,12 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   .card { padding: 16px 16px; }
   .hero { grid-template-columns: 1fr; }
   .rings { grid-template-columns: repeat(2, 1fr); }
-  .neat-cells { gap: 12px; }
-  .neat-num { font-size: 18px; }
+  .neat-stats { grid-template-columns: 1fr; gap: 10px; }
   .load-summary { grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .load-summary-value { font-size: 18px; }
   .sleep-hero { grid-template-columns: 1fr; gap: 14px; }
   .sleep-row { grid-template-columns: 12px 1fr; gap: 8px; }
-  .sleep-row-value, .sleep-row-status { grid-column: 2 / span 1; }
+  .sleep-row-value { grid-column: 2 / span 1; }
   .practices { grid-template-columns: 1fr; }
   .driver-row { grid-template-columns: 110px 1fr 50px; gap: 8px; font-size: 12px; }
   .bar-row { grid-template-columns: 1fr; gap: 4px;
@@ -1282,16 +1324,17 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
         score_value_html = f'<div class="value">{esc(fmt(score, 1))}<span class="denom"> / 10</span></div>'
     return f'''
 <section class="hero">
-  <article class="card metric metric--compact {score_cls}">
+  <article class="card metric {score_cls}">
     <h2>Recovery</h2>
     {score_value_html}
+    {recovery_scale(score)}
     <div class="sub">confidence {confidence_dots(confidence)}</div>
   </article>
   <article class="card metric {tsb_cls}">
     <h2><span class="term" data-tip="Your fitness minus your current fatigue. Positive numbers mean you are fresh and ready to train hard; negative numbers mean fatigue is accumulating. Above +5 is fresh, below -10 starts to be tired.">Freshness</span></h2>
     <div class="value">{esc(signed(tsb, 1))}</div>
     {freshness_scale(tsb)}
-    <div class="sub">{esc(tsb_label)}. <span class="term" data-tip="Your training stress over the last 42 days. This number moves slowly and represents your fitness baseline.">Fitness</span> {fmt(ctl, 1)}, <span class="term" data-tip="Your training stress over the last 7 days. This number moves quickly and represents your current fatigue.">fatigue</span> {fmt(atl, 1)}.</div>
+    <div class="sub"><span class="pill {tsb_cls}">{esc(tsb_label.lower() if tsb_label else "")}</span></div>
     <div class="sub" style="margin-top:6px; color: var(--{arrow_cls});">{arrow} {signed(tsb_trend, 1)} over the last 7 days</div>
   </article>
 </section>
@@ -1314,52 +1357,78 @@ def card_drivers(drivers, coach_text):
 '''
 
 
-def neat_strip(daily_activity):
-    """Compact NEAT sub-section below the activity rings.
+def card_rings(rings_html, coach_text):
+    return f'''
+<section class="card">
+  <h2>This week at a glance</h2>
+  <div class="rings">{rings_html}</div>
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_neat(daily_activity):
+    """Dedicated NEAT card following the dashboard's standard chrome.
 
     NEAT = Non-Exercise Activity Thermogenesis: all-day movement
-    outside structured workouts. A longevity-relevant signal in its
-    own right. Reads `daily_activity_28d` from the tracker JSON.
-    Status band keys directly off the upstream `assessment`
-    (`high`/`moderate`/`low`). Returns empty string when absent."""
+    outside structured workouts. The primary metric (exercise minutes
+    per day) gets a banded bar (low <15, moderate 15..45, high >=45)
+    matching the muscle-volume visual vocabulary; the supporting
+    metrics are simple stats. Returns empty string if no data."""
     if not daily_activity:
         return ""
     avg_min = daily_activity.get("exercise_min_daily_avg")
     walk_km = daily_activity.get("walking_distance_km_28d")
     incidental = daily_activity.get("incidental_walks_count")
     assess = (daily_activity.get("assessment") or "").lower()
-    cls = {"high": "good", "moderate": "amber", "low": "warn"}.get(assess, "muted")
-    pill_label = assess or "no signal"
-    return f'''
-<div class="neat-section">
-  <div class="neat-head">
-    <span class="neat-head-label"><span class="term" data-tip="Non-Exercise Activity Thermogenesis. The movement outside structured workouts. Strongly tied to long-term metabolic health and longevity.">All-day movement (NEAT)</span></span>
-    <span class="pill {cls}">{esc(pill_label)}</span>
+
+    # Bar for the primary metric. Mirror muscle-bar semantics:
+    # MEV = 15 min, MAV = 45 min, scale runs to 60 min so the high band
+    # has visible headroom. Fill color follows the upstream band.
+    band_cls = {"high": "band-prod", "moderate": "band-push",
+                "low": "band-low"}.get(assess, "band-low")
+    scale_max = 60.0
+    fill_pct = min(100.0, ((avg_min or 0.0) / scale_max) * 100.0)
+    mev_pct = (15.0 / scale_max) * 100.0
+    mav_pct = (45.0 / scale_max) * 100.0
+    status_word = {"high": "high",
+                   "moderate": "moderate",
+                   "low": "low"}.get(assess, "no signal")
+    status_dot_cls = {"high": "band-prod", "moderate": "band-push",
+                      "low": "band-low"}.get(assess, "band-low")
+
+    primary_row = f'''
+<div class="bar-row" data-tip="Apple's all-day exercise minutes, averaged over the last 28 days. Below 15 min/day is low, 15 to 45 is moderate, 45+ is high. Sustained higher values track well with longevity outcomes.">
+  <span class="bar-label">exercise min/day</span>
+  <div class="bar-track">
+    <div class="bar-tick" style="left:{mev_pct:.1f}%"></div>
+    <div class="bar-tick" style="left:{mav_pct:.1f}%"></div>
+    <div class="bar-fill {band_cls}" style="width:{fill_pct:.1f}%"></div>
   </div>
-  <div class="neat-cells">
-    <div class="neat-cell">
-      <div class="neat-num">{fmt(avg_min, 0)}<span class="neat-unit">min/day</span></div>
-      <div class="neat-desc">exercise minutes</div>
-    </div>
-    <div class="neat-cell">
-      <div class="neat-num">{fmt(walk_km, 1)}<span class="neat-unit">km</span></div>
-      <div class="neat-desc">walking, last 28 d</div>
-    </div>
-    <div class="neat-cell">
-      <div class="neat-num">{fmt(incidental, 0)}</div>
-      <div class="neat-desc">incidental walks</div>
-    </div>
+  <span class="bar-status">
+    <span class="bar-dot {status_dot_cls}"></span>
+    <span class="bar-status-label">{esc(status_word)}</span>
+    <span class="bar-num">{fmt(avg_min, 0)}</span>
+  </span>
+</div>'''
+
+    stats_row = f'''
+<div class="neat-stats">
+  <div class="neat-stat">
+    <div class="neat-stat-num">{fmt(walk_km, 1)}<span class="neat-stat-unit">km</span></div>
+    <div class="neat-stat-desc">walking, last 28 days</div>
+  </div>
+  <div class="neat-stat">
+    <div class="neat-stat-num">{fmt(incidental, 0)}</div>
+    <div class="neat-stat-desc">incidental walks</div>
   </div>
 </div>'''
 
-
-def card_rings(rings_html, daily_activity, coach_text):
     return f'''
 <section class="card">
-  <h2>This week at a glance</h2>
-  <div class="rings">{rings_html}</div>
-  {neat_strip(daily_activity)}
-  {coach_block(coach_text)}
+  <h2><span class="term" data-tip="Non-Exercise Activity Thermogenesis. The movement outside structured workouts. Strongly tied to long-term metabolic health and longevity.">Activity outside workouts (NEAT)</span></h2>
+  {primary_row}
+  {stats_row}
 </section>
 '''
 
@@ -1372,18 +1441,22 @@ def card_training_load(series, ctl, atl, tsb, tsb_trend, coach_text):
   {svg}
   <div class="load-summary">
     <div class="load-summary-cell">
-      <span class="load-summary-name"><span class="sw sw-ctl"></span><span class="term" data-tip="A 42-day moving average of your session-by-session training stress. It moves slowly and represents your fitness baseline. The blue line.">fitness</span></span>
+      <span class="sw sw-ctl"></span>
+      <span class="load-summary-name"><span class="term" data-tip="A 42-day moving average of your session-by-session training stress. It moves slowly and represents your fitness baseline. The blue line.">fitness</span></span>
       <span class="load-summary-value">{fmt(ctl, 1)}</span>
     </div>
     <div class="load-summary-cell">
-      <span class="load-summary-name"><span class="sw sw-atl"></span><span class="term" data-tip="A 7-day moving average of your training stress. It moves quickly and represents your current fatigue. The orange dashed line.">fatigue</span></span>
+      <span class="sw sw-atl"></span>
+      <span class="load-summary-name"><span class="term" data-tip="A 7-day moving average of your training stress. It moves quickly and represents your current fatigue. The orange dashed line.">fatigue</span></span>
       <span class="load-summary-value">{fmt(atl, 1)}</span>
     </div>
     <div class="load-summary-cell">
-      <span class="load-summary-name"><span class="sw sw-tsb"></span><span class="term" data-tip="Fitness minus fatigue. Positive means fresh, negative means accumulating fatigue. The shaded band on the chart.">freshness</span></span>
+      <span class="sw sw-tsb"></span>
+      <span class="load-summary-name"><span class="term" data-tip="Fitness minus fatigue. Positive means fresh, negative means accumulating fatigue. The shaded band on the chart.">freshness</span></span>
       <span class="load-summary-value">{signed(tsb, 1)}</span>
     </div>
     <div class="load-summary-cell">
+      <span></span>
       <span class="load-summary-name">7-day trend</span>
       <span class="load-summary-value">{signed(tsb_trend, 1)}</span>
     </div>
@@ -1700,46 +1773,40 @@ def card_sleep(sleep, coach_text):
 
   <div class="sleep-rows">
 
-    <div class="sleep-row" data-tip="Together, Deep and REM sleep carry the recovery and memory load. A common target is 2.5+ hours combined per night.">
+    <div class="sleep-row" data-tip="Together, Deep and REM sleep carry the recovery and memory load. A common target is 2.5+ hours combined per night. Status: {dr_word}.">
       <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[dr_band] }"></span>
       <span class="sleep-row-label">Deep + REM</span>
-      <span class="sleep-row-value">{deep_plus_rem:.2f} h</span>
-      <span class="sleep-row-status {dr_band}">{dr_word}</span>
+      <span class="sleep-row-value {dr_band}">{deep_plus_rem:.2f} h</span>
     </div>
 
-    <div class="sleep-row" data-tip="Sleep efficiency is the percent of time in bed that you were actually asleep. The healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools.">
+    <div class="sleep-row" data-tip="Sleep efficiency is the percent of time in bed that you were actually asleep. The healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools. Status: {ef_word}.">
       <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[ef_band] }"></span>
       <span class="sleep-row-label">Efficiency</span>
-      <span class="sleep-row-value">{ef_value}</span>
-      <span class="sleep-row-status {ef_band}">{ef_word}</span>
+      <span class="sleep-row-value {ef_band}">{ef_value}</span>
     </div>
 
-    <div class="sleep-row" data-tip="The number of awake-or-stage-transition segments Apple's classifier counted per night. More segments mean more fragmentation. Lower is better.">
+    <div class="sleep-row" data-tip="The number of awake-or-stage-transition segments Apple's classifier counted per night. More segments mean more fragmentation. Lower is better. Status: {fr_word}.">
       <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[fr_band] }"></span>
       <span class="sleep-row-label">Fragmentation</span>
-      <span class="sleep-row-value">{fmt(frag_mean, 1)} segs / night</span>
-      <span class="sleep-row-status {fr_band}">{fr_word}</span>
+      <span class="sleep-row-value {fr_band}">{fmt(frag_mean, 1)} segs / night</span>
     </div>
 
-    <div class="sleep-row" data-tip="Bedtime and waketime standard deviation over the last 28 days. A tighter schedule produces a better recovery profile. Under 30 minutes is tight, 30 to 60 is loose, above 60 is erratic.">
+    <div class="sleep-row" data-tip="Bedtime and waketime standard deviation over the last 28 days. A tighter schedule produces a better recovery profile. Under 30 minutes is tight, 30 to 60 is loose, above 60 is erratic. Status: {bt_word}.">
       <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[bt_band] }"></span>
       <span class="sleep-row-label">Schedule</span>
-      <span class="sleep-row-value">bedtime ± {fmt(bt_stdev, 0)} min · waketime ± {fmt(wt_stdev, 0)} min</span>
-      <span class="sleep-row-status {bt_band}">{bt_word}</span>
+      <span class="sleep-row-value {bt_band}">bedtime ± {fmt(bt_stdev, 0)} min · waketime ± {fmt(wt_stdev, 0)} min</span>
     </div>
 
-    <div class="sleep-row" data-tip="Average respiratory rate during sleep. Typical adult range is 12 to 20 breaths per minute. A sustained rise can precede illness by 24 to 48 hours.">
+    <div class="sleep-row" data-tip="Average respiratory rate during sleep. Typical adult range is 12 to 20 breaths per minute. A sustained rise can precede illness by 24 to 48 hours. Status: {rr_word}.">
       <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[rr_band] }"></span>
       <span class="sleep-row-label">Respiratory rate</span>
-      <span class="sleep-row-value">{rr_value}</span>
-      <span class="sleep-row-status {rr_band}">{rr_word}</span>
+      <span class="sleep-row-value {rr_band}">{rr_value}</span>
     </div>
 
-    <div class="sleep-row" data-tip="Apple's overnight breathing disturbances signal. Persistently elevated values are a screening signal for sleep apnea and worth raising with a doctor. Below 5 per minute is generally low.">
+    <div class="sleep-row" data-tip="Apple's overnight breathing disturbances signal. Persistently elevated values are a screening signal for sleep apnea and worth raising with a doctor. Below 5 per minute is generally low. Status: {sbd_word}.">
       <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[sbd_band] }"></span>
       <span class="sleep-row-label">Breathing disturbances</span>
-      <span class="sleep-row-value">{sbd_value}</span>
-      <span class="sleep-row-status {sbd_band}">{sbd_word}</span>
+      <span class="sleep-row-value {sbd_band}">{sbd_value}</span>
     </div>
 
   </div>
@@ -1963,7 +2030,8 @@ def render(j, coach, workout_md, person):
     </section>
     {card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend)}
     {card_drivers(recovery.get("drivers"), coach_cards.get("recovery_drivers"))}
-    {card_rings(rings_html, j.get("daily_activity_28d"), coach_cards.get("activity_rings"))}
+    {card_rings(rings_html, coach_cards.get("activity_rings"))}
+    {card_neat(j.get("daily_activity_28d"))}
     {card_training_load(series, ctl, atl, tsb, tsb_trend, coach_cards.get("training_load"))}
     {card_muscle_volume(weekly_volume, coach_cards.get("muscle_volume"))}
     {card_strength(e_items, coach_cards.get("strength"))}

@@ -12,7 +12,7 @@ before touching the code.
 | A card's HTML layout / structure | [`lib/render_cards.py`](lib/render_cards.py) |
 | CSS / styling / colors | [`lib/render_assets.py`](lib/render_assets.py) (the `STYLESHEET` string) |
 | Inline JavaScript (tabs, tooltips, chart scrubber, markdown viewer) | [`lib/render_assets.py`](lib/render_assets.py) (the `INLINE_JS` string) |
-| An SVG component (training-load chart, sparkline, muscle bar, freshness/recovery scale, ring, driver bar) | [`lib/render_cards.py`](lib/render_cards.py)... wait no, [`lib/render_components.py`](lib/render_components.py) |
+| An SVG component (training-load chart, sparkline, muscle bar, freshness/recovery scale, ring, driver bar) | [`lib/render_components.py`](lib/render_components.py) |
 | Coach-text validation rules / em-dash check / length cap | [`lib/render_validators.py`](lib/render_validators.py)::`validate_coach_reads` |
 | Add a tooltip for a new abbreviation in coach text | [`lib/render_validators.py`](lib/render_validators.py)::`KNOWN_TERMS` |
 | Tracker JSON shape (what fields the renderer reads) | [`scripts/read_tracker.py`](scripts/read_tracker.py) + the relevant `lib/*.py` analytics module |

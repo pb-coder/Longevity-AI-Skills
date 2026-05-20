@@ -490,6 +490,56 @@ def confidence_dots(conf):
     return f'<span class="confdots">{dots}</span>'
 
 
+def freshness_scale(tsb):
+    """Horizontal -15..+15 scale strip with a position marker.
+
+    Six band labels match the six-state TSB gate table in SKILL.md
+    Phase 2 (high fatigue / fatigued / carrying / balanced / fresh /
+    well rested). Returns an empty string if tsb is None."""
+    if tsb is None:
+        return ""
+    t_vis = max(-15.0, min(15.0, float(tsb)))
+    x = ((t_vis + 15.0) / 30.0) * 600.0
+    if t_vis <= -10 or t_vis > 10:
+        marker_cls = "warn" if t_vis <= -10 else "amber"
+    elif t_vis <= -5:
+        marker_cls = "amber"
+    else:
+        marker_cls = "good"
+    band_labels = [
+        ("high fatigue",  50),
+        ("fatigued",     150),
+        ("carrying",     250),
+        ("balanced",     350),
+        ("fresh",        450),
+        ("well rested",  550),
+    ]
+    labels_svg = "".join(
+        f'<text x="{lx}" y="10" text-anchor="middle" class="fresh-band-lbl">{lbl}</text>'
+        for lbl, lx in band_labels
+    )
+    tick_lines = "".join(
+        f'<line x1="{i*100}" y1="20" x2="{i*100}" y2="28" class="fresh-tick"/>'
+        for i in range(7)
+    )
+    tick_numbers = "".join(
+        f'<text x="{i*100}" y="42" text-anchor="middle" class="fresh-tick-num">{n}</text>'
+        for i, n in enumerate(["-15","-10","-5","0","+5","+10","+15"])
+    )
+    return f'''
+<div class="fresh-scale">
+  <svg viewBox="0 0 600 60" preserveAspectRatio="xMidYMid meet" class="fresh-scale-svg" aria-hidden="true">
+    {labels_svg}
+    <line x1="0" y1="24" x2="600" y2="24" class="fresh-axis"/>
+    {tick_lines}
+    {tick_numbers}
+    <polygon points="{x-5:.1f},14 {x+5:.1f},14 {x:.1f},22" class="fresh-marker-tri {marker_cls}"/>
+    <line x1="{x:.1f}" y1="22" x2="{x:.1f}" y2="30" class="fresh-marker {marker_cls}"/>
+    <text x="{x:.1f}" y="56" text-anchor="middle" class="fresh-marker-val {marker_cls}">{signed(tsb, 1)}</text>
+  </svg>
+</div>'''
+
+
 def sparkline(values, status_class=None, w=80, h=24):
     vals = [v for v in values if v is not None]
     if len(vals) < 2:
@@ -719,6 +769,29 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
    one = low. No tooltip; the dots are self-explanatory. */
 .confdots { display: inline-flex; align-items: center; gap: 3px;
   vertical-align: middle; }
+
+/* Freshness (TSB) scale strip under the +5.0 number in the hero. */
+.fresh-scale { margin-top: 12px; }
+.fresh-scale-svg { width: 100%; height: auto; max-height: 96px;
+  display: block; }
+.fresh-band-lbl { font-size: 9px; fill: var(--muted);
+  font-family: inherit; }
+.fresh-tick-num { font-size: 9px; fill: var(--muted);
+  font-family: inherit; font-variant-numeric: tabular-nums; }
+.fresh-axis { stroke: var(--border-strong); stroke-width: 1; }
+.fresh-tick { stroke: var(--border-strong); stroke-width: 1; }
+.fresh-marker { stroke-width: 1.5; }
+.fresh-marker.good  { stroke: var(--good); }
+.fresh-marker.amber { stroke: var(--amber); }
+.fresh-marker.warn  { stroke: var(--warn); }
+.fresh-marker-tri.good  { fill: var(--good); }
+.fresh-marker-tri.amber { fill: var(--amber); }
+.fresh-marker-tri.warn  { fill: var(--warn); }
+.fresh-marker-val { font-size: 11px; font-weight: 600;
+  font-family: inherit; font-variant-numeric: tabular-nums; }
+.fresh-marker-val.good  { fill: var(--good); }
+.fresh-marker-val.amber { fill: var(--amber); }
+.fresh-marker-val.warn  { fill: var(--warn); }
 .confdots .dot { display: inline-block; width: 7px; height: 7px;
   border-radius: 50%; }
 .confdots .dot.on  { background: var(--accent); }
@@ -1152,6 +1225,7 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
   <article class="card metric {tsb_cls}">
     <h2><span class="term" data-tip="Your fitness minus your current fatigue. Positive numbers mean you are fresh and ready to train hard; negative numbers mean fatigue is accumulating. Above +5 is fresh, below -10 starts to be tired.">Freshness</span></h2>
     <div class="value">{esc(signed(tsb, 1))}</div>
+    {freshness_scale(tsb)}
     <div class="sub">{esc(tsb_label)}. <span class="term" data-tip="Your training stress over the last 42 days. This number moves slowly and represents your fitness baseline.">Fitness</span> {fmt(ctl, 1)}, <span class="term" data-tip="Your training stress over the last 7 days. This number moves quickly and represents your current fatigue.">fatigue</span> {fmt(atl, 1)}.</div>
     <div class="sub" style="margin-top:6px; color: var(--{arrow_cls});">{arrow} {signed(tsb_trend, 1)} over the last 7 days</div>
   </article>

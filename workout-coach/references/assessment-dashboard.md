@@ -75,7 +75,7 @@ All keys under `cards` are optional. If a key is missing or empty, the card rend
 | Card | Reads from JSON | Notes |
 | --- | --- | --- |
 | Hero · Recovery | `recovery.score`, `recovery.confidence` | Status class by score band: ≥6.5 good, 4.5-6.5 amber, <4.5 warn |
-| Hero · Freshness | `training_load.{ctl, atl, tsb, trend_7d}` | Label: Balanced (\|TSB\|≤5), Carrying load (-10<TSB<-5), Fresh (5<TSB≤15), Fatigued (≤-10), Detrained (>15) |
+| Hero · Freshness | `training_load.{ctl, atl, tsb, trend_7d}` | Big signed number + a horizontal `freshness_scale` strip showing where the value sits on a -15..+15 axis. Six band labels under the axis match the SKILL.md Phase-2 gate table: high fatigue (≤-15), fatigued (-15..-10), carrying load (-10..-5), balanced (-5..+5), fresh (+5..+10), well rested (>+10). Marker color: good (-5..+10), amber (the two outer non-extreme bands), warn (≤-10). |
 | Recovery drivers | `recovery.drivers[*]` | Diverging horizontal bar chart, sorted by \|z\| desc, capped at 8 rows. **Penalty-only drivers (those with `z=None`) are filtered out** — they are "no-penalty" placeholders, not signals of movement. Positive z = green (favorable; the metric module already sign-flips RHR/wrist temp). |
 | Activity rings | `week_over_week.rows` (strength count), `cardio_hr_zones_28d.z2`, `thermal_summary` + `light_therapy_summary` (recovery sessions), `health_metrics_weekly` (sleep avg) | Targets: 4 strength sess, 150 min Z2, 4 recovery sess, 7 h sleep. Ring color: good when ≥ target, amber otherwise. Never red. |
 | Training load (90d) | computed locally from `monthly_sessions[*].trimp` via 42-day / 7-day EWMA, seeded from sessions older than the window | Interactive: mouse / touch reveals scrubber + values at the hovered day. |

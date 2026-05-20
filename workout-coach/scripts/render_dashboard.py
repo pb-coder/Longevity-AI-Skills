@@ -700,6 +700,31 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .ring-label { font-size: 13px; color: var(--text); }
 .ring-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
+/* NEAT compact strip under the activity rings. Hairline rule above
+   so it reads as a related sub-row of the rings card, not a new card. */
+.neat-strip { margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid #f0f0f1;
+  display: grid; grid-template-columns: 60px 1fr; gap: 16px;
+  align-items: center; }
+.neat-label { font-size: 11px; font-weight: 600;
+  letter-spacing: 0.10em; text-transform: uppercase;
+  color: var(--muted); }
+.neat-cells { display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 14px; }
+.neat-cell { font-size: 13px; }
+.neat-num { font-size: 18px; font-weight: 600; line-height: 1.1;
+  color: var(--text); font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: center; gap: 6px; }
+.neat-unit { font-size: 11px; color: var(--muted); font-weight: 400;
+  margin-left: 4px; }
+.neat-desc { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.neat-dot { display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; flex: 0 0 8px; }
+.neat-dot.good  { background: var(--good); }
+.neat-dot.amber { background: var(--amber); }
+.neat-dot.warn  { background: var(--warn); }
+.neat-dot.muted { background: #c1c1c5; }
+
 /* training-load chart */
 .load-chart { width: 100%; height: auto; cursor: crosshair; }
 .load-chart .hit { pointer-events: all; }
@@ -932,6 +957,8 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   .card { padding: 16px 16px; }
   .hero { grid-template-columns: 1fr; }
   .rings { grid-template-columns: repeat(2, 1fr); }
+  .neat-strip { grid-template-columns: 1fr; gap: 10px; }
+  .neat-cells { grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .sleep-hero { grid-template-columns: 1fr; gap: 14px; }
   .sleep-row { grid-template-columns: 12px 1fr; gap: 8px; }
   .sleep-row-value, .sleep-row-status { grid-column: 2 / span 1; }
@@ -1249,11 +1276,47 @@ def card_drivers(drivers, coach_text):
 '''
 
 
-def card_rings(rings_html, coach_text):
+def neat_strip(daily_activity):
+    """Compact NEAT strip below the activity rings.
+
+    NEAT = Non-Exercise Activity Thermogenesis: all-day movement
+    outside structured workouts. A longevity-relevant signal in its
+    own right. Reads `daily_activity_28d` from the tracker JSON.
+    Status keys directly off the upstream `assessment` band
+    (`high`/`moderate`/`low`). Returns empty string when absent."""
+    if not daily_activity:
+        return ""
+    avg_min = daily_activity.get("exercise_min_daily_avg")
+    walk_km = daily_activity.get("walking_distance_km_28d")
+    incidental = daily_activity.get("incidental_walks_count")
+    assess = (daily_activity.get("assessment") or "").lower()
+    cls = {"high": "good", "moderate": "amber", "low": "warn"}.get(assess, "muted")
+    return f'''
+<div class="neat-strip">
+  <div class="neat-label"><span class="term" data-tip="Non-Exercise Activity Thermogenesis. The movement outside structured workouts. Strongly tied to long-term metabolic health and longevity.">NEAT</span></div>
+  <div class="neat-cells">
+    <div class="neat-cell">
+      <div class="neat-num"><span class="neat-dot {cls}"></span>{fmt(avg_min, 0)}<span class="neat-unit">min/day</span></div>
+      <div class="neat-desc">exercise minutes</div>
+    </div>
+    <div class="neat-cell">
+      <div class="neat-num">{fmt(walk_km, 1)}<span class="neat-unit">km</span></div>
+      <div class="neat-desc">walking, last 28 d</div>
+    </div>
+    <div class="neat-cell">
+      <div class="neat-num">{fmt(incidental, 0)}</div>
+      <div class="neat-desc">incidental walks</div>
+    </div>
+  </div>
+</div>'''
+
+
+def card_rings(rings_html, daily_activity, coach_text):
     return f'''
 <section class="card">
   <h2>This week at a glance</h2>
   <div class="rings">{rings_html}</div>
+  {neat_strip(daily_activity)}
   {coach_block(coach_text)}
 </section>
 '''
@@ -1832,7 +1895,7 @@ def render(j, coach, workout_md, person):
     </section>
     {card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend)}
     {card_drivers(recovery.get("drivers"), coach_cards.get("recovery_drivers"))}
-    {card_rings(rings_html, coach_cards.get("activity_rings"))}
+    {card_rings(rings_html, j.get("daily_activity_28d"), coach_cards.get("activity_rings"))}
     {card_training_load(series, ctl, atl, tsb, tsb_trend, coach_cards.get("training_load"))}
     {card_muscle_volume(weekly_volume, coach_cards.get("muscle_volume"))}
     {card_strength(e_items, coach_cards.get("strength"))}

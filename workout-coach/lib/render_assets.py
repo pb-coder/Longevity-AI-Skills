@@ -151,17 +151,21 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .ring-label { font-size: 13px; color: var(--text); }
 .ring-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-/* NEAT card: primary metric uses the bar-row pattern from muscle
-   volume (consistent visual vocabulary); supporting metrics below
-   are simple stat cells. */
-.neat-stats { display: grid; grid-template-columns: repeat(2, 1fr);
-  gap: 18px; margin-top: 14px; padding-top: 14px;
-  border-top: 1px solid #f0f0f1; }
-.neat-stat-num { font-size: 20px; font-weight: 600; line-height: 1.1;
+/* NEAT card: three equal stat cells. The primary metric (exercise
+   min/day) appends a colored status word against the upstream band
+   below its caption; the other two cells are descriptive numbers. */
+.neat-stats { display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 18px; }
+.neat-stat-num { font-size: 22px; font-weight: 600; line-height: 1.1;
   color: var(--text); font-variant-numeric: tabular-nums; }
 .neat-stat-unit { font-size: 11px; color: var(--muted); font-weight: 400;
   margin-left: 4px; }
-.neat-stat-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.neat-stat-desc { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.neat-stat-status { font-weight: 600; }
+.neat-stat-status.good  { color: var(--good); }
+.neat-stat-status.amber { color: var(--amber); }
+.neat-stat-status.warn  { color: var(--warn); }
+.neat-stat-status.muted { color: var(--muted); }
 
 /* training-load chart */
 .load-chart { width: 100%; height: auto; cursor: crosshair; }
@@ -246,24 +250,30 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .confdots { display: inline-flex; align-items: center; gap: 3px;
   vertical-align: middle; }
 
-/* Freshness (TSB) scale strip under the +5.0 number in the hero. */
-.fresh-scale { margin-top: 12px; }
-.fresh-scale-svg { width: 100%; height: auto; max-height: 96px;
+/* Freshness (TSB) + Recovery score scale strip in the hero cards.
+   Strokes use vector-effect: non-scaling-stroke so they render at the
+   declared CSS-px width regardless of how much the SVG shrinks to fit
+   the card. Without this they'd render sub-pixel on standard displays
+   (~0.7 CSS px after the viewBox-to-container scale). */
+.fresh-scale { margin-top: 14px; }
+.fresh-scale-svg { width: 100%; height: auto; max-height: 120px;
   display: block; }
-.fresh-band-lbl { font-size: 9px; fill: var(--muted);
+.fresh-band-lbl { font-size: 11px; fill: var(--muted);
   font-family: inherit; }
-.fresh-tick-num { font-size: 9px; fill: var(--muted);
+.fresh-tick-num { font-size: 11px; fill: var(--muted);
   font-family: inherit; font-variant-numeric: tabular-nums; }
-.fresh-axis { stroke: var(--border-strong); stroke-width: 1; }
-.fresh-tick { stroke: var(--border-strong); stroke-width: 1; }
-.fresh-marker { stroke-width: 1.5; }
+.fresh-axis { stroke: var(--border-strong); stroke-width: 1.5;
+  vector-effect: non-scaling-stroke; }
+.fresh-tick { stroke: var(--border-strong); stroke-width: 1.5;
+  vector-effect: non-scaling-stroke; }
+.fresh-marker { stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .fresh-marker.good  { stroke: var(--good); }
 .fresh-marker.amber { stroke: var(--amber); }
 .fresh-marker.warn  { stroke: var(--warn); }
 .fresh-marker-tri.good  { fill: var(--good); }
 .fresh-marker-tri.amber { fill: var(--amber); }
 .fresh-marker-tri.warn  { fill: var(--warn); }
-.fresh-marker-val { font-size: 11px; font-weight: 600;
+.fresh-marker-val { font-size: 13px; font-weight: 700;
   font-family: inherit; font-variant-numeric: tabular-nums; }
 .fresh-marker-val.good  { fill: var(--good); }
 .fresh-marker-val.amber { fill: var(--amber); }

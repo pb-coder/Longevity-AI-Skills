@@ -655,7 +655,12 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 
 /* hero */
-.hero { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.hero { display: grid; grid-template-columns: 5fr 7fr; gap: 14px; }
+.hero .metric { display: flex; flex-direction: column; }
+/* Recovery card has only a few lines of content; center it vertically so
+   the score doesn't sit stranded at the top of a card that stretches to
+   match the taller Freshness card. */
+.hero .metric--compact { justify-content: center; }
 .metric .value { font-size: 48px; font-weight: 600;
   letter-spacing: -0.02em; line-height: 1; }
 .metric .value .denom { font-size: 22px; color: var(--muted);
@@ -723,43 +728,44 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .ring-label { font-size: 13px; color: var(--text); }
 .ring-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-/* NEAT compact strip under the activity rings. Hairline rule above
-   so it reads as a related sub-row of the rings card, not a new card. */
-.neat-strip { margin-top: 16px; padding-top: 14px;
-  border-top: 1px solid #f0f0f1;
-  display: grid; grid-template-columns: 60px 1fr; gap: 16px;
-  align-items: center; }
-.neat-label { font-size: 11px; font-weight: 600;
-  letter-spacing: 0.10em; text-transform: uppercase;
+/* NEAT sub-section under the activity rings. Subsection header + pill
+   at the top, three equal stat cells below. Hairline rule above so it
+   reads as a related sub-row of the rings card, not a new card. */
+.neat-section { margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid #f0f0f1; }
+.neat-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 12px; }
+.neat-head-label { font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--muted); }
 .neat-cells { display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 14px; }
+  gap: 18px; }
 .neat-cell { font-size: 13px; }
-.neat-num { font-size: 18px; font-weight: 600; line-height: 1.1;
-  color: var(--text); font-variant-numeric: tabular-nums;
-  display: inline-flex; align-items: center; gap: 6px; }
+.neat-num { font-size: 20px; font-weight: 600; line-height: 1.1;
+  color: var(--text); font-variant-numeric: tabular-nums; }
 .neat-unit { font-size: 11px; color: var(--muted); font-weight: 400;
   margin-left: 4px; }
-.neat-desc { font-size: 11px; color: var(--muted); margin-top: 3px; }
-.neat-dot { display: inline-block; width: 8px; height: 8px;
-  border-radius: 50%; flex: 0 0 8px; }
-.neat-dot.good  { background: var(--good); }
-.neat-dot.amber { background: var(--amber); }
-.neat-dot.warn  { background: var(--warn); }
-.neat-dot.muted { background: #c1c1c5; }
+.neat-desc { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
 /* training-load chart */
 .load-chart { width: 100%; height: auto; cursor: crosshair; }
 .load-chart .hit { pointer-events: all; }
-.load-stats { display: flex; gap: 28px; margin-top: 10px;
-  font-size: 13px; flex-wrap: wrap; }
-.load-stats .stat { color: var(--muted); }
-.load-stats .stat strong { color: var(--text); font-size: 16px;
-  font-weight: 600; margin-right: 4px; }
-.load-legend { display: flex; gap: 18px; margin-top: 10px;
-  font-size: 12px; color: var(--muted); flex-wrap: wrap; }
-.load-legend .sw { display: inline-block; width: 18px; height: 2px;
-  vertical-align: middle; margin-right: 6px; }
+/* Single combined "summary" row below the chart: 4 stat cells, each
+   carrying its line-color swatch + tooltipped name + current value.
+   Replaces the prior split between .load-legend (chips) and .load-stats
+   (numbers) which duplicated the metric names and made the line→value
+   relationship ambiguous. */
+.load-summary { display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 18px; margin-top: 14px; }
+.load-summary-cell { display: flex; flex-direction: column; gap: 4px; }
+.load-summary-name { display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--muted); }
+.load-summary-name .sw { display: inline-block; width: 18px; height: 2px;
+  vertical-align: middle; }
+.load-summary-value { font-size: 20px; font-weight: 600; color: var(--text);
+  font-variant-numeric: tabular-nums; line-height: 1.1; }
+/* Line/band swatches reused by both the summary row and the floating
+   tooltip on the chart, so they stay top-level. */
 .sw-ctl { background: #0a84ff; }
 .sw-atl { background: 0; border-top: 2px dashed #ff9f0a; height: 0; }
 .sw-tsb { background: linear-gradient(#ff9f0a40, #34c75922); height: 8px !important; }
@@ -865,7 +871,7 @@ td.arrow { font-size: 16px; font-weight: 600; }
 
 .vitals-table th:nth-child(1), .vitals-table td:nth-child(1) { width: auto; }
 .vitals-table th:nth-child(2), .vitals-table td:nth-child(2) { width: 120px; }
-.vitals-table th:nth-child(3), .vitals-table td:nth-child(3) { width: 90px; }
+.vitals-table th:nth-child(3), .vitals-table td:nth-child(3) { width: 120px; padding-right: 18px; }
 .vitals-table th:nth-child(4), .vitals-table td:nth-child(4) { width: 130px; }
 
 .wow-table th:nth-child(1), .wow-table td:nth-child(1) { width: auto; }
@@ -874,6 +880,13 @@ td.arrow { font-size: 16px; font-weight: 600; }
 .wow-table th:nth-child(4), .wow-table td:nth-child(4) { width: 80px; }
 .wow-table th:nth-child(5), .wow-table td:nth-child(5) { width: 30px; }
 .wow-table th:nth-child(6), .wow-table td:nth-child(6) { width: 40px; }
+
+/* Suppress the last-row hairline so the table doesn't print an
+   orphan border-bottom above the empty space before the coach
+   callout (the coach's own border-top already separates the two). */
+.strength-table tbody tr:last-child td,
+.vitals-table tbody tr:last-child td,
+.wow-table tbody tr:last-child td { border-bottom: none; }
 .arrow.good { color: var(--good); }
 .arrow.warn { color: var(--warn); }
 .arrow.muted { color: var(--muted); }
@@ -980,8 +993,10 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   .card { padding: 16px 16px; }
   .hero { grid-template-columns: 1fr; }
   .rings { grid-template-columns: repeat(2, 1fr); }
-  .neat-strip { grid-template-columns: 1fr; gap: 10px; }
-  .neat-cells { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .neat-cells { gap: 12px; }
+  .neat-num { font-size: 18px; }
+  .load-summary { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .load-summary-value { font-size: 18px; }
   .sleep-hero { grid-template-columns: 1fr; gap: 14px; }
   .sleep-row { grid-template-columns: 12px 1fr; gap: 8px; }
   .sleep-row-value, .sleep-row-status { grid-column: 2 / span 1; }
@@ -1267,7 +1282,7 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
         score_value_html = f'<div class="value">{esc(fmt(score, 1))}<span class="denom"> / 10</span></div>'
     return f'''
 <section class="hero">
-  <article class="card metric {score_cls}">
+  <article class="card metric metric--compact {score_cls}">
     <h2>Recovery</h2>
     {score_value_html}
     <div class="sub">confidence {confidence_dots(confidence)}</div>
@@ -1300,12 +1315,12 @@ def card_drivers(drivers, coach_text):
 
 
 def neat_strip(daily_activity):
-    """Compact NEAT strip below the activity rings.
+    """Compact NEAT sub-section below the activity rings.
 
     NEAT = Non-Exercise Activity Thermogenesis: all-day movement
     outside structured workouts. A longevity-relevant signal in its
     own right. Reads `daily_activity_28d` from the tracker JSON.
-    Status keys directly off the upstream `assessment` band
+    Status band keys directly off the upstream `assessment`
     (`high`/`moderate`/`low`). Returns empty string when absent."""
     if not daily_activity:
         return ""
@@ -1314,12 +1329,16 @@ def neat_strip(daily_activity):
     incidental = daily_activity.get("incidental_walks_count")
     assess = (daily_activity.get("assessment") or "").lower()
     cls = {"high": "good", "moderate": "amber", "low": "warn"}.get(assess, "muted")
+    pill_label = assess or "no signal"
     return f'''
-<div class="neat-strip">
-  <div class="neat-label"><span class="term" data-tip="Non-Exercise Activity Thermogenesis. The movement outside structured workouts. Strongly tied to long-term metabolic health and longevity.">NEAT</span></div>
+<div class="neat-section">
+  <div class="neat-head">
+    <span class="neat-head-label"><span class="term" data-tip="Non-Exercise Activity Thermogenesis. The movement outside structured workouts. Strongly tied to long-term metabolic health and longevity.">All-day movement (NEAT)</span></span>
+    <span class="pill {cls}">{esc(pill_label)}</span>
+  </div>
   <div class="neat-cells">
     <div class="neat-cell">
-      <div class="neat-num"><span class="neat-dot {cls}"></span>{fmt(avg_min, 0)}<span class="neat-unit">min/day</span></div>
+      <div class="neat-num">{fmt(avg_min, 0)}<span class="neat-unit">min/day</span></div>
       <div class="neat-desc">exercise minutes</div>
     </div>
     <div class="neat-cell">
@@ -1351,16 +1370,23 @@ def card_training_load(series, ctl, atl, tsb, tsb_trend, coach_text):
 <section class="card">
   <h2>Training load over 90 days</h2>
   {svg}
-  <div class="load-legend">
-    <span><span class="sw sw-ctl"></span><span class="term" data-tip="A 42-day moving average of your session-by-session training stress. It moves slowly and represents your fitness baseline. The blue line.">fitness</span></span>
-    <span><span class="sw sw-atl"></span><span class="term" data-tip="A 7-day moving average of your training stress. It moves quickly and represents your current fatigue. The orange dashed line.">fatigue</span></span>
-    <span><span class="sw sw-tsb"></span><span class="term" data-tip="Fitness minus fatigue. Positive means fresh, negative means accumulating fatigue. The shaded band on the chart.">freshness</span></span>
-  </div>
-  <div class="load-stats">
-    <div class="stat"><strong>{fmt(ctl, 1)}</strong>fitness</div>
-    <div class="stat"><strong>{fmt(atl, 1)}</strong>fatigue</div>
-    <div class="stat"><strong>{signed(tsb, 1)}</strong>freshness</div>
-    <div class="stat"><strong>{signed(tsb_trend, 1)}</strong>7-day trend</div>
+  <div class="load-summary">
+    <div class="load-summary-cell">
+      <span class="load-summary-name"><span class="sw sw-ctl"></span><span class="term" data-tip="A 42-day moving average of your session-by-session training stress. It moves slowly and represents your fitness baseline. The blue line.">fitness</span></span>
+      <span class="load-summary-value">{fmt(ctl, 1)}</span>
+    </div>
+    <div class="load-summary-cell">
+      <span class="load-summary-name"><span class="sw sw-atl"></span><span class="term" data-tip="A 7-day moving average of your training stress. It moves quickly and represents your current fatigue. The orange dashed line.">fatigue</span></span>
+      <span class="load-summary-value">{fmt(atl, 1)}</span>
+    </div>
+    <div class="load-summary-cell">
+      <span class="load-summary-name"><span class="sw sw-tsb"></span><span class="term" data-tip="Fitness minus fatigue. Positive means fresh, negative means accumulating fatigue. The shaded band on the chart.">freshness</span></span>
+      <span class="load-summary-value">{signed(tsb, 1)}</span>
+    </div>
+    <div class="load-summary-cell">
+      <span class="load-summary-name">7-day trend</span>
+      <span class="load-summary-value">{signed(tsb_trend, 1)}</span>
+    </div>
   </div>
   {coach_block(coach_text)}
 </section>

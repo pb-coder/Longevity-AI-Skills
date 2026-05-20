@@ -141,7 +141,9 @@ Card functions, in dashboard render order:
 1. `card_hero` — Recovery + Freshness, each with a scale strip.
 2. `card_drivers` — Recovery drivers diverging-bar chart.
 3. `card_rings` — Activity rings.
-4. `card_neat` — NEAT (all-day movement) — banded bar + supporting stats.
+4. `card_neat` — NEAT card with three stat cells: avg exercise min/day
+   (with a colored status word against the upstream band), walking
+   distance over 28 days, incidental walks. No bar.
 5. `card_training_load` — 90-day chart + 4-up summary cells.
 6. `card_muscle_volume` — Per-muscle bars.
 7. `card_strength` — Strength progression table.

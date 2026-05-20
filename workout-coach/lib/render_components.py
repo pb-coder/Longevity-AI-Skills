@@ -389,27 +389,27 @@ def freshness_scale(tsb):
         ("well rested",  550),
     ]
     labels_svg = "".join(
-        f'<text x="{lx}" y="10" text-anchor="middle" class="fresh-band-lbl">{lbl}</text>'
+        f'<text x="{lx}" y="14" text-anchor="middle" class="fresh-band-lbl">{lbl}</text>'
         for lbl, lx in band_labels
     )
     tick_lines = "".join(
-        f'<line x1="{i*100}" y1="20" x2="{i*100}" y2="28" class="fresh-tick"/>'
+        f'<line x1="{i*100}" y1="26" x2="{i*100}" y2="36" class="fresh-tick"/>'
         for i in range(7)
     )
     tick_numbers = "".join(
-        f'<text x="{i*100}" y="42" text-anchor="middle" class="fresh-tick-num">{n}</text>'
+        f'<text x="{i*100}" y="52" text-anchor="middle" class="fresh-tick-num">{n}</text>'
         for i, n in enumerate(["-15","-10","-5","0","+5","+10","+15"])
     )
     return f'''
 <div class="fresh-scale">
-  <svg viewBox="-30 0 660 60" preserveAspectRatio="xMidYMid meet" class="fresh-scale-svg" aria-hidden="true">
+  <svg viewBox="-30 0 660 76" preserveAspectRatio="xMidYMid meet" class="fresh-scale-svg" aria-hidden="true">
     {labels_svg}
-    <line x1="0" y1="24" x2="600" y2="24" class="fresh-axis"/>
+    <line x1="0" y1="31" x2="600" y2="31" class="fresh-axis"/>
     {tick_lines}
     {tick_numbers}
-    <polygon points="{x-5:.1f},14 {x+5:.1f},14 {x:.1f},22" class="fresh-marker-tri {marker_cls}"/>
-    <line x1="{x:.1f}" y1="22" x2="{x:.1f}" y2="30" class="fresh-marker {marker_cls}"/>
-    <text x="{x:.1f}" y="56" text-anchor="middle" class="fresh-marker-val {marker_cls}">{signed(tsb, 1)}</text>
+    <polygon points="{x-7:.1f},18 {x+7:.1f},18 {x:.1f},29" class="fresh-marker-tri {marker_cls}"/>
+    <line x1="{x:.1f}" y1="29" x2="{x:.1f}" y2="39" class="fresh-marker {marker_cls}"/>
+    <text x="{x:.1f}" y="70" text-anchor="middle" class="fresh-marker-val {marker_cls}">{signed(tsb, 1)}</text>
   </svg>
 </div>'''
 
@@ -437,28 +437,28 @@ def recovery_scale(score):
         ("ready",      495),   # midpoint of 6.5..10 → x=495
     ]
     labels_svg = "".join(
-        f'<text x="{lx}" y="10" text-anchor="middle" class="fresh-band-lbl">{lbl}</text>'
+        f'<text x="{lx}" y="14" text-anchor="middle" class="fresh-band-lbl">{lbl}</text>'
         for lbl, lx in band_labels
     )
     # Ticks at 0, 2, 4, 6, 8, 10 (x=0, 120, 240, 360, 480, 600).
     tick_lines = "".join(
-        f'<line x1="{i*120}" y1="20" x2="{i*120}" y2="28" class="fresh-tick"/>'
+        f'<line x1="{i*120}" y1="26" x2="{i*120}" y2="36" class="fresh-tick"/>'
         for i in range(6)
     )
     tick_numbers = "".join(
-        f'<text x="{i*120}" y="42" text-anchor="middle" class="fresh-tick-num">{n}</text>'
+        f'<text x="{i*120}" y="52" text-anchor="middle" class="fresh-tick-num">{n}</text>'
         for i, n in enumerate(["0","2","4","6","8","10"])
     )
     return f'''
 <div class="fresh-scale">
-  <svg viewBox="-30 0 660 60" preserveAspectRatio="xMidYMid meet" class="fresh-scale-svg" aria-hidden="true">
+  <svg viewBox="-30 0 660 76" preserveAspectRatio="xMidYMid meet" class="fresh-scale-svg" aria-hidden="true">
     {labels_svg}
-    <line x1="0" y1="24" x2="600" y2="24" class="fresh-axis"/>
+    <line x1="0" y1="31" x2="600" y2="31" class="fresh-axis"/>
     {tick_lines}
     {tick_numbers}
-    <polygon points="{x-5:.1f},14 {x+5:.1f},14 {x:.1f},22" class="fresh-marker-tri {marker_cls}"/>
-    <line x1="{x:.1f}" y1="22" x2="{x:.1f}" y2="30" class="fresh-marker {marker_cls}"/>
-    <text x="{x:.1f}" y="56" text-anchor="middle" class="fresh-marker-val {marker_cls}">{fmt(score, 1)}</text>
+    <polygon points="{x-7:.1f},18 {x+7:.1f},18 {x:.1f},29" class="fresh-marker-tri {marker_cls}"/>
+    <line x1="{x:.1f}" y1="29" x2="{x:.1f}" y2="39" class="fresh-marker {marker_cls}"/>
+    <text x="{x:.1f}" y="70" text-anchor="middle" class="fresh-marker-val {marker_cls}">{fmt(score, 1)}</text>
   </svg>
 </div>'''
 

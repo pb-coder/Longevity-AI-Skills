@@ -74,8 +74,7 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
     <h2><span class="term" data-tip="Your fitness minus your current fatigue. Positive numbers mean you are fresh and ready to train hard; negative numbers mean fatigue is accumulating. Above +5 is fresh, below -10 starts to be tired.">Freshness</span></h2>
     <div class="value">{esc(signed(tsb, 1))}</div>
     {freshness_scale(tsb)}
-    <div class="sub"><span class="pill {tsb_cls}">{esc(tsb_label.lower() if tsb_label else "")}</span></div>
-    <div class="sub" style="margin-top:6px; color: var(--{arrow_cls});">{arrow} {signed(tsb_trend, 1)} over the last 7 days</div>
+    <div class="sub" style="color: var(--{arrow_cls});">{arrow} {signed(tsb_trend, 1)} over the last 7 days</div>
   </article>
 </section>
 '''
@@ -108,67 +107,41 @@ def card_rings(rings_html, coach_text):
 
 
 def card_neat(daily_activity):
-    """Dedicated NEAT card following the dashboard's standard chrome.
+    """Dedicated NEAT card with three stat cells.
 
     NEAT = Non-Exercise Activity Thermogenesis: all-day movement
-    outside structured workouts. The primary metric (exercise minutes
-    per day) gets a banded bar (low <15, moderate 15..45, high >=45)
-    matching the muscle-volume visual vocabulary; the supporting
-    metrics are simple stats. Returns empty string if no data."""
+    outside structured workouts. Primary metric (exercise min/day)
+    color-codes the status word against the upstream `assessment`
+    band; the other two stats are descriptive. Returns empty string
+    if no data."""
     if not daily_activity:
         return ""
     avg_min = daily_activity.get("exercise_min_daily_avg")
     walk_km = daily_activity.get("walking_distance_km_28d")
     incidental = daily_activity.get("incidental_walks_count")
     assess = (daily_activity.get("assessment") or "").lower()
-
-    # Bar for the primary metric. Mirror muscle-bar semantics:
-    # MEV = 15 min, MAV = 45 min, scale runs to 60 min so the high band
-    # has visible headroom. Fill color follows the upstream band.
-    band_cls = {"high": "band-prod", "moderate": "band-push",
-                "low": "band-low"}.get(assess, "band-low")
-    scale_max = 60.0
-    fill_pct = min(100.0, ((avg_min or 0.0) / scale_max) * 100.0)
-    mev_pct = (15.0 / scale_max) * 100.0
-    mav_pct = (45.0 / scale_max) * 100.0
+    status_cls = {"high": "good", "moderate": "amber",
+                  "low": "warn"}.get(assess, "muted")
     status_word = {"high": "high",
                    "moderate": "moderate",
                    "low": "low"}.get(assess, "no signal")
-    status_dot_cls = {"high": "band-prod", "moderate": "band-push",
-                      "low": "band-low"}.get(assess, "band-low")
-
-    primary_row = f'''
-<div class="bar-row" data-tip="Apple's all-day exercise minutes, averaged over the last 28 days. Below 15 min/day is low, 15 to 45 is moderate, 45+ is high. Sustained higher values track well with longevity outcomes.">
-  <span class="bar-label">exercise min/day</span>
-  <div class="bar-track">
-    <div class="bar-tick" style="left:{mev_pct:.1f}%"></div>
-    <div class="bar-tick" style="left:{mav_pct:.1f}%"></div>
-    <div class="bar-fill {band_cls}" style="width:{fill_pct:.1f}%"></div>
-  </div>
-  <span class="bar-status">
-    <span class="bar-dot {status_dot_cls}"></span>
-    <span class="bar-status-label">{esc(status_word)}</span>
-    <span class="bar-num">{fmt(avg_min, 0)}</span>
-  </span>
-</div>'''
-
-    stats_row = f'''
-<div class="neat-stats">
-  <div class="neat-stat">
-    <div class="neat-stat-num">{fmt(walk_km, 1)}<span class="neat-stat-unit">km</span></div>
-    <div class="neat-stat-desc">walking, last 28 days</div>
-  </div>
-  <div class="neat-stat">
-    <div class="neat-stat-num">{fmt(incidental, 0)}</div>
-    <div class="neat-stat-desc">incidental walks</div>
-  </div>
-</div>'''
-
     return f'''
 <section class="card">
-  <h2><span class="term" data-tip="Non-Exercise Activity Thermogenesis. The movement outside structured workouts. Strongly tied to long-term metabolic health and longevity.">Activity outside workouts (NEAT)</span></h2>
-  {primary_row}
-  {stats_row}
+  <h2><span class="term" data-tip="Non-Exercise Activity Thermogenesis. All-day movement outside structured workouts. Strongly tied to long-term metabolic health and longevity.">NEAT</span></h2>
+  <div class="neat-stats">
+    <div class="neat-stat">
+      <div class="neat-stat-num">{fmt(avg_min, 0)}<span class="neat-stat-unit">min/day</span></div>
+      <div class="neat-stat-desc">exercise minutes · <span class="neat-stat-status {status_cls}">{esc(status_word)}</span></div>
+    </div>
+    <div class="neat-stat">
+      <div class="neat-stat-num">{fmt(walk_km, 1)}<span class="neat-stat-unit">km</span></div>
+      <div class="neat-stat-desc">walking, last 28 days</div>
+    </div>
+    <div class="neat-stat">
+      <div class="neat-stat-num">{fmt(incidental, 0)}</div>
+      <div class="neat-stat-desc">incidental walks</div>
+    </div>
+  </div>
 </section>
 '''
 

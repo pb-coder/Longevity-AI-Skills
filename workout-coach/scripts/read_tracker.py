@@ -155,6 +155,21 @@ def _bucket_strength_sessions(sessions: list[dict],
     return n
 
 
+def _bucket_cardio_sessions(sessions: list[dict],
+                            start: date, end: date) -> int:
+    """Cardio sessions in the half-open window ``[start, end]``."""
+    n = 0
+    for s in sessions:
+        if s.get("session_kind") != "cardio":
+            continue
+        d = _parse_iso_date(s.get("date"))
+        if d is None:
+            continue
+        if start <= d <= end:
+            n += 1
+    return n
+
+
 def _bucket_cardio_min(sessions: list[dict],
                        start: date, end: date) -> float:
     """Total cardio minutes in window ``[start, end]`` (any zone, any source)."""
@@ -231,6 +246,7 @@ def _build_week_over_week(today_d: date,
     avg_start  = today_d - timedelta(days=27)
 
     avg_strength = _bucket_strength_sessions(monthly_sessions, avg_start, today_d) / 4.0
+    avg_cardio_sess = _bucket_cardio_sessions(monthly_sessions, avg_start, today_d) / 4.0
     avg_cardio_min = _bucket_cardio_min(monthly_sessions, avg_start, today_d) / 4.0
     avg_sleep = _bucket_health_mean(health_all, "sleep_total_h", avg_start, today_d)
     avg_hrv   = _bucket_health_mean(health_all, "hrv_sdnn",      avg_start, today_d)
@@ -263,6 +279,12 @@ def _build_week_over_week(today_d: date,
                 _bucket_strength_sessions(monthly_sessions, this_start, today_d),
                 _bucket_strength_sessions(monthly_sessions, last_start, last_end),
                 avg_strength, 1, "sess",
+            ),
+            row(
+                "Cardio sessions", "cardio_sessions",
+                _bucket_cardio_sessions(monthly_sessions, this_start, today_d),
+                _bucket_cardio_sessions(monthly_sessions, last_start, last_end),
+                avg_cardio_sess, 1, "sess",
             ),
             row(
                 "Cardio minutes", "cardio_min",
@@ -413,9 +435,17 @@ def main() -> int:
     # HR-zone label back onto each monthly_session for the LLM. The zone
     # label lets a run/ride/hike entry read as "Z2 hike" or "Z4 interval"
     # directly without re-deriving from avg_hr.
-    trimp_by_date: dict[str, dict] = {t["date"]: t for t in trimps}
+    # `monthly_sessions` is now keyed by (date, kind) so the lookup must
+    # match on both — otherwise a day with strength + cardio gets the
+    # wrong TRIMP attached to each entry. `trimp_per_session` iterates
+    # `monthly_sessions` directly so the order and identity line up,
+    # but matching by (date, kind) is the safer contract.
+    trimp_by_key: dict[tuple, dict] = {
+        (t["date"], t.get("kind")): t for t in trimps
+    }
     for s in monthly_sessions:
-        t = trimp_by_date.get(s.get("date"))
+        key = (s.get("date"), s.get("session_kind"))
+        t = trimp_by_key.get(key)
         if t:
             s["trimp"] = t["trimp"]
             s["load_band"] = t["load_band"]
@@ -432,6 +462,23 @@ def main() -> int:
         swim_workouts_all, swim_laps_all, today_d, profile, max_hr,
     )
     sleep = sleep_summary(sleep_nights_all, today_d)
+    # Enrich with sleep-adjacent metrics we already import to
+    # health_metrics.csv but never surfaced anywhere on the dashboard:
+    # respiratory rate and Apple's "sleeping breathing disturbances"
+    # signal. Both populate when the watch detects them overnight.
+    if sleep:
+        resp_vals = _values_in_window(health_all, "resp_rate", today_d, 28)
+        sbd_vals  = _values_in_window(health_all, "sleep_breath_dist", today_d, 28)
+        if resp_vals:
+            sleep["resp_rate"] = {
+                "n_nights":  len(resp_vals),
+                "mean":      round(_mean_or_none(resp_vals), 2),
+            }
+        if sbd_vals:
+            sleep["breath_disturbances"] = {
+                "n_nights":  len(sbd_vals),
+                "mean":      round(_mean_or_none(sbd_vals), 2),
+            }
     # Sauna frequency target reads from profile.csv (key
     # ``sauna_target_per_week``) if set; otherwise the default 4×/week.
     try:

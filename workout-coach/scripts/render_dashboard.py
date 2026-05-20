@@ -430,34 +430,30 @@ def muscle_bars(weekly_volume):
         mrv = lm.get("mrv", 0)
         muscle_title = m.replace("_", " ").title()
         if v < mev:
-            bar_class = "warn"
+            band_class = "low"   # orange — under-stimulating, add
             status = "not enough"
-            icon = "▼"
             tip = (
                 f"{muscle_title}: {v:.1f} sets per week. Below the productive range "
                 f"(starts at {mev}). Add 1 to 2 sets next week to enter the productive band."
             )
         elif v <= mav:
-            bar_class = "good"
+            band_class = "prod"  # green — sweet spot
             status = "productive"
-            icon = "✓"
             tip = (
                 f"{muscle_title}: {v:.1f} sets per week. In the productive range "
                 f"({mev} to {mav}). Stay here, or push toward the upper band when recovery permits."
             )
         elif v <= mrv:
-            bar_class = "amber"
+            band_class = "push"  # yellow-amber — pushing the limit
             status = "pushing limit"
-            icon = "▲"
             tip = (
                 f"{muscle_title}: {v:.1f} sets per week. Above the productive range, "
                 f"approaching your recoverable ceiling at {mrv}. You can grow here, but fatigue "
                 f"costs rise. Watch recovery and don't add more."
             )
         else:
-            bar_class = "warn"
+            band_class = "over"  # red — over recoverable ceiling, cut back
             status = "too much, cut back"
-            icon = "⚠"
             tip = (
                 f"{muscle_title}: {v:.1f} sets per week. Above your recoverable ceiling at {mrv}. "
                 f"This volume costs more than it gives back. Drop 1 to 2 sets per week."
@@ -470,18 +466,33 @@ def muscle_bars(weekly_volume):
 <div class="bar-row" data-tip="{esc(tip)}">
   <span class="bar-label">{esc(m.replace("_", " "))}</span>
   <div class="bar-track">
-    <div class="bar-band" style="left:{mev_x:.1f}%; width:{(mav_x-mev_x):.1f}%"></div>
-    <div class="bar-fill {bar_class}" style="width:{actual_x:.1f}%"></div>
+    <div class="bar-tick" style="left:{mev_x:.1f}%" data-label="MEV"></div>
+    <div class="bar-tick" style="left:{mav_x:.1f}%" data-label="MAV"></div>
+    <div class="bar-fill band-{band_class}" style="width:{actual_x:.1f}%"></div>
   </div>
-  <span class="bar-value">
+  <span class="bar-status">
+    <span class="bar-dot band-{band_class}"></span>
+    <span class="bar-status-label">{esc(status)}</span>
     <span class="bar-num">{v:.1f}</span>
-    <span class="bar-status {bar_class}">{icon} {esc(status)}</span>
   </span>
 </div>''')
     return "\n".join(rows)
 
 
 # ---------- sparkline ----------
+
+def confidence_dots(conf):
+    """Render a 3-dot confidence indicator. `conf` is one of
+    'high' / 'medium' / 'low' (anything else renders as 0 filled).
+    """
+    level = {"high": 3, "medium": 2, "low": 1}.get((conf or "").lower(), 0)
+    tip = f"{(conf or 'unknown').capitalize()} confidence. Three dots = high, two = medium, one = low."
+    dots = "".join(
+        f'<span class="dot {"on" if i < level else "off"}"></span>'
+        for i in range(3)
+    )
+    return f'<span class="confdots" data-tip="{esc(tip)}">{dots}</span>'
+
 
 def sparkline(values, status_class=None, w=80, h=24):
     vals = [v for v in values if v is not None]
@@ -527,6 +538,13 @@ STYLESHEET = """
   --amber: #ff9f0a;
   --warn: #ff3b30;
   --accent: #0a84ff;
+
+  /* Per-muscle volume bands. Four distinct hues so opposite ends of
+     the spectrum (not-enough vs too-much) never share a color. */
+  --muscle-low:  #ff9500; /* orange  , below MEV, "not enough" */
+  --muscle-prod: #34c759; /* green   , MEV..MAV, "productive" */
+  --muscle-push: #ffcc00; /* yellow  , MAV..MRV, "pushing limit" */
+  --muscle-over: #ff3b30; /* red     , above MRV, "too much, cut back" */
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text);
@@ -578,7 +596,7 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .metric.amber .value { color: var(--amber); }
 .metric.warn .value { color: var(--warn); }
 
-/* coach callout — typographic differentiation only; no box, no border,
+/* coach callout, typographic differentiation only; no box, no border,
    no tint. A thin hairline rule and a small-caps label do the work. */
 .coach { margin-top: 18px; padding-top: 14px;
   border-top: 1px solid #f0f0f1; }
@@ -627,7 +645,7 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .driver-axis-row .axis-labels { display: flex; justify-content: space-between; }
 
 /* rings */
-.rings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+.rings { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
   padding: 6px 0; }
 .ring-wrap { text-align: center; }
 .ring { width: 76px; height: 76px; }
@@ -662,37 +680,49 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .load-tooltip .lt-row span:last-child { margin-left: auto;
   font-variant-numeric: tabular-nums; font-weight: 600; }
 
-/* muscle bars */
+/* muscle bars, four distinct band colors, fixed-width dots, two thin
+   tick marks per row showing MEV and MAV. No background band — that
+   was causing the 3-color confusion on under-MEV rows. */
 .muscle-legend { display: flex; gap: 14px; flex-wrap: wrap;
-  font-size: 12px; color: var(--muted); margin-bottom: 12px;
-  padding-bottom: 12px; border-bottom: 1px solid #f4f4f6; }
-.muscle-legend .swatch { display: inline-block; width: 12px; height: 12px;
-  border-radius: 3px; vertical-align: middle; margin-right: 5px; }
-.muscle-legend .swatch.band { background: rgba(52,199,89,0.16); }
-.muscle-legend .swatch.good { background: var(--good); }
-.muscle-legend .swatch.amber { background: var(--amber); }
-.muscle-legend .swatch.warn { background: var(--warn); }
+  align-items: center; font-size: 12px; color: var(--muted);
+  margin-bottom: 14px; padding-bottom: 12px;
+  border-bottom: 1px solid #f4f4f6; }
 
-.bar-row { display: grid; grid-template-columns: 130px 1fr 200px;
-  align-items: center; gap: 12px; padding: 6px 0;
+.bar-row { display: grid; grid-template-columns: 120px 1fr 210px;
+  align-items: center; gap: 14px; padding: 7px 0;
   font-size: 13px; cursor: help; }
 .bar-label { color: var(--text); text-transform: capitalize; }
-.bar-track { position: relative; height: 10px; background: #f0f1f3;
-  border-radius: 5px; overflow: hidden; }
-.bar-band { position: absolute; top: 0; height: 100%;
-  background: rgba(52,199,89,0.16); border-radius: 5px; }
+.bar-track { position: relative; height: 10px;
+  background: #f1f2f4; border-radius: 5px; }
+.bar-tick { position: absolute; top: -2px; height: 14px; width: 1px;
+  background: #b9b9bb; }
 .bar-fill { position: absolute; top: 0; left: 0; height: 100%;
   border-radius: 5px; }
-.bar-fill.good { background: var(--good); }
-.bar-fill.amber { background: var(--amber); }
-.bar-fill.warn { background: var(--warn); }
-.bar-value { font-size: 13px; }
-.bar-value .bar-num { font-variant-numeric: tabular-nums; font-weight: 500; }
-.bar-value .bar-status { font-size: 12px; color: var(--muted);
-  margin-left: 8px; }
-.bar-status.good { color: var(--good); }
-.bar-status.amber { color: var(--amber); }
-.bar-status.warn { color: var(--warn); }
+.bar-fill.band-low  { background: var(--muscle-low); }
+.bar-fill.band-prod { background: var(--muscle-prod); }
+.bar-fill.band-push { background: var(--muscle-push); }
+.bar-fill.band-over { background: var(--muscle-over); }
+
+.bar-status { display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--muted); }
+.bar-status-label { white-space: nowrap; }
+.bar-dot { display: inline-block; width: 9px; height: 9px;
+  border-radius: 50%; flex: 0 0 9px; }
+.bar-dot.band-low  { background: var(--muscle-low); }
+.bar-dot.band-prod { background: var(--muscle-prod); }
+.bar-dot.band-push { background: var(--muscle-push); }
+.bar-dot.band-over { background: var(--muscle-over); }
+.bar-num { font-variant-numeric: tabular-nums; font-weight: 500;
+  color: var(--text); margin-left: auto; }
+
+/* 3-dot confidence indicator. Three dots = high, two = medium,
+   one = low. Tooltip on hover gives the word. */
+.confdots { display: inline-flex; align-items: center; gap: 3px;
+  vertical-align: middle; cursor: help; }
+.confdots .dot { display: inline-block; width: 7px; height: 7px;
+  border-radius: 50%; }
+.confdots .dot.on  { background: var(--accent); }
+.confdots .dot.off { background: #dadadc; }
 
 /* tables */
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -711,6 +741,40 @@ td.arrow { font-size: 16px; font-weight: 600; }
 .sparkline.amber { color: var(--amber); }
 .sparkline.warn { color: var(--warn); }
 .sparkline.muted { color: var(--muted); }
+
+/* sleep card */
+.sleep-hero { display: grid; grid-template-columns: 220px 1fr; gap: 24px;
+  align-items: center; padding: 8px 0 18px; }
+.sleep-hero .value { font-size: 36px; font-weight: 600;
+  letter-spacing: -0.02em; line-height: 1; }
+.sleep-hero .denom { font-size: 18px; color: var(--muted); font-weight: 400; }
+.sleep-hero .sub { color: var(--muted); margin-top: 6px; font-size: 13px; }
+.sleep-stack-wrap { }
+.sleep-stack { display: flex; width: 100%; height: 22px;
+  border-radius: 6px; overflow: hidden;
+  border: 1px solid var(--border); }
+.sleep-stack .stage { height: 100%; }
+.sleep-stack-legend { display: flex; gap: 14px; flex-wrap: wrap;
+  margin-top: 10px; font-size: 12px; color: var(--muted); }
+.sleep-stack-legend .dot { display: inline-block; width: 10px;
+  height: 10px; border-radius: 50%; vertical-align: middle;
+  margin-right: 5px; }
+.sleep-rows { display: grid; gap: 6px;
+  padding-top: 14px; border-top: 1px solid #f4f4f6; }
+.sleep-row { display: grid; grid-template-columns: 12px 180px 1fr 130px;
+  align-items: center; gap: 12px; padding: 6px 0; font-size: 13px;
+  cursor: help; }
+.sleep-row-label { color: var(--text); }
+.sleep-row-value { color: var(--text); }
+.sleep-row-status { text-align: right; font-size: 12px;
+  color: var(--muted); }
+.sleep-row-status.good  { color: var(--good); }
+.sleep-row-status.amber { color: var(--amber); }
+.sleep-row-status.warn  { color: var(--warn); }
+.sleep-outliers { margin-top: 14px; padding: 10px 12px;
+  background: #fafafa; border-radius: 6px;
+  font-size: 13px; color: var(--text); }
+.sleep-outliers.muted { color: var(--muted); }
 
 /* recovery practices */
 .practices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
@@ -735,7 +799,7 @@ td.arrow { font-size: 16px; font-weight: 600; }
   border-top: 1px solid var(--border); font-size: 12px;
   color: var(--muted); }
 
-/* workout tab — each `## Workout N: TYPE` becomes a card. */
+/* workout tab, each `## Workout N: TYPE` becomes a card. */
 .workout-card { background: var(--card); border: 1px solid var(--border);
   border-radius: 14px; padding: 18px 22px; margin-bottom: 14px; }
 .workout-card h2 { margin: 0 0 12px; font-size: 17px;
@@ -773,7 +837,10 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 50px;
   .page { padding: 20px 14px 50px; }
   .card { padding: 16px 16px; }
   .hero { grid-template-columns: 1fr; }
-  .rings { grid-template-columns: repeat(2, 1fr); }
+  .rings { grid-template-columns: repeat(3, 1fr); }
+  .sleep-hero { grid-template-columns: 1fr; gap: 14px; }
+  .sleep-row { grid-template-columns: 12px 1fr; gap: 8px; }
+  .sleep-row-value, .sleep-row-status { grid-column: 2 / span 1; }
   .practices { grid-template-columns: 1fr; }
   .driver-row { grid-template-columns: 110px 1fr 50px; gap: 8px; font-size: 12px; }
   .bar-row { grid-template-columns: 1fr; gap: 4px;
@@ -1055,7 +1122,7 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
   <article class="card metric {score_cls}">
     <h2>Recovery</h2>
     <div class="value">{esc(fmt(score, 1))}<span class="denom"> / 10</span></div>
-    <div class="sub">{esc(confidence or "—")} confidence</div>
+    <div class="sub">confidence {confidence_dots(confidence)}</div>
   </article>
   <article class="card metric {tsb_cls}">
     <h2><span class="term" data-tip="Your fitness minus your current fatigue. Positive numbers mean you are fresh and ready to train hard; negative numbers mean fatigue is accumulating. Above +5 is fresh, below -10 starts to be tired.">Freshness</span></h2>
@@ -1121,11 +1188,11 @@ def card_muscle_volume(weekly_volume, coach_text):
 <section class="card">
   <h2>Per-muscle weekly volume</h2>
   <div class="muscle-legend">
-    <span><span class="swatch band"></span><span class="term" data-tip="The productive range for growth. Between MEV (the minimum set count that still drives adaptation) and MAV (the upper bound of the productive band). Sitting in this band means you are stimulating growth without paying excess fatigue.">productive range</span></span>
-    <span><span class="swatch warn"></span>not enough</span>
-    <span><span class="swatch good"></span>productive</span>
-    <span><span class="swatch amber"></span>pushing limit</span>
-    <span><span class="swatch warn"></span>too much, cut back</span>
+    <span><span class="bar-dot band-low"></span>not enough</span>
+    <span><span class="bar-dot band-prod"></span>productive</span>
+    <span><span class="bar-dot band-push"></span>pushing limit</span>
+    <span><span class="bar-dot band-over"></span>too much, cut back</span>
+    <span class="muted">vertical marks on each bar show <span class="term" data-tip="Minimum Effective Volume. The smallest weekly set count that still drives growth in a muscle. Below this number, training does not produce a meaningful adaptation.">MEV</span> and <span class="term" data-tip="Maximum Adaptive Volume. The upper end of the productive range for a muscle. Beyond this, extra sets cost more fatigue than they give back in growth.">MAV</span></span>
   </div>
   {bars}
   {coach_block(coach_text)}
@@ -1151,7 +1218,7 @@ def card_strength(items, coach_text):
   <td class="num">{fmt(e1, 1)}<span class="muted"> kg</span></td>
   <td class="num">{signed(slope, 1)}<span class="muted"> /4w</span></td>
   <td class="arrow {cls}">{arrow}</td>
-  <td class="muted">{esc(conf or "—")}</td>
+  <td>{confidence_dots(conf)}</td>
 </tr>''')
     return f'''
 <section class="card">
@@ -1230,16 +1297,6 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, coach_text):
          "stable",
          "good",
          "Overnight wrist temperature. Persistent elevation can precede illness."),
-        ("Sleep total", f'{fmt(latest_sleep, 2)} <span class="muted">h</span>',
-         sparkline(sleep_series, sleep_status(latest_sleep)),
-         "under 7 h" if (latest_sleep or 0) < 7 else "on target",
-         sleep_status(latest_sleep),
-         "Total nightly sleep. Below 7 hours, recovery quality drops."),
-        ("Deep + REM", f'{fmt(deep_plus_rem, 2)} <span class="muted">h</span>',
-         sparkline([(d or 0) + (r or 0) for d, r in zip(deep_series, rem_series)], "amber"),
-         f'{fmt(latest_deep, 2)} deep, {fmt(latest_rem, 2)} rem',
-         "amber" if (deep_plus_rem or 0) < 2.5 else "good",
-         "Deep + REM sleep. Below 2.5 hours blunts strength recovery."),
         ("VO2max", f'{fmt(vo2max.get("value"), 2)} <span class="muted">ml/kg/min</span>',
          sparkline(vo2_series, vo2_status(vo2_trend)),
          signed(vo2_trend, 2) + " /4w",
@@ -1269,6 +1326,193 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, coach_text):
     <thead><tr><th>Metric</th><th>Value</th><th class="vitals-spark-col">Trend</th><th>State</th></tr></thead>
     <tbody>{"".join(body)}</tbody>
   </table>
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_sleep(sleep, coach_text):
+    """Dedicated Sleep card: stage stack chart, schedule consistency,
+    deep+REM total, efficiency, fragmentation, respiratory rate,
+    breathing disturbances, outlier nights."""
+    if not sleep:
+        return ""
+    means = sleep.get("means_h") or {}
+    schedule = sleep.get("schedule_consistency") or {}
+    fragmentation = sleep.get("fragmentation") or {}
+    eff = sleep.get("sleep_efficiency_pct") or {}
+    resp = sleep.get("resp_rate") or {}
+    breath = sleep.get("breath_disturbances") or {}
+    n_nights = sleep.get("n_nights_28d") or 0
+    outliers = sleep.get("outliers") or []
+
+    total = means.get("total") or 0
+    core = means.get("core") or 0
+    deep = means.get("deep") or 0
+    rem = means.get("rem") or 0
+    awake = means.get("awake") or 0
+    deep_plus_rem = deep + rem
+    tib = means.get("time_in_bed")
+
+    # --- Stage stack chart (proportional bar) ---
+    stage_segments = []
+    if total > 0:
+        for label, hours, color, tip in [
+            ("Core", core, "#a8b6d9",
+             "Light non-REM sleep. The bulk of total sleep; not as restorative individually as Deep but supports memory consolidation."),
+            ("Deep", deep, "#4c6ee0",
+             "Slow-wave sleep. The most physiologically restorative stage; drives muscle repair, growth hormone release, and glymphatic clearance."),
+            ("REM",  rem,  "#a86bd1",
+             "Rapid-Eye-Movement sleep. Supports emotional regulation and procedural memory."),
+            ("Awake", awake, "#dadadc",
+             "Wake-after-sleep-onset. Brief arousals during the night. Some is normal; persistent elevation suggests fragmentation."),
+        ]:
+            if hours > 0:
+                pct = (hours / (total + awake)) * 100.0 if (total + awake) > 0 else 0
+                stage_segments.append(
+                    f'<span class="stage stage-{label.lower()}" '
+                    f'style="width:{pct:.2f}%; background:{color}" '
+                    f'data-tip="{esc(label)}: average {hours:.2f} h per night. {tip}">'
+                    f'</span>'
+                )
+    stage_bar = "".join(stage_segments) or '<span class="stage" style="width:100%;background:#dadadc"></span>'
+
+    # --- Schedule consistency band ---
+    bt_stdev = schedule.get("bedtime_clock_stdev_min")
+    wt_stdev = schedule.get("waketime_clock_stdev_min")
+    def schedule_band(stdev_min):
+        if stdev_min is None: return "muted", "no data"
+        if stdev_min <= 30: return "good", "tight"
+        if stdev_min <= 60: return "amber", "loose"
+        return "warn", "erratic"
+    bt_band, bt_word = schedule_band(bt_stdev)
+    wt_band, wt_word = schedule_band(wt_stdev)
+
+    # --- Deep+REM band ---
+    if deep_plus_rem >= 2.5:
+        dr_band, dr_word = "good", "healthy"
+    elif deep_plus_rem >= 1.5:
+        dr_band, dr_word = "amber", "low side"
+    else:
+        dr_band, dr_word = "warn", "deficient"
+
+    # --- Efficiency band ---
+    eff_mean = eff.get("mean") if isinstance(eff, dict) else None
+    if eff_mean is None:
+        ef_band, ef_word, ef_value = "muted", "not computable", "—"
+    elif eff_mean >= 85:
+        ef_band, ef_word, ef_value = "good", "healthy", f"{eff_mean:.1f} %"
+    elif eff_mean >= 80:
+        ef_band, ef_word, ef_value = "amber", "borderline", f"{eff_mean:.1f} %"
+    else:
+        ef_band, ef_word, ef_value = "warn", "disturbed", f"{eff_mean:.1f} %"
+
+    # --- Fragmentation band (n_segments_mean) ---
+    frag_mean = fragmentation.get("n_segments_mean")
+    if frag_mean is None:
+        fr_band, fr_word = "muted", "no data"
+    elif frag_mean <= 15:
+        fr_band, fr_word = "good", "consolidated"
+    elif frag_mean <= 30:
+        fr_band, fr_word = "amber", "moderate"
+    else:
+        fr_band, fr_word = "warn", "fragmented"
+
+    # --- Respiratory rate (typical adult 12–20/min) ---
+    rr_mean = resp.get("mean") if isinstance(resp, dict) else None
+    if rr_mean is None:
+        rr_band, rr_word, rr_value = "muted", "no data", "—"
+    elif 12 <= rr_mean <= 20:
+        rr_band, rr_word, rr_value = "good", "normal range", f"{rr_mean:.1f} / min"
+    else:
+        rr_band, rr_word, rr_value = "amber", "outside normal", f"{rr_mean:.1f} / min"
+
+    # --- Breathing disturbances (Apple SBD) ---
+    sbd_mean = breath.get("mean") if isinstance(breath, dict) else None
+    if sbd_mean is None:
+        sbd_band, sbd_word, sbd_value = "muted", "no data", "—"
+    elif sbd_mean < 5:
+        sbd_band, sbd_word, sbd_value = "good", "low", f"{sbd_mean:.2f} / min"
+    elif sbd_mean < 15:
+        sbd_band, sbd_word, sbd_value = "amber", "elevated", f"{sbd_mean:.2f} / min"
+    else:
+        sbd_band, sbd_word, sbd_value = "warn", "high", f"{sbd_mean:.2f} / min"
+
+    # --- Outliers (last 14 days) ---
+    outlier_html = (
+        f'<div class="sleep-outliers">Outlier nights, last 14 days: {len(outliers)}.</div>'
+        if outliers else
+        '<div class="sleep-outliers muted">No outlier nights in the last 14 days.</div>'
+    )
+
+    return f'''
+<section class="card sleep-card">
+  <h2>Sleep</h2>
+
+  <div class="sleep-hero">
+    <div class="sleep-hero-num">
+      <div class="value">{total:.2f}<span class="denom"> h</span></div>
+      <div class="sub">average across the last {n_nights} nights</div>
+      <div class="sub muted">in bed about {fmt(tib, 2)} h</div>
+    </div>
+    <div class="sleep-stack-wrap">
+      <div class="sleep-stack">{stage_bar}</div>
+      <div class="sleep-stack-legend">
+        <span><span class="dot" style="background:#a8b6d9"></span>Core {core:.2f} h</span>
+        <span><span class="dot" style="background:#4c6ee0"></span>Deep {deep:.2f} h</span>
+        <span><span class="dot" style="background:#a86bd1"></span>REM {rem:.2f} h</span>
+        <span><span class="dot" style="background:#dadadc"></span>Awake {awake:.2f} h</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sleep-rows">
+
+    <div class="sleep-row" data-tip="Together, Deep and REM sleep carry the recovery and memory load. A common target is 2.5+ hours combined per night.">
+      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[dr_band] }"></span>
+      <span class="sleep-row-label">Deep + REM</span>
+      <span class="sleep-row-value">{deep_plus_rem:.2f} h</span>
+      <span class="sleep-row-status {dr_band}">{dr_word}</span>
+    </div>
+
+    <div class="sleep-row" data-tip="Sleep efficiency is the percent of time in bed that you were actually asleep. The healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools.">
+      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[ef_band] }"></span>
+      <span class="sleep-row-label">Efficiency</span>
+      <span class="sleep-row-value">{ef_value}</span>
+      <span class="sleep-row-status {ef_band}">{ef_word}</span>
+    </div>
+
+    <div class="sleep-row" data-tip="The number of awake-or-stage-transition segments Apple's classifier counted per night. More segments mean more fragmentation. Lower is better.">
+      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[fr_band] }"></span>
+      <span class="sleep-row-label">Fragmentation</span>
+      <span class="sleep-row-value">{fmt(frag_mean, 1)} segs / night</span>
+      <span class="sleep-row-status {fr_band}">{fr_word}</span>
+    </div>
+
+    <div class="sleep-row" data-tip="Bedtime and waketime standard deviation over the last 28 days. A tighter schedule produces a better recovery profile. Under 30 minutes is tight, 30 to 60 is loose, above 60 is erratic.">
+      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[bt_band] }"></span>
+      <span class="sleep-row-label">Schedule</span>
+      <span class="sleep-row-value">bedtime ± {fmt(bt_stdev, 0)} min · waketime ± {fmt(wt_stdev, 0)} min</span>
+      <span class="sleep-row-status {bt_band}">{bt_word}</span>
+    </div>
+
+    <div class="sleep-row" data-tip="Average respiratory rate during sleep. Typical adult range is 12 to 20 breaths per minute. A sustained rise can precede illness by 24 to 48 hours.">
+      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[rr_band] }"></span>
+      <span class="sleep-row-label">Respiratory rate</span>
+      <span class="sleep-row-value">{rr_value}</span>
+      <span class="sleep-row-status {rr_band}">{rr_word}</span>
+    </div>
+
+    <div class="sleep-row" data-tip="Apple's overnight breathing disturbances signal. Persistently elevated values are a screening signal for sleep apnea and worth raising with a doctor. Below 5 per minute is generally low.">
+      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[sbd_band] }"></span>
+      <span class="sleep-row-label">Breathing disturbances</span>
+      <span class="sleep-row-value">{sbd_value}</span>
+      <span class="sleep-row-status {sbd_band}">{sbd_word}</span>
+    </div>
+
+  </div>
+
+  {outlier_html}
   {coach_block(coach_text)}
 </section>
 '''
@@ -1435,11 +1679,15 @@ def render(j, coach, workout_md, person):
         None,
     )
 
+    cardio_wk = next(
+        (r for r in wow.get("rows", []) if r.get("key") == "cardio_sessions"), {}
+    )
     rings_html = (
         ring(strength_wk.get("this_week", 0), 4, "Strength", "sessions / wk")
+        + ring(cardio_wk.get("this_week", 0), 3, "Cardio", "sessions / wk")
         + ring(z2_min or 0, 150, "Zone 2 cardio", "min / wk")
-        + ring(recovery_sessions, 4, "Recovery practices", "sauna + cold + light")
-        + ring(round(sleep_avg or 0, 1), 7, "Sleep", "hours per night")
+        + ring(recovery_sessions, 4, "Recovery", "sauna + cold + light")
+        + ring(round(sleep_avg or 0, 1), 7, "Sleep", "hours / night")
     )
 
     series = build_load_series(monthly_sessions, today_d, days=90)
@@ -1488,6 +1736,7 @@ def render(j, coach, workout_md, person):
     {card_muscle_volume(weekly_volume, coach_cards.get("muscle_volume"))}
     {card_strength(e_items, coach_cards.get("strength"))}
     {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, coach_cards.get("vitals"))}
+    {card_sleep(j.get("sleep_summary"), coach_cards.get("sleep"))}
     {card_recovery_practices(thermal, light, coach_cards.get("recovery_practices"))}
     {card_wow(wow)}
   </div>

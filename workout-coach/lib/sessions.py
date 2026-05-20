@@ -153,50 +153,65 @@ def build_monthly_sessions(rows: list[dict],
         if mh and mh > by_date_apple.get(d, 0):
             by_date_apple[d] = mh
 
-    # Pass 1: classify each date by what kinds of rows it contains, and
-    # capture each row's first-appearance order for ``exercise_first``.
-    by_date: dict[str, dict] = {}
+    # Pass 1: scan rows to learn, per date, which kinds of rows are present
+    # and capture each kind's first-appearance exercise name for
+    # ``exercise_first``. A date with both strength and cardio rows will
+    # emit TWO entries downstream (one per kind) so per-session TRIMP and
+    # CTL/ATL/TSB don't lose the day's cardio when a strength session also
+    # happened.
+    date_kinds: dict[str, dict] = {}
     for r in rows:
         d = r.get("date")
         if not d:
             continue
         is_strength_row = (r.get("kg") or 0) * (r.get("reps") or 0) > 0
         is_cardio_row = _is_cardio_row(r)
+        bucket = date_kinds.setdefault(d, {
+            "has_strength": False, "has_cardio": False,
+            "strength_first": None, "cardio_first": None,
+        })
+        if is_strength_row:
+            bucket["has_strength"] = True
+            if bucket["strength_first"] is None:
+                bucket["strength_first"] = r.get("exercise")
+        if is_cardio_row:
+            bucket["has_cardio"] = True
+            if bucket["cardio_first"] is None:
+                bucket["cardio_first"] = r.get("exercise")
 
-        s = by_date.get(d)
-        if s is None:
-            s = {
+    # Pass 2: build the entries, keyed by ``(date, kind)``. Each date with
+    # both kinds yields two entries; pure days yield one.
+    by_key: dict[tuple, dict] = {}
+    for d, bucket in date_kinds.items():
+        if bucket["has_strength"]:
+            by_key[(d, "strength")] = {
                 "date": d,
-                "exercise_first": r.get("exercise"),
-                "active_cal":  None,
-                "total_cal":   None,
-                "elevation_m": None,
-                "elapsed":     None,
-                "avg_hr":      None,
-                "duration_min": None,
-                "_has_strength": is_strength_row,
-                "_has_cardio":   is_cardio_row,
+                "session_kind": "strength",
+                "exercise_first": bucket["strength_first"],
+                "active_cal":  None, "total_cal":   None,
+                "elevation_m": None, "elapsed":     None,
+                "avg_hr":      None, "duration_min": None,
             }
-            by_date[d] = s
-        else:
-            if is_strength_row:
-                s["_has_strength"] = True
-            if is_cardio_row:
-                s["_has_cardio"] = True
+        if bucket["has_cardio"]:
+            by_key[(d, "cardio")] = {
+                "date": d,
+                "session_kind": "cardio",
+                "exercise_first": bucket["cardio_first"],
+                "active_cal":  None, "total_cal":   None,
+                "elevation_m": None, "elapsed":     None,
+                "avg_hr":      None, "duration_min": None,
+            }
 
-    # Pass 2: fill metadata from cardio rows ONLY when the date has no
-    # strength rows. Mixed/strength sessions get their metadata
-    # exclusively from the TOTAL row summary (folded in below); allowing
-    # cardio rows to seed the metadata first causes the cycling ride's
-    # duration / elevation / HR to masquerade as the strength session's.
+    # Pass 3: fill cardio entries' metadata from the cardio rows on each
+    # date. Strength entries are left alone here; their metadata comes
+    # from the TOTAL-row summary below. This keeps a cycling ride's
+    # duration / HR from masquerading as the strength session's stats.
     for r in rows:
         d = r.get("date")
-        if not d:
+        if not d or not _is_cardio_row(r):
             continue
-        s = by_date.get(d)
-        if s is None or s["_has_strength"]:
-            continue
-        if not _is_cardio_row(r):
+        s = by_key.get((d, "cardio"))
+        if s is None:
             continue
         for k in ("active_cal", "total_cal", "elevation_m", "elapsed", "avg_hr"):
             if s.get(k) in (None, "") and r.get(k) not in (None, ""):
@@ -204,10 +219,10 @@ def build_monthly_sessions(rows: list[dict],
         if s.get("duration_min") in (None, "") and r.get("duration_min"):
             s["duration_min"] = r.get("duration_min")
 
-    # Fold TOTAL-row session summaries (strength sessions only — TOTAL
-    # rows are not emitted for pure cardio).
+    # Pass 4: fold TOTAL-row session summaries into the strength entries
+    # (TOTAL rows are not emitted for pure cardio).
     for d, summary in summaries.items():
-        s = by_date.get(d)
+        s = by_key.get((d, "strength"))
         if s is None:
             continue
         if summary.get("active_cal") is not None:
@@ -225,14 +240,11 @@ def build_monthly_sessions(rows: list[dict],
         if summary.get("is_deload"):
             s["is_deload"] = True
 
+    # Emit sorted by (date, kind) with strength before cardio on mixed days.
+    kind_order = {"strength": 0, "cardio": 1, "other": 2}
     out: list[dict] = []
-    for d in sorted(by_date.keys()):
-        s = by_date[d]
-        kind = "strength" if s.pop("_has_strength") else (
-            "cardio" if s.pop("_has_cardio") else "other")
-        s.pop("_has_cardio", None)
-        s["session_kind"] = kind
-        # Fold in volume (strength only) and Apple max_hr.
+    for d, kind in sorted(by_key.keys(), key=lambda k: (k[0], kind_order.get(k[1], 9))):
+        s = by_key[(d, kind)]
         if kind == "strength" and d in totals:
             s["volume"] = totals[d]
         max_hr = by_date_apple.get(d)

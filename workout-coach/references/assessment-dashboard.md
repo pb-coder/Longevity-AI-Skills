@@ -17,18 +17,20 @@ plans/<Person>/<date>-assessment.html
 ├── tabs                            Assessment / Workout Plan
 ├── tab: Assessment
 │   ├── coach's summary             top card, label "COACH'S SUMMARY", body text
-│   ├── hero                        Recovery score, Freshness
+│   ├── hero                        Recovery score (confidence dots), Freshness
 │   ├── recovery drivers            diverging-bar chart (z=null drivers filtered out)
-│   ├── activity rings              4 rings: strength / Z2 cardio / recovery practices / sleep
-│   ├── training load (90d)         interactive fitness/fatigue/freshness chart
-│   ├── per-muscle volume           horizontal bars, productive-range band, action labels
-│   ├── strength progression        e1RM table with sparkline + slope
-│   ├── health vitals               compact table: HRV, RHR, wrist temp, sleep, deep+REM, VO2max, bodyweight
+│   ├── activity rings              5 rings: strength / cardio sessions / Z2 cardio / recovery / sleep
+│   ├── training load (90d)         interactive chart; tracker.json must come from --months 6
+│   ├── per-muscle volume           bars + MEV/MAV ticks, 4 distinct band colors, dots on labels
+│   ├── strength progression        e1RM table with confidence dots
+│   ├── health vitals               HRV, RHR, wrist temp, VO2max, bodyweight (sleep is NOT here)
+│   ├── sleep (NEW)                 stage stack, schedule, efficiency, fragmentation,
+│   │                                respiratory rate, breathing disturbances, outliers
 │   ├── recovery practices          3 sub-cards: sauna / cold / light therapy
 │   └── week over week              this-wk / last-wk / 4-wk-avg table
 └── tab: Workout Plan
-    └── rendered from <date>-workout.md (the H1 + Assessment link line are dropped,
-        each ## becomes a card, em-dash sub-bullets nest under their parent exercise)
+    └── rendered from <date>-workout.md (each ## becomes a card,
+        em-dash sub-bullets nest under their parent exercise)
 footer                              "generated at YYYY-MM-DD HH:MM"
 ```
 
@@ -77,7 +79,8 @@ All keys under `cards` are optional. If a key is missing or empty, the card rend
 | Recovery drivers | `recovery.drivers[*]` | Diverging horizontal bar chart, sorted by \|z\| desc, capped at 8 rows. **Penalty-only drivers (those with `z=None`) are filtered out** — they are "no-penalty" placeholders, not signals of movement. Positive z = green (favorable; the metric module already sign-flips RHR/wrist temp). |
 | Activity rings | `week_over_week.rows` (strength count), `cardio_hr_zones_28d.z2`, `thermal_summary` + `light_therapy_summary` (recovery sessions), `health_metrics_weekly` (sleep avg) | Targets: 4 strength sess, 150 min Z2, 4 recovery sess, 7 h sleep. Ring color: good when ≥ target, amber otherwise. Never red. |
 | Training load (90d) | computed locally from `monthly_sessions[*].trimp` via 42-day / 7-day EWMA, seeded from sessions older than the window | Interactive: mouse / touch reveals scrubber + values at the hovered day. |
-| Per-muscle volume | `weekly_volume_per_muscle.current` and `.landmarks` | Status labels in action voice: `not enough` (below MEV, warn), `productive` (MEV..MAV, good), `pushing limit` (MAV..MRV, amber), `too much, cut back` (above MRV, warn). Background band shows productive range. Per-row tooltip spells out the action. |
+| Per-muscle volume | `weekly_volume_per_muscle.current` and `.landmarks` | Four-color palette: `not enough` (orange, below MEV), `productive` (green, MEV..MAV), `pushing limit` (yellow, MAV..MRV), `too much, cut back` (red, above MRV). Thin tick marks at MEV and MAV on each track; **no background band** (caused the 3-color confusion in v3). Bar-status labels start with a small colored dot so labels align regardless of icon width. |
+| Sleep (NEW) | `sleep_summary.{means_h, sleep_efficiency_pct, fragmentation, schedule_consistency, resp_rate, breath_disturbances, outliers}` | Dedicated card after Health vitals. Hero shows average total + Time in Bed proxy. Stack chart breaks down Core / Deep / REM / Awake. Six diagnostic rows (Deep+REM, efficiency, fragmentation, schedule, respiratory rate, breathing disturbances) each with a status word + colored dot. Sleep stays out of the Health vitals card to avoid duplication. Newer iOS doesn't emit explicit `InBed` segments, so the importer + `Skills/shared/backfill_sleep_efficiency.py` derive Time in Bed from the first-to-last segment span. |
 | Strength progression | `estimated_1rm[*]` filtered to entries with non-null `slope_kg_per_4w` + `current_e1rm_kg`, sorted by \|slope\|, capped at 8 | Arrow class: good (slope ≥ +0.5), warn (≤ -0.5), muted otherwise. e1RM and slope column headers have tooltips. |
 | Health vitals | `health_metrics_weekly` (HRV / RHR / wrist temp / sleep / deep / REM / VO2max series), `vo2max_latest`, `vo2max_trend_per_4w`, `bodyweight_latest`, `bodyweight_trend_kg_per_week` | One clean table, no inline coach rows. Sparklines colored by per-row status. Sparkline column hides at ≤ 480 px. |
 | Recovery practices | `thermal_summary.heat`, `thermal_summary.cold`, `thermal_summary.cold.recent_sessions`, `thermal_summary.adherence`, `light_therapy_summary` | Three sub-cards, identical layout. Cold sub-card lists recent sessions with their temperature (the `dose_hint: "amber"` flag for cold_air ≥ 18 °C tags weak doses). |

@@ -223,6 +223,35 @@ def _bucket_bodyweight_mean(bw_all: list[dict],
     return _mean_over(vals)
 
 
+def _bodyweight_weekly_kg(bw_all: list[dict], today_d: date,
+                          weeks: int = 4) -> list[float | None]:
+    """Per-ISO-week mean bodyweight for the same window as
+    ``health_metrics_weekly``. Returns one entry per week present in
+    the data, oldest first; entries are None when no weight was logged
+    that week. The dashboard uses this to draw a bodyweight sparkline."""
+    if not bw_all:
+        return []
+    cutoff = today_d - timedelta(days=weeks * 7)
+    by_week: dict[tuple[int, int], list[float]] = {}
+    for row in bw_all:
+        d = _parse_iso_date(row.get("date"))
+        if d is None or d < cutoff:
+            continue
+        v = row.get("kg")
+        try:
+            if v is None:
+                continue
+            iso = d.isocalendar()
+            by_week.setdefault((iso.year, iso.week), []).append(float(v))
+        except (TypeError, ValueError):
+            continue
+    out: list[float | None] = []
+    for wk in sorted(by_week.keys()):
+        vals = by_week[wk]
+        out.append(round(sum(vals) / len(vals), 2) if vals else None)
+    return out
+
+
 def _round_or_none(v: float | None, digits: int) -> float | None:
     """Round ``v`` to ``digits`` decimals, preserving None."""
     return None if v is None else round(v, digits)
@@ -553,6 +582,7 @@ def main() -> int:
         # ---- Bodyweight ----
         "bodyweight_latest": bw_latest,
         "bodyweight_trend_kg_per_week": bodyweight_trend_kg_per_week(bw_all),
+        "bodyweight_weekly": _bodyweight_weekly_kg(bw_all, today_d, weeks=4),
         # ---- Apple Health weekly aggregates (raw daily behind a flag) ----
         "health_metrics_weekly": weekly_health,
         "health_metrics_recent": health_recent if args.include_daily_health else None,

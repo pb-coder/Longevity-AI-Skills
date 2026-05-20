@@ -72,11 +72,28 @@ EM_DASH = "—"
 COACH_STRING_MAX = 280
 
 
-def validate_coach_reads(coach: dict) -> list[str]:
-    """Return a list of validation errors. Empty list means OK."""
+# Card keys the renderer knows how to surface a coach callout for.
+# Listed here so the validator can warn when one is missing; the
+# corresponding card still renders (just without a callout) which is
+# a softer failure than a hard validator error.
+COACH_CARD_KEYS = (
+    "recovery_drivers", "activity_rings", "training_load", "muscle_volume",
+    "strength", "vitals", "sleep", "recovery_practices",
+)
+
+
+def validate_coach_reads(coach: dict) -> tuple[list[str], list[str]]:
+    """Return ``(errors, warnings)``.
+
+    Errors are hard failures (the renderer refuses to write the HTML).
+    Warnings are surfaced to stderr but don't block the render. A
+    missing ``cards.<key>`` for a documented card is a warning, not an
+    error, because the card itself still renders cleanly without a
+    callout."""
     errors: list[str] = []
+    warnings: list[str] = []
     if not isinstance(coach, dict):
-        return ["coach reads must be a JSON object"]
+        return (["coach reads must be a JSON object"], warnings)
 
     headline = coach.get("headline")
     if not isinstance(headline, str) or not headline.strip():
@@ -89,18 +106,24 @@ def validate_coach_reads(coach: dict) -> list[str]:
     cards = coach.get("cards") or {}
     if not isinstance(cards, dict):
         errors.append("`cards` must be a JSON object")
-    else:
-        for key, text in cards.items():
-            if not isinstance(text, str):
-                errors.append(f"cards.{key} must be a string")
-                continue
-            if EM_DASH in text:
-                errors.append(f"cards.{key} contains an em-dash (—). Use a period or comma.")
-            if len(text) > COACH_STRING_MAX:
-                errors.append(
-                    f"cards.{key} is {len(text)} chars; max is {COACH_STRING_MAX}"
-                )
-    return errors
+        return (errors, warnings)
+
+    for key, text in cards.items():
+        if not isinstance(text, str):
+            errors.append(f"cards.{key} must be a string")
+            continue
+        if EM_DASH in text:
+            errors.append(f"cards.{key} contains an em-dash (—). Use a period or comma.")
+        if len(text) > COACH_STRING_MAX:
+            errors.append(
+                f"cards.{key} is {len(text)} chars; max is {COACH_STRING_MAX}"
+            )
+
+    for key in COACH_CARD_KEYS:
+        if not cards.get(key):
+            warnings.append(f"cards.{key} missing or empty; that card will render without a coach callout")
+
+    return (errors, warnings)
 
 
 # Wrap KNOWN_TERMS with a tooltip span when they appear in any coach
@@ -1952,7 +1975,9 @@ def main():
         j = json.loads(Path(args.tracker).read_text())
 
     coach = json.loads(Path(args.coach).read_text())
-    errors = validate_coach_reads(coach)
+    errors, warnings = validate_coach_reads(coach)
+    for w in warnings:
+        print(f"coach_reads warning: {w}", file=sys.stderr)
     if errors:
         for e in errors:
             print(f"coach_reads validation error: {e}", file=sys.stderr)

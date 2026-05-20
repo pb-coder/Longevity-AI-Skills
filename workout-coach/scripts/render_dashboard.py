@@ -163,7 +163,7 @@ def render(j, coach, workout_md, person):
     {card_neat(j.get("daily_activity_28d"))}
     {card_training_load(series, ctl, atl, tsb, tsb_trend, coach_cards.get("training_load"))}
     {card_muscle_volume(weekly_volume, coach_cards.get("muscle_volume"))}
-    {card_strength(e_items, coach_cards.get("strength"))}
+    {card_strength(e_items, coach_cards.get("strength"), j.get("hr_at_volume_divergence"))}
     {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"))}
     {card_sleep(j.get("sleep_summary"), coach_cards.get("sleep"))}
     {card_recovery_practices(thermal, light, coach_cards.get("recovery_practices"))}

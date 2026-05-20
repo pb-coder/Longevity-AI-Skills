@@ -203,7 +203,7 @@ def card_muscle_volume(weekly_volume, coach_text):
 '''
 
 
-def card_strength(items, coach_text):
+def card_strength(items, coach_text, hr_divergence=None):
     rows = []
     for name, v in items:
         slope = v.get("slope_kg_per_4w")
@@ -223,6 +223,37 @@ def card_strength(items, coach_text):
   <td class="arrow {cls}">{arrow}</td>
   <td>{confidence_dots(conf)}</td>
 </tr>''')
+    # HR-at-volume divergence: per-muscle slope of strength-session avg HR
+    # over the last 8 weeks, controlling for volume. Surfaces fatigue
+    # (HR creeping at constant load) or improving conditioning (HR falling).
+    # Computed by read_tracker.py but previously not rendered.
+    hr_div_html = ""
+    if hr_divergence:
+        rising = [(m, v) for m, v in hr_divergence.items()
+                  if (v.get("hint") or "").startswith("rising")]
+        falling = [(m, v) for m, v in hr_divergence.items()
+                   if (v.get("hint") or "").startswith("falling")]
+        parts = []
+        if rising:
+            txt = ", ".join(
+                f"{esc(m)} +{v['slope_bpm_per_4w']:.1f} bpm/4w"
+                for m, v in rising
+            )
+            parts.append(
+                f'<span class="warn">Fatigue flag: HR rising at constant volume on {txt}. Hold or cut load on these groups.</span>'
+            )
+        if falling:
+            txt = ", ".join(
+                f"{esc(m)} {v['slope_bpm_per_4w']:.1f} bpm/4w"
+                for m, v in falling
+            )
+            parts.append(
+                f'<span class="muted">Conditioning improving on {txt} (HR falling at the same load).</span>'
+            )
+        if parts:
+            label = '<span class="term" data-tip="Per-muscle slope of strength-session average heart rate over the last 8 weeks, controlling for volume. Rising HR at the same load is a fatigue or under-recovery signal; falling HR is improving aerobic conditioning.">HR at volume</span>'
+            hr_div_html = f'<div class="hr-divergence">{label}: {" · ".join(parts)}</div>'
+
     return f'''
 <section class="card">
   <h2>Are you getting stronger?</h2>
@@ -238,6 +269,7 @@ def card_strength(items, coach_text):
     </thead>
     <tbody>{"".join(rows)}</tbody>
   </table>
+  {hr_div_html}
   {coach_block(coach_text)}
 </section>
 '''
@@ -409,6 +441,7 @@ def card_sleep(sleep, coach_text):
         return "warn", "erratic"
     bt_band, bt_word = schedule_band(bt_stdev)
     wt_band, wt_word = schedule_band(wt_stdev)
+    schedule_unavailable = bt_stdev is None and wt_stdev is None
 
     # --- Deep+REM band ---
     if deep_plus_rem >= 2.5:
@@ -467,6 +500,54 @@ def card_sleep(sleep, coach_text):
         '<div class="sleep-outliers muted">No outlier nights in the last 14 days.</div>'
     )
 
+    # --- Assemble sleep-rows: only emit rows whose underlying field exists.
+    # HealthAutoExport-sourced trackers don't supply Time in Bed (efficiency),
+    # per-night segment counts (fragmentation), or segment clock times
+    # (schedule). Silently drop those rows rather than rendering placeholder
+    # dots / dashes — the absence itself is honest.
+    band_class_map = {"good": "prod", "amber": "push", "warn": "over", "muted": "low"}
+    sleep_row_parts = []
+    sleep_row_parts.append(f'''
+    <div class="sleep-row" data-tip="Together, Deep and REM sleep carry the recovery and memory load. A common target is 2.5+ hours combined per night. Status: {dr_word}.">
+      <span class="bar-dot band-{band_class_map[dr_band]}"></span>
+      <span class="sleep-row-label">Deep + REM</span>
+      <span class="sleep-row-value {dr_band}">{deep_plus_rem:.2f} h</span>
+    </div>''')
+    if eff_mean is not None:
+        sleep_row_parts.append(f'''
+    <div class="sleep-row" data-tip="Sleep efficiency is the percent of time in bed that you were actually asleep. The healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools. Status: {ef_word}.">
+      <span class="bar-dot band-{band_class_map[ef_band]}"></span>
+      <span class="sleep-row-label">Efficiency</span>
+      <span class="sleep-row-value {ef_band}">{ef_value}</span>
+    </div>''')
+    if frag_mean is not None:
+        sleep_row_parts.append(f'''
+    <div class="sleep-row" data-tip="The number of awake-or-stage-transition segments Apple's classifier counted per night. More segments mean more fragmentation. Lower is better. Status: {fr_word}.">
+      <span class="bar-dot band-{band_class_map[fr_band]}"></span>
+      <span class="sleep-row-label">Fragmentation</span>
+      <span class="sleep-row-value {fr_band}">{frag_mean:.1f} segs / night</span>
+    </div>''')
+    if not schedule_unavailable:
+        sleep_row_parts.append(f'''
+    <div class="sleep-row" data-tip="Bedtime and waketime standard deviation over the last 28 days. A tighter schedule produces a better recovery profile. Under 30 minutes is tight, 30 to 60 is loose, above 60 is erratic. Status: {bt_word}.">
+      <span class="bar-dot band-{band_class_map[bt_band]}"></span>
+      <span class="sleep-row-label">Schedule</span>
+      <span class="sleep-row-value {bt_band}">bedtime ± {fmt(bt_stdev, 0)} min · waketime ± {fmt(wt_stdev, 0)} min</span>
+    </div>''')
+    sleep_row_parts.append(f'''
+    <div class="sleep-row" data-tip="Average respiratory rate during sleep. Typical adult range is 12 to 20 breaths per minute. A sustained rise can precede illness by 24 to 48 hours. Status: {rr_word}.">
+      <span class="bar-dot band-{band_class_map[rr_band]}"></span>
+      <span class="sleep-row-label">Respiratory rate</span>
+      <span class="sleep-row-value {rr_band}">{rr_value}</span>
+    </div>''')
+    sleep_row_parts.append(f'''
+    <div class="sleep-row" data-tip="Apple's overnight breathing disturbances signal. Persistently elevated values are a screening signal for sleep apnea and worth raising with a doctor. Below 5 per minute is generally low. Status: {sbd_word}.">
+      <span class="bar-dot band-{band_class_map[sbd_band]}"></span>
+      <span class="sleep-row-label">Breathing disturbances</span>
+      <span class="sleep-row-value {sbd_band}">{sbd_value}</span>
+    </div>''')
+    sleep_rows_html = "".join(sleep_row_parts)
+
     return f'''
 <section class="card sleep-card">
   <h2>Sleep</h2>
@@ -475,7 +556,7 @@ def card_sleep(sleep, coach_text):
     <div class="sleep-hero-num">
       <div class="value">{total:.2f}<span class="denom"> h</span></div>
       <div class="sub">average across the last {n_nights} nights</div>
-      <div class="sub muted">in bed about {fmt(tib, 2)} h</div>
+      {f'<div class="sub muted">in bed about {tib:.2f} h</div>' if tib is not None else ''}
     </div>
     <div class="sleep-stack-wrap">
       <div class="sleep-stack">{stage_bar}</div>
@@ -489,43 +570,7 @@ def card_sleep(sleep, coach_text):
   </div>
 
   <div class="sleep-rows">
-
-    <div class="sleep-row" data-tip="Together, Deep and REM sleep carry the recovery and memory load. A common target is 2.5+ hours combined per night. Status: {dr_word}.">
-      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[dr_band] }"></span>
-      <span class="sleep-row-label">Deep + REM</span>
-      <span class="sleep-row-value {dr_band}">{deep_plus_rem:.2f} h</span>
-    </div>
-
-    <div class="sleep-row" data-tip="Sleep efficiency is the percent of time in bed that you were actually asleep. The healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools. Status: {ef_word}.">
-      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[ef_band] }"></span>
-      <span class="sleep-row-label">Efficiency</span>
-      <span class="sleep-row-value {ef_band}">{ef_value}</span>
-    </div>
-
-    <div class="sleep-row" data-tip="The number of awake-or-stage-transition segments Apple's classifier counted per night. More segments mean more fragmentation. Lower is better. Status: {fr_word}.">
-      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[fr_band] }"></span>
-      <span class="sleep-row-label">Fragmentation</span>
-      <span class="sleep-row-value {fr_band}">{fmt(frag_mean, 1)} segs / night</span>
-    </div>
-
-    <div class="sleep-row" data-tip="Bedtime and waketime standard deviation over the last 28 days. A tighter schedule produces a better recovery profile. Under 30 minutes is tight, 30 to 60 is loose, above 60 is erratic. Status: {bt_word}.">
-      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[bt_band] }"></span>
-      <span class="sleep-row-label">Schedule</span>
-      <span class="sleep-row-value {bt_band}">bedtime ± {fmt(bt_stdev, 0)} min · waketime ± {fmt(wt_stdev, 0)} min</span>
-    </div>
-
-    <div class="sleep-row" data-tip="Average respiratory rate during sleep. Typical adult range is 12 to 20 breaths per minute. A sustained rise can precede illness by 24 to 48 hours. Status: {rr_word}.">
-      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[rr_band] }"></span>
-      <span class="sleep-row-label">Respiratory rate</span>
-      <span class="sleep-row-value {rr_band}">{rr_value}</span>
-    </div>
-
-    <div class="sleep-row" data-tip="Apple's overnight breathing disturbances signal. Persistently elevated values are a screening signal for sleep apnea and worth raising with a doctor. Below 5 per minute is generally low. Status: {sbd_word}.">
-      <span class="bar-dot band-{ {"good":"prod","amber":"push","warn":"over","muted":"low"}[sbd_band] }"></span>
-      <span class="sleep-row-label">Breathing disturbances</span>
-      <span class="sleep-row-value {sbd_band}">{sbd_value}</span>
-    </div>
-
+    {sleep_rows_html}
   </div>
 
   {outlier_html}
@@ -535,6 +580,21 @@ def card_sleep(sleep, coach_text):
 
 
 def card_recovery_practices(thermal, light, coach_text):
+    # When the user logged no sauna / cold / light sessions in the last 28
+    # days, both summary keys are absent from the JSON. Render one explicit
+    # behavior-gap card instead of three sub-cards full of placeholder dots
+    # — the absence is a choice, not a tracking failure.
+    if not thermal and not light:
+        return f'''
+<section class="card">
+  <h2>Recovery practices</h2>
+  <div class="body">
+    <p>No sauna, cold exposure, or light-therapy sessions in the last 28 days.</p>
+    <p class="muted">Log via <code>/log</code> after each session to track adherence against the 4 per week sauna and 3 per week light-therapy defaults.</p>
+  </div>
+  {coach_block(coach_text)}
+</section>
+'''
     heat = (thermal or {}).get("heat") or {}
     cold = (thermal or {}).get("cold") or {}
     adherence = (thermal or {}).get("adherence") or {}

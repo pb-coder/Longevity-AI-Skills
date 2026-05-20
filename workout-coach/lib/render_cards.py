@@ -131,7 +131,7 @@ def card_neat(daily_activity):
                    "low": "low"}.get(assess, "no signal")
     return f'''
 <section class="card">
-  <h2><span class="term" data-tip="Non-Exercise Activity Thermogenesis. All-day movement outside structured workouts, averaged over the last 28 days. Strongly tied to long-term metabolic health and longevity.">NEAT</span></h2>
+  <h2><span class="term" data-tip="Non-Exercise Activity Thermogenesis. All-day movement outside structured workouts, averaged over the last 28 days. Strongly tied to long-term metabolic health and longevity.">NEAT</span> over 28 days</h2>
   <div class="neat-stats">
     <div class="neat-stat">
       <div class="neat-stat-num">{fmt(avg_min, 0)}<span class="neat-stat-unit">min/day</span></div>

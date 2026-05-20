@@ -115,9 +115,12 @@ When `Profile.auto_cardio` is true, every Apple-recorded workout in `CARDIO_AUTO
 
 **Current-month gate.** The importers only ever write into the current calendar month's CSV. Past months are "finished" and never re-scanned, so a cardio row the user deletes from `2026.02.csv` stays deleted on the next import — no separate tombstone bookkeeping needed. The strength-session metadata writer follows the same rule: workouts dated outside the current month are silently skipped. (This replaced a previous `Tombstones` sheet + `auto_cardio_since` profile cell in 2026-05; both are now gone.)
 
-Per-person sidecars:
+Per-person coach output:
 
-- `<Person>/workout_plan - <Person>.md` (written by `/coach` — actually drops at the workout-tracker root for now; coach naming TBD)
+- `plans/<Person>/<YYYY-MM-DD>-assessment.html` — self-contained dashboard (inline CSS / SVG / JS, no CDN, opens offline). Rendered by `/coach` on every run.
+- `plans/<Person>/<YYYY-MM-DD>-workout.md` — lean workout-plan markdown, bullets only, no tables, sparse sub-bullet notes. Linked from the dashboard.
+
+Both files are dated per generation and accumulate (no `latest-*` symlink — open the newest dated file). Path resolvers in `shared/person_paths.py`: `plans_dir(person)`, `assessment_html(person, date)`, `workout_plan_md(person, date)`. The pre-2026-05 root-level `workout_plan - <Person>.md` files are frozen historical artifacts; `/coach` no longer writes there. Full rendering contract lives in `Skills/workout-coach/references/assessment-dashboard.md`.
 
 ## Routing (who is a message about?)
 

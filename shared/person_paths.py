@@ -25,6 +25,12 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │           └── YYYY.MM.sessions.csv
     ├── Fabian/
     │   └── (same; no swimming/, thermal/, or light_therapy/ until populated)
+    ├── plans/                             # /coach output — dated per generation
+    │   ├── Nihad/
+    │   │   ├── YYYY-MM-DD-assessment.html
+    │   │   └── YYYY-MM-DD-workout.md
+    │   └── Fabian/
+    │       └── …
     ├── Skills/
     │   └── shared/                        ← this file
     ├── Export.zip / HealthAutoExport*.zip (transient; archived on success)
@@ -248,6 +254,45 @@ def list_light_therapy_session_months(person: str) -> list[str]:
         for p in d.glob("*.sessions.csv")
         if _re.match(r"^\d{4}\.\d{2}\.sessions\.csv$", p.name)
     )
+
+
+def plans_dir(person: str) -> Path:
+    """Return the per-person plans folder, e.g. ``<root>/plans/Nihad``.
+
+    Holds the coach's generated outputs — paired dated files
+    ``YYYY-MM-DD-assessment.html`` (rich dashboard) and
+    ``YYYY-MM-DD-workout.md`` (lean exercise list). Lives at the
+    workout-tracker root (not inside ``<person>/data/``) so it stays
+    visible alongside the import dropbox and is never touched by the
+    CSV importers.
+    """
+    return WORKOUT_TRACKER_ROOT / "plans" / person
+
+
+def ensure_plans_dir(person: str) -> Path:
+    """Create ``<root>/plans/<person>`` if missing and return it."""
+    d = plans_dir(person)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def workout_plan_md(person: str, date: str) -> Path:
+    """Path to a dated workout-plan markdown for ``person``.
+
+    ``date`` is an ISO ``YYYY-MM-DD`` string — the date the coach
+    generated the plan, not the date the workout will be performed.
+    """
+    return plans_dir(person) / f"{date}-workout.md"
+
+
+def assessment_html(person: str, date: str) -> Path:
+    """Path to a dated assessment-dashboard HTML for ``person``.
+
+    Single self-contained file (inline CSS / SVG / optional inline JS,
+    no external requests) rendered by /coach alongside the matching
+    ``-workout.md``.
+    """
+    return plans_dir(person) / f"{date}-assessment.html"
 
 
 def archive_processed_export(path: Path) -> Path:

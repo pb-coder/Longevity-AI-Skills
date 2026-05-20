@@ -187,11 +187,23 @@ Native XML and HealthAutoExport imports populate the `sleep/` folder when sleep-
 
 ## Sauna + cold exposure (opt-in)
 
-Sauna and cold exposure are opt-in. The user includes a `sauna` and/or `cold` line in the `/log` message — see `references/parsing-rules.md` for the syntax (plus-shorthand for multi-round saunas, the 5-option cold-type enum, pairing rules). **No automatic prompts, no probing, no `AskUserQuestion`.** Absent ≡ didn't happen.
+Sauna and cold exposure are opt-in. The user includes a `sauna` and/or `cold` line in the `/log` message — see `references/parsing-rules.md` for the syntax (plus-shorthand for multi-round saunas, the 5-option cold-type enum, pairing rules). **No automatic prompts, no probing, no `AskUserQuestion`** — with one narrow exception: outdoor temperature on `cold_air` (see "Outdoor temperature" below). Absent ≡ didn't happen for everything else.
 
 Thermal entries are written to `<Person>/data/thermal/YYYY.MM.sessions.csv` (manual-/log-only — Apple Health doesn't classify sauna sessions reliably, so there's no importer-side write path). Sparse-merge by `(date, start)`; `Notes` is manual-wins. `heat_total_min` and (when absent) `heat_rounds` are auto-derived from `heat_round_durations_min` inside `upsert_thermal_sessions` so the file is internally consistent.
 
 **Pairing.** A `sauna` line and a `cold` line under the same workout's header become **one row** (one protocol session). Standalone cold (e.g. morning cold shower without sauna) lives in its own row with heat columns blank. Two heat sessions on the same date should use different `start` times to dedupe correctly.
+
+**Outdoor temperature — narrow exception to the no-prompt rule.** Cold exposure outdoors at −5°C is a fundamentally different stimulus than cold exposure outdoors at 25°C. Apple Health does not export ambient air temperature, so this datum can only come from the user. When the parsed payload contains a `cold_air` entry with `cold_temp_c` null, **ask once** in chat — one short question, before the write:
+
+> *"You logged a cold-air session — roughly what was it outside? (give a number in °C, or say `skip`)"*
+
+Rules for this ask:
+- **Only when `cold_type == "cold_air"`** AND `cold_temp_c` is null. Never ask for `cold_plunge` / `cold_water` / `cold_shower` (those temperatures are usually known from the protocol or irrelevant).
+- **Only when the user actually typed a `cold` line in this `/log` message.** Don't ask about cold entries that came in via a bulk-seed payload — those are historical and the user is filling in many at once.
+- **Once per log call, per cold_air entry.** If the user says `skip`, write the entry with `cold_temp_c=null` and proceed; don't re-ask on a subsequent `/log`.
+- Accept a number (`-2`, `12.5`, `0`) or `skip`. If the answer isn't parseable, treat as `skip`.
+
+This is the only thermal-field prompt allowed. All other heat / cold fields remain absent-≡-didn't-happen.
 
 ### Bulk-seed (historical thermal import)
 

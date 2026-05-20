@@ -40,6 +40,14 @@ HSP_TEMP_THRESHOLD_C = 80
 HSP_DURATION_THRESHOLD_MIN = 20
 DEFAULT_HEAT_TARGET_PER_WEEK = 4
 
+# Cold-air dose anchor. Above this temperature, a "cold_air" session is
+# barely a cold stressor — adaptation evidence is thin and norepinephrine
+# response negligible. The dashboard surfaces an "amber" hint when a
+# cold_air session was logged at or above this; the user knows the
+# session counts as habit but not as dose. The wind/cloud/humidity caveats
+# are real but a single scalar threshold is honest enough for tracking.
+COLD_AIR_DOSE_FLOOR_C = 18
+
 
 def recent_thermal_sessions(sessions: list[dict], today_d: date,
                             days: int = 28) -> list[dict]:
@@ -130,6 +138,20 @@ def thermal_summary(
               "type_distribution": {"cold_air": int, "cold_shower": int, ...},
               "paired_with_heat_pct": float,   # 0-100
               "dominant_type": str | None,
+              "avg_cold_air_temp_c": float | None,   # mean for cold_air rows
+              "avg_cold_water_temp_c": float | None, # mean for cold_plunge / cold_water rows
+              "cold_air_above_dose_floor_pct": float | None,  # 0-100; flag dashboard amber when high
+              "missing_temp_pct": float,             # 0-100; rows without a temp
+              "recent_sessions": [                    # 1 entry per cold session, newest first
+                  {
+                      "date": "YYYY-MM-DD",
+                      "cold_type": "cold_air",
+                      "cold_duration_sec": int | None,
+                      "cold_temp_c": float | None,
+                      "dose_hint": "amber" | None,    # set when cold_air >= COLD_AIR_DOSE_FLOOR_C
+                  },
+                  …
+              ],
           },
           "adherence": {
               "heat_target_per_week": int,
@@ -198,11 +220,56 @@ def thermal_summary(
     # ---- Cold block ----
     cold_type_dist: dict[str, int] = {}
     paired_with_heat = 0
+    cold_air_temps: list[float] = []
+    cold_water_temps: list[float] = []
+    cold_air_above_floor = 0
+    cold_air_total = 0
+    missing_temp = 0
+    recent_cold: list[dict] = []
     for r in cold_rows:
         ct = r.get("cold_type") or "unknown"
         cold_type_dist[ct] = cold_type_dist.get(ct, 0) + 1
         if _is_heat_session(r):
             paired_with_heat += 1
+
+        raw_temp = r.get("cold_temp_c")
+        try:
+            temp_f = float(raw_temp) if raw_temp not in (None, "") else None
+        except (TypeError, ValueError):
+            temp_f = None
+        if temp_f is None:
+            missing_temp += 1
+
+        if ct == "cold_air":
+            cold_air_total += 1
+            if temp_f is not None:
+                cold_air_temps.append(temp_f)
+                if temp_f >= COLD_AIR_DOSE_FLOOR_C:
+                    cold_air_above_floor += 1
+        elif ct in ("cold_plunge", "cold_water"):
+            if temp_f is not None:
+                cold_water_temps.append(temp_f)
+
+        raw_dur = r.get("cold_duration_sec")
+        try:
+            dur_i = int(round(float(raw_dur))) if raw_dur not in (None, "") else None
+        except (TypeError, ValueError):
+            dur_i = None
+
+        dose_hint = "amber" if (ct == "cold_air"
+                                and temp_f is not None
+                                and temp_f >= COLD_AIR_DOSE_FLOOR_C) else None
+
+        recent_cold.append({
+            "date":              r.get("date"),
+            "cold_type":         ct,
+            "cold_duration_sec": dur_i,
+            "cold_temp_c":       temp_f,
+            "dose_hint":         dose_hint,
+        })
+
+    # Newest first for the dashboard's "recent sessions" card.
+    recent_cold.sort(key=lambda s: s.get("date") or "", reverse=True)
 
     cold_block: dict = {
         "n_sessions_28d":                    len(cold_rows),
@@ -213,6 +280,23 @@ def thermal_summary(
             if cold_rows else None
         ),
         "dominant_type":                     _dominant(cold_type_dist),
+        "avg_cold_air_temp_c":               (
+            round(sum(cold_air_temps) / len(cold_air_temps), 1)
+            if cold_air_temps else None
+        ),
+        "avg_cold_water_temp_c":             (
+            round(sum(cold_water_temps) / len(cold_water_temps), 1)
+            if cold_water_temps else None
+        ),
+        "cold_air_above_dose_floor_pct":     (
+            round(cold_air_above_floor / cold_air_total * 100.0, 1)
+            if cold_air_total else None
+        ),
+        "missing_temp_pct":                  (
+            round(missing_temp / len(cold_rows) * 100.0, 1)
+            if cold_rows else None
+        ),
+        "recent_sessions":                   recent_cold,
     } if cold_rows else None
 
     # ---- Adherence ----

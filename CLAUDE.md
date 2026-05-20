@@ -42,6 +42,13 @@ keeps a forensic trail in case a downstream bug damages the CSVs.
 │           ├── interventions.md           # daily/weekly protocol (supplements, diet, training, skincare) + status tracker
 │           └── biomarkers.md              # append-only lab history
 ├── Fabian/                                # same shape (no swimming/, thermal/, or light_therapy/ until populated)
+├── plans/                                 # /coach output — dated per generation; one folder per person
+│   ├── Nihad/
+│   │   ├── YYYY-MM-DD-assessment.html     # self-contained dashboard (inline CSS / SVG / JS, no CDN)
+│   │   ├── YYYY-MM-DD-workout.md          # lean exercise list — bullets only, no tables, sparse sub-bullet notes
+│   │   └── …
+│   └── Fabian/
+│       └── …
 └── Skills/
     └── shared/
         └── exercises-database.md          # canonical catalog (markdown is truth)
@@ -356,10 +363,27 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   Hiking / Cycling / Swimming / HIIT) flow into the matching
   `monthly/YYYY.MM.csv`, with manual-wins dedupe (date + exercise,
   ±1min duration tolerance).
-- **Coach plan output includes a per-workout DATE placeholder**: every
-  strength workout heading is followed by `**Date:** ___________` on its
-  own line so the user can fill in the date when they actually train and
-  not lose track when `/log`-ing later.
+- **Coach plan output is split into a dated HTML dashboard + a lean
+  workout markdown, both under `plans/<Person>/`.** Each `/coach` run
+  writes two paired files: `plans/<Person>/<YYYY-MM-DD>-assessment.html`
+  (self-contained: inline CSS / SVG / JS, no CDN, renders identically
+  offline) and `plans/<Person>/<YYYY-MM-DD>-workout.md` (bullets only,
+  no tables, sparse sub-bullet notes — 0-2 per workout, never rationale
+  or "last time X" history). The dashboard carries the full assessment
+  (recovery score + drivers, TSB curve over 90 days, per-muscle volume
+  bars, activity rings, sleep, strength progression, HRV / RHR / wrist
+  temp / VO2max / bodyweight sparklines, recovery practices including
+  cold-air outdoor temperature when present, week-over-week comparison)
+  and per-card "coach's read" lines that absorb what the old `## Why
+  this plan` block used to do. Old root-level files (`workout_plan -
+  Nihad.md` / `workout_plan - Fabian.md`) are frozen history and never
+  rewritten. Path resolvers in `shared/person_paths.py`:
+  `plans_dir(person)`, `workout_plan_md(person, date)`,
+  `assessment_html(person, date)`. **Each workout heading is followed
+  by `Date: ___` on its own line and `Recovery (sauna / cold / light):
+  ___` on the next line** so the user can fill them in mid-workout.
+  The full HTML template + card spec lives in
+  `Skills/workout-coach/references/assessment-dashboard.md`.
 - **Sleep metrics live in `<Person>/data/sleep/`, per-month nights only.**
   Per-night aggregates (Total / Core / Deep / REM / Unspecified / Awake
   + Time in Bed + Sleep Efficiency + N Segments + First/Last Segment
@@ -397,12 +421,21 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   read; `upsert_thermal_sessions` is sparse-merge by `(date, start)`
   with manual-wins on Notes; `heat_total_min` and (when absent)
   `heat_rounds` are auto-derived from `heat_round_durations_min` on
-  every write so the file is internally consistent. **Never prompts.**
-  `/coach`'s `thermal_summary` block reads this and reports
-  frequency / dose against the HSP-induction threshold (≥20min @
-  ≥80°C, Laukkanen + mechanistic consensus); the target defaults to
-  4×/wk and can be overridden via `profile.csv`
-  `sauna_target_per_week`.
+  every write so the file is internally consistent. **Almost never
+  prompts** — the one carved-out exception: when the parsed payload
+  carries a `cold_air` entry whose `cold_temp_c` is null, `/log` asks
+  once for the outdoor temperature before writing (one short question,
+  user can answer with a number in °C or `skip`). Apple Health does
+  not export ambient air temperature in workout XML, so this datum
+  can only come from the user, and a `cold_air` session at −5°C is a
+  fundamentally different stimulus than one at 25°C. All other thermal
+  fields stay absent-≡-didn't-happen. `/coach`'s `thermal_summary`
+  block reads this and reports frequency / dose against the
+  HSP-induction threshold (≥20min @ ≥80°C, Laukkanen + mechanistic
+  consensus); the cold side carries per-session `cold_temp_c` plus a
+  `dose_hint: "amber"` when `cold_air >= 18°C` (adaptation evidence
+  thin above that). The target defaults to 4×/wk and can be overridden
+  via `profile.csv` `sauna_target_per_week`.
 - **Light therapy (RLT / PBM / blue light) lives in `<Person>/data/light_therapy/YYYY.MM.sessions.csv`, per-month.**
   Per-session aggregates: Date, Start, Duration (min), Light Type
   (`red` / `near_ir` / `red+ir` / `far_ir` / `blue` / `green` /

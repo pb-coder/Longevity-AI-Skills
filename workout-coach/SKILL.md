@@ -2,11 +2,12 @@
 name: workout-coach
 description: >
   Reads the requested person's tracker (per-person CSVs under
-  <Person>/data/), analyzes recent training state, and writes a report
-  plus the next workout plan to ./workout_plan - <Person>.md. Invoked by the
-  `/coach` slash command or when the user explicitly asks for coaching,
-  analysis, or a new plan. Do NOT trigger on general fitness questions,
-  training discussion, logging, or requests unrelated to the tracker.
+  <Person>/data/), analyzes recent training state, and writes a pair of
+  dated files to plans/<Person>/: a self-contained assessment HTML
+  dashboard and a lean workout-plan markdown. Invoked by the `/coach`
+  slash command or when the user explicitly asks for coaching, analysis,
+  or a new plan. Do NOT trigger on general fitness questions, training
+  discussion, logging, or requests unrelated to the tracker.
 ---
 
 # Workout Coach
@@ -24,7 +25,7 @@ Resolve which person this request is about BEFORE running the script:
 - If the user uses pronouns or context that clearly refer to one person ("my bf" / "boyfriend" → Fabian; "I" / "me" / "my" with no other person mentioned → Nihad, since Nihad is the account owner), use that name.
 - Otherwise ask: **"Is this for Nihad or Fabian?"** before proceeding.
 
-Pass the resolved name via `--person <Name>`. The sidecar `workout_plan.md` follows the same naming — write to `./workout_plan - <Person>.md` (e.g. `./workout_plan - Fabian.md`). Never write one person's plan over the other.
+Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at the workout-tracker root — one dated pair per generation: `plans/<Person>/<YYYY-MM-DD>-assessment.html` (the rich dashboard) and `plans/<Person>/<YYYY-MM-DD>-workout.md` (the lean workout list). Never write one person's plan over the other; never write to the repo root (where the old `./workout_plan - <Person>.md` lived — those files are frozen history). The path resolvers live in `Skills/shared/person_paths.py`: `plans_dir(person)`, `workout_plan_md(person, date)`, `assessment_html(person, date)`. Use them rather than hand-building the paths.
 
 ## When NOT to Use
 
@@ -50,55 +51,69 @@ Each row = one set. Columns: `SESSION | Date | # | Exercise | Set | Reps | kg | 
 
 ## Output target
 
-All user-facing output — the report AND the plan — goes into `./workout_plan - <Person>.md` (e.g. `./workout_plan - Nihad.md`), overwriting whatever was there. The chat gets one short block: a one-line verdict plus `Wrote plan to workout_plan - <Person>.md (N sessions)`. Nothing else. Never write to a file without the `- <Person>` suffix, and never write across people.
+All user-facing output goes into **two dated files** under `plans/<Person>/`:
 
-The file structure:
+- `plans/<Person>/<YYYY-MM-DD>-assessment.html` — the rich, visual assessment dashboard. Built from the JSON. Self-contained: inline CSS, inline SVG, inline JS where it helps. **No external requests** (no CDN, no web fonts, no remote images, no `<script src>`). Must render identically with Wi-Fi off.
+- `plans/<Person>/<YYYY-MM-DD>-workout.md` — the lean workout-plan markdown. Bullets only. No assessment section. Sub-bullet notes only when a remark is genuinely actionable (rules below).
+
+`<YYYY-MM-DD>` is the date the coach generates the plan (today's date in the JSON's `today` field). Each generation writes a fresh dated pair; older pairs stay on disk for scrollback. No `latest-*` symlink — the user opens the newest dated file.
+
+The chat gets one short block: a one-line verdict plus `Wrote dashboard to plans/<Person>/<date>-assessment.html and plan to plans/<Person>/<date>-workout.md (N sessions)`. Nothing else.
+
+### Assessment HTML structure
+
+The dashboard is produced by **`scripts/render_dashboard.py`**. The script owns all HTML, CSS, SVG, and JavaScript. You do not hand-write HTML. You author two inputs and run the renderer.
+
+The dashboard contains, in order:
+1. **Headline** — your 2-3 sentence plain-English TL;DR.
+2. **Tabs** — Assessment / Workout. The Workout tab renders the markdown plan in the same visual style.
+3. **Hero** — Recovery score + Freshness (TSB).
+4. **Recovery drivers** — diverging-bar chart of z-scores vs the 60-day baseline.
+5. **Activity rings** — strength, Zone 2 cardio, recovery practices, sleep.
+6. **Training load** — interactive 90-day chart of fitness / fatigue / freshness (CTL / ATL / TSB). Hover or tap shows the scrubber.
+7. **Per-muscle volume** — horizontal bars with the productive-range band; legend at the top.
+8. **Strength progression** — top lifts with sparkline + slope; e1RM and slope column headers have tooltips.
+9. **Health vitals** — one clean table; coach commentary in a single callout below it (not interleaved with rows).
+10. **Recovery practices** — three sub-cards (sauna / cold / light), identical shape.
+11. **Week over week** — this-wk / last-wk / 4-wk-avg comparison table.
+
+Every card with actionable signal carries a **Coach callout** below the data: blue left-border, "Coach" label, action-focused one-liner. The renderer enforces copy rules: no em-dashes, ≤ 280 characters per card string, ≤ 560 for the headline. Render fails fast on violations.
+
+The rendering spec, coach-reads schema, validation rules, and tooltip catalog all live in **`references/assessment-dashboard.md`**.
+
+### Workout-plan markdown structure
 
 ```
 # Workout plan — <YYYY-MM-DD>
+Assessment: ./<YYYY-MM-DD>-assessment.html
 
-## Report
-### The verdict
-### Last 28 days at a glance
-### What's working
-### What needs fixing
-### Are you getting stronger?
-### Missing from your tracking
-### Deload status
-### Recovery state
-### Cardio check
-### Sleep                               <!-- only when sleep_summary is present in the JSON -->
-### Heat / Cold exposure                <!-- only when thermal_summary is present in the JSON -->
-### Swim                                <!-- only when swim_summary is present in the JSON -->
+## Workout 1: <TYPE>
+Date: ___
+Recovery (sauna / cold / light): ___
 
-## Plan
+- Exercise: weight × reps (or `///`-separated sets for weighted)
+- Exercise: …
+  — optional one-line sub-bullet note (rare)
+- …
 
-### Workout 1: <TYPE>
-**Date:** ___________
-**Recovery (sauna / cold / light):** ___________
+## Workout 2: <TYPE>
+Date: ___
+Recovery (sauna / cold / light): ___
 
-<quick list — plain bullets, one line per set>
+- …
 
-| # | Exercise | Sets × Reps | Notes |
-| - | -------- | ----------- | ----- |
-...
+## Cardio 1: Zone 2 (optional, only if behind §10 target)
+- HR target, duration, brief format
 
-### Workout 2: <TYPE>
-**Date:** ___________
-**Recovery (sauna / cold / light):** ___________
-...
-
-### Cardio 1: Zone 2 (optional, only if behind §10 target)
-<plain bullet list with HR target and session notes>
-
-### Cardio 2: Intervals (optional)
-<work/rest structure>
-
-## Why this plan
-<3-4 sentences>
+## Cardio 2: Intervals (optional)
+- Work/rest structure
 ```
 
-Write the file in one pass at the end. Don't stream sections to chat while thinking.
+**No `## Report` section. No tables. No "Why this plan" block** — the dashboard's coach's-read lines (per card) replace it.
+
+The `Date:` and `Recovery:` placeholders stay on their own lines (separate lines aid mid-workout filling).
+
+Write both files in one pass at the end. Don't stream sections to chat while thinking.
 
 ## Data Reading Strategy
 
@@ -234,11 +249,63 @@ These apply to everything written into `workout_plan.md`. No exceptions.
 - Say "is" instead of "serves as", "functions as", "represents".
 - Be specific. "Your back volume is 12 sets/week, which is enough" not "Your back volume is adequate."
 
-## Phase 1: Report (into workout_plan.md `## Report`)
+## Phase 1: Assessment HTML dashboard
 
 Goals are fixed: hypertrophy + longevity. Never ask about goals.
 
-Keep the report tight. The user is an established trainee who has been coached before. If the data shows continuity (same exercises, steady progression, no new red flags), shorten WHAT'S WORKING and WHAT NEEDS FIXING to 2-3 items each. Only surface findings that changed since the last block. The report should feel proportional to what's new.
+The dashboard is produced by **`scripts/render_dashboard.py`**. The script owns all HTML, CSS, SVG, and JavaScript. Your job is to author the **two inputs** and run the renderer.
+
+### Pipeline (4 steps)
+
+1. **Read tracker data:** `python3 Skills/workout-coach/scripts/read_tracker.py --person <Name> > /tmp/tracker.json`
+2. **Author the coach reads** (`plans/<Person>/<date>-coach_reads.json`). See "Coach-reads schema" below and the full spec in `references/assessment-dashboard.md`. Strict copy rules — no em-dashes, ≤ 280 chars per card string, ≤ 560 for the headline. The renderer validates and refuses to write the HTML on violation.
+3. **Author the workout markdown** (`plans/<Person>/<date>-workout.md`). Lean exercise list, sparse `— note` sub-bullets, per-set parentheticals where needed. Rules in the "Per-workout format in the file" section below — unchanged from before.
+4. **Render:**
+   ```
+   python3 Skills/workout-coach/scripts/render_dashboard.py \
+     --tracker /tmp/tracker.json \
+     --coach plans/<Person>/<date>-coach_reads.json \
+     --workout-md plans/<Person>/<date>-workout.md \
+     --out plans/<Person>/<date>-assessment.html \
+     --person <Person>
+   ```
+
+Use the path resolvers (`plans_dir`, `workout_plan_md`, `assessment_html` in `shared/person_paths.py`) when building these paths. Never hand-assemble. Never write to the repo root.
+
+### Coach-reads schema
+
+```json
+{
+  "headline": "2-3 sentences. Plain English. The TL;DR.",
+  "cards": {
+    "recovery_drivers":   "one sentence",
+    "activity_rings":     "one sentence",
+    "training_load":      "one sentence",
+    "muscle_volume":      "one sentence",
+    "strength":           "one or two sentences (signal + action)",
+    "vitals":             "one or two sentences",
+    "recovery_practices": "one sentence"
+  }
+}
+```
+
+All `cards` keys are optional. Omit a key (or leave it `""`) and that card renders without a coach callout, pure data.
+
+### Copy rules — strict
+
+The renderer enforces these. Violation = render fail with one error per offence on stderr.
+
+- **No em-dashes.** Use periods, commas, colons.
+- **≤ 280 characters per `cards.*` string.** ≤ 560 for the headline.
+- **Action voice is imperative.** "Target 7.5 h tonight" not "you should consider".
+- **Action only when actionable.** A card whose state has not moved gets one sentence like "On track, hold course." or "Steady, no change." **Never invent urgency.**
+- **Plain English first; abbreviations second.** The renderer auto-wraps known abbreviations (CTL, ATL, TSB, e1RM, MEV, MAV, MRV, SDNN, HRR, RHR, HRV, Z2, Z5, VO2max, HSP, PR, RPE, RIR) in dotted-underline tooltips when they appear. You **may** use them; you should **prefer** the plain-English equivalent ("fitness" over CTL, "freshness" over TSB) when it reads more naturally.
+
+### Substantive analytical rules
+
+Apply these rules when deciding what each `cards.*` string should *say*. The visual rendering follows the dashboard spec; your job is the judgment.
+
+Keep coach lines tight. The user is an established trainee. Surface findings that **changed** since the last block. A card whose state hasn't moved gets a one-sentence read.
 
 ### The verdict
 2-3 sentences. What's the state of their training right now? Honest. Compute days-since-last-session from `monthly_sessions[-1].date` vs `today` and include the context — "last trained 2 days ago, normal cadence" or "9 days since last session, longer break than usual".
@@ -600,57 +667,75 @@ Re-read this block before every load suggestion in the workout tables.
 
 ### Per-workout format in the file
 
-For each workout, output the quick list immediately followed by the table for that same workout. Then move to the next workout. Do NOT batch all quick lists then all tables — that makes the file hard to use on the gym floor.
+The workout markdown is a **lean exercise list**, nothing more. No tables. No rationale paragraphs. The "why" lives in the assessment dashboard (and only there). The user trains from this file on their phone in the gym — every line they don't need slows them down.
 
-Correct order: Quick List WO1 → Table WO1 → Quick List WO2 → Table WO2 → etc.
+Each workout heading is immediately followed by `Date: ___` on its own line, then `Recovery (sauna / cold / light): ___` on its own line, then a blank line, then the bullets. The two placeholder lines are kept on **separate lines** — the visual break aids mid-workout filling. The user fills in the date when they actually train (so the session can be logged later without guessing) and the recovery slot if they did any post-workout protocol. The recovery slot is free-text — the user can write `sauna 12+8min 85C / cold 5min air -2C`, `sauna 10min 85C`, `rlt 10min 45C`, `sauna 10min / rlt 5min`, `skipped`, or leave it blank. `/log` parses each modality independently per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)` for sauna/cold; `## Light therapy (opt-in)` for RLT / blue light / PBM). Sauna+RLT in one line emits two payload entries — one `thermal`, one `light_therapy` — both keyed to the same date. Both lines apply to every strength workout — cardio sections do not need them.
 
-Each workout heading is immediately followed by `**Date:** ___________` on its own line, then `**Recovery (sauna / cold / light):** ___________` on its own line, then a blank line, then the quick list. The user fills in the date when they actually train (so the session can be logged later without guessing) and the recovery slot if they did any post-workout protocol. The recovery slot is free-text — the user can write `sauna 12+8min 85C / cold 5min air`, `sauna 10min 85C`, `rlt 10min 45C`, `sauna 10min / rlt 5min`, `skipped`, or leave it blank. `/log` parses each modality independently per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)` for sauna/cold; `## Light therapy (opt-in)` for RLT / blue light / PBM). Sauna+RLT in one line emits two payload entries — one `thermal`, one `light_therapy` — both keyed to the same date. Both lines apply to every strength workout — cardio sections do not need them.
-
-**Quick list** — what the user reads on their phone. One line per set, plain markdown bullets. No code fences. Format:
-- Bodyweight or single-rep: `Exercise Name : reps` (e.g., `Plank : 45s hold`)
+**Exercise bullets** — one line per exercise. No code fences. Format:
+- Bodyweight or single-rep: `Exercise Name: reps` (e.g., `Plank: 45s hold`)
 - Weighted: every set separated by `///`:
   - Fixed: `Dumbbell Flat Bench Press: 52kgx10 /// 52kgx10 /// 52kgx10`
   - Range: `Cable Lat Pulldown: 65-70kgx8-10 /// 65-70kgx8-10 /// 65-70kgx8-10`
   - 4 sets = 4 entries. Always.
 - Warmup exercises: same format, no special marking.
 
-Example (markdown — no code fence around it in the actual file):
+Canonical exercise names (title case from `shared/exercises-database.md`). No lowercase.
+
+**Per-set inline qualifiers (use sparingly).** When a specific set is optional, aspirational, or different from the rest, attach a short parenthetical to that set directly on the bullet line. Set-level — not exercise-level. Use for:
+- An optional last set: `... /// 30kgx10 (if you can make it)`
+- An aspirational top set: `... /// 70kgx6 (ideal — leave 1 in tank)`
+- A descending set: `40kgx8 (top set) /// 35kgx8 /// 35kgx8`
+
+Keep these terse. One short clause. Don't pile them on every set.
+
+**Exercise-level sub-bullet notes (use even more sparingly — usually 0-2 per workout).** When the entire exercise needs a remark, add an indented sub-bullet starting with an em-dash:
 
 ```
-### Workout 1: UPPER PUSH + CORE
-**Date:** ___________
+- Barbell Back Squat: 70kgx8 /// 70kgx8 /// 70kgx8
+  — knees out, drive midfoot
+```
 
-- Jumping Jacks : 50
-- Band Pull-Apart : 15
+A note appears **only** when it answers one of:
+
+| Reason | Example |
+| --- | --- |
+| Form cue that matters today | `— leave 1-2 in tank` · `— full stretch at the bottom` · `— pause at the top` |
+| Safety / injury awareness | `— elbow nagging; cut volume if pain >2/10` · `— skip if back is flaring` |
+| One-time deviation from autopilot | `— first time back; ease in` · `— last set is the test set` · `— travel gym: scale 60→35kg` |
+
+A note **must not** contain:
+- Comparative history ("last time you did 50kg × 8")
+- Rationale for the prescribed weight ("you've been stuck at 40kg, time to push")
+- Generic exhortation ("push hard, you've got this")
+- Restatement of what the bullet already shows (`— do 3 sets` when the bullet shows 3 sets)
+- Cross-references to the dashboard ("see your TSB")
+
+Style: lowercase, no period at the end, one short clause, em-dash prefix. The rich "why" lives in the dashboard — the markdown is the action list.
+
+**Soft cap: 0-2 sub-bullet notes per workout.** If you're writing a third, that's the signal that rationale is creeping in. Strip it back. The bullet list itself should be enough to train from.
+
+Full example (markdown — no code fence around it in the actual file):
+
+```
+## Workout 1: UPPER PUSH + CORE
+Date: ___
+Recovery (sauna / cold / light): ___
+
+- Jumping Jacks: 50
+- Band Pull-Apart: 15
 - Dumbbell Flat Bench Press: 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10
 - Shoulder Press Machine: 45kgx8-10 /// 45kgx8-10 /// 45kgx8-10
+  — leave 1-2 in tank
 - Dumbbell Fly: 18kgx10 /// 18kgx10 /// 18kgx10
 - Cable Lateral Raise: 15kgx10 /// 15kgx10 /// 15kgx10
 - Cable Overhead Tricep Extension: 35kgx8-10 /// 35kgx8-10 /// 35kgx8-10
-- Kneeling Cable Crunch: 20kgx15 /// 20kgx15 /// 20kgx15
-- Dead Bug : 12 per side /// 12 per side
+- Kneeling Cable Crunch: 20kgx15 /// 20kgx15 /// 20kgx15 (if you can make it)
+- Dead Bug: 12 per side /// 12 per side
 ```
 
-Canonical exercise names (title case from the database). No lowercase.
+One sub-bullet, one per-set parenthetical, eight other clean lines. That's the target density.
 
-**Table** — reference for the same workout, single continuous table, core in the same table:
-
-```
-| # | Exercise | Sets × Reps | Notes |
-| - | -------- | ----------- | ----- |
-| 1 | Jumping Jacks | 1 × 50 | Warmup |
-| 2 | Dumbbell Flat Bench Press | 4 × 8-10 | Start 54kg. Leave 1-2 reps in tank. |
-...
-| N | Dead Bug | 2 × 12/side | Anti-extension |
-```
-
-Rules for tables:
-- **#**: sequential from 1
-- **Exercise**: canonical names
-- **Sets × Reps**: `3 × 8-10` or `1 × 50` or `1 × max hold`
-- **Notes**: always specific. Include starting weight (from tracker or estimate), target ("Push for 10 reps before adding weight"), cue ("Full stretch at bottom"), purpose ("Warmup", "Shoulder health"). Never empty for working sets. Use "Leave 1-2 reps in the tank" / "All-out last set" instead of RIR/RPE numbers.
-- 2-3 warmup exercises at the top
-- Order: compounds → isolation → accessories
+**Ordering & equipment** (unchanged from before): compounds → isolation → accessories; warmup at the top; group cable/bench/machine work within the isolation/accessory block. The increment grid still applies (cables 5kg, dumbbells 1-2kg pair, plate machines 5kg).
 
 ### Cardio sessions (only when prescribed)
 
@@ -679,24 +764,20 @@ Written as their own sections after the strength workouts, not mixed in. Two sha
 
 If the user is on target (`Cardio check` in the report shows no shortfall), don't add cardio sessions to the plan. Don't over-prescribe — cap at 4 cardio sessions total per `/coach` run.
 
-### Why this plan
+### Why this plan — folded into the dashboard
 
-**REQUIRED templated rationale.** Not a free-form paragraph — a numbered three-signal list, each citing specific values. If the block is a deload, state it explicitly.
+The old free-standing `## Why this plan` block at the bottom of the workout markdown **has been removed**. Its three-signal rationale (Training load / Recovery / HR-at-volume) now lives in the dashboard's per-card coach's-read lines:
 
-```
-## Why this plan
-This block is paced from three signals:
-1. **Training load**: {TSB band citation, e.g. "TSB −5.4 (balanced)"} → {what changed in load progression rules}.
-2. **Recovery**: {dominant negative driver name + value, e.g. "Wrist temp +0.11°C, contrib -0.57"} → {what changed in volume / RPE}.
-3. **HR-at-volume**: {N flagged muscles from hr_at_volume_divergence with hint "rising HR..."} → {which muscles got volume cut}.
+- Training-load card's coach's read carries the TSB band citation ("TSB −5.4 (balanced) → hold loads this week").
+- Recovery drivers card carries the dominant-driver sentence.
+- Strength-progression and per-muscle-volume cards carry the HR-at-volume call when relevant.
 
-Plus standard rotation: {1-2 rotation decisions from progression / stale_exercises / hr_at_volume_divergence}.
-```
+This keeps the workout markdown clean (no rationale, just the action list) and surfaces the "why" where it's already visible — on the same card showing the data. The workout markdown links to the dashboard at the top (`Assessment: ./<date>-assessment.html`).
 
-Source-honesty rules:
-- If `hr_at_volume_divergence` is empty, drop line 3. Don't fabricate it; don't tell the user the data is missing. The other two lines remain mandatory.
-- If `recovery.drivers` is short, still pick the dominant negative driver. There's always one.
-- TSB citation is mandatory on both sources — every tracker has TRIMP from session duration + max HR estimate.
+Source-honesty rules still apply to those coach's-read lines:
+- If `hr_at_volume_divergence` is empty, omit the call entirely on the strength card. Don't fabricate it.
+- If `recovery.drivers` is short, still pick the dominant driver. There's always one.
+- TSB citation belongs on the training-load card and is mandatory on both sources (cardio TRIMP alone is enough on HL trackers).
 
 ## Common Mistakes
 
@@ -722,8 +803,18 @@ Source-honesty rules:
 | Missing data from casing mismatch | Searching for "Leg Extension" misses rows logged as "Leg extension" | Compare case-insensitively. |
 | Reading empty template rows | Dumping 900+ rows per sheet into context | Stop after 10 consecutive fully empty rows. |
 | Breaking on None date | `if row[0] is None: break` stops at the first continuation row | Carry forward the last known date defensively. Only skip when BOTH date and exercise are None. |
-| Writing the report or plan inline in chat | Conversation gets flooded; plan is hard to find later | All report + plan content goes into `./workout_plan - <Person>.md`. Chat gets one verdict line + the file pointer. |
-| Writing one person's plan over the other | `workout_plan - Nihad.md` overwritten with Fabian's plan, or vice versa | Always resolve the person first and write to `./workout_plan - <Person>.md`. Never a bare `workout_plan.md`. |
+| Writing the report or plan inline in chat | Conversation gets flooded; plan is hard to find later | Dashboard + markdown go to `plans/<Person>/<date>-assessment.html` and `plans/<Person>/<date>-workout.md`. Chat gets one verdict line + the two file pointers. |
+| Writing one person's plan over the other | A Nihad-dated file inside `plans/Fabian/`, or the wrong person's data rendered into the right person's HTML | Resolve the person first; pass `--person <Name>` to `read_tracker.py`; use `person_paths.plans_dir(person)` to build the output path. Never hand-assemble a path. |
+| Writing to the old root-level `./workout_plan - <Person>.md` | The lean / HTML split is bypassed; the user opens the wrong file | The old root-level file is frozen history. All new output lands in `plans/<Person>/`. Use the path resolvers in `shared/person_paths.py`. |
+| Adding a rationale table under each workout's bullet list | Recreates the old `| # | Exercise | Sets × Reps | Notes |` table that the user explicitly removed; clutters the gym-floor view | The workout markdown is bullets only — no markdown tables. Per-exercise rationale lives in the dashboard's coach's-read lines, not in the workout file. |
+| Writing a sub-bullet note on every exercise | Bullet list balloons; the few important notes get drowned out | Sub-bullet notes (`  — …`) are sparse by design (0-2 per workout, 3+ is a red flag). Use them only for: form cue that matters today, safety/injury awareness, or a one-time deviation from autopilot. Strip comparative history ("last time X"), restated rationale, and generic exhortation. |
+| Rationale creep in sub-bullet notes | `— last session 50kg × 6, time to push to 52.5` ends up under every other exercise | The bullet itself prescribes the weight. The note explains nothing about the prescription — it's reserved for form, safety, or a single deviation. If the prescription needs justification, put it on the dashboard's strength-progression card's coach's read. |
+| Reintroducing a `## Why this plan` block in the workout markdown | Adds 3-4 sentences of rationale to the file the user trains from | The three-signal rationale lives in the dashboard's per-card coach's-read lines now. The workout markdown ends after the last cardio section. |
+| Surfacing rationale that mentions "last time" | "Stuck at 40kg — push for 8 reps before bumping" survives into the workout md | Comparative history is banned from the workout markdown. It belonged to the deleted table. Trust the bullets. |
+| Dashboard depends on a network resource | `<script src="https://…">`, web font, CDN CSS, remote image | Self-contained file: inline CSS, inline SVG, inline JS only. Verify by opening with Wi-Fi off — must render identically. |
+| Dashboard surfaces gamification | "5-week streak!", badges, points, consistency score | The user explicitly rejected gamification. Stay with neutral health + fitness signals. |
+| Hardcoding the training-load chart to 60 days (or another non-90 window) | CTL is a 42-day EWMA, so a 60-day window crops out half the mesocycle context | Use a 90-day window for the CTL/ATL/TSB curve. Don't accept smaller windows for "cleaner-looking" charts — the curve becomes uninformative. |
+| Ignoring cold-air outdoor temperature when present | `cold_air -2°C × 5min` rendered identically to `cold_air × 5min`; user can't tell a real dose from a habit | Surface `thermal_summary.cold.recent_sessions[*].cold_temp_c` on the Recovery practices card. When `dose_hint == "amber"` (cold_air ≥ 18°C), tag it. Coach's read names a -2°C outdoor session as a real dose. |
 | Partial file writes | Streaming sections and forgetting to complete | Build the whole file in memory, then write once. |
 | Inventing recovery trends on <4 readings | "HRV improving" called from 2 data points | The `_trend_per_4w` keys are null until ≥4 entries spanning 21+ days. Drop the trend chunk; print the average alone. |
 | Reading single-day HRV as signal | One bad night triggers a deload | The `recovery.score` already aggregates 7-day HRV / RHR / sleep / wrist temp / HR Recovery against baselines. Trust the score; don't react to one bad night. For multi-day persistence checks, walk `health_metrics_weekly` (or pass `--include-daily-health` only when the rolling-window inspection genuinely matters). |

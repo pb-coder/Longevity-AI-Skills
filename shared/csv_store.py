@@ -143,7 +143,7 @@ def _strength_metadata_drifts(existing, incoming) -> bool:
 
 # ============================================================ Profile (CSV)
 PROFILE_KEYS = (
-    "source", "auto_cardio", "birthday",
+    "source", "auto_cardio", "birthday", "sex",
     "swim_css_sec_per_100m", "swim_css_set_at", "swim_pool_length_default",
     "light_therapy_target_per_week", "light_therapy_target_min_per_session",
 )
@@ -151,6 +151,7 @@ PROFILE_DEFAULTS = {
     "source":                              None,
     "auto_cardio":                         False,
     "birthday":                            None,
+    "sex":                                 None,
     "swim_css_sec_per_100m":               None,
     "swim_css_set_at":                     None,
     "swim_pool_length_default":            None,
@@ -257,6 +258,14 @@ def read_profile(person: str) -> dict:
                 d = _date_str(v)
                 if d:
                     out["birthday"] = d
+            elif k == "sex":
+                if v is None or v == "":
+                    continue
+                s = str(v).strip().lower()
+                if s in ("m", "male"):
+                    out["sex"] = "male"
+                elif s in ("f", "female"):
+                    out["sex"] = "female"
             elif k == "swim_css_sec_per_100m":
                 f = _coerce_float(v)
                 if f is not None:

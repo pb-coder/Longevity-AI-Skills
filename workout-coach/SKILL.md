@@ -64,18 +64,34 @@ The chat gets one short block: a one-line verdict plus `Wrote dashboard to plans
 
 The dashboard is produced by **`scripts/render_dashboard.py`**. The script owns all HTML, CSS, SVG, and JavaScript. You do not hand-write HTML. You author two inputs and run the renderer.
 
-The dashboard contains, in order:
+The dashboard is organised across **three tabs**: Today (operational, "should I train hard?"), Trajectory (longevity, "am I aging well?"), and Workout (the markdown plan, rendered in the same visual style).
+
+**TODAY tab (operational):**
 1. **Headline** — your 2-3 sentence plain-English TL;DR.
-2. **Tabs** — Assessment / Workout. The Workout tab renders the markdown plan in the same visual style.
-3. **Hero** — Recovery score + Freshness (TSB).
-4. **Recovery drivers** — diverging-bar chart of z-scores vs the 60-day baseline.
+2. **Hero** — Recovery score + Freshness (TSB) with band-labelled scale strips. **Recovery card absorbs the workout-intensity recommendation** (hard / moderate / easy) as a sub-line under the score; there is no separate "readiness" card to avoid duplicating the number.
+3. **Recovery drivers** — diverging-bar chart of z-scores vs the 60-day baseline.
+4. **ACWR** — Acute:Chronic Workload Ratio with the Gabbett 0.8–1.3 sweet-spot band shaded.
 5. **Activity rings** — strength, Zone 2 cardio, recovery practices, sleep.
-6. **Training load** — interactive 90-day chart of fitness / fatigue / freshness (CTL / ATL / TSB). Hover or tap shows the scrubber.
-7. **Per-muscle volume** — horizontal bars with the productive-range band; legend at the top.
+6. **NEAT** — 28-day daily-activity rollup.
+7. **Training load** — interactive 90-day chart of fitness / fatigue / freshness (CTL / ATL / TSB). Hover or tap shows the scrubber.
 8. **Strength progression** — top lifts with sparkline + slope; e1RM and slope column headers have tooltips.
-9. **Health vitals** — one clean table; coach commentary in a single callout below it (not interleaved with rows).
-10. **Recovery practices** — three sub-cards (sauna / cold / light), identical shape.
-11. **Week over week** — this-wk / last-wk / 4-wk-avg comparison table.
+9. **Week over week** — this-wk / last-wk / 4-wk-avg comparison table.
+
+(Per-muscle weekly volume is computed and available in the tracker JSON as `weekly_volume_per_muscle` for coach planning, but is **not rendered on the dashboard** — by user choice it stays internal.)
+
+**TRAJECTORY tab (longevity):**
+1. **Longevity score** — 0-100 composite (VO2 percentile, HRV, RHR, sleep regularity, sleep quality, training-load adherence, Zone 2 weekly, body comp, behavioural consistency, strength progression) with per-component attribution. Flagged as **bloodwork-pending** until a lab panel lands.
+2. **Cardiorespiratory** — VO2 max with 4-line comparison strip (p50 / p75 / p95 / Attia longevity target by age + sex), HR Recovery 1-min, RHR vs baseline, Zone 2 weekly minutes.
+3. **Recovery / autonomic** — HRV (SDNN, labelled — **never compare cross-platform to Whoop / Oura RMSSD**), wrist temp deviation.
+4. **Sleep architecture & regularity** — Total, Deep+REM, Efficiency, **Sleep Regularity Index** (Phillips 2017 / Windred 2024 UK Biobank n=60,977 — top quintile = 20-48% lower mortality), REM-anomaly watch (Parkinson surveillance — flag for users with paternal family history).
+5. **Body composition** — Bodyweight + trend vs lean-bulk / cutting framing. BF% / VAT / ALMI / BMD are **DEXA-pending**.
+6. **Metabolic health** — **Bloodwork-pending**. Per-person foundational panel hints read from `longevity_state` (vegan micronutrient set, PrEP renal/BMD monitoring, vitamin D winter window, etc.).
+7. **Centenarian decathlon framing** — Attia's 8-capability framework. Targets only; user logs tests manually.
+8. **Behavioral consistency** — Active days / 28, SRI, ACWR.
+9. **Health vitals** — full table (HRV, RHR, wrist temp, VO2max, bodyweight) with sparklines.
+10. **Sleep** — detail card with stage stack, schedule consistency, fragmentation, respiratory rate, breathing disturbances, outlier nights.
+11. **Recovery practices** — sauna / cold / light therapy sub-cards.
+12. **Personalized risk flags** — reads `<Person>/data/longevity/state.md` + `profile.md` for active conditions, meds, monitoring due dates, family-history surveillance. Renders "no profile on file" for people without a `longevity/` directory.
 
 Every card with actionable signal carries a **Coach callout** below the data: blue left-border, "Coach" label, action-focused one-liner. The renderer enforces copy rules: no em-dashes, ≤ 280 characters per card string, ≤ 560 for the headline. Render fails fast on violations.
 
@@ -159,6 +175,16 @@ What the JSON contains:
 **Bodyweight:**
 - `bodyweight_latest`: `{date, kg}` or null.
 - `bodyweight_trend_kg_per_week`: slope over the last 8 clean fasted entries, or null.
+
+**Longevity Trajectory (Trajectory tab inputs):**
+- `longevity_score`: composite 0-100 score with per-component attribution. Shape: `{score, band, label, n_components, components: [{name, score, weight, contribution}, …], bloodwork_pending: True, note}`. Weights renormalize across present components (mirrors `recovery_score`'s missing-signal handling). `band` is `good` / `amber` / `warn`. **Always flagged `bloodwork_pending: True` until a lab panel is on file** — the score is honest about what it doesn't see.
+- `longevity_state`: parsed `<Person>/data/longevity/{profile,state,interventions,biomarkers}.md`. `null` when the directory doesn't exist (gracefully degrades for users without a longevity profile). Shape: `{has_profile, dob, age, sex, height_cm, location, family_history: [...], constraints: [...], active_conditions: [...], medications: [...], bloodwork_status, risk_flags: [{key, label, status, hint}, …]}`. `risk_flags` is generated rule-driven from the parsed text — Parkinson family history triggers REM-watch + olfactory + autonomic surveillance; PrEP medications trigger eGFR + BMD reminders; vegan constraint triggers the micronutrient-panel set; Berlin 52°N triggers a winter vitamin D flag.
+- `vo2_percentile`: VO2 max resolved against Cooper/ACSM norms by age + sex. Shape: `{value, p50, p75, p95, longevity, label, status}` where `longevity` is Attia's "elite-for-a-decade-younger" target. `null` when sex is unknown (no longevity profile).
+- `hr_recovery`: HR Recovery 1-min summary against Cole 1999 NEJM mortality bands. Shape: `{mean_28d, mean_7d, n_readings, band, label, norms}`. `<12 bpm = abnormal` is the 4× CV-mortality cutoff.
+- `acwr`: Acute:Chronic Workload Ratio (Gabbett 2016). Shape: `{ratio, acute_7d, chronic_28d_avg, band, label, bands}`. 0.8–1.3 is the sweet spot.
+- `sleep_regularity`: SRI (Phillips 2017 / Windred 2024 eLife UK Biobank n=60,977). Shape: `{sri (0-100), n_nights, n_consecutive_pairs, window_days, band, label}`. **`null` when segment-clock timestamps are unavailable (HealthAutoExport-sourced trackers)** — the metric requires Apple XML's segment-level detail.
+- `rem_anomaly`: REM-sleep proportion watch for Parkinson surveillance. Shape: `{window_days, n_nights, mean_rem_pct, low_rem_nights, target_min_pct}`. `low_rem_nights` counts nights where REM was below 15% of total sleep.
+- `movement_consistency`: Days hitting Apple's 30-min exercise threshold (proxy for Paluch 2022 step-days dose-response). Shape: `{threshold_min, days_this_wk, days_28d, target_per_wk}`.
 
 **Apple Health weekly aggregates:**
 - `health_metrics_weekly`: 4 weeks of Mon-anchored aggregates. Each entry: `{week_start, n_days, vo2max, resting_hr, hrv_sdnn, walking_hr, hr_recovery_1min, sleep_total_h, sleep_deep_h, sleep_rem_h, time_in_bed_h, resp_rate, wrist_temp_c, exercise_min}`. Read this for trends; raw daily data is behind `--include-daily-health`. `time_in_bed_h` is the clinical denominator for Sleep Efficiency — pair it with `sleep_total_h` to compute "in-bed quality" when the dedicated `sleep_summary` block is absent.
@@ -280,21 +306,39 @@ Use the path resolvers (`plans_dir`, `workout_plan_md`, `assessment_html` in `sh
 
 ```json
 {
-  "headline": "2-3 sentences. Plain English. The TL;DR.",
+  "headline": "2-3 sentences. Plain English. The TL;DR. Anchored on longevity trajectory + today's training call.",
   "cards": {
-    "recovery_drivers":   "one sentence",
-    "activity_rings":     "one sentence",
-    "training_load":      "one sentence",
-    "muscle_volume":      "one sentence",
-    "strength":           "one or two sentences (signal + action)",
-    "vitals":             "one or two sentences",
-    "sleep":              "one or two sentences (architecture + action)",
-    "recovery_practices": "one sentence"
+    "// TODAY tab": "",
+    "today_headline":      "one or two sentences. Workout-intensity recommendation + why.",
+    "today_acwr":          "one sentence. Where in the Gabbett band + what to do.",
+    "recovery_drivers":    "one sentence",
+    "activity_rings":      "one sentence",
+    "training_load":       "one sentence",
+    "muscle_volume":       "one sentence",
+    "strength":            "one or two sentences (signal + action)",
+
+    "// TRAJECTORY tab": "",
+    "trajectory_longevity_score": "one or two sentences. What is pulling the score up, what is pulling it down.",
+    "trajectory_cardio":          "one or two sentences. VO2 percentile + Zone 2 / HRR action.",
+    "trajectory_recovery":        "one sentence. HRV + wrist temp read.",
+    "trajectory_sleep":           "one or two sentences. SRI + Deep+REM + efficiency.",
+    "trajectory_body_comp":       "one sentence. Trend + DEXA pending note.",
+    "trajectory_metabolic":       "one sentence. Bloodwork priorities personalised to constraints.",
+    "trajectory_decathlon":       "one sentence. Which capabilities to test next.",
+    "trajectory_behavioral":      "one sentence. Active-days + SRI + ACWR composite.",
+    "trajectory_risk_flags":      "one or two sentences. Highest-priority surveillance items.",
+
+    "// Cross-tab (Trajectory)": "",
+    "vitals":              "one or two sentences",
+    "sleep":               "one or two sentences (architecture + action)",
+    "recovery_practices":  "one sentence"
   }
 }
 ```
 
-All `cards` keys are optional. Omit a key (or leave it `""`) and that card renders without a coach callout, pure data.
+All `cards` keys are optional. Omit a key (or leave it `""`) and that card renders without a coach callout, pure data. Per-card cap stays at 280 characters; headline cap stays at 560.
+
+The Trajectory tab's job is to translate raw numbers into **age-cohort context** and **longevity action**: every metric should answer *Where am I? Where should I be? What do I do about it?* — not just describe the data.
 
 ### Copy rules — strict
 

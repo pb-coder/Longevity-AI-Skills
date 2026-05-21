@@ -89,10 +89,13 @@ from extract import (  # noqa: E402
 from health import (  # noqa: E402
     _mean_or_none,
     _values_in_window,
+    compute_longevity_score,
     health_metrics_weekly,
     latest_metric,
     metric_trend_per_4w,
+    read_longevity_state,
     recovery_score,
+    vo2_percentile_age_sex,
 )
 from sessions import (  # noqa: E402
     _is_working_set,
@@ -110,11 +113,18 @@ from cardio import (  # noqa: E402
     auto_deload_candidates,
     cardio_hr_zones,
     cardio_last_28d,
+    compute_acwr,
+    compute_hr_recovery_summary,
+    compute_movement_consistency_days,
     daily_activity_28d,
     training_load_summary,
     trimp_per_session,
 )
-from sleep import sleep_summary  # noqa: E402
+from sleep import (  # noqa: E402
+    compute_sleep_regularity_index,
+    flag_rem_sleep_anomalies,
+    sleep_summary,
+)
 from swim import swim_summary  # noqa: E402
 from thermal import thermal_summary  # noqa: E402
 from light_therapy import light_therapy_summary  # noqa: E402
@@ -539,6 +549,32 @@ def main() -> int:
         today_d, monthly_sessions, health_all, bw_all,
     )
 
+    # ---- Longevity-trajectory derivations (Trajectory tab) ----
+    longevity_state = read_longevity_state(person, today_d)
+    # Sex resolves from ``profile.csv`` first (the operational tracker)
+    # then falls back to the longevity profile .md. profile.csv keeps
+    # the basic dashboard functional without a longevity profile.
+    sex = profile.get("sex") or (longevity_state or {}).get("sex")
+    vo2_latest_block = latest_metric(health_all, "vo2max")
+    vo2_value = (vo2_latest_block or {}).get("value") if vo2_latest_block else None
+    vo2_percentile = vo2_percentile_age_sex(vo2_value, sex, age_years)
+    hr_recovery = compute_hr_recovery_summary(health_all, today_d)
+    acwr = compute_acwr(trimps, today_d)
+    sleep_regularity = compute_sleep_regularity_index(sleep_nights_all, today_d, window_days=14)
+    rem_anomaly = flag_rem_sleep_anomalies(sleep_nights_all, today_d)
+    movement_consistency = compute_movement_consistency_days(health_all, today_d)
+    longevity_score = compute_longevity_score(
+        vo2_percentile=vo2_percentile,
+        recovery=recovery,
+        sleep_summary=sleep,
+        sleep_regularity=sleep_regularity,
+        acwr=acwr,
+        cardio_zones=cardio_zones,
+        movement_consistency=movement_consistency,
+        bodyweight_trend_kg_per_week=bodyweight_trend_kg_per_week(bw_all),
+        estimated_1rm=e1rm,
+    )
+
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
         "data_source": data_source,
@@ -591,6 +627,15 @@ def main() -> int:
         # ---- Week-over-week comparison (this-week / last-week / 4-wk avg
         # for the assessment dashboard's bottom card). ----
         "week_over_week": week_over_week,
+        # ---- Longevity Trajectory tab ----
+        "longevity_score":      longevity_score,
+        "longevity_state":      longevity_state,
+        "vo2_percentile":       vo2_percentile,
+        "hr_recovery":          hr_recovery,
+        "acwr":                 acwr,
+        "sleep_regularity":     sleep_regularity,
+        "rem_anomaly":          rem_anomaly,
+        "movement_consistency": movement_consistency,
         # ---- Debug deep-dive: flat per-set list (--include-rows). ----
         "rows": rows if args.include_rows else None,
     }

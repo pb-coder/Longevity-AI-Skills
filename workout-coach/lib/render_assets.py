@@ -420,6 +420,160 @@ td.arrow { font-size: 16px; font-weight: 600; }
 footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   color: var(--muted); font-size: 12px; }
 
+/* =============================================================================
+   Longevity / Trajectory tab components
+   ============================================================================= */
+
+/* Comparison strip: VO2, HRV, RHR cohort percentile axis with current marker */
+.cmp-strip { margin-top: 14px; }
+.cmp-svg { width: 100%; height: auto; max-height: 100px; display: block; }
+.cmp-axis { stroke: var(--border-strong); stroke-width: 1.5;
+  vector-effect: non-scaling-stroke; }
+.cmp-band line { stroke: var(--border-strong); stroke-width: 1;
+  vector-effect: non-scaling-stroke; }
+.cmp-band-lbl { font-size: 10.5px; fill: var(--muted); font-family: inherit; }
+.cmp-band-num { font-size: 10px; fill: var(--muted); font-family: inherit;
+  font-variant-numeric: tabular-nums; }
+.cmp-baseline line { stroke: var(--accent); stroke-width: 1.5;
+  vector-effect: non-scaling-stroke; }
+.cmp-unit { font-size: 10px; fill: var(--muted); }
+.cmp-user-val { font-size: 12.5px; font-weight: 700; font-family: inherit;
+  font-variant-numeric: tabular-nums; }
+.cmp-user-good polygon, .cmp-user.cmp-user-good polygon { fill: var(--good); }
+.cmp-user-amber polygon, .cmp-user.cmp-user-amber polygon { fill: var(--amber); }
+.cmp-user-warn polygon, .cmp-user.cmp-user-warn polygon { fill: var(--warn); }
+.cmp-user-good text, .cmp-user.cmp-user-good text { fill: var(--good); }
+.cmp-user-amber text, .cmp-user.cmp-user-amber text { fill: var(--amber); }
+.cmp-user-warn text, .cmp-user.cmp-user-warn text { fill: var(--warn); }
+
+/* Domain score dial (0-100 semi-circle gauge) */
+.domain-dial { text-align: center; }
+.domain-dial-svg { width: 120px; height: 75px; }
+.domain-dial-bg { fill: none; stroke: #eef0f3; stroke-width: 7;
+  stroke-linecap: round; }
+.domain-dial-fg { fill: none; stroke-width: 7; stroke-linecap: round;
+  vector-effect: non-scaling-stroke; }
+.domain-dial-good { stroke: var(--good); }
+.domain-dial-amber { stroke: var(--amber); }
+.domain-dial-warn { stroke: var(--warn); }
+.domain-dial-muted { stroke: var(--muted); }
+.domain-dial-num { font-size: 22px; font-weight: 700;
+  font-family: inherit; font-variant-numeric: tabular-nums; }
+.domain-dial-num.domain-dial-good { fill: var(--good); }
+.domain-dial-num.domain-dial-amber { fill: var(--amber); }
+.domain-dial-num.domain-dial-warn { fill: var(--warn); }
+.domain-dial-lbl { font-size: 12px; color: var(--text); margin-top: 2px; }
+.domain-dial-sub { color: var(--muted); }
+
+/* Domain card layout (Trajectory tab) — uses the same hero language as
+   the Today tab's Recovery / Freshness cards. Hero block sits at the
+   top of each domain card; secondary metrics stack below. */
+
+.metric-hero { padding: 4px 0 6px; }
+.metric-hero-value { font-size: 48px; font-weight: 600;
+  letter-spacing: -0.02em; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--text); }
+.metric-hero-value .denom { font-size: 22px; color: var(--muted);
+  font-weight: 400; }
+.metric-hero-value.good  { color: var(--good); }
+.metric-hero-value.amber { color: var(--amber); }
+.metric-hero-value.warn  { color: var(--warn); }
+.metric-hero-value.muted { color: var(--muted); }
+.metric-hero-status { font-size: 14px; font-weight: 500; margin-top: 8px; }
+.metric-hero-status.good  { color: var(--good); }
+.metric-hero-status.amber { color: var(--amber); }
+.metric-hero-status.warn  { color: var(--warn); }
+.metric-hero-status.muted { color: var(--muted); }
+.metric-hero-sub { font-size: 12.5px; margin-top: 4px; line-height: 1.5; }
+
+/* Recovery hero card absorbs the workout-intensity recommendation as a
+   single line below the score, in place of the standalone readiness
+   headline card (which used to duplicate the score). */
+.hero-recommendation { font-size: 14px; font-weight: 500; line-height: 1.5;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid #f0f0f1; }
+.hero-recommendation.good  { color: var(--good); }
+.hero-recommendation.amber { color: var(--amber); }
+.hero-recommendation.warn  { color: var(--warn); }
+.hero-recommendation.muted { color: var(--muted); }
+
+/* Secondary metrics: stacked rows under the hero block. Up to three per
+   domain card. Lighter weight than the hero, heavier than a generic data
+   row. */
+.secondary-metrics { display: grid; gap: 12px; padding-top: 16px;
+  margin-top: 14px; border-top: 1px solid #f0f0f1; }
+.secondary-metric { display: grid; grid-template-columns: 200px 1fr;
+  gap: 12px; align-items: baseline; cursor: help; }
+.secondary-label { font-size: 13px; color: var(--text); font-weight: 500; }
+.secondary-value { font-size: 22px; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1.1;
+  color: var(--text); }
+.secondary-value.good  { color: var(--good); }
+.secondary-value.amber { color: var(--amber); }
+.secondary-value.warn  { color: var(--warn); }
+.secondary-value.muted { color: var(--muted); }
+.secondary-sub { font-size: 12px; color: var(--muted); margin-top: 4px;
+  grid-column: 2 / -1; line-height: 1.45; }
+
+/* Longevity score: hero number with attribution table below */
+.longevity-table { width: 100%; font-size: 13px; margin-top: 16px;
+  padding-top: 14px; border-top: 1px solid #f0f0f1; }
+.longevity-table th { padding: 4px 8px 4px 0;
+  font-size: 11px; font-weight: 500; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em; }
+.longevity-table td { padding: 4px 8px 4px 0; border-bottom: 1px solid #f4f4f6; }
+.longevity-table tbody tr:last-child td { border-bottom: none; }
+
+/* Missing-inputs panel under the longevity score when partial / incomplete */
+.missing-inputs { margin-top: 14px; padding: 12px 14px;
+  background: #fafafa; border: 1px solid var(--border);
+  border-radius: 8px; }
+.missing-title { font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.06em; margin-bottom: 8px; font-weight: 600; }
+.missing-list { font-size: 13px; margin: 0; padding-left: 18px;
+  line-height: 1.55; }
+.missing-list li { margin-bottom: 4px; }
+.missing-list li strong { color: var(--text); }
+
+/* Bloodwork-pending callout (shared by metabolic / body comp domains) */
+.bloodwork-pending { margin-top: 14px; padding: 10px 14px;
+  background: #fafafa; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 12.5px; line-height: 1.5;
+  color: var(--text); }
+.bloodwork-pending strong { color: var(--text); }
+
+/* REM-anomaly watch callout under sleep domain */
+.rem-watch { margin-top: 14px; padding: 10px 14px;
+  background: #fafafa; border-left: 3px solid var(--amber);
+  border-radius: 6px; font-size: 12.5px; line-height: 1.5; }
+
+/* (The Today readiness card was merged into the Recovery hero — its
+   CSS lives under .hero-recommendation above.) */
+
+/* ACWR card */
+.acwr-card .acwr-strip { padding: 8px 0 4px; }
+.acwr-svg { width: 100%; height: auto; max-height: 100px; display: block; }
+.acwr-axis { stroke: var(--border-strong); stroke-width: 1.5;
+  vector-effect: non-scaling-stroke; }
+.acwr-sweet { fill: rgba(52,199,89,0.18); }
+.acwr-stats { display: flex; gap: 24px; align-items: center;
+  font-size: 13px; margin-top: 6px; flex-wrap: wrap; }
+.acwr-stat-num { font-size: 18px; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+
+/* (Longevity score uses the shared .metric-hero / .longevity-table
+   styles defined above.) */
+
+/* Risk flags panel */
+.risk-flags-list { display: grid; gap: 10px; }
+.risk-flag-row { display: grid; grid-template-columns: 220px auto 1fr;
+  gap: 12px; align-items: start; padding: 8px 0;
+  border-bottom: 1px solid #f4f4f6; }
+.risk-flags-list .risk-flag-row:last-child { border-bottom: none; }
+.risk-flag-label { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.risk-flag-hint { font-size: 12px; line-height: 1.5; }
+.risk-family { font-size: 12px; margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid #f4f4f6; line-height: 1.5; }
+
 /* responsive */
 @media (max-width: 720px) {
   .page { padding: 20px 14px 50px; }
@@ -440,10 +594,18 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   .bar-value { display: flex; justify-content: space-between;
     font-size: 12px; }
 }
+@media (max-width: 720px) {
+  .cardio-grid { grid-template-columns: 1fr; }
+  .readiness-row { grid-template-columns: 1fr; gap: 12px; }
+  .longevity-row { grid-template-columns: 1fr; gap: 16px; }
+  .risk-flag-row { grid-template-columns: 1fr; gap: 4px; }
+  .vo2-headline { flex-direction: column; align-items: flex-start; gap: 2px; }
+}
 @media (max-width: 480px) {
   .vitals-spark-col { display: none; }
   .metric .value { font-size: 40px; }
   .practice .big { font-size: 24px; }
+  .longevity-table th:nth-child(3), .longevity-table td:nth-child(3) { display: none; }
 }
 """
 
@@ -465,8 +627,9 @@ INLINE_JS = r"""
   document.querySelectorAll('.tab').forEach(function(t) {
     t.addEventListener('click', function() { selectTab(t.dataset.tab); });
   });
-  var initial = (location.hash || '#assessment').slice(1);
-  if (initial !== 'assessment' && initial !== 'workout') initial = 'assessment';
+  var initial = (location.hash || '#today').slice(1);
+  var validTabs = ['today', 'trajectory', 'workout'];
+  if (validTabs.indexOf(initial) === -1) initial = 'today';
   selectTab(initial);
 
   // -------- tooltips for [data-tip] and .term --------

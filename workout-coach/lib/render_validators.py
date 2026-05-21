@@ -68,6 +68,22 @@ KNOWN_TERMS = {
                "The maximum rate at which your body can use oxygen during intense exercise. A standard fitness ceiling and one of the strongest predictors of long-term healthspan."),
     "HSP":    ("Heat Shock Proteins",
                "Molecular chaperones induced by heat exposure. They are linked to many of sauna's longevity-associated effects. Induction needs roughly 20 minutes at or above 80 degrees Celsius."),
+    "ACWR":   ("Acute:Chronic Workload Ratio",
+               "Last 7 days of training stress divided by the rolling 4-week average. Gabbett 2016 sweet spot is 0.8 to 1.3. Above 1.5 carries materially higher soft-tissue injury risk."),
+    "SRI":    ("Sleep Regularity Index",
+               "How consistent your sleep schedule is across consecutive days, scored 0 to 100. UK Biobank n=60,977: the top quintile has 20 to 48 percent lower all-cause mortality than the bottom."),
+    "ApoB":   ("Apolipoprotein B",
+               "The protein on every atherogenic lipoprotein particle. Better predictor of cardiovascular risk than LDL cholesterol alone."),
+    "ALMI":   ("Appendicular Lean Mass Index",
+               "DEXA-measured lean mass in arms plus legs, divided by height squared. Lower-than-cohort values predict sarcopenia and frailty risk decades out."),
+    "BMD":    ("Bone Mineral Density",
+               "DEXA-measured bone density. A baseline matters for anyone on tenofovir (PrEP) or with risk factors for osteoporosis."),
+    "VAT":    ("Visceral Adipose Tissue",
+               "Fat stored around abdominal organs. The metabolically dangerous fat depot. Above 100 cm² is the risk threshold; under 80 cm² is the Attia optimal target."),
+    "eGFR":   ("Estimated Glomerular Filtration Rate",
+               "Kidney filtration function. The cystatin-C variant is preferred when creatine supplementation can confound the serum-creatinine version."),
+    "PrEP":   ("Pre-exposure Prophylaxis",
+               "Daily HIV-prevention medication (tenofovir + emtricitabine). Requires eGFR and bone-density monitoring."),
 }
 
 EM_DASH = "—"
@@ -78,9 +94,20 @@ COACH_STRING_MAX = 280
 # Listed here so the validator can warn when one is missing; the
 # corresponding card still renders (just without a callout) which is
 # a softer failure than a hard validator error.
+#
+# Today + Trajectory tabs have their own per-tab keys. ``vitals``,
+# ``sleep``, ``recovery_practices`` are retained where the corresponding
+# cards still render (cross-tab — they appear on the Trajectory tab).
 COACH_CARD_KEYS = (
-    "recovery_drivers", "activity_rings", "training_load", "muscle_volume",
-    "strength", "vitals", "sleep", "recovery_practices",
+    # TODAY tab
+    "today_acwr",
+    "recovery_drivers", "activity_rings", "training_load", "strength",
+    # TRAJECTORY tab — domain callouts
+    "trajectory_longevity_score", "trajectory_cardio", "trajectory_recovery",
+    "trajectory_sleep", "trajectory_body_comp", "trajectory_metabolic",
+    "trajectory_decathlon", "trajectory_behavioral", "trajectory_risk_flags",
+    # Retained (cross-tab cards)
+    "vitals", "sleep", "recovery_practices",
 )
 
 

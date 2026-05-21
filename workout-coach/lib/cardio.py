@@ -348,6 +348,142 @@ def auto_deload_candidates(monthly_sessions: list[dict],
     return candidates
 
 
+def compute_hr_recovery_summary(health_all: list[dict],
+                                 today_d: date) -> dict | None:
+    """Heart-Rate Recovery 1-min summary for the Cardiorespiratory card.
+
+    Apple Health exposes per-day HRR values in ``hr_recovery_1min``. This
+    helper rolls them up over the last 28 days and resolves the value to
+    the Cole 1999 / Cleveland Clinic mortality bands (<12 = abnormal,
+    12-15 borderline, 15-25 normal, ≥25 excellent). Returns ``None`` when
+    no HRR readings exist in the window so ``_compact`` drops the key.
+
+    Already wired as one of the recovery_score drivers (`hr_recovery_1min`
+    in `health.py`). This standalone summary is what the Trajectory tab
+    visualizes as a first-class metric.
+    """
+    from constants import HRR_1MIN_NORMS  # local import to avoid cycle
+    vals_28 = _values_in_window(health_all, "hr_recovery_1min", today_d, 28)
+    if not vals_28:
+        return None
+    mean_28 = sum(vals_28) / len(vals_28)
+    vals_7 = _values_in_window(health_all, "hr_recovery_1min", today_d, 7)
+    mean_7 = (sum(vals_7) / len(vals_7)) if vals_7 else None
+    latest = max(vals_28)  # most recent isn't trivially extractable; use peak
+    # Band classification on the 28-day mean.
+    if mean_28 < HRR_1MIN_NORMS["abnormal_below"]:
+        band, label = "warn", "abnormal"
+    elif mean_28 < HRR_1MIN_NORMS["borderline"]:
+        band, label = "amber", "borderline"
+    elif mean_28 < HRR_1MIN_NORMS["normal"]:
+        band, label = "good", "normal"
+    elif mean_28 < HRR_1MIN_NORMS["excellent"]:
+        band, label = "good", "fit"
+    else:
+        band, label = "good", "excellent"
+    return {
+        "mean_28d":   round(mean_28, 1),
+        "mean_7d":    round(mean_7, 1) if mean_7 is not None else None,
+        "n_readings": len(vals_28),
+        "band":       band,
+        "label":      label,
+        "norms":      HRR_1MIN_NORMS,
+    }
+
+
+def compute_acwr(trimps: list[dict], today_d: date) -> dict | None:
+    """Acute:Chronic Workload Ratio (Gabbett 2016 sweet-spot model).
+
+    Acute = total TRIMP last 7 days; chronic = mean weekly TRIMP over the
+    last 28 days. Ratio in the [0.8, 1.3] sweet spot = lowest injury risk;
+    >1.5 is the high-risk zone. Returns ``None`` when either window is
+    empty.
+    """
+    from constants import ACWR_BANDS
+    if not trimps:
+        return None
+    by_date: dict[date, float] = {}
+    for t in trimps:
+        d = _parse_iso_date(t.get("date"))
+        if d is None:
+            continue
+        by_date[d] = by_date.get(d, 0.0) + float(t.get("trimp") or 0.0)
+    acute = sum(v for d, v in by_date.items()
+                if today_d - timedelta(days=7) < d <= today_d)
+    chronic_total = sum(v for d, v in by_date.items()
+                        if today_d - timedelta(days=28) < d <= today_d)
+    chronic_weekly = chronic_total / 4.0
+    if chronic_weekly <= 0:
+        return None
+    ratio = acute / chronic_weekly
+    if ratio < ACWR_BANDS["detraining_below"]:
+        band, label = "amber", "detraining"
+    elif ratio <= ACWR_BANDS["sweet_spot_hi"]:
+        band, label = "good", "sweet spot"
+    elif ratio <= ACWR_BANDS["caution_hi"]:
+        band, label = "amber", "caution"
+    else:
+        band, label = "warn", "high injury risk"
+    return {
+        "ratio":          round(ratio, 2),
+        "acute_7d":       round(acute, 0),
+        "chronic_28d_avg": round(chronic_weekly, 0),
+        "band":           band,
+        "label":          label,
+        "bands":          ACWR_BANDS,
+    }
+
+
+def compute_movement_consistency_days(health_all: list[dict],
+                                       today_d: date,
+                                       threshold_min: int = 30) -> dict | None:
+    """Behavioral consistency: days hitting Apple's exercise-minute threshold.
+
+    We don't ingest a steps column — Apple's Activity ring exposes
+    ``exercise_min`` instead (brisk-activity minutes). Threshold defaults
+    to 30 (the Apple Move ring default; lines up with the WHO ≥150 min/wk
+    recommendation as 5 days of 30 min). Returns counts for the current
+    ISO week and the trailing 28 days.
+
+    The Paluch 2022 / Saint-Maurice 2023 finding that *days at threshold*
+    is dose-responsive even when the weekly mean is unchanged applies the
+    same way here: one high-activity day still moves the mortality needle.
+    Returns ``None`` when no exercise-minute data exists in the 28-day
+    window (HL trackers, or no Watch wear).
+    """
+    iso = today_d.isocalendar()
+    monday = today_d - timedelta(days=iso.weekday - 1)
+    in_window = []
+    in_week = []
+    for e in health_all:
+        d = _parse_iso_date(e.get("date"))
+        if d is None:
+            continue
+        if today_d - timedelta(days=28) < d <= today_d:
+            in_window.append(e)
+        if monday <= d <= today_d:
+            in_week.append(e)
+    any_data = any(
+        (e.get("exercise_min") is not None) for e in in_window
+    )
+    if not any_data:
+        return None
+    days_this_wk = sum(
+        1 for e in in_week
+        if (e.get("exercise_min") or 0) >= threshold_min
+    )
+    days_28d = sum(
+        1 for e in in_window
+        if (e.get("exercise_min") or 0) >= threshold_min
+    )
+    return {
+        "threshold_min":  threshold_min,
+        "days_this_wk":   days_this_wk,
+        "days_28d":       days_28d,
+        "target_per_wk":  5,
+    }
+
+
 def daily_activity_28d(health_all: list[dict],
                        workout_sessions_all: list[dict],
                        today_d: date) -> dict:

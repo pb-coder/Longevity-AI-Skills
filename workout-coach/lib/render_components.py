@@ -483,6 +483,185 @@ def sparkline(values, status_class=None, w=80, h=24):
             f'points="{" ".join(pts)}"/></svg>')
 
 
+# ---------- shared metric "hero block" helper ----------
+
+
+def metric_hero(value_html, status_word, status_cls,
+                *, sublabel=None, comparison_html=""):
+    """Reusable "hero block": big number + status word + optional scale.
+
+    Every Trajectory domain card uses this shape to match the Today tab's
+    hero visual language. Two contracts:
+
+    - ``value_html`` is already-formatted HTML (e.g. ``"49.6 <span class='muted'>ml/kg/min</span>"``).
+    - ``status_word`` is the short banded label ("above median", "elite").
+    - ``status_cls`` is one of ``good`` / ``amber`` / ``warn`` / ``muted``
+      and controls the value-colour binding.
+    - ``sublabel`` is an optional small text below the status word.
+    - ``comparison_html`` is an already-rendered comparison strip / scale.
+    """
+    sub = f'<div class="metric-hero-sub muted">{esc(sublabel)}</div>' if sublabel else ''
+    return f'''
+<div class="metric-hero">
+  <div class="metric-hero-value {status_cls}">{value_html}</div>
+  <div class="metric-hero-status {status_cls}">{esc(status_word)}</div>
+  {sub}
+  {comparison_html}
+</div>'''
+
+
+def secondary_metric_row(label, value_html, status_cls="muted",
+                         *, sublabel=None, tip=None):
+    """Stacked secondary-metric row used in domain cards under the hero
+    block. Lighter weight than a hero, heavier than a generic data row.
+
+    Use for the second / third metric inside a domain card. Three metrics
+    max per domain so the card stays scannable.
+    """
+    tip_attr = f' data-tip="{esc(tip)}"' if tip else ''
+    sub_html = f'<div class="secondary-sub muted">{esc(sublabel)}</div>' if sublabel else ''
+    return f'''
+<div class="secondary-metric"{tip_attr}>
+  <div class="secondary-label">{esc(label)}</div>
+  <div class="secondary-value {status_cls}">{value_html}</div>
+  {sub_html}
+</div>'''
+
+
+# ---------- longevity / trajectory components ----------
+
+def comparison_strip(value, p50, p75, p95, longevity, *, unit="",
+                     longevity_label="longevity target",
+                     baseline=None, baseline_label="your baseline"):
+    """4-line comparison strip used across the Trajectory tab.
+
+    Renders a horizontal scale with the four canonical reference markers
+    (population p50 / p75 / p95 / longevity target), plus optional
+    personal baseline. The user's current ``value`` is placed on the
+    same axis with a colored marker that resolves its band against the
+    reference points.
+
+    Use when a metric has age-cohort norms (VO2, HRV-SDNN, RHR, HRR).
+    For metrics without published norms, prefer ``simple_comparison_strip``.
+    """
+    if value is None or p50 is None or p95 is None:
+        return ""
+    # Establish the axis. Use 0 to longevity*1.15 as upper bound; lower bound
+    # is min(p50*0.7, value*0.9). For metrics where lower-is-better (RHR),
+    # the caller can flip; here we keep the default left-low / right-high
+    # so positive numbers grow rightward.
+    longevity = longevity or p95
+    span_lo = min(p50 * 0.7, value * 0.9, baseline * 0.9 if baseline else p50 * 0.7)
+    span_hi = max(longevity * 1.12, value * 1.1)
+    span = max(span_hi - span_lo, 1.0)
+
+    def x(v):
+        return 50.0 + ((v - span_lo) / span) * 540.0
+
+    # Marker color: matches the band the user's value sits in.
+    if value >= longevity:
+        cls = "good"
+    elif value >= p95:
+        cls = "good"
+    elif value >= p75:
+        cls = "amber"
+    elif value >= p50:
+        cls = "amber"
+    else:
+        cls = "warn"
+
+    band_marks = []
+    band_labels = [
+        ("p50", p50, "median"),
+        ("p75", p75, "good"),
+        ("p95", p95, "elite"),
+        ("target", longevity, longevity_label),
+    ]
+    for name, mv, lbl in band_labels:
+        mx = x(mv)
+        band_marks.append(
+            f'<g class="cmp-band cmp-band-{name}">'
+            f'<line x1="{mx:.1f}" y1="34" x2="{mx:.1f}" y2="48" />'
+            f'<text x="{mx:.1f}" y="60" text-anchor="middle" class="cmp-band-lbl">{esc(lbl)}</text>'
+            f'<text x="{mx:.1f}" y="72" text-anchor="middle" class="cmp-band-num">{mv:g}</text>'
+            f'</g>'
+        )
+    user_x = x(value)
+    baseline_html = ""
+    if baseline is not None:
+        bx = x(baseline)
+        baseline_html = (
+            f'<g class="cmp-baseline">'
+            f'<line x1="{bx:.1f}" y1="20" x2="{bx:.1f}" y2="48" stroke-dasharray="3,3" />'
+            f'<text x="{bx:.1f}" y="14" text-anchor="middle" class="cmp-band-lbl">{esc(baseline_label)}</text>'
+            f'</g>'
+        )
+
+    unit_html = f' <tspan class="cmp-unit">{esc(unit)}</tspan>' if unit else ""
+    return f'''
+<div class="cmp-strip">
+  <svg viewBox="0 0 620 90" preserveAspectRatio="xMidYMid meet" class="cmp-svg" aria-hidden="true">
+    <line x1="50" y1="40" x2="590" y2="40" class="cmp-axis"/>
+    {''.join(band_marks)}
+    {baseline_html}
+    <g class="cmp-user cmp-user-{cls}">
+      <polygon points="{user_x-7:.1f},25 {user_x+7:.1f},25 {user_x:.1f},37" />
+      <text x="{user_x:.1f}" y="20" text-anchor="middle" class="cmp-user-val">{value:g}{unit_html}</text>
+    </g>
+  </svg>
+</div>'''
+
+
+def domain_score_dial(score, band, label, *, n_components=None, w=120, h=80):
+    """0-100 score dial used by every Trajectory domain card header.
+
+    Semi-circular gauge with the score arc filling clockwise. Color
+    matches the band class. Label sits below. Optional ``n_components``
+    shows under the label when not None.
+    """
+    if score is None:
+        return (
+            f'<div class="domain-dial">'
+            f'<div class="domain-dial-num muted">·</div>'
+            f'<div class="domain-dial-lbl muted">no data</div></div>'
+        )
+    s = max(0.0, min(100.0, float(score)))
+    # Arc geometry: half-circle, radius 40, centered at (60, 60). Sweep
+    # from left (180°) to right (0°) clockwise as score increases.
+    import math as _math
+    angle_rad = _math.pi * (1.0 - s / 100.0)  # 180° at 0, 0° at 100
+    end_x = 60 + 40 * _math.cos(angle_rad)
+    end_y = 60 - 40 * _math.sin(angle_rad)
+    large_arc = 1 if s > 50 else 0
+    arc_path = f"M 20 60 A 40 40 0 {large_arc} 1 {end_x:.2f} {end_y:.2f}"
+    background_path = "M 20 60 A 40 40 0 1 1 100 60"
+    sub = f' <span class="domain-dial-sub">{n_components} inputs</span>' if n_components else ''
+    return f'''
+<div class="domain-dial">
+  <svg viewBox="0 0 120 75" class="domain-dial-svg" aria-hidden="true">
+    <path d="{background_path}" class="domain-dial-bg" />
+    <path d="{arc_path}" class="domain-dial-fg domain-dial-{band}" />
+    <text x="60" y="62" text-anchor="middle" class="domain-dial-num domain-dial-{band}">{s:.0f}</text>
+  </svg>
+  <div class="domain-dial-lbl">{esc(label or "")}{sub}</div>
+</div>'''
+
+
+def risk_flag_pill(status):
+    """Status pill for personalized risk flags. ``status`` is one of
+    ``tracked`` / ``due`` / ``overdue`` / ``active`` / ``unknown``.
+    """
+    cls_map = {
+        "tracked":  "good",
+        "due":      "amber",
+        "overdue":  "warn",
+        "active":   "warn",
+        "unknown":  "muted",
+    }
+    cls = cls_map.get(status, "muted")
+    return f'<span class="pill {cls}">{esc(status or "unknown")}</span>'
+
+
 # ---------- workout markdown embed ----------
 
 def embed_workout_markdown(md_text: str) -> str:

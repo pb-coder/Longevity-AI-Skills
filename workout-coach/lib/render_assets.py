@@ -220,11 +220,6 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .neat-stat-unit { font-size: 11px; color: var(--muted); font-weight: 400;
   margin-left: 4px; }
 .neat-stat-desc { font-size: 12px; color: var(--muted); margin-top: 6px; }
-.neat-stat-status { font-weight: 600; }
-.neat-stat-status.good  { color: var(--good); }
-.neat-stat-status.amber { color: var(--amber); }
-.neat-stat-status.warn  { color: var(--warn); }
-.neat-stat-status.muted { color: var(--muted); }
 
 /* training-load chart */
 .load-chart { width: 100%; height: auto; cursor: crosshair; }
@@ -679,6 +674,24 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 
 /* (Longevity score uses the shared .metric-hero / .longevity-table
    styles defined above.) */
+
+/* HR-at-volume divergence rows (under the strength card). One row per
+   muscle group with a coloured dot, the muscle name, the state, and
+   the bpm/4w delta. Avoids the prior single-row flex-wrap layout that
+   truncated long words like "Conditioning". */
+.hr-divergence { margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--border-soft); }
+.hr-div-title { font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 8px; }
+.hr-div-row { display: grid;
+  grid-template-columns: 12px 130px 1fr auto;
+  column-gap: 12px; align-items: center; padding: 4px 0;
+  font-size: 13px; }
+.hr-div-muscle { color: var(--text); text-transform: capitalize; }
+.hr-div-state.warn { color: var(--warn); font-weight: 500; }
+.hr-div-state.good { color: var(--good); font-weight: 500; }
+.hr-div-delta { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* Risk flags panel */
 .risk-flags-list { display: grid; gap: 10px; }

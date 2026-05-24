@@ -337,28 +337,6 @@ Z2_TARGETS = {
     "vo2_sessions_per_week": 1,   # Norwegian 4x4
 }
 
-# Centenarian Decathlon framing (Attia Outlive). Used as Trajectory-tab
-# placeholder targets until a manual log file lands. "test" = whether
-# this is normally a tested benchmark (vs estimated from training data).
-DECATHLON_BENCHMARKS = [
-    {"key": "dead_hang",      "label": "Dead hang",       "target_str": "2:30 min",
-     "test": True,  "unit": "min:sec"},
-    {"key": "wall_sit",       "label": "Wall sit",        "target_str": "2:30 min",
-     "test": True,  "unit": "min:sec"},
-    {"key": "farmer_carry",   "label": "Farmer carry",    "target_str": "1.25× BW · 1 min",
-     "test": True,  "unit": "kg / min"},
-    {"key": "push_ups_1min",  "label": "Push-ups in 1 min", "target_str": "50",
-     "test": True,  "unit": "reps"},
-    {"key": "grip_strength",  "label": "Grip strength",   "target_str": "55 kg",
-     "test": True,  "unit": "kg"},
-    {"key": "deadlift_bw",    "label": "Deadlift (vs BW)", "target_str": "1.5–2× BW for 1RM",
-     "test": False, "unit": "× BW"},
-    {"key": "mile_run",       "label": "Mile run",        "target_str": "sub-6:30",
-     "test": True,  "unit": "min:sec"},
-    {"key": "vo2_max",        "label": "VO2 max",         "target_str": "≥56 ml/kg/min",
-     "test": False, "unit": "ml/kg/min"},
-]
-
 # Longevity Score composite weights (Trajectory headline). Weights are
 # normalized at runtime to whatever subset of inputs is actually present
 # (mirrors recovery_score's renormalization). No weight ≥ 0.30 — the

@@ -44,7 +44,6 @@ from render_cards import (
     card_behavioral_domain,
     card_body_comp_domain,
     card_cardio_domain,
-    card_decathlon_framing,
     card_drivers,
     card_hero,
     card_longevity_score,
@@ -182,11 +181,7 @@ def render(j, coach, workout_md, person):
   </div>
 
   <div class="tab-panel" data-tab="today">
-    {card_session_call(session_rec, coach_cards.get("session_recommendation_callout"))}
-    <section class="card summary">
-      <h2>Coach&rsquo;s summary</h2>
-      <div class="body">{auto_wrap_terms(headline)}</div>
-    </section>
+    {card_session_call(session_rec, coach_cards.get("session_recommendation_callout"), summary_text=headline)}
     {card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend)}
     {card_drivers(recovery.get("drivers"), coach_cards.get("recovery_drivers"))}
     {card_acwr(acwr, coach_cards.get("today_acwr"))}
@@ -202,10 +197,9 @@ def render(j, coach, workout_md, person):
     {card_longevity_score(longevity_score, coach_cards.get("trajectory_longevity_score"))}
     {card_cardio_domain(vo2_percentile, hr_recovery, recovery, j.get("cardio_hr_zones_28d") or {{}}, vo2max, vo2_trend, coach_cards.get("trajectory_cardio"))}
     {card_recovery_domain(recovery, weekly, coach_cards.get("trajectory_recovery"))}
-    {card_sleep_domain(j.get("sleep_summary"), sleep_regularity, rem_anomaly, coach_cards.get("trajectory_sleep"))}
+    {card_sleep_domain(j.get("sleep_summary"), sleep_regularity, rem_anomaly, coach_cards.get("trajectory_sleep"), longevity_state=longevity_state)}
     {card_body_comp_domain(bw, bw_trend, longevity_state, coach_cards.get("trajectory_body_comp"))}
     {card_metabolic_domain(longevity_state, coach_cards.get("trajectory_metabolic"))}
-    {card_decathlon_framing(coach_cards.get("trajectory_decathlon"))}
     {card_behavioral_domain(movement_consistency, sleep_regularity, acwr, j.get("cardio_hr_zones_28d") or {{}}, coach_cards.get("trajectory_behavioral"))}
     {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"))}
     {card_sleep(j.get("sleep_summary"), coach_cards.get("sleep"))}

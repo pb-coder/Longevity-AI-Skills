@@ -67,7 +67,6 @@ DOMAIN_HEADING_TIPS = {
     "sleep": "Both how much sleep you are getting and how consistently. The timing of bedtime and waketime is its own mortality predictor independent of total hours.",
     "body_comp": "How much of your weight is muscle versus fat, especially the visceral fat around the organs. The composition matters more than the bodyweight number alone.",
     "metabolic": "How well your body processes glucose, lipids, and insulin. The early-warning system for cardiovascular and type 2 diabetes risk decades before symptoms.",
-    "decathlon": "Peter Attia's framework: pick the ten physical capabilities you want at 100, then reverse-engineer the training you need today.",
     "behavioral": "Daily movement and sleep schedule consistency. Less glamorous than peak performance numbers, but consistency is what compounds over decades.",
     "risk_flags": "Active conditions, medications, family history, and personalised monitoring items pulled from your longevity profile.",
     "longevity_score": "A composite score across ten longevity-relevant signals. Bloodwork is not yet included; the score is honest about what it does not see.",
@@ -170,7 +169,7 @@ def card_neat(daily_activity):
   <div class="neat-stats">
     <div class="neat-stat">
       <div class="neat-stat-num">{fmt(avg_min, 0)}<span class="neat-stat-unit">min/day</span></div>
-      <div class="neat-stat-desc">exercise minutes · <span class="neat-stat-status {status_cls}">{esc(status_word)}</span></div>
+      <div class="neat-stat-desc">exercise minutes · <span class="pill {status_cls}">{esc(status_word)}</span></div>
     </div>
     <div class="neat-stat">
       <div class="neat-stat-num">{fmt(walk_min_daily, 0)}<span class="neat-stat-unit">min/day</span></div>
@@ -260,35 +259,43 @@ def card_strength(items, coach_text, hr_divergence=None):
   <td>{confidence_dots(conf)}</td>
 </tr>''')
     # HR-at-volume divergence: per-muscle slope of strength-session avg HR
-    # over the last 8 weeks, controlling for volume. Surfaces fatigue
-    # (HR creeping at constant load) or improving conditioning (HR falling).
-    # Computed by read_tracker.py but previously not rendered.
+    # over the last 8 weeks, controlling for volume. Rising HR at constant
+    # load is a fatigue signal; falling HR is improving conditioning.
+    # Rendered as one row per muscle with a coloured dot so long words
+    # ("Conditioning") never get truncated by a flex-wrap collapse.
     hr_div_html = ""
     if hr_divergence:
         rising = [(m, v) for m, v in hr_divergence.items()
                   if (v.get("hint") or "").startswith("rising")]
         falling = [(m, v) for m, v in hr_divergence.items()
                    if (v.get("hint") or "").startswith("falling")]
-        parts = []
-        if rising:
-            txt = ", ".join(
-                f"{esc(m)} +{v['slope_bpm_per_4w']:.1f} bpm/4w"
-                for m, v in rising
+        rows_hr = []
+        for m, v in rising:
+            rows_hr.append(
+                f'<div class="hr-div-row">'
+                f'<span class="bar-dot band-over"></span>'
+                f'<span class="hr-div-muscle">{esc(m)}</span>'
+                f'<span class="hr-div-state warn">rising fatigue</span>'
+                f'<span class="hr-div-delta">+{v["slope_bpm_per_4w"]:.1f} bpm/4w</span>'
+                f'</div>'
             )
-            parts.append(
-                f'<span class="warn">Fatigue flag: HR rising at constant volume on {txt}. Hold or cut load on these groups.</span>'
+        for m, v in falling:
+            rows_hr.append(
+                f'<div class="hr-div-row">'
+                f'<span class="bar-dot band-prod"></span>'
+                f'<span class="hr-div-muscle">{esc(m)}</span>'
+                f'<span class="hr-div-state good">improving conditioning</span>'
+                f'<span class="hr-div-delta">{v["slope_bpm_per_4w"]:.1f} bpm/4w</span>'
+                f'</div>'
             )
-        if falling:
-            txt = ", ".join(
-                f"{esc(m)} {v['slope_bpm_per_4w']:.1f} bpm/4w"
-                for m, v in falling
-            )
-            parts.append(
-                f'<span class="muted">Conditioning improving on {txt} (HR falling at the same load).</span>'
-            )
-        if parts:
+        if rows_hr:
             label = '<span class="term" data-tip="Per-muscle slope of strength-session average heart rate over the last 8 weeks, controlling for volume. Rising HR at the same load is a fatigue or under-recovery signal; falling HR is improving aerobic conditioning.">HR at volume</span>'
-            hr_div_html = f'<div class="hr-divergence">{label}: {" · ".join(parts)}</div>'
+            hr_div_html = (
+                f'<div class="hr-divergence">'
+                f'<div class="hr-div-title">{label}</div>'
+                f'{"".join(rows_hr)}'
+                f'</div>'
+            )
 
     return f'''
 <section class="card">
@@ -530,10 +537,11 @@ def card_sleep(sleep, coach_text):
         sbd_band, sbd_word, sbd_value = "warn", "high", f"{sbd_mean:.2f} / min"
 
     # --- Outliers (last 14 days) ---
+    # Hide the row entirely when there are no outliers; per DESIGN.md, empty
+    # states are omitted rather than rendered as muted placeholder text.
     outlier_html = (
         f'<div class="sleep-outliers">Outlier nights, last 14 days: {len(outliers)}.</div>'
-        if outliers else
-        '<div class="sleep-outliers muted">No outlier nights in the last 14 days.</div>'
+        if outliers else ""
     )
 
     # --- Assemble sleep-rows: only emit rows whose underlying field exists.
@@ -635,42 +643,55 @@ def card_recovery_practices(thermal, light, coach_text):
     cold = (thermal or {}).get("cold") or {}
     adherence = (thermal or {}).get("adherence") or {}
 
-    def status_pill(status_key):
+    def adherence_pill(status_key):
+        """Adherence semantics — goal-attainment, not state. Uses
+        .pill-adherence.* per Skills/DESIGN.md so we don't overload
+        the status .pill.good with two meanings."""
         cls = {
-            "on-target": "good", "below-target": "warn", "above-target": "amber",
-            "below-HSP-threshold": "amber", "below-min": "amber", "in-band": "good",
-        }.get(status_key, "muted")
-        return f'<span class="pill {cls}">{esc(status_key or "—")}</span>'
+            "on-target":    "on-target",
+            "below-target": "below-target",
+            "above-target": "above-target",
+            "below-HSP-threshold": "below-target",
+            "below-min":    "below-target",
+            "in-band":      "on-target",
+        }.get(status_key, "below-target")
+        return f'<span class="pill-adherence {cls}">{esc(status_key or "—")}</span>'
 
     sauna_html = f'''
 <div class="practice">
   <div class="title">Sauna</div>
   <div class="big">{fmt(heat.get("n_sessions_per_week"), 2)}<span class="unit">/ wk</span></div>
-  {status_pill(adherence.get("heat_status"))}
+  {adherence_pill(adherence.get("heat_status"))}
   <div class="detail">Target {adherence.get("heat_target_per_week", 4)} per week. Average session {fmt(heat.get("avg_session_minutes"), 0)} min at about {fmt(heat.get("avg_temp_c"), 0)} °C.</div>
   <div class="recent">HSP band: {fmt(heat.get("minutes_above_hsp_threshold_per_week"), 0)} min/wk above 80 °C for 20+ min.</div>
 </div>
 '''
-    cold_recent_lines = []
-    for s in (cold.get("recent_sessions") or [])[:4]:
-        temp = s.get("cold_temp_c")
-        dur = s.get("cold_duration_sec")
-        dur_str = f"{round(dur/60, 1)} min" if dur else "duration not logged"
-        if temp is None:
-            tag = '<span class="pill muted">no temperature logged</span>'
-        elif s.get("dose_hint") == "amber":
-            tag = f'<span class="pill amber">{esc(temp)} °C, weak dose</span>'
-        else:
-            tag = f'<span class="pill good">{esc(temp)} °C</span>'
-        cold_recent_lines.append(
-            f'<div>{esc(s.get("date"))} · {esc((s.get("cold_type") or "").replace("_", " "))} · {dur_str} {tag}</div>'
+    # Cold-exposure block: weekly count + adherence pill + one-line average
+    # (rendered only when both temp and duration are populated for at least
+    # one session). Per-session detail and "not logged" pills are omitted —
+    # they were visual noise that didn't help adherence reading.
+    cold_status = cold.get("adherence_status") or adherence.get("cold_status")
+    sessions_with_dose = [
+        s for s in (cold.get("recent_sessions") or [])
+        if s.get("cold_temp_c") is not None and s.get("cold_duration_sec")
+    ]
+    avg_line_html = ""
+    if sessions_with_dose:
+        avg_min = sum(s["cold_duration_sec"] for s in sessions_with_dose) / len(sessions_with_dose) / 60
+        avg_temp = sum(s["cold_temp_c"] for s in sessions_with_dose) / len(sessions_with_dose)
+        avg_line_html = (
+            f'<div class="detail">Average session {avg_min:.1f} min at {avg_temp:.0f} °C '
+            f'({len(sessions_with_dose)} session{"s" if len(sessions_with_dose) != 1 else ""} with full dose data).</div>'
         )
+    cold_adherence_html = (
+        adherence_pill(cold_status) if cold_status else ""
+    )
     cold_html = f'''
 <div class="practice">
   <div class="title">Cold exposure ({esc((cold.get("dominant_type") or "—").replace("_", " "))})</div>
   <div class="big">{fmt(cold.get("n_sessions_per_week"), 2)}<span class="unit">/ wk</span></div>
-  <span class="pill muted">paired with sauna {fmt(cold.get("paired_with_heat_pct"), 0)}%</span>
-  <div class="recent">{"".join(cold_recent_lines) or "no sessions in window"}</div>
+  {cold_adherence_html}
+  {avg_line_html}
 </div>
 '''
     light_adh = (light or {}).get("adherence") or {}
@@ -678,7 +699,7 @@ def card_recovery_practices(thermal, light, coach_text):
 <div class="practice">
   <div class="title">Light therapy</div>
   <div class="big">{fmt((light or {}).get("n_sessions_per_week"), 2)}<span class="unit">/ wk</span></div>
-  {status_pill(light_adh.get("status"))}
+  {adherence_pill(light_adh.get("status"))}
   <div class="detail">Target {light_adh.get("target_per_week", 3)} per week, {light_adh.get("target_min_per_session", 10)} min per session.</div>
   <div class="recent">Average session {fmt((light or {}).get("avg_session_minutes"), 0)} min. {esc((light or {}).get("dominant_light_type") or "—")} via {esc((light or {}).get("dominant_modality") or "—")}.</div>
 </div>
@@ -741,22 +762,20 @@ def coach_block(text: str | None) -> str:
 # =============================================================================
 
 
-def card_session_call(rec, coach_text):
+def card_session_call(rec, coach_text, summary_text=None):
     """The Today tab's headline card. Sits at position 1, before every
-    other card. Renders the 5-tier session recommendation: prescription
-    headline + "Why this call" rationale list + override note.
+    other card. Renders the 5-tier session recommendation: a tier-coloured
+    pill chip + prescriptive headline + substitute prescription + "Why this
+    call" rationale list + the merged Coach's-summary narrative + the
+    coach's per-card callout + the override note.
 
-    Per-tier visual treatment:
-      A — red border, red headline (refuse strength)
-      B — amber border, amber headline (reactive deload / Zone 2)
-      C — soft amber border, amber headline (modified strength OK)
-      D — green border, green headline (train as planned, compact)
-      E — blue border, blue headline (over-recovered taper warning)
+    Tier is communicated by the .tier-indicator pill placed above the
+    headline. The card chrome itself is uniform — no coloured left-borders
+    or background tints. See Skills/DESIGN.md for the rule.
     """
     if not rec:
         return ""
     tier = rec.get("tier", "D")
-    label = rec.get("label", "")
     headline = rec.get("headline", "Train as planned.")
     substitute = rec.get("substitute") or {}
     prescription = substitute.get("prescription", "")
@@ -764,11 +783,18 @@ def card_session_call(rec, coach_text):
     rationale = rec.get("rationale") or []
     override_msg = rec.get("override_message") or ""
 
-    tier_class_map = {
-        "A": "tier-a", "B": "tier-b", "C": "tier-c",
-        "D": "tier-d", "E": "tier-e",
+    # Tier indicator: a single semantic chip placed above the headline.
+    # Colour comes from the .pill palette; the word names the tier in plain
+    # English so the colour isn't the only carrier of meaning.
+    tier_indicator = {
+        "A": ("warn",   "Rest day"),
+        "B": ("amber",  "Reactive deload"),
+        "C": ("amber",  "Modified strength"),
+        "D": ("good",   "Train as planned"),
+        "E": ("accent", "Over-recovered"),
     }
-    tier_class = tier_class_map.get(tier, "tier-d")
+    pill_cls, pill_word = tier_indicator.get(tier, ("good", "Train as planned"))
+    tier_pill = f'<span class="tier-indicator {pill_cls}">{esc(pill_word)}</span>'
 
     # Pretty signal names for the rationale rows (single line per signal,
     # left-column label, right-column note).
@@ -818,18 +844,29 @@ def card_session_call(rec, coach_text):
         f'<div class="session-call-notes muted">{esc(notes)}</div>'
         if notes and tier != "D" else ""
     )
+    # Coach's summary narrative — merged here from what used to be its own
+    # top-of-Today section. Auto-wraps known terms with the tooltip system.
+    summary_block = ""
+    if summary_text:
+        summary_block = f'''
+<div class="session-call-coach-note">
+  <div class="session-call-coach-label">Coach&rsquo;s note</div>
+  <div>{auto_wrap_terms(summary_text)}</div>
+</div>'''
     override_line = (
         f'<div class="session-call-override">{esc(override_msg)}</div>'
         if override_msg else ""
     )
 
     return f'''
-<section class="card session-call-card {tier_class}">
+<section class="card session-call-card">
   <h2>Today&rsquo;s call</h2>
+  {tier_pill}
   <div class="session-call-headline">{esc(headline)}</div>
   {substitute_line}
   {notes_line}
   {rationale_html}
+  {summary_block}
   {coach_block(coach_text)}
   {override_line}
 </section>
@@ -1230,7 +1267,23 @@ def card_recovery_domain(recovery, weekly, coach_text):
 '''
 
 
-def card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text):
+def _has_risk_flag(longevity_state, key):
+    """True when ``longevity_state.risk_flags`` carries the named key.
+
+    Used to gate user-specific copy (Parkinson surveillance notes, PrEP
+    callouts, etc.) so it only renders for people whose longevity profile
+    actually declares the relevant flag. Without this guard, hardcoded
+    references would leak across people."""
+    if not longevity_state:
+        return False
+    return any(
+        (f or {}).get("key") == key
+        for f in (longevity_state.get("risk_flags") or [])
+    )
+
+
+def card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text,
+                      longevity_state=None):
     """Sleep architecture domain card. Hero: Total sleep h. Secondaries:
     Deep+REM, Efficiency, SRI. REM-anomaly watch below."""
     if not sleep and not sleep_regularity:
@@ -1308,10 +1361,18 @@ def card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text):
     if rem_anomaly:
         low = rem_anomaly.get("low_rem_nights", 0)
         mean_pct = rem_anomaly.get("mean_rem_pct", 0)
+        # The Parkinson surveillance note only renders when the person's
+        # longevity profile carries the parkinson_surveillance risk flag.
+        # Without that gate the line would leak to everyone with a low-REM
+        # window, including people without family history of Parkinson's.
+        parkinson_note = (
+            " Relevant for paternal Parkinson family history surveillance."
+            if _has_risk_flag(longevity_state, "parkinson_surveillance") else ""
+        )
         rem_watch = f'''
 <div class="rem-watch muted">
   <strong>REM watch.</strong> {low} of {rem_anomaly.get("n_nights", 0)} nights showed REM below 15% of total sleep in the 28-day window.
-  Mean REM proportion {mean_pct:.1f}% &middot; healthy adult range is 20 to 25%. Relevant for paternal Parkinson family history surveillance.
+  Mean REM proportion {mean_pct:.1f}% &middot; healthy adult range is 20 to 25%.{parkinson_note}
 </div>'''
 
     return f'''
@@ -1365,13 +1426,25 @@ def card_body_comp_domain(bw, bw_trend, longevity_state, coach_text):
         ),
     ]
 
-    dexa_msg = (
-        '<strong>DEXA pending.</strong> Visceral adipose tissue (VAT), '
-        'appendicular lean mass (ALMI), and bone density (BMD) need a DEXA scan to populate. '
-        'PrEP users should book one for BMD baseline anyway.'
-        if has_profile else
-        '<strong>DEXA pending.</strong> Body composition detail (VAT / ALMI / bone density) requires a DEXA scan.'
-    )
+    # Gate the PrEP-specific BMD prompt on the prep_monitoring risk flag —
+    # otherwise it would leak to every user whose profile is populated,
+    # not just the ones actually on PrEP.
+    if has_profile and _has_risk_flag(longevity_state, "prep_monitoring"):
+        dexa_msg = (
+            '<strong>DEXA pending.</strong> Visceral adipose tissue (VAT), '
+            'appendicular lean mass (ALMI), and bone density (BMD) need a DEXA scan to populate. '
+            'PrEP users should book one for BMD baseline anyway.'
+        )
+    elif has_profile:
+        dexa_msg = (
+            '<strong>DEXA pending.</strong> Visceral adipose tissue (VAT), '
+            'appendicular lean mass (ALMI), and bone density (BMD) need a DEXA scan to populate.'
+        )
+    else:
+        dexa_msg = (
+            '<strong>DEXA pending.</strong> Body composition detail '
+            '(VAT / ALMI / bone density) requires a DEXA scan.'
+        )
 
     return f'''
 <section class="card domain-card">
@@ -1475,36 +1548,6 @@ def card_behavioral_domain(movement_consistency, sleep_regularity, acwr,
   <h2>{_heading("Behavioral consistency", "behavioral")}</h2>
   {hero_html}
   {secondaries_html}
-  {coach_block(coach_text)}
-</section>
-'''
-
-
-def card_decathlon_framing(coach_text):
-    """Centenarian-decathlon framing card. Targets only (no current
-    values until a manual log file lands). Reads from
-    constants.DECATHLON_BENCHMARKS."""
-    from constants import DECATHLON_BENCHMARKS  # local import
-    rows = []
-    for b in DECATHLON_BENCHMARKS:
-        rows.append(f'''
-<tr>
-  <td>{esc(b["label"])}</td>
-  <td class="num muted">·</td>
-  <td>{esc(b["target_str"])}</td>
-  <td><span class="pill muted">not tested</span></td>
-</tr>''')
-    return f'''
-<section class="card domain-card">
-  <h2>{_heading("Centenarian decathlon framing", "decathlon")}</h2>
-  <div class="muted" style="font-size:13px; margin-bottom:14px;">
-    Attia's framework: 10 physical capabilities you want at 100, reverse-engineered to today's training.
-    Treat these as benchmarks to test on a quarterly cadence. Add a log file at <code>longevity/decathlon.csv</code> to populate.
-  </div>
-  <table class="strength-table">
-    <thead><tr><th>Capability</th><th>Current</th><th>Target</th><th>Status</th></tr></thead>
-    <tbody>{"".join(rows)}</tbody>
-  </table>
   {coach_block(coach_text)}
 </section>
 '''

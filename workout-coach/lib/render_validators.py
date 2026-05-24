@@ -107,7 +107,7 @@ COACH_CARD_KEYS = (
     # TRAJECTORY tab — domain callouts
     "trajectory_longevity_score", "trajectory_cardio", "trajectory_recovery",
     "trajectory_sleep", "trajectory_body_comp", "trajectory_metabolic",
-    "trajectory_decathlon", "trajectory_behavioral", "trajectory_risk_flags",
+    "trajectory_behavioral", "trajectory_risk_flags",
     # Retained (cross-tab cards)
     "vitals", "sleep", "recovery_practices",
 )

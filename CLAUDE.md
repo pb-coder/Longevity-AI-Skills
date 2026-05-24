@@ -263,6 +263,15 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
 
 ## Conventions
 
+- **Visual surfaces follow `Skills/DESIGN.md`.** Any HTML / CSS output
+  (the workout-coach assessment dashboard today; future report
+  surfaces tomorrow) reads its tokens from `Skills/DESIGN.md`, which
+  uses the [Google Stitch DESIGN.md format](https://github.com/google-labs-code/design.md)
+  (YAML token front matter + Markdown prose for rationale). The token
+  values are normative; the prose explains intent and how to apply
+  them. Lint with `npx @google/design.md lint Skills/DESIGN.md`. **No
+  raw hex literals outside the YAML front matter** — render modules
+  reference CSS variables that map back to tokens.
 - **Notes columns are for user-supplied, row-unique annotations only.**
   Writers (importers, /log) must never stash pipeline-state strings in
   Notes — anything that recurs as the same string across more than a

@@ -1,5 +1,11 @@
 """Static CSS + inline JS used by the dashboard renderer.
 
+Implements the design system documented in ``Skills/DESIGN.md`` (Google
+Stitch DESIGN.md format). Token values — colours, typography, spacing,
+shadows — live there as the normative source; this module's CSS
+variables on ``:root`` are the local mirror. Never inline a raw hex
+literal outside the ``:root`` block.
+
 Two module-level string constants:
 
 - ``STYLESHEET`` — the full inline CSS embedded in the HTML's ``<style>``

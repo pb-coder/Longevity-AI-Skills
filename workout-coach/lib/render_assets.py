@@ -1,5 +1,11 @@
 """Static CSS + inline JS used by the dashboard renderer.
 
+Implements the design system documented in ``Skills/DESIGN.md`` (Google
+Stitch DESIGN.md format). Token values — colours, typography, spacing,
+shadows — live there as the normative source; this module's CSS
+variables on ``:root`` are the local mirror. Never inline a raw hex
+literal outside the ``:root`` block.
+
 Two module-level string constants:
 
 - ``STYLESHEET`` — the full inline CSS embedded in the HTML's ``<style>``
@@ -23,17 +29,40 @@ from __future__ import annotations
 
 
 STYLESHEET = """
+/* Tokens mirror Skills/DESIGN.md. The YAML front matter there is the
+   normative source; every CSS variable below points back to a token
+   in that file. Never inline a raw hex literal outside this :root block. */
 :root {
   --bg: #f7f7f8;
   --card: #ffffff;
   --border: #ececec;
   --border-strong: #d8d8d9;
+  --border-soft: #f4f4f6;
   --text: #1c1c1e;
   --muted: #6b6b6f;
   --good: #34c759;
   --amber: #ff9f0a;
   --warn: #ff3b30;
   --accent: #0a84ff;
+
+  /* Tinted backgrounds — derived from the semantic palette at 12%
+     opacity so pills + soft callouts can share one alpha scheme. */
+  --good-tint:   rgba(52,199,89,0.12);
+  --amber-tint:  rgba(255,159,10,0.12);
+  --warn-tint:   rgba(255,59,48,0.12);
+  --accent-tint: rgba(10,132,255,0.12);
+  --muted-tint:  #eeeeef;
+
+  /* Surfaces — quieter than --card, used for inset tiles and callouts. */
+  --tile-bg:  #fafafa;
+  --track-bg: #f0f1f3;
+
+  /* Soft shadow on card chrome (Apple Health-style elevation). */
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.04);
+
+  /* Dark surface tokens for floating overlays. */
+  --tooltip-bg: #1c1c1e;
+  --tooltip-fg: #ffffff;
 
   /* Per-muscle volume bands. Four distinct hues so opposite ends of
      the spectrum (not-enough vs too-much) never share a color. */
@@ -73,11 +102,13 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .tab-panel { display: none; }
-.tab-panel[data-active="true"] { display: grid; gap: 14px; }
+.tab-panel[data-active="true"] { display: grid; gap: 24px; }
 
-/* card */
+/* card — one chrome for every card, every tab. State indicators live
+   inside the card (pills, dots), never on its border or background. */
 .card { background: var(--card); border: 1px solid var(--border);
-  border-radius: 14px; padding: 20px 22px; }
+  border-radius: 14px; padding: 20px 22px;
+  box-shadow: var(--shadow-card); }
 .card h2 { margin: 0 0 14px; font-size: 12px; font-weight: 600;
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 
@@ -97,7 +128,7 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 /* coach callout, typographic differentiation only; no box, no border,
    no tint. A thin hairline rule and a small-caps label do the work. */
 .coach { margin-top: 18px; padding-top: 14px;
-  border-top: 1px solid #f0f0f1; }
+  border-top: 1px solid var(--border-soft); }
 .coach .label { font-size: 10.5px; font-weight: 600;
   letter-spacing: 0.10em; text-transform: uppercase;
   color: var(--muted); margin-bottom: 4px; }
@@ -108,7 +139,7 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .term { border-bottom: 1px dotted var(--muted); cursor: help; }
 .tooltip {
   position: fixed;
-  background: #1c1c1e; color: #ffffff;
+  background: var(--tooltip-bg); color: var(--tooltip-fg);
   border-radius: 8px; padding: 10px 12px;
   font-size: 12.5px; line-height: 1.5;
   max-width: 280px; box-shadow: 0 8px 24px rgba(0,0,0,0.22);
@@ -116,7 +147,33 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
   z-index: 200;
 }
 .tooltip.show { opacity: 1; }
-.tooltip strong { color: #ffffff; font-weight: 600; }
+.tooltip strong { color: var(--tooltip-fg); font-weight: 600; }
+
+/* Pills — exactly two semantic families plus a tier-indicator variant.
+   Status pills carry state (good/amber/warn/muted). Adherence pills
+   carry goal-attainment (on-target/below-target/above-target). Tier
+   indicator is a single chip above the session-call headline. All three
+   share chrome; only the colour palette differs. */
+.pill { display: inline-block; padding: 3px 9px;
+  border-radius: 999px; font-size: 11px; font-weight: 500; }
+.pill.good  { color: var(--good);   background: var(--good-tint); }
+.pill.amber { color: var(--amber);  background: var(--amber-tint); }
+.pill.warn  { color: var(--warn);   background: var(--warn-tint); }
+.pill.muted { color: var(--muted);  background: var(--muted-tint); }
+
+.pill-adherence { display: inline-block; padding: 3px 9px;
+  border-radius: 999px; font-size: 11px; font-weight: 500; }
+.pill-adherence.on-target    { color: var(--good);  background: var(--good-tint); }
+.pill-adherence.below-target { color: var(--amber); background: var(--amber-tint); }
+.pill-adherence.above-target { color: var(--accent); background: var(--accent-tint); }
+
+.tier-indicator { display: inline-block; padding: 3px 10px;
+  border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  letter-spacing: 0.02em; margin-bottom: 14px; }
+.tier-indicator.good   { color: var(--good);   background: var(--good-tint); }
+.tier-indicator.amber  { color: var(--amber);  background: var(--amber-tint); }
+.tier-indicator.warn   { color: var(--warn);   background: var(--warn-tint); }
+.tier-indicator.accent { color: var(--accent); background: var(--accent-tint); }
 
 /* drivers */
 .driver-row { display: grid; grid-template-columns: 150px 1fr 60px;
@@ -124,14 +181,14 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
   font-size: 13px; cursor: help; }
 .driver-label { color: var(--text); }
 .driver-track { position: relative; height: 12px;
-  background: #f0f1f3; border-radius: 6px; overflow: hidden; }
+  background: var(--track-bg); border-radius: 6px; overflow: hidden; }
 .driver-axis { position: absolute; left: 50%; top: 0; width: 1px;
   height: 100%; background: var(--border-strong); }
 .driver-fill { position: absolute; top: 0; height: 100%; border-radius: 6px; }
 .driver-fill.good { background: var(--good); }
 .driver-fill.amber { background: var(--amber); }
 .driver-fill.warn { background: var(--warn); }
-.driver-fill.muted { background: #c1c1c5; }
+.driver-fill.muted { background: var(--border-strong); }
 .driver-value { font-variant-numeric: tabular-nums; font-weight: 500;
   text-align: right; }
 .driver-value.good { color: var(--good); }
@@ -163,11 +220,6 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .neat-stat-unit { font-size: 11px; color: var(--muted); font-weight: 400;
   margin-left: 4px; }
 .neat-stat-desc { font-size: 12px; color: var(--muted); margin-top: 6px; }
-.neat-stat-status { font-weight: 600; }
-.neat-stat-status.good  { color: var(--good); }
-.neat-stat-status.amber { color: var(--amber); }
-.neat-stat-status.warn  { color: var(--warn); }
-.neat-stat-status.muted { color: var(--muted); }
 
 /* training-load chart */
 .load-chart { width: 100%; height: auto; cursor: crosshair; }
@@ -194,11 +246,13 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
   vertical-align: middle; }
 /* Line/band swatches reused by both the summary row and the floating
    tooltip on the chart, so they stay top-level. */
-.sw-ctl { background: #0a84ff; }
-.sw-atl { background: 0; border-top: 2px dashed #ff9f0a; height: 0; }
-.sw-tsb { background: linear-gradient(#ff9f0a40, #34c75922); height: 8px !important; }
+.sw-ctl { background: var(--accent); }
+.sw-atl { background: 0; border-top: 2px dashed var(--amber); height: 0; }
+.sw-tsb { background: linear-gradient(var(--amber-tint), var(--good-tint));
+  height: 8px !important; }
 
-.load-tooltip { position: fixed; background: #1c1c1e; color: #ffffff;
+.load-tooltip { position: fixed; background: var(--tooltip-bg);
+  color: var(--tooltip-fg);
   border-radius: 8px; padding: 10px 12px; font-size: 12px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.22);
   pointer-events: none; z-index: 200; }
@@ -214,7 +268,7 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
    was causing the 3-color confusion on under-MEV rows. */
 .muscle-legend { font-size: 12px; color: var(--muted);
   margin-bottom: 14px; padding-bottom: 12px;
-  border-bottom: 1px solid #f4f4f6; }
+  border-bottom: 1px solid var(--border-soft); }
 .muscle-legend-chips { display: flex; gap: 20px; flex-wrap: wrap;
   align-items: center; }
 .muscle-legend-chip { display: inline-flex; align-items: center; gap: 6px; }
@@ -222,14 +276,14 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .muscle-legend-caveat { margin-top: 6px; line-height: 1.5;
   font-size: 11.5px; font-style: italic; }
 
-.bar-row { display: grid; grid-template-columns: 140px 1fr 240px;
+.bar-row { display: grid; grid-template-columns: 140px 1fr 290px;
   align-items: center; gap: 14px; padding: 7px 0;
   font-size: 13px; cursor: help; }
 .bar-label { color: var(--text); text-transform: capitalize; }
 .bar-track { position: relative; height: 10px;
-  background: #f1f2f4; border-radius: 5px; }
+  background: var(--track-bg); border-radius: 5px; }
 .bar-tick { position: absolute; top: -2px; height: 14px; width: 1px;
-  background: #b9b9bb; }
+  background: var(--border-strong); }
 .bar-fill { position: absolute; top: 0; left: 0; height: 100%;
   border-radius: 5px; }
 .bar-fill.band-low  { background: var(--muscle-low); }
@@ -248,6 +302,13 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .bar-dot.band-over { background: var(--muscle-over); }
 .bar-num { font-variant-numeric: tabular-nums; font-weight: 500;
   color: var(--text); margin-left: auto; }
+/* Per-muscle HR-at-volume annotation. Tiny chip after .bar-num that
+   surfaces the fatigue / conditioning trend from the same row's
+   muscle. Absent when stable or no data. */
+.bar-hr { font-size: 11.5px; font-weight: 500;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar-hr.good { color: var(--good); }
+.bar-hr.warn { color: var(--warn); }
 
 /* 3-dot confidence indicator. Three dots = high, two = medium,
    one = low. No tooltip; the dots are self-explanatory. */
@@ -285,13 +346,13 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .confdots .dot { display: inline-block; width: 7px; height: 7px;
   border-radius: 50%; }
 .confdots .dot.on  { background: var(--accent); }
-.confdots .dot.off { background: #dadadc; }
+.confdots .dot.off { background: var(--border-strong); }
 
 /* tables */
 table { width: 100%; border-collapse: collapse; font-size: 14px;
   table-layout: fixed; }
 th, td { text-align: left; padding: 8px 10px 8px 0;
-  border-bottom: 1px solid #f4f4f6; }
+  border-bottom: 1px solid var(--border-soft); }
 th { font-weight: 500; color: var(--muted); font-size: 11px;
   text-transform: uppercase; letter-spacing: 0.06em; }
 td.num { font-variant-numeric: tabular-nums; }
@@ -351,7 +412,7 @@ td.arrow { font-size: 16px; font-weight: 600; }
   height: 10px; border-radius: 50%; vertical-align: middle;
   margin-right: 5px; }
 .sleep-rows { display: grid; gap: 6px;
-  padding-top: 14px; border-top: 1px solid #f4f4f6; }
+  padding-top: 14px; border-top: 1px solid var(--border-soft); }
 .sleep-row { display: grid; grid-template-columns: 12px 200px 1fr;
   align-items: center; gap: 14px; padding: 6px 0; font-size: 13px;
   cursor: help; }
@@ -362,13 +423,13 @@ td.arrow { font-size: 16px; font-weight: 600; }
 .sleep-row-value.warn  { color: var(--warn); }
 .sleep-row-value.muted { color: var(--muted); }
 .sleep-outliers { margin-top: 14px; padding: 10px 12px;
-  background: #fafafa; border-radius: 6px;
+  background: var(--tile-bg); border-radius: 6px;
   font-size: 13px; color: var(--text); }
 .sleep-outliers.muted { color: var(--muted); }
 
 /* recovery practices */
 .practices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.practice { padding: 14px 16px; background: #fafafb;
+.practice { padding: 14px 16px; background: var(--tile-bg);
   border: 1px solid var(--border); border-radius: 10px; }
 .practice .title { font-size: 13px; font-weight: 600;
   color: var(--text); margin-bottom: 8px; }
@@ -376,31 +437,33 @@ td.arrow { font-size: 16px; font-weight: 600; }
   letter-spacing: -0.01em; line-height: 1; }
 .practice .big .unit { font-size: 13px; font-weight: 400;
   color: var(--muted); margin-left: 4px; }
-.practice .pill { display: inline-block; padding: 3px 9px;
-  border-radius: 999px; font-size: 11px; font-weight: 500;
-  margin-top: 8px; }
-.pill.good { color: var(--good); background: rgba(52,199,89,0.12); }
-.pill.amber { color: var(--amber); background: rgba(255,159,10,0.12); }
-.pill.warn { color: var(--warn); background: rgba(255,59,48,0.12); }
-.pill.muted { color: var(--muted); background: #eeeeef; }
+/* Practices card adds a small top-margin to its pill placement; pill
+   chrome itself is shared via .pill above. */
+.practice .pill { margin-top: 8px; }
+.practice .pill-adherence { margin-top: 8px; }
 .practice .detail { color: var(--muted); font-size: 12.5px;
   margin-top: 8px; line-height: 1.5; }
 .practice .recent { margin-top: 8px; padding-top: 8px;
   border-top: 1px solid var(--border); font-size: 12px;
   color: var(--muted); }
 
-/* workout tab, each `## Workout N: TYPE` becomes a card. */
+/* workout tab — each `## Workout N: TYPE` becomes a card. Shares the
+   global .card chrome (background, border, radius, padding, shadow);
+   only the inner layout patterns are workout-specific. */
 .workout-card { background: var(--card); border: 1px solid var(--border);
-  border-radius: 14px; padding: 18px 22px; margin-bottom: 14px; }
-.workout-card h2 { margin: 0 0 12px; font-size: 17px;
-  font-weight: 600; letter-spacing: -0.01em; color: var(--text);
-  text-transform: none; }
+  border-radius: 14px; padding: 20px 22px; margin-bottom: 14px;
+  box-shadow: var(--shadow-card); }
+.workout-card h2 { margin: 0 0 14px; font-size: 12px;
+  font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted); }
 .workout-card .placeholders { color: var(--muted); font-size: 13px;
   margin-bottom: 14px; padding-bottom: 12px;
-  border-bottom: 1px solid #f4f4f6; }
-.workout-card .placeholder-row { padding: 2px 0;
-  font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
-  font-size: 12.5px; }
+  border-bottom: 1px solid var(--border-soft); }
+/* Sans-serif placeholder rows with a soft tint signal "writable line"
+   without resorting to a monospace typeface. */
+.workout-card .placeholder-row { padding: 4px 10px; margin-bottom: 4px;
+  font-size: 12.5px; background: var(--border-soft);
+  border-radius: 4px; }
 .workout-card ul { list-style: none; padding: 0; margin: 0; }
 .workout-card > ul > li { padding: 5px 0 5px 18px; font-size: 14px;
   color: var(--text); font-variant-numeric: tabular-nums;
@@ -410,13 +473,13 @@ td.arrow { font-size: 16px; font-weight: 600; }
   font-weight: 700; }
 .workout-card ul.sub { margin-top: 4px; padding-left: 0; }
 .workout-card ul.sub li { padding: 2px 0 2px 18px;
-  font-size: 13px; color: var(--muted); font-style: italic;
+  font-size: 13px; color: var(--muted);
   position: relative; line-height: 1.5;
   font-variant-numeric: normal; }
 .workout-card ul.sub li::before { content: "";
   position: absolute; left: 0; top: 12px; width: 10px;
-  border-top: 1px solid #e0e0e2; }
-.workout-card .workout-prose { color: var(--muted); font-size: 13px;
+  border-top: 1px solid var(--border-strong); }
+.workout-card .workout-prose { color: var(--text); font-size: 15px;
   line-height: 1.5; padding: 4px 0; }
 
 footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
@@ -451,7 +514,7 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 /* Domain score dial (0-100 semi-circle gauge) */
 .domain-dial { text-align: center; }
 .domain-dial-svg { width: 120px; height: 75px; }
-.domain-dial-bg { fill: none; stroke: #eef0f3; stroke-width: 7;
+.domain-dial-bg { fill: none; stroke: var(--track-bg); stroke-width: 7;
   stroke-linecap: round; }
 .domain-dial-fg { fill: none; stroke-width: 7; stroke-linecap: round;
   vector-effect: non-scaling-stroke; }
@@ -492,7 +555,7 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
    single line below the score, in place of the standalone readiness
    headline card (which used to duplicate the score). */
 .hero-recommendation { font-size: 14px; font-weight: 500; line-height: 1.5;
-  margin-top: 14px; padding-top: 14px; border-top: 1px solid #f0f0f1; }
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
 .hero-recommendation.good  { color: var(--good); }
 .hero-recommendation.amber { color: var(--amber); }
 .hero-recommendation.warn  { color: var(--warn); }
@@ -502,32 +565,42 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
    domain card. Lighter weight than the hero, heavier than a generic data
    row. */
 .secondary-metrics { display: grid; gap: 12px; padding-top: 16px;
-  margin-top: 14px; border-top: 1px solid #f0f0f1; }
+  margin-top: 14px; border-top: 1px solid var(--border-soft); }
+/* Outer grid uses explicit areas so the sublabel always sits in column
+   2 directly under the value, regardless of how short the value text
+   is. Replaces the prior grid-column: 2 / -1 trick which misaligned
+   when the value cell was narrow (e.g. a lone "·" placeholder). */
 .secondary-metric { display: grid; grid-template-columns: 200px 1fr;
-  gap: 12px; align-items: baseline; cursor: help; }
-.secondary-label { font-size: 13px; color: var(--text); font-weight: 500; }
-.secondary-value { font-size: 22px; font-weight: 600;
+  grid-template-areas:
+    "label value"
+    ".     sub";
+  column-gap: 12px; row-gap: 4px;
+  align-items: baseline; cursor: help; }
+.secondary-label { grid-area: label;
+  font-size: 13px; color: var(--text); font-weight: 500; }
+.secondary-value { grid-area: value;
+  font-size: 24px; font-weight: 600;
   font-variant-numeric: tabular-nums; line-height: 1.1;
   color: var(--text); }
 .secondary-value.good  { color: var(--good); }
 .secondary-value.amber { color: var(--amber); }
 .secondary-value.warn  { color: var(--warn); }
 .secondary-value.muted { color: var(--muted); }
-.secondary-sub { font-size: 12px; color: var(--muted); margin-top: 4px;
-  grid-column: 2 / -1; line-height: 1.45; }
+.secondary-sub { grid-area: sub;
+  font-size: 12.5px; color: var(--muted); line-height: 1.45; }
 
 /* Longevity score: hero number with attribution table below */
 .longevity-table { width: 100%; font-size: 13px; margin-top: 16px;
-  padding-top: 14px; border-top: 1px solid #f0f0f1; }
+  padding-top: 14px; border-top: 1px solid var(--border-soft); }
 .longevity-table th { padding: 4px 8px 4px 0;
   font-size: 11px; font-weight: 500; color: var(--muted);
   text-transform: uppercase; letter-spacing: 0.06em; }
-.longevity-table td { padding: 4px 8px 4px 0; border-bottom: 1px solid #f4f4f6; }
+.longevity-table td { padding: 4px 8px 4px 0; border-bottom: 1px solid var(--border-soft); }
 .longevity-table tbody tr:last-child td { border-bottom: none; }
 
 /* Missing-inputs panel under the longevity score when partial / incomplete */
 .missing-inputs { margin-top: 14px; padding: 12px 14px;
-  background: #fafafa; border: 1px solid var(--border);
+  background: var(--tile-bg); border: 1px solid var(--border);
   border-radius: 8px; }
 .missing-title { font-size: 12px; text-transform: uppercase;
   letter-spacing: 0.06em; margin-bottom: 8px; font-weight: 600; }
@@ -538,42 +611,41 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 
 /* Bloodwork-pending callout (shared by metabolic / body comp domains) */
 .bloodwork-pending { margin-top: 14px; padding: 10px 14px;
-  background: #fafafa; border: 1px solid var(--border);
+  background: var(--tile-bg); border: 1px solid var(--border);
   border-radius: 8px; font-size: 12.5px; line-height: 1.5;
   color: var(--text); }
 .bloodwork-pending strong { color: var(--text); }
 
-/* REM-anomaly watch callout under sleep domain */
-.rem-watch { margin-top: 14px; padding: 10px 14px;
-  background: #fafafa; border-left: 3px solid var(--amber);
-  border-radius: 6px; font-size: 12.5px; line-height: 1.5; }
+/* REM-anomaly watch callout under sleep domain. Soft-tile chrome
+   matching .bloodwork-pending / .missing-inputs; state lives in the
+   inline .pill chip the card emits, not on the callout border. */
+.rem-watch { margin-top: 14px; padding: 12px 14px;
+  background: var(--tile-bg); border: 1px solid var(--border);
+  border-radius: 10px; font-size: 12.5px; line-height: 1.5; }
+.rem-watch .pill { margin-right: 8px; vertical-align: baseline; }
 
 /* Session-call card (Today tab, position 1). The recovery gate's
-   verdict — bigger and more prominent than any other card so the user
-   cannot gloss past it. Per-tier left-border + background tint. */
-.session-call-card { padding: 24px 22px; border-left: 4px solid var(--border-strong); }
-.session-call-card.tier-a { border-left-color: var(--warn);
-  background: linear-gradient(180deg, rgba(255,59,48,0.05), transparent 60%); }
-.session-call-card.tier-b { border-left-color: var(--amber);
-  background: linear-gradient(180deg, rgba(255,159,10,0.05), transparent 60%); }
-.session-call-card.tier-c { border-left-color: #ffcc00; }
-.session-call-card.tier-d { border-left-color: var(--good); }
-.session-call-card.tier-e { border-left-color: var(--accent); }
+   verdict. Tier is communicated by a .tier-indicator chip placed
+   inside the card above the headline — never by a coloured border
+   or background tint on the card chrome itself. */
+.session-call-card { padding: 24px 22px; }
 
 .session-call-headline { font-size: 32px; font-weight: 600;
-  letter-spacing: -0.02em; line-height: 1.15; }
-.session-call-card.tier-a .session-call-headline { color: var(--warn); }
-.session-call-card.tier-b .session-call-headline { color: var(--amber); }
-.session-call-card.tier-c .session-call-headline { color: #b67e00; }
-.session-call-card.tier-d .session-call-headline { color: var(--good); }
-.session-call-card.tier-e .session-call-headline { color: var(--accent); }
+  letter-spacing: -0.02em; line-height: 1.15; color: var(--text); }
 
 .session-call-substitute { font-size: 15px; color: var(--text);
   margin-top: 10px; line-height: 1.5; }
 .session-call-notes { font-size: 13px; margin-top: 6px; line-height: 1.5; }
 
+.session-call-coach-note { margin-top: 18px; padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 15px; line-height: 1.55; color: var(--text); }
+.session-call-coach-label { font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.10em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 4px; }
+
 .session-call-rationale { margin-top: 18px; padding-top: 14px;
-  border-top: 1px solid #f0f0f1; }
+  border-top: 1px solid var(--border-soft); }
 .session-call-rationale-title { font-size: 11px; font-weight: 600;
   letter-spacing: 0.07em; text-transform: uppercase;
   color: var(--muted); margin-bottom: 8px; }
@@ -585,7 +657,7 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 
 .session-call-override { font-size: 11.5px; font-style: italic;
   color: var(--muted); margin-top: 14px; padding-top: 10px;
-  border-top: 1px dashed #f0f0f1; }
+  border-top: 1px dashed var(--border-soft); }
 
 /* Trajectory tab — 14-day tier history strip */
 .tier-history-strip { margin-top: 12px; }
@@ -599,7 +671,7 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 
 /* ACWR card */
 .acwr-card .acwr-strip { padding: 8px 0 4px; }
-.acwr-svg { width: 100%; height: auto; max-height: 100px; display: block; }
+.acwr-svg { width: 100%; height: auto; max-height: 110px; display: block; }
 .acwr-axis { stroke: var(--border-strong); stroke-width: 1.5;
   vector-effect: non-scaling-stroke; }
 .acwr-sweet { fill: rgba(52,199,89,0.18); }
@@ -613,16 +685,26 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 /* (Longevity score uses the shared .metric-hero / .longevity-table
    styles defined above.) */
 
-/* Risk flags panel */
-.risk-flags-list { display: grid; gap: 10px; }
-.risk-flag-row { display: grid; grid-template-columns: 220px auto 1fr;
-  gap: 12px; align-items: start; padding: 8px 0;
-  border-bottom: 1px solid #f4f4f6; }
+/* (HR-at-volume now annotates each muscle row inside
+   .bar-status via .bar-hr — see above. The standalone hr-divergence
+   block under card_strength was removed when the signal moved to
+   the per-muscle volume card.) */
+
+/* Risk flags panel — two-row layout per flag: label + pill on the top
+   row, hint spanning the full width on the second. Predictable
+   alignment regardless of label length. */
+.risk-flags-list { display: grid; gap: 0; }
+.risk-flag-row { display: grid; grid-template-columns: 1fr auto;
+  column-gap: 12px; row-gap: 4px; padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft); }
 .risk-flags-list .risk-flag-row:last-child { border-bottom: none; }
-.risk-flag-label { font-size: 13.5px; font-weight: 600; color: var(--text); }
-.risk-flag-hint { font-size: 12px; line-height: 1.5; }
+.risk-flag-label { grid-column: 1;
+  font-size: 13.5px; font-weight: 600; color: var(--text); }
+.risk-flag-row .pill { grid-column: 2; align-self: start; }
+.risk-flag-hint { grid-column: 1 / -1;
+  font-size: 12px; line-height: 1.5; }
 .risk-family { font-size: 12px; margin-top: 12px; padding-top: 10px;
-  border-top: 1px solid #f4f4f6; line-height: 1.5; }
+  border-top: 1px solid var(--border-soft); line-height: 1.5; }
 
 /* responsive */
 @media (max-width: 720px) {
@@ -639,7 +721,7 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   .practices { grid-template-columns: 1fr; }
   .driver-row { grid-template-columns: 110px 1fr 50px; gap: 8px; font-size: 12px; }
   .bar-row { grid-template-columns: 1fr; gap: 4px;
-    padding: 8px 0; border-bottom: 1px solid #f4f4f6; }
+    padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
   .bar-label { font-size: 13px; font-weight: 500; }
   .bar-value { display: flex; justify-content: space-between;
     font-size: 12px; }

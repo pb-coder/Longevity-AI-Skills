@@ -575,6 +575,7 @@ def main() -> int:
         movement_consistency=movement_consistency,
         bodyweight_trend_kg_per_week=bodyweight_trend_kg_per_week(bw_all),
         estimated_1rm=e1rm,
+        capabilities=capabilities,
     )
 
     # ---- Session recommendation (the 5-tier gate that SKILL.md Phase 2

@@ -26,6 +26,7 @@ before touching the code.
 | Per-muscle HR creep / strength session HR / e1RM slope | [`lib/strength.py`](lib/strength.py) |
 | Apple Health import semantics | [`../shared/import_apple_health.py`](../shared/import_apple_health.py) (Apple XML) or [`../shared/import_health_auto_export.py`](../shared/import_health_auto_export.py) (HealthAutoExport) |
 | Dashboard spec / card contracts | [`references/assessment-dashboard.md`](references/assessment-dashboard.md) |
+| Visual design system — colours, typography, pills, card chrome | [`Skills/DESIGN.md`](../DESIGN.md) |
 | Coach behavioral rules (Phase 2 planning) | [`SKILL.md`](SKILL.md) |
 
 ## Layout
@@ -123,10 +124,16 @@ Grouped by purpose:
 
 Two module-level string constants — pure data, no functions.
 
+**Implements the design system documented in
+[`Skills/DESIGN.md`](../../DESIGN.md).** Read that first before
+touching CSS — token values (colours, typography, spacing) come from
+its YAML front matter and must be referenced via CSS variables here.
+No raw hex literals outside the `:root` block.
+
 - `STYLESHEET` — the full inline CSS. Owns colors (CSS custom
-  properties at the top), card chrome, every visual component's layout,
-  tooltip styling, mobile breakpoints. To change spacing or color for
-  any card, edit here.
+  properties at the top, mapping `Skills/DESIGN.md` tokens), card
+  chrome, every visual component's layout, tooltip styling, mobile
+  breakpoints. To change spacing or color for any card, edit here.
 - `INLINE_JS` — inline JavaScript embedded at the bottom of the HTML.
   Handles: tab switching with URL hash mirroring, hover tooltip
   positioning, interactive training-load chart scrubber + tooltip, and

@@ -36,6 +36,13 @@ SOURCE_CAPABILITIES = {
         "sleep_nights":       True,   # per-night architecture (all 6 stages +
                                       # Time in Bed + Efficiency + N Segments +
                                       # first/last segment clock times)
+        # SRI (Sleep Regularity Index) needs per-segment bedtime / wake
+        # timestamps. The Apple Health XML export carries these; the
+        # HealthAutoExport pipeline collapses to daily totals and drops
+        # them. Surfaces as a capability so compute_longevity_score can
+        # suppress sleep_regularity from the missing-inputs list when
+        # the source structurally can't provide it.
+        "sleep_regularity":   True,
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
         # Thermal (sauna + cold exposure) is manual-/log-only, not
@@ -53,6 +60,7 @@ SOURCE_CAPABILITIES = {
         "sleep_stages":       True,
         "sleep_breath_dist":  True,
         "sleep_nights":       True,
+        "sleep_regularity":   False,  # see note on xml: no segment-level timestamps
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
         "thermal_log":        True,
@@ -66,6 +74,7 @@ SOURCE_CAPABILITIES = {
         "sleep_stages":       False,
         "sleep_breath_dist":  False,
         "sleep_nights":       False,
+        "sleep_regularity":   False,
         "exercise_min_daily": False,
         "per_workout_hr_strength": False,
         "thermal_log":        True,
@@ -336,28 +345,6 @@ Z2_TARGETS = {
     "min_per_week_target":  200,
     "vo2_sessions_per_week": 1,   # Norwegian 4x4
 }
-
-# Centenarian Decathlon framing (Attia Outlive). Used as Trajectory-tab
-# placeholder targets until a manual log file lands. "test" = whether
-# this is normally a tested benchmark (vs estimated from training data).
-DECATHLON_BENCHMARKS = [
-    {"key": "dead_hang",      "label": "Dead hang",       "target_str": "2:30 min",
-     "test": True,  "unit": "min:sec"},
-    {"key": "wall_sit",       "label": "Wall sit",        "target_str": "2:30 min",
-     "test": True,  "unit": "min:sec"},
-    {"key": "farmer_carry",   "label": "Farmer carry",    "target_str": "1.25× BW · 1 min",
-     "test": True,  "unit": "kg / min"},
-    {"key": "push_ups_1min",  "label": "Push-ups in 1 min", "target_str": "50",
-     "test": True,  "unit": "reps"},
-    {"key": "grip_strength",  "label": "Grip strength",   "target_str": "55 kg",
-     "test": True,  "unit": "kg"},
-    {"key": "deadlift_bw",    "label": "Deadlift (vs BW)", "target_str": "1.5–2× BW for 1RM",
-     "test": False, "unit": "× BW"},
-    {"key": "mile_run",       "label": "Mile run",        "target_str": "sub-6:30",
-     "test": True,  "unit": "min:sec"},
-    {"key": "vo2_max",        "label": "VO2 max",         "target_str": "≥56 ml/kg/min",
-     "test": False, "unit": "ml/kg/min"},
-]
 
 # Longevity Score composite weights (Trajectory headline). Weights are
 # normalized at runtime to whatever subset of inputs is actually present

@@ -101,7 +101,8 @@ COACH_STRING_MAX = 280
 COACH_CARD_KEYS = (
     # TODAY tab
     "today_acwr",
-    "recovery_drivers", "activity_rings", "training_load", "strength",
+    "recovery_drivers", "activity_rings", "training_load",
+    "muscle_volume", "strength",
     # TRAJECTORY tab — domain callouts
     "trajectory_longevity_score", "trajectory_cardio", "trajectory_recovery",
     "trajectory_sleep", "trajectory_body_comp", "trajectory_metabolic",

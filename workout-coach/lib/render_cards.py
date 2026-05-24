@@ -241,6 +241,7 @@ def card_muscle_volume(weekly_volume, coach_text):
       <span class="muscle-legend-chip"><span class="bar-dot band-over"></span>too much, cut back</span>
     </div>
     <div class="muscle-legend-explain muted">the two thin marks on each bar show the start of the productive range (<span class="term" data-tip="Minimum Effective Volume. The smallest weekly set count that still drives growth in a muscle. Below this number, training does not produce a meaningful adaptation.">MEV</span>) and its upper edge (<span class="term" data-tip="Maximum Adaptive Volume. The upper end of the productive range for a muscle. Beyond this, extra sets cost more fatigue than they give back in growth.">MAV</span>)</div>
+    <div class="muscle-legend-caveat muted">Landmarks are Renaissance Periodization practitioner heuristics fitted to the Schoenfeld 2017 / Baz-Valle 2022 / Pelland 2025 dose-response meta-analyses. Treat as soft bands, not knife-edges — individual response varies.</div>
   </div>
   {bars}
   {coach_block(coach_text)}
@@ -770,41 +771,81 @@ def workout_recommendation(recovery, acwr):
 
 
 def card_acwr(acwr, coach_text):
-    """Acute:Chronic Workload Ratio card with Gabbett sweet-spot band."""
+    """Training-load progression card.
+
+    Hero metric: week-over-week TRIMP change percent (the "10% rule" —
+    what survived the Impellizzeri 2020 / Lolli 2020 debunking of the
+    strict ACWR sweet-spot framework). The ACWR ratio + Gabbett sweet-
+    spot band is shown below as a coarse trend indicator with an explicit
+    caveat that the strict 0.8–1.3 framework has been questioned.
+    """
     if not acwr:
         return ""
     ratio = acwr.get("ratio")
     band = acwr.get("band") or "muted"
     label = acwr.get("label") or ""
     acute = acwr.get("acute_7d")
+    prior_week = acwr.get("prior_week")
     chronic = acwr.get("chronic_28d_avg")
+    wow_pct = acwr.get("wow_change_pct")
+    wow_band = acwr.get("wow_band") or "muted"
+    wow_label = acwr.get("wow_label") or ""
     bands = acwr.get("bands") or {}
-    # Render a simple position-on-axis: 0.5 → 1.5 scale
+
+    # Hero: WoW change % (signed). The 10% rule is the surviving
+    # actionable signal from the ACWR literature.
+    if wow_pct is None:
+        wow_value_html = '<span class="muted">·</span>'
+        wow_status = "no prior-week TRIMP"
+        wow_cls = "muted"
+        wow_sub = ""
+    else:
+        sign = "+" if wow_pct >= 0 else ""
+        wow_value_html = f'{sign}{wow_pct:.0f}<span class="denom"> %</span>'
+        wow_status = f'Week-over-week training stress · {wow_label}'
+        wow_cls = wow_band
+        wow_sub = (f'last 7 days {fmt(acute, 0)} TRIMP vs prior 7 days {fmt(prior_week, 0)} · '
+                   f'classic 10% rule keeps weekly change in ±10%')
+
+    hero_html = metric_hero(
+        value_html=wow_value_html,
+        status_word=wow_status,
+        status_cls=wow_cls,
+        sublabel=wow_sub,
+    )
+
+    # Legacy ACWR ratio strip (kept as a coarse trend indicator with
+    # the Impellizzeri / Lolli caveat made explicit).
     lo, hi = 0.4, 1.7
     user_x = 50 + ((max(lo, min(hi, ratio)) - lo) / (hi - lo)) * 540 if ratio else 50
     sw_lo = bands.get("sweet_spot_lo", 0.8)
     sw_hi = bands.get("sweet_spot_hi", 1.3)
     sw_lo_x = 50 + ((sw_lo - lo) / (hi - lo)) * 540
     sw_hi_x = 50 + ((sw_hi - lo) / (hi - lo)) * 540
+    acwr_strip = f'''
+<div class="acwr-strip">
+  <svg viewBox="0 0 620 80" preserveAspectRatio="xMidYMid meet" class="acwr-svg" aria-hidden="true">
+    <rect x="{sw_lo_x:.1f}" y="32" width="{sw_hi_x-sw_lo_x:.1f}" height="14" class="acwr-sweet"/>
+    <line x1="50" y1="39" x2="590" y2="39" class="acwr-axis"/>
+    <text x="50" y="60" class="cmp-band-lbl">{lo}</text>
+    <text x="590" y="60" text-anchor="end" class="cmp-band-lbl">{hi}</text>
+    <text x="{(sw_lo_x+sw_hi_x)/2:.1f}" y="22" text-anchor="middle" class="cmp-band-lbl">Gabbett "sweet spot"</text>
+    <polygon points="{user_x-7:.1f},25 {user_x+7:.1f},25 {user_x:.1f},37" class="cmp-user-{band}"/>
+    <text x="{user_x:.1f}" y="20" text-anchor="middle" class="cmp-user-val">{fmt(ratio, 2)}</text>
+  </svg>
+</div>
+<div class="acwr-stats">
+  <div><span class="acwr-stat-num">{fmt(ratio, 2)}</span> <span class="muted"><span class="term" data-tip="Acute:Chronic Workload Ratio. Last 7 days of training stress divided by the rolling 4-week average. Gabbett 2016 originally claimed 0.8 to 1.3 was a sweet spot for injury risk; later analyses (Impellizzeri 2020, Lolli 2020) showed this is largely a statistical artifact. Treat as a coarse trend indicator only.">ACWR</span></span> &middot; <span class="{band}">{esc(label)}</span></div>
+  <div><span class="acwr-stat-num">{fmt(chronic, 0)}</span> <span class="muted">avg weekly TRIMP (last 28 days)</span></div>
+</div>
+<div class="acwr-caveat muted">The strict ACWR 0.8–1.3 sweet-spot framework has been questioned (Impellizzeri 2020 IJSPP, Lolli 2020). The week-over-week change above is the cleaner signal. Treat the ratio as a coarse trend indicator, not an injury predictor.</div>
+'''
+
     return f'''
 <section class="card acwr-card">
-  <h2><span class="term" data-tip="Acute:Chronic Workload Ratio. Last 7 days of training stress divided by the rolling 4-week average. Gabbett 2016 BJSM: 0.8 to 1.3 is the sweet spot for the lowest injury risk. Above 1.5 carries materially higher soft-tissue injury risk.">ACWR</span> &middot; training-load sweet spot</h2>
-  <div class="acwr-strip">
-    <svg viewBox="0 0 620 80" preserveAspectRatio="xMidYMid meet" class="acwr-svg" aria-hidden="true">
-      <rect x="{sw_lo_x:.1f}" y="32" width="{sw_hi_x-sw_lo_x:.1f}" height="14" class="acwr-sweet"/>
-      <line x1="50" y1="39" x2="590" y2="39" class="acwr-axis"/>
-      <text x="50" y="60" class="cmp-band-lbl">{lo}</text>
-      <text x="590" y="60" text-anchor="end" class="cmp-band-lbl">{hi}</text>
-      <text x="{(sw_lo_x+sw_hi_x)/2:.1f}" y="22" text-anchor="middle" class="cmp-band-lbl">sweet spot</text>
-      <polygon points="{user_x-7:.1f},25 {user_x+7:.1f},25 {user_x:.1f},37" class="cmp-user-{band}"/>
-      <text x="{user_x:.1f}" y="20" text-anchor="middle" class="cmp-user-val">{fmt(ratio, 2)}</text>
-    </svg>
-  </div>
-  <div class="acwr-stats">
-    <div><span class="acwr-stat-num">{fmt(acute, 0)}</span> <span class="muted">TRIMP last 7 days</span></div>
-    <div><span class="acwr-stat-num">{fmt(chronic, 0)}</span> <span class="muted">avg weekly (last 28 days)</span></div>
-    <div class="pill {band}">{esc(label)}</div>
-  </div>
+  <h2><span class="term" data-tip="How much your weekly training stress is ramping. The classic 10 percent rule is to keep week-over-week change in roughly ±10%. Sharp ramps above 25% raise soft-tissue injury risk; sharp drops suggest detraining or illness.">Training-load progression</span></h2>
+  {hero_html}
+  {acwr_strip}
   {coach_block(coach_text)}
 </section>
 '''

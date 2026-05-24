@@ -70,6 +70,14 @@ STYLESHEET = """
   --muscle-prod: #34c759; /* green   , MEV..MAV, "productive" */
   --muscle-push: #ffcc00; /* yellow  , MAV..MRV, "pushing limit" */
   --muscle-over: #ff3b30; /* red     , above MRV, "too much, cut back" */
+
+  /* Sleep stages. Cool palette — Core/Deep on the blue axis, REM on
+     violet, Awake on neutral grey. Shared by the stack chart and its
+     legend dots; also the empty-night fallback. */
+  --stage-core:  #a8b6d9;
+  --stage-deep:  #4c6ee0;
+  --stage-rem:   #a86bd1;
+  --stage-awake: #dadadc;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text);
@@ -406,6 +414,10 @@ td.arrow { font-size: 16px; font-weight: 600; }
   border-radius: 6px; overflow: hidden;
   border: 1px solid var(--border); }
 .sleep-stack .stage { height: 100%; }
+.stage-core,  .dot.stage-core  { background: var(--stage-core); }
+.stage-deep,  .dot.stage-deep  { background: var(--stage-deep); }
+.stage-rem,   .dot.stage-rem   { background: var(--stage-rem); }
+.stage-awake, .dot.stage-awake { background: var(--stage-awake); }
 .sleep-stack-legend { display: flex; gap: 14px; flex-wrap: wrap;
   margin-top: 10px; font-size: 12px; color: var(--muted); }
 .sleep-stack-legend .dot { display: inline-block; width: 10px;

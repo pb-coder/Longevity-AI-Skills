@@ -416,27 +416,30 @@ def card_sleep(sleep, coach_text):
     tib = means.get("time_in_bed")
 
     # --- Stage stack chart (proportional bar) ---
+    # Stage colors come from CSS variables in render_assets.py
+    # (--stage-{core,deep,rem,awake}); the class on each span pulls
+    # the right one. Empty-night fallback reuses the awake token.
     stage_segments = []
     if total > 0:
-        for label, hours, color, tip in [
-            ("Core", core, "#a8b6d9",
+        for label, hours, tip in [
+            ("Core", core,
              "Light non-REM sleep. The bulk of total sleep; not as restorative individually as Deep but supports memory consolidation."),
-            ("Deep", deep, "#4c6ee0",
+            ("Deep", deep,
              "Slow-wave sleep. The most physiologically restorative stage; drives muscle repair, growth hormone release, and glymphatic clearance."),
-            ("REM",  rem,  "#a86bd1",
+            ("REM",  rem,
              "Rapid-Eye-Movement sleep. Supports emotional regulation and procedural memory."),
-            ("Awake", awake, "#dadadc",
+            ("Awake", awake,
              "Wake-after-sleep-onset. Brief arousals during the night. Some is normal; persistent elevation suggests fragmentation."),
         ]:
             if hours > 0:
                 pct = (hours / (total + awake)) * 100.0 if (total + awake) > 0 else 0
                 stage_segments.append(
                     f'<span class="stage stage-{label.lower()}" '
-                    f'style="width:{pct:.2f}%; background:{color}" '
+                    f'style="width:{pct:.2f}%" '
                     f'data-tip="{esc(label)}: average {hours:.2f} h per night. {tip}">'
                     f'</span>'
                 )
-    stage_bar = "".join(stage_segments) or '<span class="stage" style="width:100%;background:#dadadc"></span>'
+    stage_bar = "".join(stage_segments) or '<span class="stage stage-awake" style="width:100%"></span>'
 
     # --- Schedule consistency band ---
     bt_stdev = schedule.get("bedtime_clock_stdev_min")
@@ -569,10 +572,10 @@ def card_sleep(sleep, coach_text):
     <div class="sleep-stack-wrap">
       <div class="sleep-stack">{stage_bar}</div>
       <div class="sleep-stack-legend">
-        <span><span class="dot" style="background:#a8b6d9"></span>Core {core:.2f} h</span>
-        <span><span class="dot" style="background:#4c6ee0"></span>Deep {deep:.2f} h</span>
-        <span><span class="dot" style="background:#a86bd1"></span>REM {rem:.2f} h</span>
-        <span><span class="dot" style="background:#dadadc"></span>Awake {awake:.2f} h</span>
+        <span><span class="dot stage-core"></span>Core {core:.2f} h</span>
+        <span><span class="dot stage-deep"></span>Deep {deep:.2f} h</span>
+        <span><span class="dot stage-rem"></span>REM {rem:.2f} h</span>
+        <span><span class="dot stage-awake"></span>Awake {awake:.2f} h</span>
       </div>
     </div>
   </div>
@@ -866,25 +869,6 @@ def card_tier_history_strip(history, coach_text=None):
   {coach_block(coach_text)}
 </section>
 '''
-
-
-def workout_recommendation(recovery, acwr):
-    """Compute the workout-intensity recommendation + colour class.
-
-    Returns ``(text, cls)``. Used by the Today tab's hero card; the logic
-    lives here so the hero card can stay a pure layout function. The
-    rules: recovery score is the primary gate; ACWR sweet-spot is the
-    secondary gate; missing inputs degrade to muted.
-    """
-    score = (recovery or {}).get("score")
-    if score is None:
-        return ("Not enough data to recommend an intensity.", "muted")
-    acwr_band = (acwr or {}).get("band")
-    if score >= 6.5 and acwr_band in ("good", None):
-        return ("Green light. Hard training is on the table today.", "good")
-    if score >= 4.5:
-        return ("Moderate day. Hold loads, push reps. Avoid PR attempts.", "amber")
-    return ("Easy day. Walk, mobility, or a Zone 2 cardio session.", "warn")
 
 
 def card_acwr(acwr, coach_text):

@@ -27,6 +27,8 @@
 | seated abductor | Hip Abductor Machine | — |
 | row machine without chest support | Seated Row Machine | — |
 | Pulley | Cable Seated Row | — |
+| Rear delt fly dumbbell | Dumbbell Rear Delt Fly | — |
+| Hanging leg raises | Leg Raise | — |
 
 ## Modifier Handling
 

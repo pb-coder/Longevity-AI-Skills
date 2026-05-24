@@ -44,24 +44,59 @@ if str(_LIB) not in sys.path:
 
 from render_helpers import esc, fmt, signed
 from render_components import (
+    comparison_strip,
     confidence_dots,
+    domain_score_dial,
     driver_bars,
     freshness_scale,
     load_chart_svg,
+    metric_hero,
     muscle_bars,
     recovery_scale,
+    risk_flag_pill,
+    secondary_metric_row,
     sparkline,
+    tier_history_strip,
 )
+
+
+# Section-heading explainers used as tooltips on every domain title.
+DOMAIN_HEADING_TIPS = {
+    "cardiorespiratory": "Your aerobic engine. How efficiently the heart, lungs, and blood vessels deliver oxygen to working muscles. The single strongest longevity predictor across decades of research.",
+    "recovery": "How well your nervous system is shifting between effort and rest. The signals here predict whether your body can absorb the training you are prescribing it.",
+    "sleep": "Both how much sleep you are getting and how consistently. The timing of bedtime and waketime is its own mortality predictor independent of total hours.",
+    "body_comp": "How much of your weight is muscle versus fat, especially the visceral fat around the organs. The composition matters more than the bodyweight number alone.",
+    "metabolic": "How well your body processes glucose, lipids, and insulin. The early-warning system for cardiovascular and type 2 diabetes risk decades before symptoms.",
+    "decathlon": "Peter Attia's framework: pick the ten physical capabilities you want at 100, then reverse-engineer the training you need today.",
+    "behavioral": "Daily movement and sleep schedule consistency. Less glamorous than peak performance numbers, but consistency is what compounds over decades.",
+    "risk_flags": "Active conditions, medications, family history, and personalised monitoring items pulled from your longevity profile.",
+    "longevity_score": "A composite score across ten longevity-relevant signals. Bloodwork is not yet included; the score is honest about what it does not see.",
+}
+
+
+def _heading(label, key):
+    """Wrap a domain heading in a tooltipped term span."""
+    tip = DOMAIN_HEADING_TIPS.get(key, "")
+    if not tip:
+        return label
+    return f'<span class="term" data-tip="{esc(tip)}">{esc(label)}</span>'
 from render_validators import auto_wrap_terms
 
 
 def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend):
+    """Top hero on the Today tab. Recovery score + Freshness side by side.
+
+    The workout-intensity recommendation is rendered by `card_session_call`
+    at position 1 of the Today tab; this card no longer carries it (the
+    previous duplication of the score across two adjacent cards is gone).
+    """
     arrow = "▲" if (tsb_trend or 0) > 0 else ("▼" if (tsb_trend or 0) < 0 else "→")
     arrow_cls = "good" if (tsb_trend or 0) > 0 else ("warn" if (tsb_trend or 0) < 0 else "muted")
     if score is None:
         score_value_html = '<div class="value muted" style="font-size:22px;">not enough data</div>'
     else:
         score_value_html = f'<div class="value">{esc(fmt(score, 1))}<span class="denom"> / 10</span></div>'
+
     return f'''
 <section class="hero">
   <article class="card metric {score_cls}">
@@ -196,6 +231,7 @@ def card_muscle_volume(weekly_volume, coach_text):
       <span class="muscle-legend-chip"><span class="bar-dot band-over"></span>too much, cut back</span>
     </div>
     <div class="muscle-legend-explain muted">the two thin marks on each bar show the start of the productive range (<span class="term" data-tip="Minimum Effective Volume. The smallest weekly set count that still drives growth in a muscle. Below this number, training does not produce a meaningful adaptation.">MEV</span>) and its upper edge (<span class="term" data-tip="Maximum Adaptive Volume. The upper end of the productive range for a muscle. Beyond this, extra sets cost more fatigue than they give back in growth.">MAV</span>)</div>
+    <div class="muscle-legend-caveat muted">Landmarks are Renaissance Periodization practitioner heuristics fitted to the Schoenfeld 2017 / Baz-Valle 2022 / Pelland 2025 dose-response meta-analyses. Treat as soft bands, not knife-edges — individual response varies.</div>
   </div>
   {bars}
   {coach_block(coach_text)}
@@ -697,6 +733,819 @@ def coach_block(text: str | None) -> str:
   <div class="label">Coach</div>
   <div class="text">{auto_wrap_terms(text)}</div>
 </aside>
+'''
+
+
+# =============================================================================
+# TODAY tab cards (operational, "should I train hard?")
+# =============================================================================
+
+
+def card_session_call(rec, coach_text):
+    """The Today tab's headline card. Sits at position 1, before every
+    other card. Renders the 5-tier session recommendation: prescription
+    headline + "Why this call" rationale list + override note.
+
+    Per-tier visual treatment:
+      A — red border, red headline (refuse strength)
+      B — amber border, amber headline (reactive deload / Zone 2)
+      C — soft amber border, amber headline (modified strength OK)
+      D — green border, green headline (train as planned, compact)
+      E — blue border, blue headline (over-recovered taper warning)
+    """
+    if not rec:
+        return ""
+    tier = rec.get("tier", "D")
+    label = rec.get("label", "")
+    headline = rec.get("headline", "Train as planned.")
+    substitute = rec.get("substitute") or {}
+    prescription = substitute.get("prescription", "")
+    notes = substitute.get("notes", "")
+    rationale = rec.get("rationale") or []
+    override_msg = rec.get("override_message") or ""
+
+    tier_class_map = {
+        "A": "tier-a", "B": "tier-b", "C": "tier-c",
+        "D": "tier-d", "E": "tier-e",
+    }
+    tier_class = tier_class_map.get(tier, "tier-d")
+
+    # Pretty signal names for the rationale rows (single line per signal,
+    # left-column label, right-column note).
+    signal_label = {
+        "wrist_temp_c":              "Wrist temp",
+        "hrv_sdnn_z":                "HRV (SDNN)",
+        "rhr_sustained_days":        "RHR streak",
+        "rhr_z":                     "RHR",
+        "recovery_crash":            "Recovery composite",
+        "recovery_score":            "Recovery score",
+        "tsb":                       "Freshness (TSB)",
+        "wow_change_pct":            "Week-over-week load",
+        "muscles_over_mrv":          "Muscles over MRV",
+        "auto_deload_candidate":     "Auto-deload flag",
+        "stalled_lifts":             "Stalled lifts",
+        "sleep_last_night_h":        "Sleep last night",
+        "sleep_7d_mean_h":           "7-day sleep mean",
+        "sleep_regularity_index":    "Sleep regularity (SRI)",
+        "hr_at_volume_divergence":   "HR-at-volume creep",
+    }
+
+    rationale_html = ""
+    # Tier D doesn't need a verbose "why" list — it's the default green.
+    if tier != "D" and rationale:
+        rows = []
+        for r in rationale[:5]:
+            sig = r.get("signal", "")
+            note = r.get("note", "")
+            label_text = signal_label.get(sig, sig.replace("_", " "))
+            rows.append(f'''
+<div class="session-call-rationale-row">
+  <span class="session-call-rationale-label">{esc(label_text)}</span>
+  <span class="session-call-rationale-note">{esc(note)}</span>
+</div>''')
+        rationale_html = (
+            f'<div class="session-call-rationale">'
+            f'<div class="session-call-rationale-title">Why this call</div>'
+            f'{"".join(rows)}'
+            f'</div>'
+        )
+
+    substitute_line = (
+        f'<div class="session-call-substitute">{esc(prescription)}</div>'
+        if prescription else ""
+    )
+    notes_line = (
+        f'<div class="session-call-notes muted">{esc(notes)}</div>'
+        if notes and tier != "D" else ""
+    )
+    override_line = (
+        f'<div class="session-call-override">{esc(override_msg)}</div>'
+        if override_msg else ""
+    )
+
+    return f'''
+<section class="card session-call-card {tier_class}">
+  <h2>Today&rsquo;s call</h2>
+  <div class="session-call-headline">{esc(headline)}</div>
+  {substitute_line}
+  {notes_line}
+  {rationale_html}
+  {coach_block(coach_text)}
+  {override_line}
+</section>
+'''
+
+
+def card_tier_history_strip(history, coach_text=None):
+    """Trajectory tab component: 14-day strip of coloured dots showing
+    the session-recommendation tier each day. Hover-tooltip reveals the
+    date and dominant signal. Used to spot fatigue spirals (e.g. 5 ambers
+    in the last 7 days means chronic under-recovery)."""
+    if not history:
+        return ""
+    strip = tier_history_strip(history)
+    return f'''
+<section class="card">
+  <h2>Decision history &middot; last 14 days</h2>
+  <div class="tier-history-explain muted">Each day shows the call the recovery gate would have made: green = train, soft-yellow = modified, amber = reactive deload, red = rest, blue = over-recovered. Hover a square for the date and dominant signal.</div>
+  {strip}
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def workout_recommendation(recovery, acwr):
+    """Compute the workout-intensity recommendation + colour class.
+
+    Returns ``(text, cls)``. Used by the Today tab's hero card; the logic
+    lives here so the hero card can stay a pure layout function. The
+    rules: recovery score is the primary gate; ACWR sweet-spot is the
+    secondary gate; missing inputs degrade to muted.
+    """
+    score = (recovery or {}).get("score")
+    if score is None:
+        return ("Not enough data to recommend an intensity.", "muted")
+    acwr_band = (acwr or {}).get("band")
+    if score >= 6.5 and acwr_band in ("good", None):
+        return ("Green light. Hard training is on the table today.", "good")
+    if score >= 4.5:
+        return ("Moderate day. Hold loads, push reps. Avoid PR attempts.", "amber")
+    return ("Easy day. Walk, mobility, or a Zone 2 cardio session.", "warn")
+
+
+def card_acwr(acwr, coach_text):
+    """Training-load progression card.
+
+    Hero metric: week-over-week TRIMP change percent (the "10% rule" —
+    what survived the Impellizzeri 2020 / Lolli 2020 debunking of the
+    strict ACWR sweet-spot framework). The ACWR ratio + Gabbett sweet-
+    spot band is shown below as a coarse trend indicator with an explicit
+    caveat that the strict 0.8–1.3 framework has been questioned.
+    """
+    if not acwr:
+        return ""
+    ratio = acwr.get("ratio")
+    band = acwr.get("band") or "muted"
+    label = acwr.get("label") or ""
+    acute = acwr.get("acute_7d")
+    prior_week = acwr.get("prior_week")
+    chronic = acwr.get("chronic_28d_avg")
+    wow_pct = acwr.get("wow_change_pct")
+    wow_band = acwr.get("wow_band") or "muted"
+    wow_label = acwr.get("wow_label") or ""
+    bands = acwr.get("bands") or {}
+
+    # Hero: WoW change % (signed). The 10% rule is the surviving
+    # actionable signal from the ACWR literature.
+    if wow_pct is None:
+        wow_value_html = '<span class="muted">·</span>'
+        wow_status = "no prior-week TRIMP"
+        wow_cls = "muted"
+        wow_sub = ""
+    else:
+        sign = "+" if wow_pct >= 0 else ""
+        wow_value_html = f'{sign}{wow_pct:.0f}<span class="denom"> %</span>'
+        wow_status = f'Week-over-week training stress · {wow_label}'
+        wow_cls = wow_band
+        wow_sub = (f'last 7 days {fmt(acute, 0)} TRIMP vs prior 7 days {fmt(prior_week, 0)} · '
+                   f'classic 10% rule keeps weekly change in ±10%')
+
+    hero_html = metric_hero(
+        value_html=wow_value_html,
+        status_word=wow_status,
+        status_cls=wow_cls,
+        sublabel=wow_sub,
+    )
+
+    # Legacy ACWR ratio strip (kept as a coarse trend indicator with
+    # the Impellizzeri / Lolli caveat made explicit).
+    lo, hi = 0.4, 1.7
+    user_x = 50 + ((max(lo, min(hi, ratio)) - lo) / (hi - lo)) * 540 if ratio else 50
+    sw_lo = bands.get("sweet_spot_lo", 0.8)
+    sw_hi = bands.get("sweet_spot_hi", 1.3)
+    sw_lo_x = 50 + ((sw_lo - lo) / (hi - lo)) * 540
+    sw_hi_x = 50 + ((sw_hi - lo) / (hi - lo)) * 540
+    acwr_strip = f'''
+<div class="acwr-strip">
+  <svg viewBox="0 0 620 80" preserveAspectRatio="xMidYMid meet" class="acwr-svg" aria-hidden="true">
+    <rect x="{sw_lo_x:.1f}" y="32" width="{sw_hi_x-sw_lo_x:.1f}" height="14" class="acwr-sweet"/>
+    <line x1="50" y1="39" x2="590" y2="39" class="acwr-axis"/>
+    <text x="50" y="60" class="cmp-band-lbl">{lo}</text>
+    <text x="590" y="60" text-anchor="end" class="cmp-band-lbl">{hi}</text>
+    <text x="{(sw_lo_x+sw_hi_x)/2:.1f}" y="22" text-anchor="middle" class="cmp-band-lbl">Gabbett "sweet spot"</text>
+    <polygon points="{user_x-7:.1f},25 {user_x+7:.1f},25 {user_x:.1f},37" class="cmp-user-{band}"/>
+    <text x="{user_x:.1f}" y="20" text-anchor="middle" class="cmp-user-val">{fmt(ratio, 2)}</text>
+  </svg>
+</div>
+<div class="acwr-stats">
+  <div><span class="acwr-stat-num">{fmt(ratio, 2)}</span> <span class="muted"><span class="term" data-tip="Acute:Chronic Workload Ratio. Last 7 days of training stress divided by the rolling 4-week average. Gabbett 2016 originally claimed 0.8 to 1.3 was a sweet spot for injury risk; later analyses (Impellizzeri 2020, Lolli 2020) showed this is largely a statistical artifact. Treat as a coarse trend indicator only.">ACWR</span></span> &middot; <span class="{band}">{esc(label)}</span></div>
+  <div><span class="acwr-stat-num">{fmt(chronic, 0)}</span> <span class="muted">avg weekly TRIMP (last 28 days)</span></div>
+</div>
+<div class="acwr-caveat muted">The strict ACWR 0.8–1.3 sweet-spot framework has been questioned (Impellizzeri 2020 IJSPP, Lolli 2020). The week-over-week change above is the cleaner signal. Treat the ratio as a coarse trend indicator, not an injury predictor.</div>
+'''
+
+    return f'''
+<section class="card acwr-card">
+  <h2><span class="term" data-tip="How much your weekly training stress is ramping. The classic 10 percent rule is to keep week-over-week change in roughly ±10%. Sharp ramps above 25% raise soft-tissue injury risk; sharp drops suggest detraining or illness.">Training-load progression</span></h2>
+  {hero_html}
+  {acwr_strip}
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+# =============================================================================
+# TRAJECTORY tab cards (longevity, "am I aging well?")
+# =============================================================================
+
+
+PRETTY_INPUT_NAMES = {
+    "vo2_percentile":         "VO₂ max",
+    "hrv_trend":              "HRV trend",
+    "rhr_trend":              "RHR trend",
+    "sleep_regularity":       "Sleep regularity",
+    "sleep_quality":          "Sleep quality",
+    "training_load_in_band":  "Training load in band",
+    "z2_weekly_adherence":    "Zone 2 weekly",
+    "body_comp_trend":        "Body comp trend",
+    "behavioral_consistency": "Movement consistency",
+    "strength_progression":   "Strength progression",
+}
+
+
+def card_longevity_score(longevity_score, coach_text):
+    """Headline card for the Trajectory tab. Composite 0-100 score plus
+    per-component attribution. Branches on ``status``:
+
+    - ``incomplete`` → score rendered muted with the missing-cornerstone
+      explanation. No confident attribution.
+    - ``partial`` → score rendered in colour with a partial badge and a
+      "missing inputs" list below the attribution.
+    - ``complete`` → standard render with full attribution.
+    """
+    if not longevity_score:
+        return ""
+    score = longevity_score.get("score")
+    band = longevity_score.get("band") or "muted"
+    label = longevity_score.get("label") or ""
+    status = longevity_score.get("status") or "complete"
+    status_label = longevity_score.get("status_label") or ""
+    components = longevity_score.get("components") or []
+    missing_inputs = longevity_score.get("missing_inputs") or []
+    n_present = longevity_score.get("n_components")
+    n_total = longevity_score.get("n_tracked_total")
+
+    # Status pill colour follows the score's overall band.
+    status_pill_cls = {"complete": "good", "partial": "amber",
+                       "incomplete": "muted"}.get(status, "muted")
+
+    # Attribution rows (always show, but suppressed when incomplete).
+    rows = []
+    if status != "incomplete":
+        for c in components[:8]:
+            name = PRETTY_INPUT_NAMES.get(c["name"], c["name"])
+            s = c.get("score", 0)
+            if s >= 75: cls = "good"
+            elif s >= 50: cls = "amber"
+            else: cls = "warn"
+            rows.append(f'''
+<tr>
+  <td>{esc(name)}</td>
+  <td class="num">{s:.0f}<span class="muted"> / 100</span></td>
+  <td class="num muted">×{c.get("weight", 0):.2f}</td>
+  <td class="num {cls}">{c.get("contribution", 0):+.1f}</td>
+</tr>''')
+    attribution_html = (
+        f'''<table class="longevity-table">
+            <thead><tr><th>Component</th><th>Score</th><th>Weight</th><th>Contribution</th></tr></thead>
+            <tbody>{"".join(rows)}</tbody>
+          </table>''' if rows else ""
+    )
+
+    # Missing-inputs panel (always when there are missing).
+    missing_html = ""
+    if missing_inputs:
+        items = []
+        for m in missing_inputs:
+            name = PRETTY_INPUT_NAMES.get(m["name"], m["name"])
+            items.append(f'<li><strong>{esc(name)}</strong> — {esc(m["hint"])}</li>')
+        title = ("To complete the score, populate the following inputs:"
+                 if status == "partial"
+                 else "Score is incomplete. Populate VO₂ max first, then the others:")
+        missing_html = (
+            f'<div class="missing-inputs">'
+            f'<div class="missing-title muted">{esc(title)}</div>'
+            f'<ul class="missing-list">{"".join(items)}</ul>'
+            f'</div>'
+        )
+
+    # Bloodwork note (always — biomarkers are deferred until labs land).
+    pending_note = (
+        f'<div class="bloodwork-pending muted">'
+        f'<strong>Bloodwork pending.</strong> '
+        f'{esc(longevity_score.get("note", ""))}'
+        f'</div>'
+        if longevity_score.get("bloodwork_pending") else ""
+    )
+
+    inputs_chip = (
+        f'<span class="pill {status_pill_cls}">{esc(status_label)}</span>'
+        if status_label else ""
+    )
+
+    # Big number is muted when incomplete; coloured otherwise.
+    big_value_cls = "muted" if status == "incomplete" else band
+    big_value_html = f'{fmt(score, 0)}<span class="denom"> / 100</span>'
+
+    return f'''
+<section class="card longevity-headline">
+  <h2>{_heading("Longevity score", "longevity_score")}</h2>
+  <div class="metric-hero">
+    <div class="metric-hero-value {big_value_cls}" style="font-size:64px;">{big_value_html}</div>
+    <div class="metric-hero-status {band}">{esc(label)}</div>
+    <div class="metric-hero-sub muted">composite across {n_present or 0} of {n_total or 0} longevity-relevant signals {inputs_chip}</div>
+  </div>
+  {attribution_html}
+  {missing_html}
+  {pending_note}
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_cardio_domain(vo2_percentile, hr_recovery, recovery, cardio_zones,
+                       vo2max_latest, vo2_trend, coach_text):
+    """Cardiorespiratory domain card: VO2 max as the hero metric, with
+    HR Recovery 1-min, RHR vs baseline, and Zone 2 weekly minutes as
+    stacked secondaries underneath.
+
+    Visual language matches the Today tab's hero cards (big number +
+    comparison strip + status word).
+    """
+    vo2_value = (vo2max_latest or {}).get("value")
+
+    # Hero: VO2 max number + comparison strip + status word
+    if vo2_percentile:
+        vo2_cls = vo2_percentile.get("status") or "muted"
+        vo2_status = vo2_percentile.get("label", "")
+        strip_html = comparison_strip(
+            value=vo2_percentile["value"],
+            p50=vo2_percentile["p50"],
+            p75=vo2_percentile["p75"],
+            p95=vo2_percentile["p95"],
+            longevity=vo2_percentile["longevity"],
+            unit="ml/kg/min",
+            longevity_label="Attia target",
+        )
+    else:
+        vo2_cls = "muted"
+        vo2_status = "cohort percentile not resolvable"
+        strip_html = ""
+
+    hero_html = metric_hero(
+        value_html=f'{fmt(vo2_value, 1)}<span class="denom"> ml/kg/min</span>',
+        status_word=f'VO₂ max · {vo2_status}',
+        status_cls=vo2_cls,
+        sublabel=(f'+{vo2_trend:.2f} per 4 weeks' if vo2_trend and vo2_trend > 0
+                  else (f'{vo2_trend:.2f} per 4 weeks' if vo2_trend else None)),
+        comparison_html=strip_html,
+    )
+
+    # Secondary metrics: HR Recovery, RHR, Zone 2
+    secondaries = []
+
+    if hr_recovery:
+        cls = hr_recovery.get("band", "muted")
+        secondaries.append(secondary_metric_row(
+            "HR Recovery 1-min",
+            f'{fmt(hr_recovery.get("mean_28d"), 0)} <span class="muted">bpm drop</span>',
+            cls,
+            sublabel=f'28-day average · {hr_recovery.get("label", "")}',
+            tip="Heart-rate Recovery 1-minute after exercise stops. Cole 1999 NEJM: under 12 bpm = 4x cardiovascular mortality risk. Above 25 is normal-fit, above 35 is excellent.",
+        ))
+
+    drivers = (recovery or {}).get("drivers") or []
+    rhr_d = next((d for d in drivers if d.get("metric") == "resting_hr"), None)
+    if rhr_d:
+        z = rhr_d.get("z")
+        if z is not None and z >= 0.3: cls = "good"
+        elif z is not None and z >= -0.5: cls = "amber"
+        else: cls = "warn"
+        secondaries.append(secondary_metric_row(
+            "Resting HR",
+            f'{fmt(rhr_d.get("recent_avg"), 0)} <span class="muted">bpm</span>',
+            cls,
+            sublabel=f'vs 60-day baseline {fmt(rhr_d.get("baseline_mean"), 0)} (z {signed(z, 2)})',
+            tip="Resting Heart Rate. Lower than your 60-day baseline is favorable. Sustained >5 bpm elevation often signals overreaching or illness.",
+        ))
+
+    if cardio_zones:
+        z2_min = cardio_zones.get("z2") or 0
+        z2_per_wk = z2_min / 4.0
+        if z2_per_wk >= 150: cls = "good"
+        elif z2_per_wk >= 80: cls = "amber"
+        else: cls = "warn"
+        secondaries.append(secondary_metric_row(
+            "Zone 2 cardio",
+            f'{z2_per_wk:.0f} <span class="muted">min / wk</span>',
+            cls,
+            sublabel='target 150–200 min/wk · Attia / San-Millán prescription',
+            tip="Zone 2 weekly minutes. The aerobic-base zone where mitochondrial density adapts. Attia/San-Millán prescription: 150 to 200 min/wk.",
+        ))
+
+    secondaries_html = (
+        f'<div class="secondary-metrics">{"".join(secondaries)}</div>'
+        if secondaries else ""
+    )
+
+    return f'''
+<section class="card domain-card">
+  <h2>{_heading("Cardiorespiratory fitness", "cardiorespiratory")}</h2>
+  {hero_html}
+  {secondaries_html}
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_recovery_domain(recovery, weekly, coach_text):
+    """Recovery / Autonomic-nervous-system domain card.
+
+    Hero metric: HRV (SDNN) vs 60-day baseline. Secondary: wrist temp
+    deviation. Apple Watch HRV is SDNN — explicitly labelled to prevent
+    cross-platform comparisons with Whoop/Oura RMSSD.
+    """
+    drivers = (recovery or {}).get("drivers") or []
+    hrv_d = next((d for d in drivers if d.get("metric") == "hrv_sdnn"), None)
+    wt_d = next((d for d in drivers if d.get("metric") == "wrist_temp_c"), None)
+
+    if hrv_d:
+        recent = hrv_d.get("recent_avg")
+        baseline = hrv_d.get("baseline_mean")
+        z = hrv_d.get("z")
+        if z is not None and z >= 0.5: cls, status = "good", "favorable vs baseline"
+        elif z is not None and z >= -0.5: cls, status = "amber", "near baseline"
+        else: cls, status = "warn", "below baseline"
+        hero_html = metric_hero(
+            value_html=f'{fmt(recent, 1)}<span class="denom"> ms</span>',
+            status_word=f'HRV (SDNN) · {status}',
+            status_cls=cls,
+            sublabel=f'vs 60-day baseline {fmt(baseline, 1)} (z {signed(z, 2)}) · Apple Watch SDNN, not comparable to Whoop or Oura RMSSD',
+        )
+    else:
+        hero_html = metric_hero(
+            value_html='<span class="muted">·</span>',
+            status_word='no HRV data in 60-day window',
+            status_cls="muted",
+        )
+
+    secondaries = []
+    if wt_d:
+        recent = wt_d.get("recent_avg")
+        baseline = wt_d.get("baseline_mean")
+        z = wt_d.get("z")
+        if z is not None and z <= 0.5: cls, lbl = "good", "stable"
+        elif z is not None and z <= 1.0: cls, lbl = "amber", "rising"
+        else: cls, lbl = "warn", "elevated"
+        secondaries.append(secondary_metric_row(
+            "Wrist temp",
+            f'{fmt(recent, 2)} <span class="muted">°C</span>',
+            cls,
+            sublabel=f'vs 60-day baseline {fmt(baseline, 2)} (z {signed(z, 2)}) · {lbl}',
+            tip="Overnight wrist temperature deviation from your 60-day baseline. Sustained elevation can precede illness or signal under-recovery.",
+        ))
+
+    secondaries_html = (
+        f'<div class="secondary-metrics">{"".join(secondaries)}</div>'
+        if secondaries else ""
+    )
+
+    return f'''
+<section class="card domain-card">
+  <h2>{_heading("Recovery & autonomic nervous system", "recovery")}</h2>
+  {hero_html}
+  {secondaries_html}
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text):
+    """Sleep architecture domain card. Hero: Total sleep h. Secondaries:
+    Deep+REM, Efficiency, SRI. REM-anomaly watch below."""
+    if not sleep and not sleep_regularity:
+        return ""
+    means = (sleep or {}).get("means_h") or {}
+    total = means.get("total")
+    deep = means.get("deep") or 0
+    rem = means.get("rem") or 0
+    deep_plus_rem = deep + rem if (deep or rem) else None
+    eff_block = (sleep or {}).get("sleep_efficiency_pct") or {}
+    eff_mean = eff_block.get("mean") if isinstance(eff_block, dict) else None
+
+    # Hero: total sleep with NSF target context
+    if total is None:
+        hero_html = metric_hero(
+            value_html='<span class="muted">·</span>',
+            status_word='no sleep data in 28-day window',
+            status_cls="muted",
+        )
+    else:
+        if total >= 7.5: cls, status = "good", "in target range"
+        elif total >= 7.0: cls, status = "good", "meeting minimum"
+        elif total >= 6.0: cls, status = "amber", "below 7 h floor"
+        else: cls, status = "warn", "chronically short"
+        hero_html = metric_hero(
+            value_html=f'{total:.2f}<span class="denom"> h</span>',
+            status_word=f'Total sleep · {status}',
+            status_cls=cls,
+            sublabel="National Sleep Foundation target 7 to 9 h",
+        )
+
+    secondaries = []
+    if deep_plus_rem is not None:
+        if deep_plus_rem >= 2.5: cls, lbl = "good", "healthy"
+        elif deep_plus_rem >= 1.5: cls, lbl = "amber", "low side"
+        else: cls, lbl = "warn", "deficient"
+        secondaries.append(secondary_metric_row(
+            "Deep + REM",
+            f'{deep_plus_rem:.2f} <span class="muted">h</span>',
+            cls,
+            sublabel=f'deep {deep:.2f} h · rem {rem:.2f} h · {lbl}',
+            tip="Combined Deep + REM hours per night. Together they carry the recovery and memory consolidation load. Target 2.5+ hours.",
+        ))
+
+    if eff_mean is not None:
+        if eff_mean >= 85: cls, lbl = "good", "healthy"
+        elif eff_mean >= 80: cls, lbl = "amber", "borderline"
+        else: cls, lbl = "warn", "disturbed"
+        secondaries.append(secondary_metric_row(
+            "Efficiency",
+            f'{eff_mean:.1f} <span class="muted">%</span>',
+            cls,
+            sublabel=f'target ≥85% · {lbl}',
+            tip="Percent of time in bed actually asleep. Healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools.",
+        ))
+
+    if sleep_regularity:
+        sri = sleep_regularity.get("sri")
+        band = sleep_regularity.get("band") or "muted"
+        label = sleep_regularity.get("label") or ""
+        secondaries.append(secondary_metric_row(
+            "Sleep Regularity Index",
+            f'{fmt(sri, 0)} <span class="muted">/ 100</span>',
+            band,
+            sublabel=f'{label} · UK Biobank bottom &lt;71, top &gt;87',
+            tip="Sleep Regularity Index (Phillips 2017 / Windred 2024 eLife). UK Biobank n=60,977: top quintile has 20 to 48 percent lower all-cause mortality than bottom. A stronger predictor than sleep duration.",
+        ))
+
+    secondaries_html = (
+        f'<div class="secondary-metrics">{"".join(secondaries)}</div>'
+        if secondaries else ""
+    )
+
+    rem_watch = ""
+    if rem_anomaly:
+        low = rem_anomaly.get("low_rem_nights", 0)
+        mean_pct = rem_anomaly.get("mean_rem_pct", 0)
+        rem_watch = f'''
+<div class="rem-watch muted">
+  <strong>REM watch.</strong> {low} of {rem_anomaly.get("n_nights", 0)} nights showed REM below 15% of total sleep in the 28-day window.
+  Mean REM proportion {mean_pct:.1f}% &middot; healthy adult range is 20 to 25%. Relevant for paternal Parkinson family history surveillance.
+</div>'''
+
+    return f'''
+<section class="card domain-card">
+  <h2>{_heading("Sleep architecture & regularity", "sleep")}</h2>
+  {hero_html}
+  {secondaries_html}
+  {rem_watch}
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_body_comp_domain(bw, bw_trend, longevity_state, coach_text):
+    """Body composition domain card. Hero: bodyweight + trend context.
+    Body fat and visceral fat secondaries are explicit DEXA-pending."""
+    bw_val = (bw or {}).get("kg")
+    has_profile = bool(longevity_state)
+
+    # Hero: bodyweight with trend status
+    if bw_trend is None:
+        cls, status, sub = "muted", "no trend yet", "needs 8+ fasted entries"
+    elif -0.1 <= bw_trend <= 0.4:
+        cls, status, sub = "good", "lean-bulk range", f'{signed(bw_trend, 2)} kg/wk · target +0.2 to +0.4'
+    elif bw_trend > 0.4:
+        cls, status, sub = "amber", "trending fat-mass zone", f'{signed(bw_trend, 2)} kg/wk · over lean-bulk target'
+    else:
+        cls, status, sub = "amber", "cutting trajectory", f'{signed(bw_trend, 2)} kg/wk · negative balance'
+
+    hero_html = metric_hero(
+        value_html=f'{fmt(bw_val, 1)}<span class="denom"> kg</span>',
+        status_word=f'Bodyweight · {status}',
+        status_cls=cls,
+        sublabel=sub,
+    )
+
+    secondaries = [
+        secondary_metric_row(
+            "Body fat %",
+            '<span class="muted">·</span>',
+            "muted",
+            sublabel="DEXA or skinfold pending",
+            tip="Body fat percentage from DEXA or skinfold callipers. Apple/Watch consumer-scale estimates are unreliable and not used here.",
+        ),
+        secondary_metric_row(
+            "Visceral fat (VAT)",
+            '<span class="muted">·</span>',
+            "muted",
+            sublabel="DEXA pending · &lt;100 cm² is the optimal target",
+            tip="Visceral adipose tissue around the organs. The metabolically dangerous fat depot. Under 100 cm² is the risk threshold; under 80 cm² is the Attia optimal target.",
+        ),
+    ]
+
+    dexa_msg = (
+        '<strong>DEXA pending.</strong> Visceral adipose tissue (VAT), '
+        'appendicular lean mass (ALMI), and bone density (BMD) need a DEXA scan to populate. '
+        'PrEP users should book one for BMD baseline anyway.'
+        if has_profile else
+        '<strong>DEXA pending.</strong> Body composition detail (VAT / ALMI / bone density) requires a DEXA scan.'
+    )
+
+    return f'''
+<section class="card domain-card">
+  <h2>{_heading("Body composition", "body_comp")}</h2>
+  {hero_html}
+  <div class="secondary-metrics">{"".join(secondaries)}</div>
+  <div class="bloodwork-pending muted">{dexa_msg}</div>
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_metabolic_domain(longevity_state, coach_text):
+    """Metabolic-health domain card. Placeholder until a blood panel
+    lands. Reads the personalized panel-design hints from longevity_state
+    (vegan emphasis, Berlin vitamin D window, PrEP markers)."""
+    if not longevity_state:
+        return f'''
+<section class="card domain-card">
+  <h2>{_heading("Metabolic health", "metabolic")}</h2>
+  <div class="bloodwork-pending muted">
+    <strong>Bloodwork pending.</strong> A foundational panel covers fasting glucose,
+    HbA1c, fasting insulin, ApoB, Lp(a), triglyceride:HDL, hsCRP, eGFR.
+  </div>
+  {coach_block(coach_text)}
+</section>
+'''
+    flags = longevity_state.get("risk_flags") or []
+    panel_hints = [f for f in flags if f.get("key") in (
+        "first_blood_panel", "vegan_micronutrient_panel", "prep_monitoring", "vitamin_d_winter")]
+    hint_html = "".join(
+        f'<li><strong>{esc(f.get("label", ""))}</strong>: {esc(f.get("hint", ""))}</li>'
+        for f in panel_hints
+    )
+    return f'''
+<section class="card domain-card">
+  <h2>{_heading("Metabolic health", "metabolic")}</h2>
+  <div class="bloodwork-pending muted">
+    <strong>Bloodwork pending.</strong> Until a panel lands, this slot stays empty. Personalised priorities for the first panel:
+    <ul style="margin-top:8px; padding-left:18px;">{hint_html}</ul>
+  </div>
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_behavioral_domain(movement_consistency, sleep_regularity, acwr,
+                            cardio_zones, coach_text):
+    """Behavioral consistency domain card. Hero: active days / 28.
+    Secondaries: sleep regularity + training-load ratio."""
+
+    if movement_consistency:
+        days = movement_consistency.get("days_28d", 0)
+        target_days = movement_consistency.get("target_per_wk", 5) * 4
+        if days >= target_days:        cls, status = "good", "exceeding target"
+        elif days >= target_days * 0.7: cls, status = "amber", "near target"
+        else:                          cls, status = "warn", "under target"
+        hero_html = metric_hero(
+            value_html=f'{days}<span class="denom"> / 28 days</span>',
+            status_word=f'Active days · {status}',
+            status_cls=cls,
+            sublabel=f'target {target_days}/28 ({movement_consistency.get("target_per_wk")}/wk) · this week {movement_consistency.get("days_this_wk", 0)}',
+        )
+    else:
+        hero_html = metric_hero(
+            value_html='<span class="muted">·</span>',
+            status_word='no movement data in 28-day window',
+            status_cls="muted",
+        )
+
+    secondaries = []
+    if sleep_regularity:
+        sri = sleep_regularity.get("sri")
+        band = sleep_regularity.get("band") or "muted"
+        secondaries.append(secondary_metric_row(
+            "Sleep Regularity Index",
+            f'{fmt(sri, 0)} <span class="muted">/ 100</span>',
+            band,
+            sublabel=esc(sleep_regularity.get("label") or ""),
+            tip="Sleep Regularity Index. UK Biobank top quintile = 20 to 48 percent lower all-cause mortality vs bottom.",
+        ))
+
+    if acwr:
+        ratio = acwr.get("ratio")
+        band = acwr.get("band") or "muted"
+        secondaries.append(secondary_metric_row(
+            "Training-load ratio",
+            f'{fmt(ratio, 2)}',
+            band,
+            sublabel=esc(acwr.get("label") or ""),
+            tip="Acute (last 7 days) divided by chronic (last 28 days) TRIMP. Gabbett sweet spot is 0.8 to 1.3.",
+        ))
+
+    secondaries_html = (
+        f'<div class="secondary-metrics">{"".join(secondaries)}</div>'
+        if secondaries else ""
+    )
+
+    return f'''
+<section class="card domain-card">
+  <h2>{_heading("Behavioral consistency", "behavioral")}</h2>
+  {hero_html}
+  {secondaries_html}
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_decathlon_framing(coach_text):
+    """Centenarian-decathlon framing card. Targets only (no current
+    values until a manual log file lands). Reads from
+    constants.DECATHLON_BENCHMARKS."""
+    from constants import DECATHLON_BENCHMARKS  # local import
+    rows = []
+    for b in DECATHLON_BENCHMARKS:
+        rows.append(f'''
+<tr>
+  <td>{esc(b["label"])}</td>
+  <td class="num muted">·</td>
+  <td>{esc(b["target_str"])}</td>
+  <td><span class="pill muted">not tested</span></td>
+</tr>''')
+    return f'''
+<section class="card domain-card">
+  <h2>{_heading("Centenarian decathlon framing", "decathlon")}</h2>
+  <div class="muted" style="font-size:13px; margin-bottom:14px;">
+    Attia's framework: 10 physical capabilities you want at 100, reverse-engineered to today's training.
+    Treat these as benchmarks to test on a quarterly cadence. Add a log file at <code>longevity/decathlon.csv</code> to populate.
+  </div>
+  <table class="strength-table">
+    <thead><tr><th>Capability</th><th>Current</th><th>Target</th><th>Status</th></tr></thead>
+    <tbody>{"".join(rows)}</tbody>
+  </table>
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+def card_risk_flags(longevity_state, coach_text):
+    """Personalized risk flag panel. Reads from `longevity_state` parsed
+    in health.py. Shows nothing when a person has no longevity profile."""
+    if not longevity_state:
+        return f'''
+<section class="card domain-card">
+  <h2>{_heading("Personalized risk flags", "risk_flags")}</h2>
+  <div class="muted" style="font-size:13px;">
+    No longevity profile on file. Add <code>&lt;Person&gt;/data/longevity/&#123;profile,state&#125;.md</code> to populate.
+  </div>
+  {coach_block(coach_text)}
+</section>
+'''
+    flags = longevity_state.get("risk_flags") or []
+    fam = longevity_state.get("family_history") or []
+    rows = []
+    for f in flags:
+        rows.append(f'''
+<div class="risk-flag-row">
+  <div class="risk-flag-label">{esc(f.get("label", ""))}</div>
+  {risk_flag_pill(f.get("status", "unknown"))}
+  <div class="risk-flag-hint muted">{esc(f.get("hint", ""))}</div>
+</div>''')
+    fam_html = ""
+    if fam:
+        fam_html = (
+            f'<div class="risk-family muted"><strong>Family history</strong>: '
+            f'{esc("; ".join(fam[:3]))}</div>'
+        )
+    return f'''
+<section class="card domain-card">
+  <h2>{_heading("Personalized risk flags", "risk_flags")}</h2>
+  <div class="risk-flags-list">{"".join(rows) or "<div class='muted'>no flags surfaced</div>"}</div>
+  {fam_html}
+  {coach_block(coach_text)}
+</section>
 '''
 
 

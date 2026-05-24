@@ -275,3 +275,148 @@ def sleep_summary(nights: list[dict], today_d: date) -> dict | None:
         "schedule_consistency": schedule,
         "outliers":             outliers,
     }
+
+
+def compute_sleep_regularity_index(nights: list[dict], today_d: date,
+                                    window_days: int = 14) -> dict | None:
+    """Sleep Regularity Index (Phillips 2017 / Windred 2024 eLife).
+
+    SRI scores how consistently a person is asleep at the same wall-clock
+    minute on consecutive days, scaled 0-100 (100 = identical schedule
+    every day). Computed by sampling each minute of the day across the
+    window and asking, for every pair of consecutive days, "was the
+    person asleep at minute m on both days?"
+
+    UK Biobank (n=60,977): top-quintile SRI vs bottom = 20-48% lower
+    all-cause mortality. Stronger mortality predictor than total sleep.
+
+    We approximate the per-minute asleep state from each night's
+    ``first_segment_start`` (sleep onset) and ``last_segment_end`` (final
+    wake), treating the interval as asleep. This is a reasonable proxy
+    for SRI's intent without per-stage hypnogram data (Apple importer
+    drops segment-level detail). Returns ``None`` if fewer than 3 nights
+    in the window have both timestamps.
+    """
+    if not nights:
+        return None
+    cutoff = today_d - timedelta(days=window_days)
+    spans: list[tuple[date, int, int]] = []
+    for n in nights:
+        d = _parse_iso_date(n.get("date"))
+        if d is None or d < cutoff or d > today_d:
+            continue
+        start = _parse_clock_to_min_of_day(n.get("first_segment_start"))
+        end = _parse_clock_to_min_of_day(n.get("last_segment_end"))
+        if start is None or end is None:
+            continue
+        spans.append((d, start, end))
+    if len(spans) < 3:
+        return None
+    spans.sort(key=lambda s: s[0])
+    # Build per-night asleep bitmap over a 1440-minute day. The sleep
+    # interval often crosses midnight (start near 23:00, end near 07:00);
+    # treat each night's interval as belonging to the second calendar day
+    # so consecutive nights' bitmaps align.
+    by_day: dict[date, list[bool]] = {}
+    for d, start, end in spans:
+        asleep = [False] * 1440
+        if end >= start:
+            # No wrap (e.g. 01:30 → 09:00). Rare but possible (nap).
+            for m in range(start, end):
+                asleep[m] = True
+        else:
+            # Crosses midnight: [start..1440) on prior day + [0..end) on d.
+            for m in range(start, 1440):
+                asleep[m] = True
+            for m in range(0, end):
+                asleep[m] = True
+        by_day[d] = asleep
+    sorted_days = sorted(by_day.keys())
+    if len(sorted_days) < 2:
+        return None
+    # For each consecutive day-pair within 1 day apart, count agreement.
+    total = 0
+    agree = 0
+    pairs = 0
+    for i in range(1, len(sorted_days)):
+        if (sorted_days[i] - sorted_days[i - 1]).days != 1:
+            continue
+        a = by_day[sorted_days[i - 1]]
+        b = by_day[sorted_days[i]]
+        for m in range(1440):
+            if a[m] == b[m]:
+                agree += 1
+            total += 1
+        pairs += 1
+    if total == 0:
+        return None
+    sri = 200.0 * (agree / total) - 100.0  # Phillips 2017 formula
+    sri = max(0.0, min(100.0, sri))
+    # UK Biobank band thresholds (Windred 2024 eLife).
+    if sri >= 87.0:
+        band, label = "good", "top quintile"
+    elif sri >= 78.0:
+        band, label = "good", "above median"
+    elif sri >= 71.0:
+        band, label = "amber", "below median"
+    else:
+        band, label = "warn", "bottom quintile"
+    return {
+        "sri":                round(sri, 1),
+        "n_nights":           len(spans),
+        "n_consecutive_pairs": pairs,
+        "window_days":        window_days,
+        "band":               band,
+        "label":              label,
+    }
+
+
+def flag_rem_sleep_anomalies(nights: list[dict], today_d: date,
+                              window_days: int = 28) -> dict | None:
+    """REM-sleep anomaly count for Parkinson-surveillance signal.
+
+    Nihad's profile has a two-generation paternal Parkinson family
+    history; REM Sleep Behavior Disorder is one of the earliest non-motor
+    prodromal markers (>50% conversion to PD over 14 yrs, Postuma 2019).
+    We don't have movement-during-REM hypnograms, but a sustained drop
+    in REM proportion (or unusually fragmented REM nights) is the closest
+    proxy the data exposes. Returns counts of nights where REM dropped
+    below 15% of total sleep in the window. Returns ``None`` if no REM
+    data in the window.
+    """
+    if not nights:
+        return None
+    cutoff = today_d - timedelta(days=window_days)
+    n_with_rem = 0
+    low_rem_nights = 0
+    rem_pcts: list[float] = []
+    for n in nights:
+        d = _parse_iso_date(n.get("date"))
+        if d is None or d < cutoff or d > today_d:
+            continue
+        rem = n.get("rem_h")
+        total = n.get("total_h")
+        if rem is None or total is None or total <= 0:
+            continue
+        try:
+            rem_f = float(rem)
+            total_f = float(total)
+        except (TypeError, ValueError):
+            continue
+        if total_f <= 0:
+            continue
+        n_with_rem += 1
+        pct = (rem_f / total_f) * 100.0
+        rem_pcts.append(pct)
+        if pct < 15.0:
+            low_rem_nights += 1
+    if n_with_rem == 0:
+        return None
+    mean_rem_pct = sum(rem_pcts) / len(rem_pcts)
+    return {
+        "window_days":       window_days,
+        "n_nights":          n_with_rem,
+        "mean_rem_pct":      round(mean_rem_pct, 1),
+        "low_rem_nights":    low_rem_nights,
+        "target_min_pct":    20.0,
+    }

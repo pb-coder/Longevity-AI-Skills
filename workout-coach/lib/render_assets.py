@@ -664,7 +664,7 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 
 /* ACWR card */
 .acwr-card .acwr-strip { padding: 8px 0 4px; }
-.acwr-svg { width: 100%; height: auto; max-height: 100px; display: block; }
+.acwr-svg { width: 100%; height: auto; max-height: 110px; display: block; }
 .acwr-axis { stroke: var(--border-strong); stroke-width: 1.5;
   vector-effect: non-scaling-stroke; }
 .acwr-sweet { fill: rgba(52,199,89,0.18); }
@@ -687,10 +687,9 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 .hr-div-title { font-size: 11px; font-weight: 600;
   letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--muted); margin-bottom: 8px; }
-.hr-div-row { display: grid;
-  grid-template-columns: 12px 130px 1fr auto;
-  column-gap: 12px; align-items: center; padding: 4px 0;
-  font-size: 13px; }
+.hr-div-row { display: flex; align-items: center; gap: 12px;
+  padding: 4px 0; font-size: 13px; }
+.hr-div-row .hr-div-delta { margin-left: auto; }
 .hr-div-muscle { color: var(--text); text-transform: capitalize; }
 .hr-div-state.warn { color: var(--warn); font-weight: 500; }
 .hr-div-state.good { color: var(--good); font-weight: 500; }

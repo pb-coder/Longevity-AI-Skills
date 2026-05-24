@@ -974,12 +974,12 @@ def card_acwr(acwr, coach_text):
     sw_hi_x = 50 + ((sw_hi - lo) / (hi - lo)) * 540
     acwr_strip = f'''
 <div class="acwr-strip">
-  <svg viewBox="0 0 620 80" preserveAspectRatio="xMidYMid meet" class="acwr-svg" aria-hidden="true">
+  <svg viewBox="0 0 620 90" preserveAspectRatio="xMidYMid meet" class="acwr-svg" aria-hidden="true">
     <rect x="{sw_lo_x:.1f}" y="32" width="{sw_hi_x-sw_lo_x:.1f}" height="14" class="acwr-sweet"/>
     <line x1="50" y1="39" x2="590" y2="39" class="acwr-axis"/>
-    <text x="50" y="60" class="cmp-band-lbl">{lo}</text>
-    <text x="590" y="60" text-anchor="end" class="cmp-band-lbl">{hi}</text>
-    <text x="{(sw_lo_x+sw_hi_x)/2:.1f}" y="22" text-anchor="middle" class="cmp-band-lbl">Gabbett "sweet spot"</text>
+    <text x="{(sw_lo_x+sw_hi_x)/2:.1f}" y="62" text-anchor="middle" class="cmp-band-lbl">Gabbett "sweet spot"</text>
+    <text x="50" y="78" class="cmp-band-lbl">{lo}</text>
+    <text x="590" y="78" text-anchor="end" class="cmp-band-lbl">{hi}</text>
     <polygon points="{user_x-7:.1f},25 {user_x+7:.1f},25 {user_x:.1f},37" class="cmp-user-{band}"/>
     <text x="{user_x:.1f}" y="20" text-anchor="middle" class="cmp-user-val">{fmt(ratio, 2)}</text>
   </svg>

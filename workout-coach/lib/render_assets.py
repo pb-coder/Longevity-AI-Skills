@@ -219,6 +219,8 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
   align-items: center; }
 .muscle-legend-chip { display: inline-flex; align-items: center; gap: 6px; }
 .muscle-legend-explain { margin-top: 10px; line-height: 1.5; }
+.muscle-legend-caveat { margin-top: 6px; line-height: 1.5;
+  font-size: 11.5px; font-style: italic; }
 
 .bar-row { display: grid; grid-template-columns: 140px 1fr 240px;
   align-items: center; gap: 14px; padding: 7px 0;
@@ -559,6 +561,8 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   font-size: 13px; margin-top: 6px; flex-wrap: wrap; }
 .acwr-stat-num { font-size: 18px; font-weight: 600;
   font-variant-numeric: tabular-nums; }
+.acwr-caveat { margin-top: 10px; font-size: 11.5px; font-style: italic;
+  line-height: 1.5; }
 
 /* (Longevity score uses the shared .metric-hero / .longevity-table
    styles defined above.) */

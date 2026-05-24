@@ -392,12 +392,21 @@ def compute_hr_recovery_summary(health_all: list[dict],
 
 
 def compute_acwr(trimps: list[dict], today_d: date) -> dict | None:
-    """Acute:Chronic Workload Ratio (Gabbett 2016 sweet-spot model).
+    """Training-load progression: ACWR (legacy) + week-over-week change
+    (the cleaner replacement).
 
-    Acute = total TRIMP last 7 days; chronic = mean weekly TRIMP over the
-    last 28 days. Ratio in the [0.8, 1.3] sweet spot = lowest injury risk;
-    >1.5 is the high-risk zone. Returns ``None`` when either window is
-    empty.
+    The strict Gabbett 2016 ACWR 0.8–1.3 sweet-spot was substantially
+    discredited by Impellizzeri et al. 2020 (IJSPP) and Lolli et al. 2020
+    on statistical grounds (the ratio is mathematically coupled to the
+    chronic-window denominator and adds spurious variance). What
+    survived: the underlying intuition that **weekly training stress
+    should not jump >10% week-over-week** is a defensible guardrail.
+
+    We compute both so the renderer can show the WoW change as the
+    primary signal and the ACWR ratio as a coarse trend indicator with a
+    caveat.
+
+    Returns ``None`` when either window is empty.
     """
     from constants import ACWR_BANDS
     if not trimps:
@@ -408,29 +417,57 @@ def compute_acwr(trimps: list[dict], today_d: date) -> dict | None:
         if d is None:
             continue
         by_date[d] = by_date.get(d, 0.0) + float(t.get("trimp") or 0.0)
+
     acute = sum(v for d, v in by_date.items()
                 if today_d - timedelta(days=7) < d <= today_d)
+    prior_week = sum(v for d, v in by_date.items()
+                     if today_d - timedelta(days=14) < d <= today_d - timedelta(days=7))
     chronic_total = sum(v for d, v in by_date.items()
                         if today_d - timedelta(days=28) < d <= today_d)
     chronic_weekly = chronic_total / 4.0
     if chronic_weekly <= 0:
         return None
+
     ratio = acute / chronic_weekly
     if ratio < ACWR_BANDS["detraining_below"]:
         band, label = "amber", "detraining"
     elif ratio <= ACWR_BANDS["sweet_spot_hi"]:
-        band, label = "good", "sweet spot"
+        band, label = "good", "in band"
     elif ratio <= ACWR_BANDS["caution_hi"]:
-        band, label = "amber", "caution"
+        band, label = "amber", "ramping high"
     else:
-        band, label = "warn", "high injury risk"
+        band, label = "warn", "steep ramp"
+
+    # Week-over-week percent change. The classic "10% rule" — what
+    # survived ACWR's debunking. Treat ±10% as the green band, ±25% as
+    # caution, anything beyond as high.
+    wow_change_pct = None
+    wow_band = None
+    wow_label = None
+    if prior_week > 0:
+        wow_change_pct = ((acute - prior_week) / prior_week) * 100.0
+        abs_pct = abs(wow_change_pct)
+        if abs_pct <= 10.0:
+            wow_band, wow_label = "good", "stable progression"
+        elif abs_pct <= 25.0:
+            wow_band, wow_label = "amber", "ramping fast" if wow_change_pct > 0 else "tapering"
+        else:
+            wow_band, wow_label = "warn", "ramp too steep" if wow_change_pct > 0 else "sharp drop"
+    elif acute > 0:
+        # Came back from a zero week — flag as fresh ramp.
+        wow_band, wow_label = "amber", "returning from rest"
+
     return {
-        "ratio":          round(ratio, 2),
-        "acute_7d":       round(acute, 0),
+        "ratio":           round(ratio, 2),
+        "acute_7d":        round(acute, 0),
+        "prior_week":      round(prior_week, 0),
         "chronic_28d_avg": round(chronic_weekly, 0),
-        "band":           band,
-        "label":          label,
-        "bands":          ACWR_BANDS,
+        "wow_change_pct":  round(wow_change_pct, 1) if wow_change_pct is not None else None,
+        "wow_band":        wow_band,
+        "wow_label":       wow_label,
+        "band":            band,
+        "label":           label,
+        "bands":           ACWR_BANDS,
     }
 
 

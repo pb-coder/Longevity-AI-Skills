@@ -87,28 +87,53 @@ DELOAD_MARKER = "deload workout"
 EMPTY_STREAK_STOP = 10
 TOTAL_LABEL = "TOTAL"
 
-# Per-muscle weekly volume landmarks (hard sets). Source: references/training-
-# science.md §1 + RP Strength tables. MV=maintenance, MEV=minimum effective,
-# MAV=maximum adaptive, MRV=maximum recoverable. Numbers are individual and
-# approximate; the coach uses them to name the band the current volume sits in.
+# Per-muscle weekly volume landmarks (hard sets). Source: current
+# (2024-26) Renaissance Periodization muscle-by-muscle guides + Mike
+# Israetel's published per-muscle videos, cross-referenced against
+# Schoenfeld 2017 (J Sports Sci, dose-response meta-analysis),
+# Baz-Valle 2022 (J Human Kinetics systematic review), and
+# Pelland/Helms/Schoenfeld 2025 meta-regression (Sports Medicine).
+#
+# Treat these as **practitioner heuristics**, not RCT-validated
+# thresholds. The shape of the volume-response curve is well supported
+# (monotonically increasing with diminishing returns); the exact
+# landmark points are coaching observation + dose-response curves
+# fitted to per-muscle context.
+#
+# Convention: MV = maintenance (preserves muscle), MEV = minimum
+# effective (smallest dose that drives growth), MAV = maximum adaptive
+# (upper end of the best-gains band), MRV = maximum recoverable
+# (ceiling beyond which chronic recovery degrades). MAV upper bound
+# and MRV lower bound *overlap by design* — the productive and
+# pushing-limit bands shade into each other.
+#
+# Numbers refreshed 2026-05 from the current RP help-center per-muscle
+# pages. Several values were revised down from the 2018-2020 RP
+# guidance: chest MV, quads MRV (non-priority), hamstrings/glutes
+# MV+MEV, front delts (RP now recommends ~no direct work for most
+# lifters — pressing covers it), calves MRV; traps MAV/MRV revised up.
+# external_rotators / adductors have no published RP landmark; values
+# are reasonable practitioner extrapolations and should be treated
+# as such.
 VOLUME_LANDMARKS = {
-    "chest":        {"mv": 6,  "mev": 10, "mav": 16, "mrv": 22},
+    "chest":        {"mv": 3,  "mev": 8,  "mav": 16, "mrv": 22},
     "back":         {"mv": 6,  "mev": 10, "mav": 18, "mrv": 25},
-    "lats":         {"mv": 6,  "mev": 10, "mav": 16, "mrv": 22},
-    "quads":        {"mv": 6,  "mev": 10, "mav": 18, "mrv": 22},
-    "hamstrings":   {"mv": 4,  "mev": 8,  "mav": 14, "mrv": 18},
-    "glutes":       {"mv": 4,  "mev": 8,  "mav": 14, "mrv": 18},
-    "front_delts":  {"mv": 4,  "mev": 6,  "mav": 12, "mrv": 16},
+    "lats":         {"mv": 6,  "mev": 10, "mav": 18, "mrv": 25},
+    "quads":        {"mv": 4,  "mev": 8,  "mav": 14, "mrv": 18},
+    "hamstrings":   {"mv": 2,  "mev": 4,  "mav": 12, "mrv": 16},
+    "glutes":       {"mv": 0,  "mev": 4,  "mav": 12, "mrv": 16},
+    "front_delts":  {"mv": 0,  "mev": 0,  "mav": 6,  "mrv": 12},
     "side_delts":   {"mv": 6,  "mev": 8,  "mav": 16, "mrv": 22},
     "rear_delts":   {"mv": 6,  "mev": 8,  "mav": 16, "mrv": 22},
-    "biceps":       {"mv": 5,  "mev": 8,  "mav": 14, "mrv": 20},
-    "triceps":      {"mv": 4,  "mev": 6,  "mav": 12, "mrv": 18},
-    "calves":       {"mv": 6,  "mev": 8,  "mav": 16, "mrv": 22},
+    "biceps":       {"mv": 5,  "mev": 8,  "mav": 16, "mrv": 22},
+    "triceps":      {"mv": 4,  "mev": 6,  "mav": 12, "mrv": 16},
+    "calves":       {"mv": 6,  "mev": 8,  "mav": 14, "mrv": 18},
     "forearms":     {"mv": 2,  "mev": 4,  "mav": 8,  "mrv": 12},
     "abs":          {"mv": 0,  "mev": 4,  "mav": 16, "mrv": 25},
     "core":         {"mv": 0,  "mev": 4,  "mav": 16, "mrv": 25},
     "erectors":     {"mv": 2,  "mev": 4,  "mav": 10, "mrv": 16},
-    "traps":        {"mv": 2,  "mev": 4,  "mav": 10, "mrv": 16},
+    "traps":        {"mv": 2,  "mev": 4,  "mav": 15, "mrv": 22},
+    # No published RP landmark — practitioner extrapolation:
     "external_rotators": {"mv": 0,  "mev": 2,  "mav": 6,  "mrv": 12},
     "adductors":    {"mv": 0,  "mev": 2,  "mav": 8,  "mrv": 12},
     "neck":         {"mv": 0,  "mev": 2,  "mav": 6,  "mrv": 12},

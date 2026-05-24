@@ -656,9 +656,39 @@ Example (filled from a real `swim_summary`):
 
 ## Phase 2: Planning (into workout_plan.md `## Plan`)
 
+### Recovery gate — REQUIRED before any plan generation
+
+**Step 1: read `session_recommendation` from the tracker JSON.** The gate is deterministic, derived from the same signals the dashboard surfaces. It returns one of five tiers:
+
+| Tier | label | What the markdown contains |
+|---|---|---|
+| **A** | `rest` | A rest day (walk + sleep priority). **No strength.** No "modified" strength either — the plan is the rest. |
+| **B** | `reactive_deload` | Either a reactive-deload week (cut sets to ~50%, hold loads, rotate the over-MRV muscles), OR a Zone 2 / mobility day (per `substitute.kind`). **No on-top strength session.** |
+| **C** | `downgrade` | Planned strength, but pre-modified: −25% volume on secondary lifts, hold loads, drop the conditioning finisher, no PR attempts. Compound lifts stay at planned volume; isolations halve. |
+| **D** | `green` | Normal plan. The rules below (split rotation, double progression, exercise variation) apply unchanged. |
+| **E** | `over_recovered` | Normal plan + one-line warning that fitness is bleeding off (TSB has been too positive too long). |
+
+**Step 2: the substitute is BINDING.** Quote the gate's `headline` and the top 3 `rationale` entries in the workout markdown's opening lines so the user sees the signals that drove the call:
+
+```markdown
+# Workout plan — 2026-05-24
+> Today's call: <headline>
+> Why: <rationale[0].note> · <rationale[1].note> · <rationale[2].note>
+
+Assessment: ./2026-05-24-assessment.html
+```
+
+**Step 3: build the body from the substitute template.** See `references/substitute-protocols.md` for the canonical content of each tier's markdown (rest day, Zone 2 day, reactive-deload week, modified strength, normal strength).
+
+**Step 4: only Tier D / E use the existing programming rules below.** For Tier A and B the rest of this Phase 2 spec is not consulted — the substitute IS the plan. For Tier C the rules below apply but with the modifications spelled out above.
+
+**Override protocol.** Overrides are allowed only when the user **explicitly** asks to override after seeing the gate's call (e.g. "ignore the rest call, plan strength anyway"). Default behavior is to honor the recommendation. Never generate strength on a Tier A or B day on assumption.
+
+### If the gate is D / E (or C with modifications applied)
+
 If the user specified a session count in the `/coach` message (e.g., `/coach plan 3 sessions`), use it directly. Otherwise, ask in chat: **"How many sessions should I plan?"** — and wait for the answer before writing the file.
 
-Generate that many strength workouts.
+Generate that many strength workouts (Tier C: with the −25% volume / hold loads / no finisher modifications baked in).
 
 ### Programming (internal)
 

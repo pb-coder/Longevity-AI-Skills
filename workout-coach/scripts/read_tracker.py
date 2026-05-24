@@ -90,6 +90,8 @@ from health import (  # noqa: E402
     _mean_or_none,
     _values_in_window,
     compute_longevity_score,
+    compute_session_recommendation,
+    compute_tier_history,
     health_metrics_weekly,
     latest_metric,
     metric_trend_per_4w,
@@ -575,6 +577,44 @@ def main() -> int:
         estimated_1rm=e1rm,
     )
 
+    # ---- Session recommendation (the 5-tier gate that SKILL.md Phase 2
+    # MUST honor before generating any workout). This is the deterministic
+    # single source of truth so the LLM can't rationalize past it.
+    session_recommendation = compute_session_recommendation(
+        recovery=recovery,
+        training_load=training_load,
+        acwr=acwr,
+        weekly_volume=weekly_volume,
+        sleep_regularity=sleep_regularity,
+        sleep_summary=sleep,
+        estimated_1rm=e1rm,
+        hr_at_volume_divergence=hr_volume_div,
+        deloads=deloads,
+        auto_deload_candidates=auto_deloads,
+        health_all=health_all,
+        today_d=today_d,
+        estimated_max_hr=max_hr,
+    )
+
+    # 14-day tier history strip (Trajectory tab — spot fatigue spirals).
+    tier_history = compute_tier_history(
+        days=14,
+        today_d=today_d,
+        health_all=health_all,
+        monthly_sessions=monthly_sessions,
+        weekly_volume=weekly_volume,
+        sleep_nights_all=sleep_nights_all,
+        sleep_regularity_today=sleep_regularity,
+        sleep_summary_today=sleep,
+        estimated_1rm=e1rm,
+        hr_at_volume_divergence=hr_volume_div,
+        deloads=deloads,
+        auto_deload_candidates=auto_deloads,
+        capabilities=capabilities,
+        estimated_max_hr=max_hr,
+        estimated_rest_hr=rest_hr,
+    )
+
     out = {
         "today": today_d.strftime("%Y-%m-%d"),
         "data_source": data_source,
@@ -627,6 +667,11 @@ def main() -> int:
         # ---- Week-over-week comparison (this-week / last-week / 4-wk avg
         # for the assessment dashboard's bottom card). ----
         "week_over_week": week_over_week,
+        # ---- Recovery gate: 5-tier session recommendation. SKILL.md Phase 2
+        # MUST honor this before generating any workout. ----
+        "session_recommendation": session_recommendation,
+        # 14-day rolling tier classifications (Trajectory tab).
+        "tier_history":           tier_history,
         # ---- Longevity Trajectory tab ----
         "longevity_score":      longevity_score,
         "longevity_state":      longevity_state,

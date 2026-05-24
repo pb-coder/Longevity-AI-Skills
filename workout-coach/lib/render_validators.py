@@ -100,6 +100,7 @@ COACH_STRING_MAX = 280
 # cards still render (cross-tab — they appear on the Trajectory tab).
 COACH_CARD_KEYS = (
     # TODAY tab
+    "session_recommendation_callout",  # narrative gloss on the recovery gate
     "today_acwr",
     "recovery_drivers", "activity_rings", "training_load",
     "muscle_volume", "strength",

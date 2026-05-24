@@ -662,6 +662,62 @@ def risk_flag_pill(status):
     return f'<span class="pill {cls}">{esc(status or "unknown")}</span>'
 
 
+# ---------- tier-history strip ----------
+
+def tier_history_strip(history):
+    """Horizontal strip of N coloured dots, one per day, coloured by that
+    day's session-recommendation tier (A/B/C/D/E). On hover each dot
+    tooltips the date + tier + dominant signal.
+
+    `history` is the list emitted by `compute_tier_history` — oldest first.
+    """
+    if not history:
+        return ""
+    tier_colour = {
+        "A": "var(--warn)",      # red
+        "B": "var(--amber)",     # amber
+        "C": "#ffcc00",          # softer amber / yellow
+        "D": "var(--good)",      # green
+        "E": "var(--accent)",    # blue
+    }
+    tier_word = {
+        "A": "rest",
+        "B": "reactive deload",
+        "C": "downgrade",
+        "D": "green",
+        "E": "over-recovered",
+    }
+    n = len(history)
+    if n == 0:
+        return ""
+    dot_w = 26
+    gap = 4
+    total_w = n * dot_w + (n - 1) * gap
+    parts = []
+    for i, entry in enumerate(history):
+        x = i * (dot_w + gap)
+        tier = entry.get("tier", "")
+        colour = tier_colour.get(tier, "var(--muted)")
+        word = tier_word.get(tier, "")
+        signal = entry.get("dominant_signal", "")
+        tip = f"{entry.get('date','')} · {word}{(' · ' + signal) if signal else ''}"
+        parts.append(
+            f'<rect x="{x}" y="2" width="{dot_w}" height="22" rx="4" ry="4" '
+            f'fill="{colour}" data-tip="{esc(tip)}"></rect>'
+        )
+    # Date labels at first and last position
+    first_date = history[0].get("date", "")[5:]   # MM-DD
+    last_date = history[-1].get("date", "")[5:]
+    return f'''
+<div class="tier-history-strip">
+  <svg viewBox="0 0 {total_w} 38" preserveAspectRatio="xMinYMid meet" class="tier-strip-svg" aria-hidden="true">
+    {''.join(parts)}
+    <text x="0" y="34" class="tier-strip-lbl">{first_date}</text>
+    <text x="{total_w}" y="34" text-anchor="end" class="tier-strip-lbl">{last_date} (today)</text>
+  </svg>
+</div>'''
+
+
 # ---------- workout markdown embed ----------
 
 def embed_workout_markdown(md_text: str) -> str:

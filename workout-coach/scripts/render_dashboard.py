@@ -55,13 +55,14 @@ from render_cards import (
     card_recovery_practices,
     card_rings,
     card_risk_flags,
+    card_session_call,
     card_sleep,
     card_sleep_domain,
     card_strength,
+    card_tier_history_strip,
     card_training_load,
     card_vitals,
     card_wow,
-    workout_recommendation,
 )
 
 
@@ -153,10 +154,11 @@ def render(j, coach, workout_md, person):
     rem_anomaly = j.get("rem_anomaly")
     movement_consistency = j.get("movement_consistency")
 
-    # Workout-intensity recommendation absorbed into the Recovery hero
-    # card (replaces the old standalone "Today's readiness" card to avoid
-    # duplicating the score number).
-    rec_text, rec_cls = workout_recommendation(recovery, acwr)
+    # Session-recommendation gate (Today tab headline) + 14-day tier history
+    # (Trajectory tab). The gate is the new binding decision the coach must
+    # honor before generating any workout markdown.
+    session_rec = j.get("session_recommendation")
+    tier_history = j.get("tier_history") or []
 
     html_doc = f"""<!doctype html>
 <html lang="en">
@@ -180,11 +182,12 @@ def render(j, coach, workout_md, person):
   </div>
 
   <div class="tab-panel" data-tab="today">
+    {card_session_call(session_rec, coach_cards.get("session_recommendation_callout"))}
     <section class="card summary">
       <h2>Coach&rsquo;s summary</h2>
       <div class="body">{auto_wrap_terms(headline)}</div>
     </section>
-    {card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend, recommendation=rec_text, recommendation_cls=rec_cls)}
+    {card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend)}
     {card_drivers(recovery.get("drivers"), coach_cards.get("recovery_drivers"))}
     {card_acwr(acwr, coach_cards.get("today_acwr"))}
     {card_rings(rings_html, coach_cards.get("activity_rings"))}
@@ -208,6 +211,7 @@ def render(j, coach, workout_md, person):
     {card_sleep(j.get("sleep_summary"), coach_cards.get("sleep"))}
     {card_recovery_practices(thermal, light, coach_cards.get("recovery_practices"))}
     {card_risk_flags(longevity_state, coach_cards.get("trajectory_risk_flags"))}
+    {card_tier_history_strip(tier_history)}
   </div>
 
   <div class="tab-panel" data-tab="workout"></div>

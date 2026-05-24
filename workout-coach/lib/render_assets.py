@@ -548,8 +548,54 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   background: #fafafa; border-left: 3px solid var(--amber);
   border-radius: 6px; font-size: 12.5px; line-height: 1.5; }
 
-/* (The Today readiness card was merged into the Recovery hero — its
-   CSS lives under .hero-recommendation above.) */
+/* Session-call card (Today tab, position 1). The recovery gate's
+   verdict — bigger and more prominent than any other card so the user
+   cannot gloss past it. Per-tier left-border + background tint. */
+.session-call-card { padding: 24px 22px; border-left: 4px solid var(--border-strong); }
+.session-call-card.tier-a { border-left-color: var(--warn);
+  background: linear-gradient(180deg, rgba(255,59,48,0.05), transparent 60%); }
+.session-call-card.tier-b { border-left-color: var(--amber);
+  background: linear-gradient(180deg, rgba(255,159,10,0.05), transparent 60%); }
+.session-call-card.tier-c { border-left-color: #ffcc00; }
+.session-call-card.tier-d { border-left-color: var(--good); }
+.session-call-card.tier-e { border-left-color: var(--accent); }
+
+.session-call-headline { font-size: 32px; font-weight: 600;
+  letter-spacing: -0.02em; line-height: 1.15; }
+.session-call-card.tier-a .session-call-headline { color: var(--warn); }
+.session-call-card.tier-b .session-call-headline { color: var(--amber); }
+.session-call-card.tier-c .session-call-headline { color: #b67e00; }
+.session-call-card.tier-d .session-call-headline { color: var(--good); }
+.session-call-card.tier-e .session-call-headline { color: var(--accent); }
+
+.session-call-substitute { font-size: 15px; color: var(--text);
+  margin-top: 10px; line-height: 1.5; }
+.session-call-notes { font-size: 13px; margin-top: 6px; line-height: 1.5; }
+
+.session-call-rationale { margin-top: 18px; padding-top: 14px;
+  border-top: 1px solid #f0f0f1; }
+.session-call-rationale-title { font-size: 11px; font-weight: 600;
+  letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 8px; }
+.session-call-rationale-row { display: grid; grid-template-columns: 180px 1fr;
+  gap: 12px; align-items: baseline; padding: 4px 0; font-size: 13px;
+  line-height: 1.45; }
+.session-call-rationale-label { color: var(--text); font-weight: 500; }
+.session-call-rationale-note { color: var(--muted); }
+
+.session-call-override { font-size: 11.5px; font-style: italic;
+  color: var(--muted); margin-top: 14px; padding-top: 10px;
+  border-top: 1px dashed #f0f0f1; }
+
+/* Trajectory tab — 14-day tier history strip */
+.tier-history-strip { margin-top: 12px; }
+.tier-history-explain { font-size: 12.5px; line-height: 1.5;
+  margin-bottom: 10px; }
+.tier-strip-svg { width: 100%; height: auto; max-height: 48px;
+  display: block; }
+.tier-strip-lbl { font-size: 10px; fill: var(--muted);
+  font-family: inherit; }
+.tier-history-strip rect { cursor: help; }
 
 /* ACWR card */
 .acwr-card .acwr-strip { padding: 8px 0 4px; }

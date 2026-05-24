@@ -56,6 +56,7 @@ from render_components import (
     risk_flag_pill,
     secondary_metric_row,
     sparkline,
+    tier_history_strip,
 )
 
 
@@ -82,15 +83,12 @@ def _heading(label, key):
 from render_validators import auto_wrap_terms
 
 
-def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend,
-               *, recommendation=None, recommendation_cls=None):
+def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, tsb_trend):
     """Top hero on the Today tab. Recovery score + Freshness side by side.
 
-    The Recovery card absorbs the workout-intensity recommendation
-    ("Moderate day. Hold loads, push reps.") as a sub-line under the
-    score, so the dashboard doesn't show 5.8/10 twice in adjacent cards.
-    ``recommendation`` + ``recommendation_cls`` are computed by the
-    renderer from recovery + ACWR.
+    The workout-intensity recommendation is rendered by `card_session_call`
+    at position 1 of the Today tab; this card no longer carries it (the
+    previous duplication of the score across two adjacent cards is gone).
     """
     arrow = "▲" if (tsb_trend or 0) > 0 else ("▼" if (tsb_trend or 0) < 0 else "→")
     arrow_cls = "good" if (tsb_trend or 0) > 0 else ("warn" if (tsb_trend or 0) < 0 else "muted")
@@ -99,13 +97,6 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
     else:
         score_value_html = f'<div class="value">{esc(fmt(score, 1))}<span class="denom"> / 10</span></div>'
 
-    rec_html = ""
-    if recommendation:
-        rec_cls = recommendation_cls or "muted"
-        rec_html = (
-            f'<div class="hero-recommendation {rec_cls}">{esc(recommendation)}</div>'
-        )
-
     return f'''
 <section class="hero">
   <article class="card metric {score_cls}">
@@ -113,7 +104,6 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
     {score_value_html}
     {recovery_scale(score)}
     <div class="sub">confidence {confidence_dots(confidence)}</div>
-    {rec_html}
   </article>
   <article class="card metric {tsb_cls}">
     <h2><span class="term" data-tip="Your fitness minus your current fatigue. Positive numbers mean you are fresh and ready to train hard; negative numbers mean fatigue is accumulating. Above +5 is fresh, below -10 starts to be tired.">Freshness</span></h2>
@@ -749,6 +739,119 @@ def coach_block(text: str | None) -> str:
 # =============================================================================
 # TODAY tab cards (operational, "should I train hard?")
 # =============================================================================
+
+
+def card_session_call(rec, coach_text):
+    """The Today tab's headline card. Sits at position 1, before every
+    other card. Renders the 5-tier session recommendation: prescription
+    headline + "Why this call" rationale list + override note.
+
+    Per-tier visual treatment:
+      A — red border, red headline (refuse strength)
+      B — amber border, amber headline (reactive deload / Zone 2)
+      C — soft amber border, amber headline (modified strength OK)
+      D — green border, green headline (train as planned, compact)
+      E — blue border, blue headline (over-recovered taper warning)
+    """
+    if not rec:
+        return ""
+    tier = rec.get("tier", "D")
+    label = rec.get("label", "")
+    headline = rec.get("headline", "Train as planned.")
+    substitute = rec.get("substitute") or {}
+    prescription = substitute.get("prescription", "")
+    notes = substitute.get("notes", "")
+    rationale = rec.get("rationale") or []
+    override_msg = rec.get("override_message") or ""
+
+    tier_class_map = {
+        "A": "tier-a", "B": "tier-b", "C": "tier-c",
+        "D": "tier-d", "E": "tier-e",
+    }
+    tier_class = tier_class_map.get(tier, "tier-d")
+
+    # Pretty signal names for the rationale rows (single line per signal,
+    # left-column label, right-column note).
+    signal_label = {
+        "wrist_temp_c":              "Wrist temp",
+        "hrv_sdnn_z":                "HRV (SDNN)",
+        "rhr_sustained_days":        "RHR streak",
+        "rhr_z":                     "RHR",
+        "recovery_crash":            "Recovery composite",
+        "recovery_score":            "Recovery score",
+        "tsb":                       "Freshness (TSB)",
+        "wow_change_pct":            "Week-over-week load",
+        "muscles_over_mrv":          "Muscles over MRV",
+        "auto_deload_candidate":     "Auto-deload flag",
+        "stalled_lifts":             "Stalled lifts",
+        "sleep_last_night_h":        "Sleep last night",
+        "sleep_7d_mean_h":           "7-day sleep mean",
+        "sleep_regularity_index":    "Sleep regularity (SRI)",
+        "hr_at_volume_divergence":   "HR-at-volume creep",
+    }
+
+    rationale_html = ""
+    # Tier D doesn't need a verbose "why" list — it's the default green.
+    if tier != "D" and rationale:
+        rows = []
+        for r in rationale[:5]:
+            sig = r.get("signal", "")
+            note = r.get("note", "")
+            label_text = signal_label.get(sig, sig.replace("_", " "))
+            rows.append(f'''
+<div class="session-call-rationale-row">
+  <span class="session-call-rationale-label">{esc(label_text)}</span>
+  <span class="session-call-rationale-note">{esc(note)}</span>
+</div>''')
+        rationale_html = (
+            f'<div class="session-call-rationale">'
+            f'<div class="session-call-rationale-title">Why this call</div>'
+            f'{"".join(rows)}'
+            f'</div>'
+        )
+
+    substitute_line = (
+        f'<div class="session-call-substitute">{esc(prescription)}</div>'
+        if prescription else ""
+    )
+    notes_line = (
+        f'<div class="session-call-notes muted">{esc(notes)}</div>'
+        if notes and tier != "D" else ""
+    )
+    override_line = (
+        f'<div class="session-call-override">{esc(override_msg)}</div>'
+        if override_msg else ""
+    )
+
+    return f'''
+<section class="card session-call-card {tier_class}">
+  <h2>Today&rsquo;s call</h2>
+  <div class="session-call-headline">{esc(headline)}</div>
+  {substitute_line}
+  {notes_line}
+  {rationale_html}
+  {coach_block(coach_text)}
+  {override_line}
+</section>
+'''
+
+
+def card_tier_history_strip(history, coach_text=None):
+    """Trajectory tab component: 14-day strip of coloured dots showing
+    the session-recommendation tier each day. Hover-tooltip reveals the
+    date and dominant signal. Used to spot fatigue spirals (e.g. 5 ambers
+    in the last 7 days means chronic under-recovery)."""
+    if not history:
+        return ""
+    strip = tier_history_strip(history)
+    return f'''
+<section class="card">
+  <h2>Decision history &middot; last 14 days</h2>
+  <div class="tier-history-explain muted">Each day shows the call the recovery gate would have made: green = train, soft-yellow = modified, amber = reactive deload, red = rest, blue = over-recovered. Hover a square for the date and dominant signal.</div>
+  {strip}
+  {coach_block(coach_text)}
+</section>
+'''
 
 
 def workout_recommendation(recovery, acwr):

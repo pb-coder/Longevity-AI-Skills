@@ -400,6 +400,65 @@ METRIC_WINDOWS = {
 }
 
 
+# =============================================================================
+# Recovery-gate (5-tier session recommendation) thresholds
+# =============================================================================
+#
+# Single source of truth for the gate that decides "rest / Zone 2 / modified
+# strength / normal strength" before any workout markdown is generated.
+#
+# Sources:
+# - Tier A (illness): Cole 1999 NEJM (autonomic crash mortality), TrainingPeaks
+#   "4 signs of overtraining", Oura pre-illness wrist temp deviation band.
+# - Tier B (reactive deload): TrainingPeaks PMC bands (TSB), Altini HRV4Training
+#   (baseline-below-band heuristic), Israetel RP MRV-breach protocol, Tuchscherer
+#   / Helms reactive-deload trigger, Impellizzeri 2020 IJSPP (10% rule survives).
+# - Tier C (downgrade): Stronger by Science autoregulation, Saw 2016 BJSM.
+# - Tier E (over-recovered taper): TrainingPeaks form-band guidance.
+#
+# Thresholds are tightened against the tracker's TSB scale (which runs narrower
+# than TrainingPeaks' classic ±30 because our TRIMP is shorter-window).
+
+SESSION_GATE_THRESHOLDS = {
+    # ---- Tier A: illness / acute rest (refuse strength flat-out) ----
+    "tier_a_wrist_temp_dev_c":         0.7,    # Oura pre-illness deviation
+    "tier_a_hrv_z_paired_with_temp":  -1.0,    # autonomic suppression alongside temp rise
+    "tier_a_rhr_dev_bpm":              10.0,   # +10 bpm sustained = serious
+    "tier_a_rhr_sustained_days":       3,
+    "tier_a_recovery_score_crash":     3.0,    # composite crash
+    "tier_a_hrv_z_crash":             -1.5,    # paired with recovery crash
+    "tier_a_rhr_z_crash":              1.0,    # paired with recovery crash
+
+    # ---- Tier B: reactive deload (refuse planned strength, substitute) ----
+    "tier_b_tsb_high_fatigue":        -15.0,   # SKILL.md existing band
+    "tier_b_hrv_z_sustained":         -0.75,   # Altini baseline-below-band
+    "tier_b_muscles_over_mrv_count":   3,      # RP MRV-breach protocol
+    "tier_b_wow_spike_pct":            60.0,   # 10% rule (10% green, >60% red)
+    "tier_b_stalled_lifts_count":      2,      # Tuchscherer reactive-deload
+
+    # ---- Tier C: downgrade (modified strength is fine) ----
+    "tier_c_recovery_score_lo":        3.0,
+    "tier_c_recovery_score_hi":        5.0,
+    "tier_c_hrv_z_lo":                -0.75,
+    "tier_c_hrv_z_hi":                -0.30,
+    "tier_c_sleep_total_h_floor":      5.0,    # last night
+    "tier_c_sleep_7d_mean_floor":      6.0,
+    "tier_c_sri_floor":                71.0,   # UK Biobank bottom quintile
+    "tier_c_rhr_z_floor":              0.50,
+    "tier_c_muscles_over_mrv_count":   1,
+    "tier_c_downgrade_volume_pct":     25.0,   # -25% volume on secondaries
+
+    # ---- Tier D: green (default — train as planned) ----
+    "tier_d_recovery_score_min":       5.5,
+    "tier_d_tsb_lo":                  -10.0,
+    "tier_d_tsb_hi":                   0.0,
+
+    # ---- Tier E: over-recovered / taper warning ----
+    "tier_e_tsb_high":                 10.0,
+    "tier_e_tsb_sustained_days":       5,
+}
+
+
 def age_band(norms_table: dict, sex: str, age: int) -> dict | None:
     """Resolve (sex, age) to a norm-band dict from one of the per-sex tables
     above. Returns ``None`` when sex or age is missing/out-of-range — the

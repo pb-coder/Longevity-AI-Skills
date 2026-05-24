@@ -609,10 +609,13 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
   color: var(--text); }
 .bloodwork-pending strong { color: var(--text); }
 
-/* REM-anomaly watch callout under sleep domain */
-.rem-watch { margin-top: 14px; padding: 10px 14px;
-  background: var(--tile-bg); border-left: 3px solid var(--amber);
-  border-radius: 6px; font-size: 12.5px; line-height: 1.5; }
+/* REM-anomaly watch callout under sleep domain. Soft-tile chrome
+   matching .bloodwork-pending / .missing-inputs; state lives in the
+   inline .pill chip the card emits, not on the callout border. */
+.rem-watch { margin-top: 14px; padding: 12px 14px;
+  background: var(--tile-bg); border: 1px solid var(--border);
+  border-radius: 10px; font-size: 12.5px; line-height: 1.5; }
+.rem-watch .pill { margin-right: 8px; vertical-align: baseline; }
 
 /* Session-call card (Today tab, position 1). The recovery gate's
    verdict. Tier is communicated by a .tier-indicator chip placed
@@ -693,14 +696,19 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 .hr-div-state.good { color: var(--good); font-weight: 500; }
 .hr-div-delta { color: var(--muted); font-variant-numeric: tabular-nums; }
 
-/* Risk flags panel */
-.risk-flags-list { display: grid; gap: 10px; }
-.risk-flag-row { display: grid; grid-template-columns: 220px auto 1fr;
-  gap: 12px; align-items: start; padding: 8px 0;
+/* Risk flags panel — two-row layout per flag: label + pill on the top
+   row, hint spanning the full width on the second. Predictable
+   alignment regardless of label length. */
+.risk-flags-list { display: grid; gap: 0; }
+.risk-flag-row { display: grid; grid-template-columns: 1fr auto;
+  column-gap: 12px; row-gap: 4px; padding: 10px 0;
   border-bottom: 1px solid var(--border-soft); }
 .risk-flags-list .risk-flag-row:last-child { border-bottom: none; }
-.risk-flag-label { font-size: 13.5px; font-weight: 600; color: var(--text); }
-.risk-flag-hint { font-size: 12px; line-height: 1.5; }
+.risk-flag-label { grid-column: 1;
+  font-size: 13.5px; font-weight: 600; color: var(--text); }
+.risk-flag-row .pill { grid-column: 2; align-self: start; }
+.risk-flag-hint { grid-column: 1 / -1;
+  font-size: 12px; line-height: 1.5; }
 .risk-family { font-size: 12px; margin-top: 12px; padding-top: 10px;
   border-top: 1px solid var(--border-soft); line-height: 1.5; }
 

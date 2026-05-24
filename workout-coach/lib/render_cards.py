@@ -666,10 +666,12 @@ def card_recovery_practices(thermal, light, coach_text):
   <div class="recent">HSP band: {fmt(heat.get("minutes_above_hsp_threshold_per_week"), 0)} min/wk above 80 °C for 20+ min.</div>
 </div>
 '''
-    # Cold-exposure block: weekly count + adherence pill + one-line average
-    # (rendered only when both temp and duration are populated for at least
-    # one session). Per-session detail and "not logged" pills are omitted —
-    # they were visual noise that didn't help adherence reading.
+    # Cold-exposure block: weekly count + adherence pill (when adherence
+    # status is computed) + one-line average (only when both temp and
+    # duration are populated for at least one session). Per-session detail
+    # and "not logged" pills are omitted as v1 dictated, but the card
+    # always carries at least the "paired with sauna" pill + a sessions
+    # count line so it never reads as visually empty.
     cold_status = cold.get("adherence_status") or adherence.get("cold_status")
     sessions_with_dose = [
         s for s in (cold.get("recent_sessions") or [])
@@ -684,13 +686,21 @@ def card_recovery_practices(thermal, light, coach_text):
             f'({len(sessions_with_dose)} session{"s" if len(sessions_with_dose) != 1 else ""} with full dose data).</div>'
         )
     cold_adherence_html = (
-        adherence_pill(cold_status) if cold_status else ""
+        adherence_pill(cold_status) if cold_status
+        else f'<span class="pill muted">paired with sauna {fmt(cold.get("paired_with_heat_pct"), 0)}%</span>'
+    )
+    n_28 = cold.get("n_sessions_28d") or 0
+    sessions_count_line = (
+        f'<div class="detail">{n_28} session{"s" if n_28 != 1 else ""} '
+        f'in last 28 days.</div>'
+        if n_28 else ""
     )
     cold_html = f'''
 <div class="practice">
   <div class="title">Cold exposure ({esc((cold.get("dominant_type") or "—").replace("_", " "))})</div>
   <div class="big">{fmt(cold.get("n_sessions_per_week"), 2)}<span class="unit">/ wk</span></div>
   {cold_adherence_html}
+  {sessions_count_line}
   {avg_line_html}
 </div>
 '''
@@ -1371,7 +1381,7 @@ def card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text,
         )
         rem_watch = f'''
 <div class="rem-watch muted">
-  <strong>REM watch.</strong> {low} of {rem_anomaly.get("n_nights", 0)} nights showed REM below 15% of total sleep in the 28-day window.
+  <span class="pill amber">REM watch</span> {low} of {rem_anomaly.get("n_nights", 0)} nights showed REM below 15% of total sleep in the 28-day window.
   Mean REM proportion {mean_pct:.1f}% &middot; healthy adult range is 20 to 25%.{parkinson_note}
 </div>'''
 

@@ -188,8 +188,8 @@ def render(j, coach, workout_md, person):
     {card_rings(rings_html, coach_cards.get("activity_rings"))}
     {card_neat(j.get("daily_activity_28d"))}
     {card_training_load(series, ctl, atl, tsb, tsb_trend, coach_cards.get("training_load"))}
-    {card_muscle_volume(weekly_volume, coach_cards.get("muscle_volume"))}
-    {card_strength(e_items, coach_cards.get("strength"), j.get("hr_at_volume_divergence"))}
+    {card_muscle_volume(weekly_volume, coach_cards.get("muscle_volume"), hr_divergence=j.get("hr_at_volume_divergence"))}
+    {card_strength(e_items, coach_cards.get("strength"))}
     {card_wow(wow)}
   </div>
 

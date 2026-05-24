@@ -276,7 +276,7 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .muscle-legend-caveat { margin-top: 6px; line-height: 1.5;
   font-size: 11.5px; font-style: italic; }
 
-.bar-row { display: grid; grid-template-columns: 140px 1fr 240px;
+.bar-row { display: grid; grid-template-columns: 140px 1fr 290px;
   align-items: center; gap: 14px; padding: 7px 0;
   font-size: 13px; cursor: help; }
 .bar-label { color: var(--text); text-transform: capitalize; }
@@ -302,6 +302,13 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .bar-dot.band-over { background: var(--muscle-over); }
 .bar-num { font-variant-numeric: tabular-nums; font-weight: 500;
   color: var(--text); margin-left: auto; }
+/* Per-muscle HR-at-volume annotation. Tiny chip after .bar-num that
+   surfaces the fatigue / conditioning trend from the same row's
+   muscle. Absent when stable or no data. */
+.bar-hr { font-size: 11.5px; font-weight: 500;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar-hr.good { color: var(--good); }
+.bar-hr.warn { color: var(--warn); }
 
 /* 3-dot confidence indicator. Three dots = high, two = medium,
    one = low. No tooltip; the dots are self-explanatory. */
@@ -678,22 +685,10 @@ footer { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px;
 /* (Longevity score uses the shared .metric-hero / .longevity-table
    styles defined above.) */
 
-/* HR-at-volume divergence rows (under the strength card). One row per
-   muscle group with a coloured dot, the muscle name, the state, and
-   the bpm/4w delta. Avoids the prior single-row flex-wrap layout that
-   truncated long words like "Conditioning". */
-.hr-divergence { margin-top: 14px; padding-top: 12px;
-  border-top: 1px solid var(--border-soft); }
-.hr-div-title { font-size: 11px; font-weight: 600;
-  letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--muted); margin-bottom: 8px; }
-.hr-div-row { display: flex; align-items: center; gap: 12px;
-  padding: 4px 0; font-size: 13px; }
-.hr-div-row .hr-div-delta { margin-left: auto; }
-.hr-div-muscle { color: var(--text); text-transform: capitalize; }
-.hr-div-state.warn { color: var(--warn); font-weight: 500; }
-.hr-div-state.good { color: var(--good); font-weight: 500; }
-.hr-div-delta { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* (HR-at-volume now annotates each muscle row inside
+   .bar-status via .bar-hr — see above. The standalone hr-divergence
+   block under card_strength was removed when the signal moved to
+   the per-muscle volume card.) */
 
 /* Risk flags panel — two-row layout per flag: label + pill on the top
    row, hint spanning the full width on the second. Predictable

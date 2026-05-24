@@ -270,11 +270,12 @@ def driver_bars(drivers):
 
 # ---------- per-muscle bar chart ----------
 
-def muscle_bars(weekly_volume):
+def muscle_bars(weekly_volume, hr_divergence=None):
     current = weekly_volume.get("current", {})
     landmarks = weekly_volume.get("landmarks", {})
     if not current:
         return ""
+    hr_divergence = hr_divergence or {}
 
     def gap_score(m):
         v = current.get(m, 0.0)
@@ -330,6 +331,28 @@ def muscle_bars(weekly_volume):
                 f"This volume costs more than it gives back. Drop 1 to 2 sets per week."
             )
 
+        # Per-muscle HR-at-volume annotation (was its own block on the
+        # strength card — moved here so all per-muscle state lives on
+        # one card). Rising HR at constant volume → fatigue (warn); falling
+        # HR → improving conditioning (good). Stable / absent → no chip,
+        # per DESIGN.md's hide-empty-states rule.
+        hrd = hr_divergence.get(m) or {}
+        hr_hint = (hrd.get("hint") or "")
+        hr_slope = hrd.get("slope_bpm_per_4w")
+        hr_html = ""
+        if hr_hint.startswith("rising") and hr_slope is not None:
+            hr_html = (
+                f'<span class="bar-hr warn" data-tip="Rising HR at constant '
+                f'volume — fatigue or under-recovery signal.">'
+                f'&uarr; +{hr_slope:.1f} bpm/4w</span>'
+            )
+        elif hr_hint.startswith("falling") and hr_slope is not None:
+            hr_html = (
+                f'<span class="bar-hr good" data-tip="Falling HR at constant '
+                f'volume — improving conditioning.">'
+                f'&darr; {hr_slope:.1f} bpm/4w</span>'
+            )
+
         mev_x = (mev / xmax) * 100
         mav_x = (mav / xmax) * 100
         actual_x = (v / xmax) * 100
@@ -345,6 +368,7 @@ def muscle_bars(weekly_volume):
     <span class="bar-dot band-{band_class}"></span>
     <span class="bar-status-label">{esc(status)}</span>
     <span class="bar-num">{v:.1f}</span>
+    {hr_html}
   </span>
 </div>''')
     return "\n".join(rows)

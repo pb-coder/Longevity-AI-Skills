@@ -217,8 +217,8 @@ def card_training_load(series, ctl, atl, tsb, tsb_trend, coach_text):
 '''
 
 
-def card_muscle_volume(weekly_volume, coach_text):
-    bars = muscle_bars(weekly_volume)
+def card_muscle_volume(weekly_volume, coach_text, hr_divergence=None):
+    bars = muscle_bars(weekly_volume, hr_divergence=hr_divergence)
     return f'''
 <section class="card">
   <h2>Per-muscle weekly volume</h2>
@@ -238,7 +238,10 @@ def card_muscle_volume(weekly_volume, coach_text):
 '''
 
 
-def card_strength(items, coach_text, hr_divergence=None):
+def card_strength(items, coach_text):
+    """Strength progression table. e1RM per lift + 4-week slope. The
+    HR-at-volume signal that used to render here is now per-muscle on
+    card_muscle_volume — all per-muscle state lives on one card."""
     rows = []
     for name, v in items:
         slope = v.get("slope_kg_per_4w")
@@ -258,44 +261,6 @@ def card_strength(items, coach_text, hr_divergence=None):
   <td class="arrow {cls}">{arrow}</td>
   <td>{confidence_dots(conf)}</td>
 </tr>''')
-    # HR-at-volume divergence: per-muscle slope of strength-session avg HR
-    # over the last 8 weeks, controlling for volume. Rising HR at constant
-    # load is a fatigue signal; falling HR is improving conditioning.
-    # Rendered as one row per muscle with a coloured dot so long words
-    # ("Conditioning") never get truncated by a flex-wrap collapse.
-    hr_div_html = ""
-    if hr_divergence:
-        rising = [(m, v) for m, v in hr_divergence.items()
-                  if (v.get("hint") or "").startswith("rising")]
-        falling = [(m, v) for m, v in hr_divergence.items()
-                   if (v.get("hint") or "").startswith("falling")]
-        rows_hr = []
-        for m, v in rising:
-            rows_hr.append(
-                f'<div class="hr-div-row">'
-                f'<span class="bar-dot band-over"></span>'
-                f'<span class="hr-div-muscle">{esc(m)}</span>'
-                f'<span class="hr-div-state warn">rising fatigue</span>'
-                f'<span class="hr-div-delta">+{v["slope_bpm_per_4w"]:.1f} bpm/4w</span>'
-                f'</div>'
-            )
-        for m, v in falling:
-            rows_hr.append(
-                f'<div class="hr-div-row">'
-                f'<span class="bar-dot band-prod"></span>'
-                f'<span class="hr-div-muscle">{esc(m)}</span>'
-                f'<span class="hr-div-state good">improving conditioning</span>'
-                f'<span class="hr-div-delta">{v["slope_bpm_per_4w"]:.1f} bpm/4w</span>'
-                f'</div>'
-            )
-        if rows_hr:
-            label = '<span class="term" data-tip="Per-muscle slope of strength-session average heart rate over the last 8 weeks, controlling for volume. Rising HR at the same load is a fatigue or under-recovery signal; falling HR is improving aerobic conditioning.">HR at volume</span>'
-            hr_div_html = (
-                f'<div class="hr-divergence">'
-                f'<div class="hr-div-title">{label}</div>'
-                f'{"".join(rows_hr)}'
-                f'</div>'
-            )
 
     return f'''
 <section class="card">
@@ -312,7 +277,6 @@ def card_strength(items, coach_text, hr_divergence=None):
     </thead>
     <tbody>{"".join(rows)}</tbody>
   </table>
-  {hr_div_html}
   {coach_block(coach_text)}
 </section>
 '''
@@ -629,6 +593,10 @@ def card_recovery_practices(thermal, light, coach_text):
     # behavior-gap card instead of three sub-cards full of placeholder dots
     # — the absence is a choice, not a tracking failure.
     if not thermal and not light:
+        # Empty-state branch deliberately skips coach_block — the native
+        # message already says what the coach would. Adding the callout
+        # double-prompts the user with the same content (one of the v2
+        # cleanup fixes).
         return f'''
 <section class="card">
   <h2>Recovery practices</h2>
@@ -636,7 +604,6 @@ def card_recovery_practices(thermal, light, coach_text):
     <p>No sauna, cold exposure, or light-therapy sessions in the last 28 days.</p>
     <p class="muted">Log via <code>/log</code> after each session to track adherence against the 4 per week sauna and 3 per week light-therapy defaults.</p>
   </div>
-  {coach_block(coach_text)}
 </section>
 '''
     heat = (thermal or {}).get("heat") or {}
@@ -1086,14 +1053,11 @@ def card_longevity_score(longevity_score, coach_text):
             f'</div>'
         )
 
-    # Bloodwork note (always — biomarkers are deferred until labs land).
-    pending_note = (
-        f'<div class="bloodwork-pending muted">'
-        f'<strong>Bloodwork pending.</strong> '
-        f'{esc(longevity_score.get("note", ""))}'
-        f'</div>'
-        if longevity_score.get("bloodwork_pending") else ""
-    )
+    # Bloodwork is now surfaced as a synthetic entry in missing_inputs
+    # (consolidated to one place per v2). The standalone callout that
+    # used to live here was redundant. Body-comp + metabolic domain
+    # cards keep their own bloodwork-pending callouts for domain context.
+    pending_note = ""
 
     inputs_chip = (
         f'<span class="pill {status_pill_cls}">{esc(status_label)}</span>'
@@ -1567,13 +1531,15 @@ def card_risk_flags(longevity_state, coach_text):
     """Personalized risk flag panel. Reads from `longevity_state` parsed
     in health.py. Shows nothing when a person has no longevity profile."""
     if not longevity_state:
+        # Empty-state branch deliberately skips coach_block — the native
+        # message already says what the coach would. Adding the callout
+        # double-prompts the user with the same content.
         return f'''
 <section class="card domain-card">
   <h2>{_heading("Personalized risk flags", "risk_flags")}</h2>
   <div class="muted" style="font-size:13px;">
     No longevity profile on file. Add <code>&lt;Person&gt;/data/longevity/&#123;profile,state&#125;.md</code> to populate.
   </div>
-  {coach_block(coach_text)}
 </section>
 '''
     flags = longevity_state.get("risk_flags") or []

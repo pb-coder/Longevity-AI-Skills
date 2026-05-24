@@ -643,6 +643,19 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
             continue
         missing_inputs.append({"name": n, "hint": HINTS.get(n, "")})
 
+    # Bloodwork lives in its own top-level flag (panel ingestion isn't
+    # wired yet) but the user reads it as "another outstanding longevity
+    # item." Surface it as a synthetic missing-input entry so the
+    # longevity-score card lists everything outstanding in one place —
+    # users no longer need to cross-reference the body-comp / metabolic
+    # domain cards to find the full picture.
+    missing_inputs.append({
+        "name": "bloodwork",
+        "hint": ("Foundational panel: lipids (ApoB, Lp(a)), fasting "
+                 "glucose / HbA1c / insulin, hsCRP, eGFR. Covers the "
+                 "metabolic + body-comp gaps."),
+    })
+
     if CORNERSTONE not in present_names:
         status = "incomplete"
         status_label = "Incomplete"

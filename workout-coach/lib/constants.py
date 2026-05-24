@@ -36,6 +36,13 @@ SOURCE_CAPABILITIES = {
         "sleep_nights":       True,   # per-night architecture (all 6 stages +
                                       # Time in Bed + Efficiency + N Segments +
                                       # first/last segment clock times)
+        # SRI (Sleep Regularity Index) needs per-segment bedtime / wake
+        # timestamps. The Apple Health XML export carries these; the
+        # HealthAutoExport pipeline collapses to daily totals and drops
+        # them. Surfaces as a capability so compute_longevity_score can
+        # suppress sleep_regularity from the missing-inputs list when
+        # the source structurally can't provide it.
+        "sleep_regularity":   True,
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
         # Thermal (sauna + cold exposure) is manual-/log-only, not
@@ -53,6 +60,7 @@ SOURCE_CAPABILITIES = {
         "sleep_stages":       True,
         "sleep_breath_dist":  True,
         "sleep_nights":       True,
+        "sleep_regularity":   False,  # see note on xml: no segment-level timestamps
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
         "thermal_log":        True,
@@ -66,6 +74,7 @@ SOURCE_CAPABILITIES = {
         "sleep_stages":       False,
         "sleep_breath_dist":  False,
         "sleep_nights":       False,
+        "sleep_regularity":   False,
         "exercise_min_daily": False,
         "per_workout_hr_strength": False,
         "thermal_log":        True,

@@ -446,7 +446,8 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
                             cardio_zones: dict | None,
                             movement_consistency: dict | None,
                             bodyweight_trend_kg_per_week: float | None,
-                            estimated_1rm: dict | None) -> dict | None:
+                            estimated_1rm: dict | None,
+                            capabilities: dict | None = None) -> dict | None:
     """Composite Longevity Score (0-100) — the Trajectory tab headline.
 
     Weighted average of normalized inputs from ``LONGEVITY_SCORE_WEIGHTS``.
@@ -608,12 +609,17 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
     present_names = set(components.keys())
     missing_names = [n for n in TRACKED_INPUTS if n not in present_names]
 
-    # Friendly hints for each missing input.
+    # Friendly hints for each missing input — only shown when the user
+    # can actually act on them. Structural source limitations (e.g. SRI
+    # requires segment-level sleep timestamps that HealthAutoExport
+    # doesn't produce) are filtered out below via INPUT_CAPABILITY_REQ so
+    # the dashboard doesn't punish people for a tooling boundary they
+    # can't move.
     HINTS = {
         "vo2_percentile":         "Needs both age (from profile.csv birthday) AND sex (profile.csv sex field). Apple Health typically logs VO2max within a week of any outdoor run.",
         "hrv_trend":              "Needs ~7 consecutive nights of HRV (SDNN) data from the Apple Watch.",
         "rhr_trend":              "Needs ~7 consecutive days of resting heart rate readings from the Apple Watch.",
-        "sleep_regularity":       "Needs Apple Health XML sleep data with segment-level timestamps. HealthAutoExport does not currently provide these.",
+        "sleep_regularity":       "Needs ~14 consecutive nights of sleep data with per-segment bedtime / waketime timestamps.",
         "sleep_quality":          "Needs at least one logged sleep night with total / deep / REM in the 28-day window.",
         "training_load_in_band":  "Needs at least one cardio session with average HR in the last 28 days to compute the ACWR.",
         "z2_weekly_adherence":    "Needs at least one cardio session with average HR in the last 28 days.",
@@ -621,7 +627,21 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
         "behavioral_consistency": "Needs daily Apple exercise minutes from the last 28 days.",
         "strength_progression":   "Needs at least 4 weeks of strength logs with progressive weights or reps.",
     }
-    missing_inputs = [{"name": n, "hint": HINTS.get(n, "")} for n in missing_names]
+    # Each input maps to the SOURCE_CAPABILITIES flag it depends on (or
+    # None if it's source-independent / user-populatable). When the
+    # current source returns False for the required flag, the input is
+    # filtered from the user-facing missing list — it's structurally
+    # unavailable, not "not yet populated".
+    INPUT_CAPABILITY_REQ = {
+        "sleep_regularity": "sleep_regularity",
+    }
+    caps = capabilities or {}
+    missing_inputs = []
+    for n in missing_names:
+        req = INPUT_CAPABILITY_REQ.get(n)
+        if req is not None and caps.get(req) is False:
+            continue
+        missing_inputs.append({"name": n, "hint": HINTS.get(n, "")})
 
     if CORNERSTONE not in present_names:
         status = "incomplete"

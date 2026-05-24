@@ -674,11 +674,11 @@ def tier_history_strip(history):
     if not history:
         return ""
     tier_colour = {
-        "A": "var(--warn)",      # red
-        "B": "var(--amber)",     # amber
-        "C": "#ffcc00",          # softer amber / yellow
-        "D": "var(--good)",      # green
-        "E": "var(--accent)",    # blue
+        "A": "var(--warn)",          # red
+        "B": "var(--amber)",         # amber
+        "C": "var(--muscle-push)",   # softer amber / yellow (same hex as muscle-push)
+        "D": "var(--good)",          # green
+        "E": "var(--accent)",        # blue
     }
     tier_word = {
         "A": "rest",

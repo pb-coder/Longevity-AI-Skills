@@ -33,6 +33,7 @@ from person_paths import (
     ensure_thermal_dir,
     health_metrics_csv,
     light_therapy_sessions_csv,
+    nutrition_phases_csv,
     profile_csv,
     sleep_nights_csv,
     swim_laps_csv,
@@ -1328,3 +1329,140 @@ def upsert_light_therapy_sessions(person: str, entries: Iterable[dict]) -> list[
 
     return [f"Light Therapy Sessions: {total_written} sessions written / "
             f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries
+
+
+# ============================================================ Nutrition Phases (bulk / cut / maintain / recomp)
+# Per-phase row store. Phases are sparse (a handful per year) so this is
+# a single flat CSV at <person>/data/nutrition_phases.csv — no per-month
+# split. Mirrors the "manual /log only" pattern (thermal, light_therapy):
+# the file is absent until the user logs their first phase via /log.
+#
+# Schema (one row per phase):
+#   Start Date | End Date | Phase Type | Target Surplus/Deficit (kcal) |
+#   Target Protein (g/kg) | Target Rate (kg/wk) | Stop Conditions | Notes
+#
+# Dedupe key = Start Date. An "open" phase has End Date blank. Closing a
+# phase = an `upsert` with `end_date` set on the matching start_date row.
+# The coach derives actuals (weeks elapsed, observed rate) from
+# health_metrics.csv bodyweight trend, so daily macro logging is NOT
+# required — phase metadata alone gives the coaching signal.
+NUTRITION_PHASE_TYPES = {"bulk", "cut", "maintain", "recomp"}
+
+NUTRITION_PHASES_HEADERS = [
+    "Start Date", "End Date", "Phase Type",
+    "Target Surplus/Deficit (kcal)", "Target Protein (g/kg)",
+    "Target Rate (kg/wk)", "Stop Conditions", "Notes",
+]
+
+NUTRITION_PHASES_FIELDS = [
+    "start_date", "end_date", "phase_type",
+    "target_kcal_delta", "target_protein_g_per_kg",
+    "target_rate_kg_per_wk", "stop_conditions", "notes",
+]
+
+
+def read_nutrition_phases(person: str) -> list[dict]:
+    """Return every nutrition phase for ``person``, sorted DESC by start_date.
+
+    Each dict has the ``NUTRITION_PHASES_FIELDS`` keys. ``end_date`` is
+    None when the phase is open. Missing file → ``[]``. Stop conditions
+    and notes are passthrough strings.
+    """
+    path = nutrition_phases_csv(person)
+    header, rows = _read_csv_rows(path)
+    if not header:
+        return []
+    out: list[dict] = []
+    for row in rows:
+        if not row or not row[0].strip():
+            continue
+        start = _date_str(row[0])
+        if start is None:
+            continue
+        end = _date_str(row[1]) if len(row) > 1 and row[1].strip() else None
+        phase_type = (row[2].strip().lower() if len(row) > 2 and row[2].strip() else None)
+        rec = {
+            "start_date": start,
+            "end_date": end,
+            "phase_type": phase_type,
+            "target_kcal_delta": _parse_value(row[3]) if len(row) > 3 else None,
+            "target_protein_g_per_kg": _parse_value(row[4]) if len(row) > 4 else None,
+            "target_rate_kg_per_wk": _parse_value(row[5]) if len(row) > 5 else None,
+            "stop_conditions": (row[6] or None) if len(row) > 6 else None,
+            "notes": (row[7] or None) if len(row) > 7 else None,
+        }
+        out.append(rec)
+    out.sort(key=lambda r: r["start_date"], reverse=True)
+    return out
+
+
+def upsert_nutrition_phases(person: str, entries: Iterable[dict]) -> list[str]:
+    """Sparse-merge nutrition-phase rows into ``nutrition_phases.csv``.
+
+    Dedupe key = ``start_date`` (one phase per start_date). For an
+    existing row, incoming non-None fields overwrite (this is the
+    "close a phase" path — caller passes ``{"start_date": ..., "end_date": ...}``);
+    incoming None never overwrites a populated cell (sparse-merge).
+    Notes is manual-wins (incoming wins only when provided non-empty).
+
+    Validates ``phase_type`` against ``NUTRITION_PHASE_TYPES``. Unknown
+    values raise ValueError so bad parser output never gets persisted.
+    """
+    entries = list(entries or [])
+    if not entries:
+        return ["Nutrition Phases: 0 phases written / 0 updated"]
+
+    existing = read_nutrition_phases(person)
+    by_start: dict[str, dict] = {r["start_date"]: dict(r) for r in existing}
+
+    written = 0
+    updated = 0
+    for e in entries:
+        start = _date_str(e.get("start_date"))
+        if start is None:
+            raise ValueError(f"nutrition phase missing start_date: {e!r}")
+        pt = e.get("phase_type")
+        if pt is not None:
+            pt = str(pt).strip().lower()
+            if pt not in NUTRITION_PHASE_TYPES:
+                raise ValueError(f"unknown phase_type: {pt!r}")
+        sanitized = {
+            "start_date":              start,
+            "end_date":                _date_str(e.get("end_date")) if e.get("end_date") else None,
+            "phase_type":              pt,
+            "target_kcal_delta":       e.get("target_kcal_delta"),
+            "target_protein_g_per_kg": e.get("target_protein_g_per_kg"),
+            "target_rate_kg_per_wk":   e.get("target_rate_kg_per_wk"),
+            "stop_conditions":         e.get("stop_conditions"),
+            "notes":                   e.get("notes"),
+        }
+        prev = by_start.get(start)
+        if prev is None:
+            by_start[start] = sanitized
+            written += 1
+        else:
+            for k, v in sanitized.items():
+                if v is not None and v != "":
+                    prev[k] = v
+            updated += 1
+
+    # Sort DESC by start_date for on-disk stability.
+    records = sorted(by_start.values(), key=lambda r: r["start_date"], reverse=True)
+
+    rows = []
+    for r in records:
+        rows.append([
+            r.get("start_date") or "",
+            r.get("end_date") or "",
+            r.get("phase_type") or "",
+            r.get("target_kcal_delta") if r.get("target_kcal_delta") is not None else "",
+            r.get("target_protein_g_per_kg") if r.get("target_protein_g_per_kg") is not None else "",
+            r.get("target_rate_kg_per_wk") if r.get("target_rate_kg_per_wk") is not None else "",
+            r.get("stop_conditions") or "",
+            r.get("notes") or "",
+        ])
+
+    ensure_data_dir(person)
+    _write_csv(nutrition_phases_csv(person), NUTRITION_PHASES_HEADERS, rows)
+
+    return [f"Nutrition Phases: {written} written / {updated} updated"]

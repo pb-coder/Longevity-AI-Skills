@@ -329,6 +329,16 @@ def read_light_therapy_sessions(person: str) -> list[dict]:
     return _csv_store.read_light_therapy_sessions(person)
 
 
+def read_nutrition_phases(person: str) -> list[dict]:
+    """Return nutrition-phase rows from ``nutrition_phases.csv``.
+
+    Pass-through to ``csv_store.read_nutrition_phases``. Empty list
+    when the file is absent (no manual /log bulking/cutting entries
+    yet). Sorted DESC by ``start_date``.
+    """
+    return _csv_store.read_nutrition_phases(person)
+
+
 def read_workout_sessions(person: str) -> list[dict]:
     """Return Workout Sessions rows from the per-person CSV, ASC by date+start.
 

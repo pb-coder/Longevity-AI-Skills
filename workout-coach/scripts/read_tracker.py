@@ -79,6 +79,7 @@ from extract import (  # noqa: E402
     load_exercises_db,
     read_bodyweight,
     read_health_metrics,
+    read_nutrition_phases,
     read_sleep_nights,
     read_swim_laps,
     read_swim_workouts,
@@ -130,6 +131,7 @@ from sleep import (  # noqa: E402
 from swim import swim_summary  # noqa: E402
 from thermal import thermal_summary  # noqa: E402
 from light_therapy import light_therapy_summary  # noqa: E402
+from nutrition_phase import nutrition_phase_summary  # noqa: E402
 
 
 def _wow_trend(this_v: float | None, last_v: float | None,
@@ -426,6 +428,7 @@ def main() -> int:
     sleep_nights_all = read_sleep_nights(person)
     thermal_sessions_all = read_thermal_sessions(person)
     light_therapy_sessions_all = read_light_therapy_sessions(person)
+    nutrition_phases_all = read_nutrition_phases(person)
 
     bw_all = read_bodyweight(person)
     bw_latest = (
@@ -544,6 +547,14 @@ def main() -> int:
         target_min_per_session=lt_dose,
     )
 
+    # ---- Nutrition phase (bulk / cut / maintain / recomp). Returns None
+    # when no open phase. The summarizer needs estimated_1rm to detect
+    # the "lifts stalled while bulking" stop-signal, so this call must
+    # happen AFTER the e1rm calculation above. ----
+    nutrition_phase = nutrition_phase_summary(
+        nutrition_phases_all, bw_all, today_d, estimated_1rm=e1rm,
+    )
+
     # ---- Week-over-week comparison block (used by the assessment HTML
     # dashboard's bottom card). Composes existing extracts; no new data
     # sources. ----
@@ -647,6 +658,12 @@ def main() -> int:
         # present when at least one manual /log session in the 28-day
         # window; ``_compact`` drops None when absent). ----
         "light_therapy_summary": light_therapy,
+        # ---- Nutrition phase (bulk / cut / maintain / recomp). Only
+        # present when the person has an open phase in
+        # nutrition_phases.csv; ``_compact`` drops None when absent so
+        # the renderer's card gate stays consistent with thermal /
+        # light_therapy. ----
+        "nutrition_phase":      nutrition_phase,
         # ---- Daily activity (NEAT) — all-day movement beyond workouts. ----
         "daily_activity_28d": daily_activity,
         # ---- Recovery + training load (Python-derived, not raw metrics) ----

@@ -108,9 +108,24 @@ COACH_CARD_KEYS = (
     "trajectory_longevity_score", "trajectory_cardio", "trajectory_recovery",
     "trajectory_sleep", "trajectory_body_comp", "trajectory_metabolic",
     "trajectory_behavioral", "trajectory_risk_flags",
+    # TRAJECTORY tab — gated cards (callout only rendered when card renders).
+    # Missing keys are not a warning for these because the card itself may
+    # not render this run (no swim data, no open nutrition phase).
+    "swim_trajectory_callout",
+    "nutrition_phase_callout",
     # Retained (cross-tab cards)
     "vitals", "sleep", "recovery_practices",
 )
+
+
+# Cards that ONLY render when a gating block exists in the tracker JSON.
+# The validator skips "missing callout" warnings for these because the
+# card may legitimately not render this turn — and a missing callout is
+# only noise when there's no card to attach it to.
+GATED_COACH_CARD_KEYS = frozenset({
+    "swim_trajectory_callout",
+    "nutrition_phase_callout",
+})
 
 
 def validate_coach_reads(coach: dict) -> tuple[list[str], list[str]]:
@@ -151,6 +166,11 @@ def validate_coach_reads(coach: dict) -> tuple[list[str], list[str]]:
             )
 
     for key in COACH_CARD_KEYS:
+        if key in GATED_COACH_CARD_KEYS:
+            # Card only renders when its gating block is present in tracker
+            # JSON; a missing callout is only meaningful when the card would
+            # actually render. The renderer decides per-run via its own gate.
+            continue
         if not cards.get(key):
             warnings.append(f"cards.{key} missing or empty; that card will render without a coach callout")
 

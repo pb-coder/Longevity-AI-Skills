@@ -256,6 +256,17 @@ def list_light_therapy_session_months(person: str) -> list[str]:
     )
 
 
+def nutrition_phases_csv(person: str) -> Path:
+    """Per-person nutrition-phase tracker (bulk / cut / maintain / recomp).
+
+    ``<person>/data/nutrition_phases.csv``. One row per phase, keyed by
+    ``Start Date``. ``End Date`` blank ≡ the phase is still open. Manual
+    /log only — no importer writes this file. Absent until the user
+    starts logging phases (mirrors thermal/light_therapy).
+    """
+    return data_dir(person) / "nutrition_phases.csv"
+
+
 def plans_dir(person: str) -> Path:
     """Return the per-person plans folder, e.g. ``<root>/plans/Nihad``.
 

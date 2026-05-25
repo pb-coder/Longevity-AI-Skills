@@ -50,6 +50,7 @@ from render_cards import (
     card_metabolic_domain,
     card_muscle_volume,
     card_neat,
+    card_nutrition_phase,
     card_recovery_domain,
     card_recovery_practices,
     card_rings,
@@ -58,6 +59,7 @@ from render_cards import (
     card_sleep,
     card_sleep_domain,
     card_strength,
+    card_swim_trajectory,
     card_tier_history_strip,
     card_training_load,
     card_vitals,
@@ -196,9 +198,11 @@ def render(j, coach, workout_md, person):
   <div class="tab-panel" data-tab="trajectory">
     {card_longevity_score(longevity_score, coach_cards.get("trajectory_longevity_score"))}
     {card_cardio_domain(vo2_percentile, hr_recovery, recovery, j.get("cardio_hr_zones_28d") or {{}}, vo2max, vo2_trend, coach_cards.get("trajectory_cardio"))}
+    {card_swim_trajectory(j.get("swim_summary"), coach_cards.get("swim_trajectory_callout"))}
     {card_recovery_domain(recovery, weekly, coach_cards.get("trajectory_recovery"))}
     {card_sleep_domain(j.get("sleep_summary"), sleep_regularity, rem_anomaly, coach_cards.get("trajectory_sleep"), longevity_state=longevity_state)}
     {card_body_comp_domain(bw, bw_trend, longevity_state, coach_cards.get("trajectory_body_comp"))}
+    {card_nutrition_phase(j.get("nutrition_phase"), coach_cards.get("nutrition_phase_callout"))}
     {card_metabolic_domain(longevity_state, coach_cards.get("trajectory_metabolic"))}
     {card_behavioral_domain(movement_consistency, sleep_regularity, acwr, j.get("cardio_hr_zones_28d") or {{}}, coach_cards.get("trajectory_behavioral"))}
     {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"))}

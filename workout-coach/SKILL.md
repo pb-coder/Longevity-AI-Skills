@@ -36,7 +36,7 @@ Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at
 ## Setup
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
-2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis. When `swim_summary` is present in the JSON, also read `references/swim-coaching.md` for SWOLF / SPL / CSS-zone interpretation, retest cadence, and what NOT to say about swim form.
+2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis. When `swim_summary` is present in the JSON, also read `references/swim-coaching.md` for SWOLF / SPL / CSS-zone interpretation, retest cadence, and what NOT to say about swim form. When `nutrition_phase` is present AND `current.phase_type == "bulk"`, also read `references/bulking-science.md` for surplus / rate / off-ramp judgment and the binding `coach_action_hint` token semantics.
 3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script reads the per-person CSVs — `<Person>/data/monthly/YYYY.MM.csv` (per-month workout data), `health_metrics.csv`, `workout_sessions.csv`, `profile.csv`, on XML trackers with recent swims also `swimming/YYYY.MM.{workouts,laps}.csv`, on XML trackers with recent sleep data also `sleep/YYYY.MM.nights.csv`, on any tracker with manual sauna / cold logs also `thermal/YYYY.MM.sessions.csv`, and on any tracker with manual light-therapy logs also `light_therapy/YYYY.MM.sessions.csv` — and returns one JSON blob organised around session-level signals, not raw arrays — `monthly_sessions` (one entry per session-date with TRIMP / load_band / volume / max_hr / is_deload), `recovery` (0-10 score with named drivers), `training_load` (CTL/ATL/TSB), `hr_at_volume_divergence` (per-muscle fatigue flag), `cardio_last_28d` + `cardio_hr_zones_28d`, `swim_summary` (only present when there are swims in the last 28 days), `sleep_summary` (only present when there are sleep nights in the last 28 days — all 6 stage means, efficiency mean + trend, fragmentation, schedule consistency, outlier nights), `thermal_summary` (only present when there are sauna / cold sessions in the last 28 days — heat dose, HSP-threshold adherence, cold dominant type), `light_therapy_summary` (only present when there are light-therapy sessions in the last 28 days — adherence vs. target, per-session dose, light_type / modality distribution), `weekly_volume_per_muscle`, `estimated_1rm`, `progression_summary`, `health_metrics_weekly`, plus `bodyweight_latest` / `bodyweight_trend_kg_per_week`. If the data folder isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
    **Output is compact (no indentation) by default** — saves ~20% of tokens vs pretty-printed. Pass `--pretty` for human inspection.
@@ -281,12 +281,14 @@ Goals are fixed: hypertrophy + longevity. Never ask about goals.
 
 The dashboard is produced by **`scripts/render_dashboard.py`**. The script owns all HTML, CSS, SVG, and JavaScript. Your job is to author the **two inputs** and run the renderer.
 
-### Pipeline (4 steps)
+### Pipeline (5 steps — STRICT ORDER)
 
-1. **Read tracker data, 6 months back:** `python3 Skills/workout-coach/scripts/read_tracker.py --person <Name> --months 6 > /tmp/tracker.json`. Six months is required so the 90-day training-load chart's 42-day CTL EWMA is properly warmed up before the visible window begins (anything less and the chart shows a cold-start ramp that is not real fitness movement).
-2. **Author the coach reads** (`plans/<Person>/<date>-coach_reads.json`). See "Coach-reads schema" below and the full spec in `references/assessment-dashboard.md`. Strict copy rules — no em-dashes, ≤ 280 chars per card string, ≤ 560 for the headline. The renderer validates and refuses to write the HTML on violation.
-3. **Author the workout markdown** (`plans/<Person>/<date>-workout.md`). Lean exercise list, sparse `— note` sub-bullets, per-set parentheticals where needed. Rules in the "Per-workout format in the file" section below — unchanged from before.
-4. **Render:**
+The pipeline runs in three logical stages: **A** (Python insights), **B** (LLM authorship), **C** (HTML render). Stage B is split into two sub-steps with a HARD CHECKPOINT between them so the workout plan is always built on top of a finalized assessment, never in parallel with it.
+
+1. **(Stage A) Read tracker data, 6 months back:** `python3 Skills/workout-coach/scripts/read_tracker.py --person <Name> --months 6 > /tmp/tracker.json`. Six months is required so the 90-day training-load chart's 42-day CTL EWMA is properly warmed up before the visible window begins (anything less and the chart shows a cold-start ramp that is not real fitness movement). The Python stage produces every metric, the 5-tier `session_recommendation` gate, `nutrition_phase`, and `swim_summary` — the LLM does not re-derive any of this.
+2. **(Stage B1 — assessment FIRST) Author and save `coach_reads.json`.** Read `/tmp/tracker.json`. Draft `headline` + every `cards.*` callout (including `swim_trajectory_callout` when `swim_summary` is present and `nutrition_phase_callout` when `nutrition_phase` is present). Validate copy rules locally as you write — no em-dashes, ≤ 280 chars per card string, ≤ 560 for the headline. Write the file to `plans/<Person>/<date>-coach_reads.json`. **HARD CHECKPOINT: this file MUST exist on disk before step 3 starts.** The file IS the assessment in structured form; the workout step consumes it as input.
+3. **(Stage B2 — workout SECOND, built on top) Author `plans/<Person>/<date>-workout.md`.** Re-open `coach_reads.json` from disk (do NOT skip the re-read — it forces the workout plan to honor the saved assessment, not paraphrase it from memory). Quote the `headline` and `cards.session_recommendation_callout` as load-bearing references in the workout opener. Then draft the lean exercise bullets honoring the binding 5-tier `session_recommendation` gate from the tracker JSON. Rules in "Per-workout format in the file" below. **DO NOT draft `workout.md` before `coach_reads.json` is saved.**
+4. **(Stage C) Render:**
    ```
    python3 Skills/workout-coach/scripts/render_dashboard.py \
      --tracker /tmp/tracker.json \
@@ -295,6 +297,7 @@ The dashboard is produced by **`scripts/render_dashboard.py`**. The script owns 
      --out plans/<Person>/<date>-assessment.html \
      --person <Person>
    ```
+5. **(Verification) Confirm ordering on disk.** `stat -f "%m %N" plans/<Person>/<date>-{coach_reads.json,workout.md}` — the coach_reads.json mtime must be strictly earlier than the workout.md mtime. If they're inverted, the workout was drafted before the assessment was saved; redo step 3 properly.
 
 ### Common manual reruns
 
@@ -331,12 +334,16 @@ Use the path resolvers (`plans_dir`, `workout_plan_md`, `assessment_html` in `sh
     "// Cross-tab (Trajectory)": "",
     "vitals":              "one or two sentences",
     "sleep":               "one or two sentences (architecture + action)",
-    "recovery_practices":  "one sentence"
+    "recovery_practices":  "one sentence",
+
+    "// Gated (only when the matching tracker block is present)": "",
+    "swim_trajectory_callout":  "one or two sentences. Quote the verdict + 1 actionable focus for the next session. Authored ONLY when tracker JSON contains `swim_summary` (else the card is hidden). The validator does NOT warn when missing because the card may legitimately not render this turn.",
+    "nutrition_phase_callout":  "one or two sentences. Quote the `coach_action_hint` token (Continue / Add calories / Slow intake / Consider ending / End now) and the binding 'why'. Authored ONLY when tracker JSON contains `nutrition_phase`. For `current.phase_type == 'bulk'`, read `references/bulking-science.md` first."
   }
 }
 ```
 
-All `cards` keys are optional. Omit a key (or leave it `""`) and that card renders without a coach callout, pure data. Per-card cap stays at 280 characters; headline cap stays at 560.
+All `cards` keys are optional. Omit a key (or leave it `""`) and that card renders without a coach callout, pure data. Per-card cap stays at 280 characters; headline cap stays at 560. The two gated slots (`swim_trajectory_callout`, `nutrition_phase_callout`) skip the missing-key warning because their cards only render when the matching tracker block is present.
 
 The Trajectory tab's job is to translate raw numbers into **age-cohort context** and **longevity action**: every metric should answer *Where am I? Where should I be? What do I do about it?* — not just describe the data.
 
@@ -630,29 +637,49 @@ Example (filled from a real `light_therapy_summary`):
 
 ### Swim
 
-**REQUIRED when `swim_summary` is in the JSON.** Skip the section entirely when the key is absent — that means no lap data or no swims in the last 28 days, and silence is correct. Read `references/swim-coaching.md` for SWOLF / SPL / CSS interpretation, retest cadence, and what NOT to say about swim form.
+**REQUIRED when `swim_summary` is in the JSON — author `cards.swim_trajectory_callout` in coach_reads.json.** Skip the callout entirely when the key is absent (the renderer hides the swim card when there's no data, and silence is correct). The renderer surfaces the structured data — totals, 14d-vs-prior-14d pace/SPL/SWOLF deltas, PR badges, the verdict pill. The callout adds judgment that the numbers alone can't supply.
 
-Hard template (3–5 lines, plain bullets):
+Read `references/swim-coaching.md` for SWOLF / SPL / CSS interpretation, retest cadence, and what NOT to say about swim form.
 
-- **Totals.** `{N} sessions, {km} km, {minutes} minutes (avg pace ~{sec_per_100m}s/100m).` Pull from `swim_summary.sessions`, `total_distance_km`, `total_minutes`, `avg_pace_sec_per_100m`. Round pace to nearest second; round distance to 2 decimals.
-- **Trend.** Lead with what changed. Cite `swim_summary.spl_trend_4w_per_week` and `swolf_trend_4w_per_week` as primary signals; absolute SPL / SWOLF are secondary. If both trends are null (fewer than 3 sessions in the window), say "not enough swim history for a trend yet" and drop this bullet's trend claim.
-- **CSS state.** If `swim_summary.css` is null AND `swim_summary.css_test_detected` is non-null, prompt: "Looks like you did a 400m + 200m pair on {date} — was that a CSS test? If yes, the inferred CSS is {sec}/100m. Re-log with `CSS test` on the header to write it to your profile." If `swim_summary.css` is null and no test detected, prompt the CSS test workflow (see swim-coaching.md). If `swim_summary.css_retest_due: True`, prompt the retest. Otherwise cite zone distribution if present (`swim_summary.css_zone_distribution`).
-- **Stroke-mix outliers.** If `swim_summary.stroke_outliers` is non-empty, name them once and flag as Apple Watch misclassification candidates (e.g., one Butterfly lap in a Freestyle session). Never claim the user changed strokes mid-session without confirmation.
+**What the callout MUST do** (one to two sentences, ≤280 chars):
+
+1. **Quote the 14d verdict** from `swim_summary.window_14d.improvement_verdict` (`improving` / `regressing` / `mixed` / `flat` / `insufficient_data`) in plain English.
+2. **Name ONE specific signal** driving the verdict — usually the metric in `delta_vs_prior_14d` with the largest absolute movement (lower = better for pace / SPL / SWOLF). When `pace_pr` or `swolf_pr` is True, mention it.
+3. **Give ONE actionable focus** for the next session (e.g., "tempo focus, hold SWOLF" or "log a CSS test"). Don't lecture technique — that's the swim-coaching.md no-go list.
+
+When `swim_summary.css` is null AND `swim_summary.css_test_detected` is non-null, prompt the user via the callout: "Looks like a 400m + 200m pair on {date} — was that a CSS test? Re-log with `CSS test` on the header to write it to your profile." When `swim_summary.css_retest_due: True`, prompt the retest. When `swim_summary.stroke_outliers` is non-empty, flag the lap once as an Apple Watch misclassification candidate (one Butterfly lap in a Freestyle session = noise, not a stroke change).
 
 Source-honesty rules (from swim-coaching.md):
 - Trend over absolute. Don't quote SWOLF / SPL ability brackets unless the user asks.
-- Don't lecture about technique (catch, body roll, kick mechanics). Coach reads metrics, not video.
-- Don't quote SPL to the decimal in user-facing text. "around 8" beats "8.4".
-- One outlier lap is almost always Apple Watch noise on a flip turn or stroke transition. Flag it; don't act on it.
+- Don't lecture technique (catch, body roll, kick mechanics). Coach reads metrics, not video.
+- Don't quote SPL to the decimal. "around 8" beats "8.4".
+- One outlier lap is almost always Apple Watch noise on a flip turn. Flag it; don't act on it.
 
-Example (filled from a real `swim_summary`):
+Example (real `swim_trajectory_callout` against Nihad's 2026-05-25 data):
 
-```
-- 2 sessions, 0.88 km, 21 minutes (avg pace ~145 s/100m).
-- SPL around 8, SWOLF around 28. Not enough swim history for a trend yet — needs ≥3 sessions in the window.
-- CSS not on file. Want to set one? Log a 400m + 200m TT pair on the same day with `CSS test` on the header.
-- Stroke outlier: one "Butterfly" lap on 2026-05-08 inside an otherwise Freestyle session. Likely an Apple Watch misclassification on a turn.
-```
+> Mixed read: SWOLF dropped 4.5 (new PR at 21.9) and SPL improved 1.1, but average pace slipped 4s/100m. Stroke economy is up, raw speed is down. Next session: hold the SWOLF win, push tempo on the last 200m.
+
+### Nutrition phase
+
+**REQUIRED when `nutrition_phase` is in the JSON — author `cards.nutrition_phase_callout` in coach_reads.json.** Skip the callout when the key is absent (no open phase row in `<person>/data/nutrition_phases.csv`). When `current.phase_type == "bulk"`, **read `references/bulking-science.md` first** — it's the source of truth for surplus / rate / off-ramp judgment.
+
+The renderer surfaces the structured data — phase type + weeks elapsed, observed-vs-target rate, status pill, the binding `coach_action_hint` action pill, triggered stop signals, the user's pre-committed off-ramp. The callout adds the judgment that the numbers alone can't supply.
+
+**What the callout MUST do** (one to two sentences, ≤280 chars):
+
+1. **Quote the `coach_action_hint`** verbatim (`Continue phase` / `Add calories` / `Slow intake` / `Consider ending` / `End now`) — this is the binding decision token, the same way `session_recommendation.headline` is binding for the workout.
+2. **Name the load-bearing 'why'** — the single signal driving the hint. Observed rate vs target ratio, a triggered stop signal, or weeks elapsed when nothing has triggered (e.g. "week 2, on-track, no signals — hold").
+3. **For `consider_ending` / `end_now`**: also quote the matching `stop_signals_triggered[0]` so the user sees which pre-committed line was crossed.
+
+Source-honesty rules (from bulking-science.md):
+- The smoothed-endpoint 14d rate filters daily scale noise. Don't quote raw daily fluctuations.
+- A single bad week is not a stop signal. Confounders (sleep, sodium, travel, illness) need to be considered first.
+- Don't recommend "just eat more" or "just eat less" — surplus/deficit changes go via the structured target on the phase row, refined deliberately over weeks.
+- Default lean-bulk cap is 12 weeks. Beyond that, the math almost always favors a planned mini-cut before the next bulk.
+
+Example (real `nutrition_phase_callout` against Nihad's 2026-05-25 data):
+
+> Continue phase. Week 2 at +0.24 kg/wk against a 0.25 target, no stop signals triggered. Re-evaluate after week 4; if rate creeps above 0.4 kg/wk, dial the surplus back 100-200 kcal.
 
 ## Phase 2: Planning (into workout_plan.md `## Plan`)
 
@@ -913,7 +940,9 @@ Source-honesty rules still apply to those coach's-read lines:
 | Defaulting to `→` on the recovery trend | Recovery row reads `4.2/10 (... trend → vs prior 4w)` even when every metric is moving down | Use the `improving / drifting / mixed` descriptor (deterministic procedure under "Last 28 days at a glance"). The arrow is no longer accepted. |
 | Calling a deload on TSB alone when strength HR is unavailable | TSB -10.7 from two big hikes triggers a "fatigued" prescription even though strength load is invisible to TSB | When `capabilities.per_workout_hr_strength` is False, CTL/ATL/TSB are computed only from cardio TRIMPs — strength load is invisible. Don't treat a negative TSB as a unilateral deload trigger; cross-check with `recovery.score` and prefer recovery_score as the primary fatigue signal on these trackers. |
 | Citing `non_interval_minutes` as Zone-2 minutes | Cardio check section reports `cardio_last_28d.non_interval_minutes` (which is just "cardio time that wasn't intervals") as if it were a real Z2 measurement — a 3h Z1 hike inflates the number | Read `cardio_hr_zones_28d.z2` for true Zone-2 minutes (HRR-based). Use `cardio_last_28d.non_interval_minutes` only as a fallback when `cardio_hr_zones_28d` is empty (no avg_hr on cardio sessions). |
-| Skipping the Swim section when `swim_summary` is present | Fully-populated swim data emits zero coach output; the user sees a polished report that pretends they don't swim | Gate on `swim_summary` key presence. Write the REQUIRED 3–5 line block per `references/swim-coaching.md` (see `### Swim` in Phase 1). Skip cleanly only when the key is absent (no lap data or no swims in 28 days). |
+| Skipping `swim_trajectory_callout` when `swim_summary` is present | The renderer surfaces the swim card with structured 14d trend data, but no coach commentary — the user reads numbers without judgment | Gate on `swim_summary` key presence in tracker JSON. When present, author `cards.swim_trajectory_callout` per the `### Swim` block in Phase 1 (verdict + 1 driver + 1 actionable focus). |
+| Skipping `nutrition_phase_callout` when `nutrition_phase` is present | The dashboard shows the bulk/cut phase + status pill but no judgment; the binding `coach_action_hint` token reads as ungrounded | Gate on `nutrition_phase` key presence. When present, author `cards.nutrition_phase_callout` per the `### Nutrition phase` block in Phase 1. For `current.phase_type == "bulk"`, read `references/bulking-science.md` first. |
+| Drafting `workout.md` before `coach_reads.json` is saved | The workout plan ends up paraphrasing the assessment in parallel instead of building on top of it; the two artifacts can drift | Hard checkpoint: write coach_reads.json to disk FIRST, then re-read it before drafting workout.md. The Pipeline (5 steps) section enforces this; verify via mtime ordering after the run. |
 | Skipping the Sleep section when `sleep_summary` is present | Fully-populated sleep architecture (all 6 stages, efficiency, fragmentation, schedule stdev) gets zero coach output; the user only sees the headline Sleep total/Deep/REM lines under `### Recovery state` and misses the efficiency / schedule story | Gate on `sleep_summary` key presence. Write the REQUIRED 3–5 line block per the `### Sleep` template in Phase 1. Skip cleanly only when the key is absent (no nights in 28 days). |
 | Skipping the Heat / Cold section when `thermal_summary` is present | The user logged sauna / cold sessions but the coach silently ignores them. Adherence call (on-target / below-target) and HSP-threshold call are exactly the actionable bits the user needs to see. | Gate on `thermal_summary` key presence. Write the REQUIRED 3–5 line block per the `### Heat / Cold exposure` template in Phase 1. Skip cleanly only when the key is absent (no sauna / cold sessions logged in the last 28 days). |
 | Skipping the Light therapy section when `light_therapy_summary` is present | The user logged RLT / blue-light sessions but the coach silently ignores them. Adherence + per-session dose are the only actionable bits. | Gate on `light_therapy_summary` key presence. Write the REQUIRED 2–4 line block per the `### Light therapy` template in Phase 1. Skip cleanly only when the key is absent (no light-therapy sessions logged in 28d). |

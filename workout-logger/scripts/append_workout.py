@@ -104,6 +104,7 @@ from monthly_csv import (  # noqa: E402
 from csv_store import (  # noqa: E402
     upsert_health_metrics,
     upsert_light_therapy_sessions,
+    upsert_nutrition_phases,
     upsert_sleep_nights,
     upsert_thermal_sessions,
     write_profile,
@@ -399,6 +400,49 @@ def upsert_light_therapy(person: str, entries: list[dict]) -> list[str]:
     return out
 
 
+def upsert_nutrition_phase(person: str, entries: list[dict]) -> list[str]:
+    """Forward parsed nutrition-phase entries (bulk / cut / maintain /
+    recomp) to the flat per-person ``nutrition_phases.csv`` store.
+
+    Each entry has shape:
+
+        {
+          "start_date": "2026-05-11",
+          "end_date": null | "YYYY-MM-DD",   # null ≡ phase is open
+          "phase_type": "bulk" | "cut" | "maintain" | "recomp",
+          "target_kcal_delta": 300,           # optional, kcal/day above maintenance
+          "target_protein_g_per_kg": 1.8,     # optional
+          "target_rate_kg_per_wk": 0.25,      # optional, falls back to type default
+          "stop_conditions": "free text ...", # optional pre-committed off-ramp
+          "notes": null
+        }
+
+    Sparse-merge by ``start_date`` (one phase per start_date). Ending an
+    open phase = an upsert with ``end_date`` set on the matching
+    start_date row. Manual /log only — no Apple importer writes here.
+    """
+    if not entries:
+        return []
+    out = upsert_nutrition_phases(person, entries)
+    summary_parts: list[str] = []
+    for e in entries:
+        sd = str(e.get("start_date") or "")[:10]
+        if not sd:
+            continue
+        pt = e.get("phase_type") or "phase"
+        ed = e.get("end_date")
+        if ed:
+            summary_parts.append(f"{pt} {sd}→{str(ed)[:10]} (closed)")
+        else:
+            summary_parts.append(f"{pt} {sd} (open)")
+    if summary_parts:
+        out.append(
+            f"Nutrition phase: forwarded {len(summary_parts)} "
+            f"entr{'y' if len(summary_parts) == 1 else 'ies'} ({', '.join(summary_parts)})"
+        )
+    return out
+
+
 def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
     """Mirror manual bodyweight entries into the Health Metrics CSV.
 
@@ -429,14 +473,15 @@ def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
                   css_test: dict | None = None,
                   sleep: list[dict] | None = None,
                   thermal: list[dict] | None = None,
-                  light_therapy: list[dict] | None = None) -> list[str]:
-    """Apply rows + bodyweight + sleep + thermal + light_therapy + optional CSS test.
+                  light_therapy: list[dict] | None = None,
+                  nutrition_phase: list[dict] | None = None) -> list[str]:
+    """Apply rows + bodyweight + sleep + thermal + light_therapy + nutrition_phase + optional CSS test.
 
     Routes per-set rows to the matching ``YYYY.MM.csv`` under
     ``<person>/data/monthly/``, then canonicalizes each touched month
     (sort, recompute Volume / Pace / TOTAL rows). Bodyweight, sleep,
-    thermal, light_therapy, and css_test flow through the existing CSV
-    helpers.
+    thermal, light_therapy, nutrition_phase, and css_test flow through
+    the existing CSV helpers.
     """
     status: list[str] = []
 
@@ -468,21 +513,25 @@ def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
     status.extend(upsert_thermal(person, thermal or []))
     # Light therapy writes to light_therapy/YYYY.MM.sessions.csv.
     status.extend(upsert_light_therapy(person, light_therapy or []))
+    # Nutrition phase (bulk / cut / maintain / recomp) writes to the flat
+    # <person>/data/nutrition_phases.csv. Independent of every other store.
+    status.extend(upsert_nutrition_phase(person, nutrition_phase or []))
     # CSS test writes to profile.csv. Independent of rows / bodyweight.
     status.extend(apply_css_test(person, css_test))
     return status
 
 
-def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list[dict], list[dict], list[dict]]:
-    """Return (rows, bodyweight, css_test, sleep, thermal, light_therapy).
+def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list[dict], list[dict], list[dict], list[dict]]:
+    """Return (rows, bodyweight, css_test, sleep, thermal, light_therapy, nutrition_phase).
 
     Accepts bare list (legacy — rows only) or wrapper dict. Wrapper
     dict accepts optional ``bodyweight``, ``css_test``, ``sleep``,
-    ``thermal``, and ``light_therapy`` keys; all are independent.
+    ``thermal``, ``light_therapy``, and ``nutrition_phase`` keys; all
+    are independent.
 
     ``sleep`` / ``thermal`` / ``light_therapy`` entries each require
-    ``date``; every other field is optional and falls through
-    sparse-merge.
+    ``date``; ``nutrition_phase`` entries require ``start_date``. Every
+    other field is optional and falls through sparse-merge.
     """
     if source == "-":
         data = json.load(sys.stdin)
@@ -493,6 +542,7 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
     sleep_entries: list[dict] = []
     thermal_entries: list[dict] = []
     light_therapy_entries: list[dict] = []
+    nutrition_phase_entries: list[dict] = []
     if isinstance(data, list):
         rows = data
         bw = []
@@ -516,6 +566,10 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
         if isinstance(light_raw, dict):
             light_raw = [light_raw]
         light_therapy_entries = light_raw
+        np_raw = data.get("nutrition_phase", []) or []
+        if isinstance(np_raw, dict):
+            np_raw = [np_raw]
+        nutrition_phase_entries = np_raw
     else:
         raise ValueError("payload must be a list of rows or a dict wrapper")
 
@@ -541,8 +595,12 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
     for e in light_therapy_entries:
         if "date" not in e:
             raise ValueError(f"light_therapy entry missing date: {e!r}")
+    for e in nutrition_phase_entries:
+        if "start_date" not in e:
+            raise ValueError(f"nutrition_phase entry missing start_date: {e!r}")
 
-    return rows, bw, css_test, sleep_entries, thermal_entries, light_therapy_entries
+    return (rows, bw, css_test, sleep_entries, thermal_entries,
+            light_therapy_entries, nutrition_phase_entries)
 
 
 def main() -> int:
@@ -556,17 +614,20 @@ def main() -> int:
     ctx = TrackerContext(args.person)
 
     (rows, bodyweight, css_test, sleep_entries,
-     thermal_entries, light_therapy_entries) = load_payload(args.payload)
+     thermal_entries, light_therapy_entries,
+     nutrition_phase_entries) = load_payload(args.payload)
     if (not rows and not bodyweight and not css_test
             and not sleep_entries and not thermal_entries
-            and not light_therapy_entries):
-        print("No rows, bodyweight, sleep, thermal, light_therapy, or css_test entries to write.")
+            and not light_therapy_entries
+            and not nutrition_phase_entries):
+        print("No rows, bodyweight, sleep, thermal, light_therapy, nutrition_phase, or css_test entries to write.")
         return 0
     try:
         for line in write_payload(ctx.person, rows, bodyweight, css_test,
                                   sleep=sleep_entries,
                                   thermal=thermal_entries,
-                                  light_therapy=light_therapy_entries):
+                                  light_therapy=light_therapy_entries,
+                                  nutrition_phase=nutrition_phase_entries):
             print(line)
     except FileNotFoundError as e:
         print(f"ERROR: {e}", file=sys.stderr)

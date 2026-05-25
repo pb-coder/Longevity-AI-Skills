@@ -209,6 +209,115 @@ def detect_css_test(swim_workouts: list[dict]) -> dict | None:
     return None
 
 
+def _window_aggregates(window: list[dict]) -> dict:
+    """Compute (n_sessions, total_distance_km, total_minutes, avg_pace,
+    avg_spl, avg_swolf) for a windowed list of swims. Empty window → all
+    None (sessions = 0). Pace uses sum(time)/sum(distance), not the
+    mean-of-pace, so a short slow swim doesn't drag the average.
+    """
+    if not window:
+        return {
+            "n_sessions":     0,
+            "total_distance_km": 0.0,
+            "total_minutes":  0.0,
+            "avg_pace_sec_per_100m": None,
+            "avg_spl":        None,
+            "avg_swolf":      None,
+        }
+    total_dist = round(sum(float(w.get("distance_km") or 0) for w in window), 2)
+    total_min = round(sum(float(w.get("duration_min") or 0) for w in window), 1)
+
+    pace_dist = pace_time = 0.0
+    for w in window:
+        d = w.get("distance_km")
+        m = w.get("duration_min")
+        if d and m and float(d) > 0 and float(m) > 0:
+            pace_dist += float(d)
+            pace_time += float(m)
+    avg_pace = pace_per_100m(pace_dist, pace_time)
+
+    spl_vals = [float(w["spl"]) for w in window if w.get("spl")]
+    swolf_vals = [float(w["avg_swolf"]) for w in window if w.get("avg_swolf")]
+    return {
+        "n_sessions":             len(window),
+        "total_distance_km":      total_dist,
+        "total_minutes":          total_min,
+        "avg_pace_sec_per_100m":  avg_pace,
+        "avg_spl":                round(sum(spl_vals) / len(spl_vals), 1) if spl_vals else None,
+        "avg_swolf":              round(sum(swolf_vals) / len(swolf_vals), 1) if swolf_vals else None,
+    }
+
+
+def _delta(curr: float | None, prev: float | None) -> float | None:
+    """Return curr - prev rounded, or None if either side is missing."""
+    if curr is None or prev is None:
+        return None
+    return round(curr - prev, 2)
+
+
+def _best_pace(window: list[dict]) -> float | None:
+    """Best (lowest) per-session pace_per_100m in the window, or None."""
+    paces = []
+    for w in window:
+        p = pace_per_100m(w.get("distance_km"), w.get("duration_min"))
+        if p is not None:
+            paces.append(p)
+    return min(paces) if paces else None
+
+
+def _best_swolf(window: list[dict]) -> float | None:
+    """Best (lowest) per-session avg_swolf in the window, or None."""
+    swolfs = [float(w["avg_swolf"]) for w in window if w.get("avg_swolf")]
+    return round(min(swolfs), 1) if swolfs else None
+
+
+def _improvement_verdict(curr: dict, prev: dict) -> str:
+    """Classify 14d-vs-prior-14d movement into a single verdict token.
+
+    Tokens (LLM-friendly):
+      - ``insufficient_data`` — fewer than 2 sessions in either window
+      - ``improving``         — at least 2 of {pace, SPL, SWOLF} moved
+                                in the improving direction (lower = better
+                                for all three); pace must be one of them
+      - ``regressing``        — at least 2 of {pace, SPL, SWOLF} got worse;
+                                pace must be one of them
+      - ``mixed``             — non-trivial movement in both directions
+      - ``flat``              — no metric moved more than ~1%
+    """
+    if curr["n_sessions"] < 2 or prev["n_sessions"] < 2:
+        return "insufficient_data"
+
+    deltas = {
+        "pace":  _delta(curr["avg_pace_sec_per_100m"], prev["avg_pace_sec_per_100m"]),
+        "spl":   _delta(curr["avg_spl"], prev["avg_spl"]),
+        "swolf": _delta(curr["avg_swolf"], prev["avg_swolf"]),
+    }
+
+    # Significance threshold: ~1 sec/100m for pace, ~0.3 strokes for SPL,
+    # ~0.5 for SWOLF. Below these floors, treat as noise, not movement.
+    thresholds = {"pace": 1.0, "spl": 0.3, "swolf": 0.5}
+    significant = {
+        k: v for k, v in deltas.items()
+        if v is not None and abs(v) >= thresholds[k]
+    }
+
+    if not significant:
+        return "flat"
+
+    improving = {k for k, v in significant.items() if v < 0}
+    regressing = {k for k, v in significant.items() if v > 0}
+
+    if len(improving) >= 2 and "pace" in improving:
+        return "improving"
+    if len(regressing) >= 2 and "pace" in regressing:
+        return "regressing"
+    if improving and regressing:
+        return "mixed"
+    if improving:
+        return "improving" if "pace" in improving else "mixed"
+    return "regressing" if "pace" in regressing else "mixed"
+
+
 def swim_summary(swim_workouts: list[dict],
                  swim_laps: list[dict],
                  today_d: date,
@@ -220,6 +329,12 @@ def swim_summary(swim_workouts: list[dict],
       window_days, sessions, total_distance_km, total_minutes,
       total_laps, avg_pace_sec_per_100m, avg_spl, avg_swolf,
       spl_trend_4w_per_week, swolf_trend_8w_per_week,
+      window_14d: {n_sessions, total_distance_km, total_minutes,
+        avg_pace_sec_per_100m, avg_spl, avg_swolf,
+        delta_vs_prior_14d: {pace, spl, swolf},
+        best_pace_sec_per_100m, best_swolf, prior_best_pace,
+        prior_best_swolf, pace_pr, swolf_pr (bool flags),
+        improvement_verdict},
       sessions_detail (per-session: date, distance_km, duration_min,
         pace, css_zone, modal_stroke, outlier_count),
       stroke_outliers (sessions with at least one outlier lap),
@@ -325,8 +440,65 @@ def swim_summary(swim_workouts: list[dict],
 
     css_test_detected = detect_css_test(swim_workouts)
 
+    # ---- 14d window: "am I getting better?" headline. ----
+    # Compared against the prior 14d (days 14-28 ago) for a delta-driven
+    # improvement verdict the renderer + LLM both consume. Falls back to
+    # insufficient_data when either window has < 2 swims.
+    window_14d = recent_swim_workouts(swim_workouts, today_d, days=14)
+    cutoff_28_inclusive = today_d - timedelta(days=14)
+    prior_14d = []
+    for w in swim_workouts:
+        d_w = _parse_iso_date(w.get("date"))
+        if d_w is None or d_w > today_d:
+            continue
+        if d_w >= cutoff_28_inclusive:
+            continue
+        if d_w < today_d - timedelta(days=28):
+            continue
+        prior_14d.append(w)
+
+    curr_agg = _window_aggregates(window_14d)
+    prev_agg = _window_aggregates(prior_14d)
+    verdict = _improvement_verdict(curr_agg, prev_agg)
+
+    best_pace_curr = _best_pace(window_14d)
+    best_pace_prev = _best_pace(prior_14d)
+    best_swolf_curr = _best_swolf(window_14d)
+    best_swolf_prev = _best_swolf(prior_14d)
+
+    window_14d_block = {
+        "n_sessions":              curr_agg["n_sessions"],
+        "total_distance_km":       curr_agg["total_distance_km"],
+        "total_minutes":           curr_agg["total_minutes"],
+        "avg_pace_sec_per_100m":   curr_agg["avg_pace_sec_per_100m"],
+        "avg_spl":                 curr_agg["avg_spl"],
+        "avg_swolf":               curr_agg["avg_swolf"],
+        "delta_vs_prior_14d": {
+            "pace":  _delta(curr_agg["avg_pace_sec_per_100m"],
+                            prev_agg["avg_pace_sec_per_100m"]),
+            "spl":   _delta(curr_agg["avg_spl"], prev_agg["avg_spl"]),
+            "swolf": _delta(curr_agg["avg_swolf"], prev_agg["avg_swolf"]),
+        },
+        "best_pace_sec_per_100m":  best_pace_curr,
+        "best_swolf":              best_swolf_curr,
+        "prior_best_pace":         best_pace_prev,
+        "prior_best_swolf":        best_swolf_prev,
+        "pace_pr":  bool(
+            best_pace_curr is not None
+            and best_pace_prev is not None
+            and best_pace_curr < best_pace_prev
+        ),
+        "swolf_pr": bool(
+            best_swolf_curr is not None
+            and best_swolf_prev is not None
+            and best_swolf_curr < best_swolf_prev
+        ),
+        "improvement_verdict":     verdict,
+    }
+
     return {
         "window_days":              28,
+        "window_14d":               window_14d_block,
         "sessions":                 sessions,
         "total_distance_km":        total_dist,
         "total_minutes":            total_min,

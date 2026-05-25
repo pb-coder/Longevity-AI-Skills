@@ -223,6 +223,47 @@ Light-therapy entries are written to `<Person>/data/light_therapy/YYYY.MM.sessio
 
 To back-fill historical light-therapy sessions, call `append_workout.py` with a payload of only light-therapy entries: `{"rows": [], "light_therapy": [{"date": "...", "duration_min": 5, "light_type": "red+ir", "ambient_temp_c": 45}, ...]}`. The logger routes each entry to the right `light_therapy/YYYY.MM.sessions.csv`. Same dedupe-by-`(date, start)` semantics as the per-month thermal store.
 
+## Nutrition phase (opt-in)
+
+Nutrition phases (`bulk` / `cut` / `maintain` / `recomp`) are opt-in. The user signals one via a top-level line in the `/log` message:
+
+- **`bulking start [date] [target X kcal] [protein X g/kg] [rate X kg/wk] [stop: ...]`** — opens a new phase. `date` defaults to today; all other targets are optional and fall back to the bulk defaults (target rate 0.25 kg/wk; coach uses bulking-science.md for kcal/protein when omitted). `stop:` is a free-text pre-commitment line listing the off-ramp conditions (e.g. `stop: >0.5 kg/wk for 3 weeks; lifts stall 2 weeks; visible bloat`).
+- **`bulking end [date]`** — closes the open bulk phase. `date` defaults to today.
+- **`bulking update [field=value ...]`** — updates the open bulk phase's targets / notes. Same keys as start (target, protein, rate, stop, notes).
+- The same three commands exist for `cutting` (e.g. `cutting start`, defaults: target rate -0.5 kg/wk) and `maintaining` (target rate 0.0) and `recomp` (no target rate).
+
+**No automatic prompts, no probing, no `AskUserQuestion`.** Absent ≡ didn't happen.
+
+Phases are stored in a single flat CSV at `<Person>/data/nutrition_phases.csv` (sparse: a handful of rows per year, so no per-month split). Dedupe key = `Start Date` (one phase per start_date). Opening a new phase while one is already open is allowed — both rows exist, and the coach's `nutrition_phase_summary` picks the most recent open phase. To "swap" phases cleanly, end the prior one first (`bulking end`) then start the new one.
+
+Payload shape — add a `nutrition_phase` key alongside `rows` / `bodyweight` / `sleep` / `thermal` / `light_therapy`:
+
+```json
+{
+  "rows": [],
+  "nutrition_phase": [
+    {
+      "start_date": "2026-05-11",
+      "end_date": null,
+      "phase_type": "bulk",
+      "target_kcal_delta": 300,
+      "target_protein_g_per_kg": 1.8,
+      "target_rate_kg_per_wk": 0.25,
+      "stop_conditions": ">+0.5 kg/wk for 3 weeks; lifts stall 2 weeks; visible bloat",
+      "notes": "first bulk after 4-month maintain"
+    }
+  ]
+}
+```
+
+The logger calls `csv_store.upsert_nutrition_phases(person, payload["nutrition_phase"])` which sparse-merges on `Start Date`. Phase-type validation lives in the upsert (one of `bulk` / `cut` / `maintain` / `recomp`); unknown values raise ValueError. Coach reads via `read_nutrition_phases` and the lib helper `nutrition_phase_summary`.
+
+The coach evaluates whether the bulk is on-track by reading bodyweight rate from `health_metrics.csv` (smoothed-endpoint 14d window) — daily macro logging is NOT required. Phase metadata alone gives the coaching signal.
+
+### Bulk-seed (historical nutrition phases)
+
+To back-fill historical phases (e.g. tracking prior bulks/cuts retroactively), call `append_workout.py` with a payload of only phase entries: `{"rows": [], "nutrition_phase": [{"start_date": "2025-01-15", "end_date": "2025-03-10", "phase_type": "cut", "target_rate_kg_per_wk": -0.5, "notes": "post-holidays cut"}, ...]}`. Multiple phases can be seeded in one call; the upsert dedupes on `Start Date`.
+
 ## Session-level flags
 
 **Deload.** If the word `deload` appears anywhere on the header line of a session (before the first exercise bullet), that session is a deload. Examples that all trigger it:

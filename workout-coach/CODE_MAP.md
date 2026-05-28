@@ -32,7 +32,10 @@ For known issues / planned cleanup, see
 
 | Goal | Edit |
 | --- | --- |
-| A card's HTML layout / structure | [`lib/render_cards.py`](lib/render_cards.py) |
+| Today-tab card HTML | [`lib/render_cards_today.py`](lib/render_cards_today.py) |
+| Trajectory health/recovery cards | [`lib/render_cards_health.py`](lib/render_cards_health.py) |
+| Trajectory longevity-domain cards | [`lib/render_cards_domains.py`](lib/render_cards_domains.py) |
+| Trajectory risk/swim/nutrition cards | [`lib/render_cards_programs.py`](lib/render_cards_programs.py) |
 | CSS / styling / colors | [`lib/render_assets.py`](lib/render_assets.py) (the `STYLESHEET` string) |
 | Inline JavaScript (tabs, tooltips, chart scrubber, markdown viewer) | [`lib/render_assets.py`](lib/render_assets.py) (the `INLINE_JS` string) |
 | An SVG component (training-load chart, sparkline, muscle bar, freshness / recovery scale, ring, driver bar) | [`lib/render_components.py`](lib/render_components.py) |
@@ -40,12 +43,12 @@ For known issues / planned cleanup, see
 | Add a tooltip for a new abbreviation in coach text | [`lib/render_validators.py`](lib/render_validators.py)::`KNOWN_TERMS` |
 | Tracker JSON shape (what fields the renderer reads) | [`../tracker/contracts.py`](../tracker/contracts.py)::`TrackerJSON` + [`scripts/read_tracker.py`](scripts/read_tracker.py) |
 | Coach reads JSON shape | [`../tracker/contracts.py`](../tracker/contracts.py)::`CoachReads` + [`lib/render_validators.py`](lib/render_validators.py) |
-| Recovery score formula / drivers | [`lib/health.py`](lib/health.py)::`recovery_score` |
-| **5-tier session recommendation (Phase 2 binding gate)** | [`lib/health.py`](lib/health.py)::`compute_session_recommendation` |
-| 14-day tier history (the decision-history strip) | [`lib/health.py`](lib/health.py)::`compute_tier_history` |
-| Longevity composite score (10-component weighted) | [`lib/health.py`](lib/health.py)::`compute_longevity_score` |
-| VO2max age/sex percentile | [`lib/health.py`](lib/health.py)::`vo2_percentile_age_sex` |
-| Longevity state I/O (DOB, conditions, meds, risk flags) | [`lib/health.py`](lib/health.py)::`read_longevity_state` |
+| Recovery score formula / drivers | [`lib/health_recovery.py`](lib/health_recovery.py)::`recovery_score` |
+| **5-tier session recommendation (Phase 2 binding gate)** | [`lib/health_session_rec.py`](lib/health_session_rec.py)::`compute_session_recommendation` |
+| 14-day tier history (the decision-history strip) | [`lib/health_session_rec.py`](lib/health_session_rec.py)::`compute_tier_history` |
+| Longevity composite score (10-component weighted) | [`lib/health_longevity.py`](lib/health_longevity.py)::`compute_longevity_score` |
+| VO2max age/sex percentile | [`lib/health_longevity.py`](lib/health_longevity.py)::`vo2_percentile_age_sex` |
+| Longevity state I/O (DOB, conditions, meds, risk flags) | [`lib/health_longevity.py`](lib/health_longevity.py)::`read_longevity_state` |
 | Per-muscle volume math (MEV / MAV / MRV thresholds, weekly tally) | [`lib/constants.py`](lib/constants.py) + [`lib/strength.py`](lib/strength.py) |
 | CTL / ATL / TSB / TRIMP math | [`lib/cardio.py`](lib/cardio.py) |
 | Sleep aggregation (efficiency, fragmentation, schedule, outliers) | [`lib/sleep.py`](lib/sleep.py) |
@@ -84,7 +87,11 @@ Skills/workout-coach/
     ├── sessions.py (267)                 per-session aggregation + bodyweight trend
     ├── strength.py (512)                 volume, e1RM, HR-at-volume divergence
     ├── cardio.py (609)                   cardio rollups, HR zones, TRIMP, CTL/ATL/TSB, NEAT
-    ├── health.py (1349)                  windowing, recovery_score, longevity_score, session_recommendation, tier_history, longevity_state I/O
+    ├── health.py (77)                    compatibility facade for focused health modules
+    ├── health_windowing.py (162)         time-series primitives + weekly aggregates
+    ├── health_recovery.py (220)          recovery_score + recovery drivers
+    ├── health_longevity.py (497)         longevity_score + longevity_state I/O
+    ├── health_session_rec.py (472)       5-tier gate + 14-day tier history
     ├── sleep.py (422)                    sleep_summary (stages, schedule, fragmentation, outliers)
     ├── swim.py (347)                     swim_summary (pace, SPL, SWOLF, CSS zones)
     ├── thermal.py (336)                  thermal_summary (sauna + cold)
@@ -95,42 +102,36 @@ Skills/workout-coach/
     ├── render_validators.py (186)        KNOWN_TERMS catalog, validate_coach_reads, auto_wrap_terms
     ├── render_components.py (752)        SVG / HTML components (chart, rings, bars, scales, sparkline)
     ├── render_assets.py (998)            STYLESHEET (CSS) + INLINE_JS strings
-    └── render_cards.py (1551)            card_* HTML templates + coach_block
+    ├── render_cards.py (76)              compatibility facade for card modules
+    ├── render_cards_common.py (39)       shared heading + coach callout helpers
+    ├── render_cards_today.py (472)       Today tab card templates
+    ├── render_cards_health.py (442)      health / sleep / recovery-practice cards
+    ├── render_cards_domains.py (581)     longevity-domain cards
+    └── render_cards_programs.py (371)    risk / swim / nutrition cards
 ```
 
-> Line counts are accurate as of 2026-05-24. They will drift; re-check
+> Line counts are accurate as of 2026-05-28. They will drift; re-check
 > with `wc -l workout-coach/lib/*.py workout-coach/scripts/*.py` when
 > something looks off.
 
 ## Analytics module index (`lib/<domain>.py`)
 
-### [`lib/health.py`](lib/health.py) (~1349 lines)
+### Health analytics split
 
-The biggest analytics module. Five logical sections — split is on the
-backlog (see `references/code-health-audit.md` #10):
+`lib/health.py` is now a compatibility facade only. Existing imports keep
+working; new changes should go to the focused module:
 
-1. **Windowing / aggregation** (lines 34–130) — `_values_in_window`,
-   `_mean_or_none`, `metric_trend_per_4w`, `latest_metric`,
-   `baseline_60d`, `workout_sessions_in_window`,
-   `health_metrics_weekly`.
-2. **Recovery scoring** (lines 183–395) — `_z_score_signal`,
-   `recovery_score` (composes ~9 drivers with per-signal sample-
-   sufficiency gate; confidence drops one band when a high-weight
-   z-scored driver has too few recent readings).
-3. **Longevity scoring** (lines 396–699) — `vo2_percentile_age_sex`,
-   `_safe_norm`, `compute_longevity_score` (10-component weighted
-   average; accepts optional `capabilities` to suppress source-
-   unavailable inputs).
-4. **Session recommendation (5-tier gate, the Phase 2 mandate)** (lines
-   700–1162) — internal helpers `_muscles_over_mrv`,
-   `_rhr_sustained_elevation_days`, `_wrist_temp_deviation_c`, `_z_for`,
-   `_count_stalled_lifts`, `_tsb_sustained_days`; then
-   `compute_session_recommendation` (returns tier A/B/C/D/E + headline
-   + rationale) and `compute_tier_history` (rolls the recommendation
-   over a 14-day window for the decision-history strip).
-5. **Longevity state I/O** (lines 1163–1349) — `read_longevity_state`
-   loads `<Person>/data/longevity/state.md` (DOB, conditions, meds,
-   risk flags). Called from `read_tracker.py`.
+- [`lib/health_windowing.py`](lib/health_windowing.py) — `_values_in_window`,
+  `_mean_or_none`, `metric_trend_per_4w`, `latest_metric`,
+  `baseline_60d`, `workout_sessions_in_window`, `health_metrics_weekly`.
+- [`lib/health_recovery.py`](lib/health_recovery.py) — `_z_score_signal`,
+  `recovery_score` and recovery-driver confidence logic.
+- [`lib/health_longevity.py`](lib/health_longevity.py) —
+  `vo2_percentile_age_sex`, `_safe_norm`, `compute_longevity_score`,
+  `read_longevity_state`.
+- [`lib/health_session_rec.py`](lib/health_session_rec.py) —
+  `compute_session_recommendation`, `compute_tier_history`, and the
+  private helper gates behind Tier A/B/C/D/E decisions.
 
 ### Other analytics modules
 
@@ -220,68 +221,26 @@ hex literals outside the `:root` block** (lint: `rg
   interactive training-load chart scrubber + tooltip, tiny markdown
   renderer for the Workout tab.
 
-### [`lib/render_cards.py`](lib/render_cards.py) (~1551 lines)
+### Card renderer split
 
-HTML templates for every card. Each `card_*` returns a complete
-`<section>`. Pure presentation — no I/O, no analytics.
+`lib/render_cards.py` is now a compatibility facade. Existing imports
+keep working; new card changes should go to the focused module:
 
-Render order (matches `scripts/render_dashboard.py::render()`):
+- [`lib/render_cards_common.py`](lib/render_cards_common.py) —
+  `coach_block`, `_heading`, heading tooltip copy.
+- [`lib/render_cards_today.py`](lib/render_cards_today.py) — Today tab:
+  `card_session_call`, `card_hero`, recovery drivers, ACWR, rings, NEAT,
+  training load, muscle volume, strength, week-over-week, tier strip.
+- [`lib/render_cards_health.py`](lib/render_cards_health.py) —
+  trajectory health surfaces: vitals, sleep, recovery practices.
+- [`lib/render_cards_domains.py`](lib/render_cards_domains.py) —
+  longevity domain cards: longevity score, cardio, recovery, sleep,
+  body composition, metabolic, behavioral.
+- [`lib/render_cards_programs.py`](lib/render_cards_programs.py) —
+  risk flags, swim trajectory, nutrition phase.
 
-**Today tab** (10 cards):
-1. `card_session_call(rec, coach_text, summary_text)` — the Phase 2
-   5-tier gate call-out at the top. Quotes `headline` + top-3
-   `rationale` from `compute_session_recommendation`. Tier-coloured
-   accent pill.
-2. `card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label,
-   ctl, atl, tsb_trend)` — Recovery + Freshness, each with a scale
-   strip.
-3. `card_drivers(drivers, coach_text)` — Recovery drivers diverging-bar
-   chart.
-4. `card_acwr(acwr, coach_text)` — Training-load progression (week-
-   over-week TRIMP change + ACWR with Gabbett caveat).
-5. `card_rings(rings_html, coach_text)` — Activity rings.
-6. `card_neat(daily_activity)` — NEAT card: avg exercise min/day,
-   walking distance, incidental walks.
-7. `card_training_load(series, ctl, atl, tsb, tsb_trend, coach_text)`
-   — 90-day chart + 4-up summary cells.
-8. `card_muscle_volume(weekly_volume, coach_text, hr_divergence=None)`
-   — Per-muscle bars with HR-at-volume annotation chips.
-9. `card_strength(items, coach_text)` — Strength progression table.
-10. `card_wow(wow)` — Week over week.
-
-**Trajectory tab** (12 cards):
-1. `card_longevity_score(longevity_score, coach_text)` — composite
-   score + per-component bars.
-2. `card_cardio_domain(vo2_percentile, hr_recovery, recovery,
-   cardio_zones, vo2max, vo2_trend, coach_text)`.
-3. `card_recovery_domain(recovery, weekly, coach_text)`.
-4. `card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text,
-   longevity_state=...)` — gates Parkinson REM-watch copy on
-   `_has_risk_flag`.
-5. `card_body_comp_domain(bw, bw_trend, longevity_state, coach_text)`
-   — gates PrEP BMD prompt on `_has_risk_flag`.
-6. `card_metabolic_domain(longevity_state, coach_text)` — bloodwork
-   consolidated here.
-7. `card_behavioral_domain(movement_consistency, sleep_regularity,
-   acwr, cardio_zones, coach_text)`.
-8. `card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly,
-   coach_text)` — HRV / RHR / wrist temp / VO2max / bodyweight
-   sparklines.
-9. `card_sleep(sleep, coach_text)` — stage stack + diagnostic rows +
-   outliers.
-10. `card_recovery_practices(thermal, light, coach_text)` — sauna /
-    cold / light sub-cards.
-11. `card_risk_flags(longevity_state, coach_text)`.
-12. `card_tier_history_strip(history, coach_text=None)` — 14-day
-    decision history strip.
-
-Shared:
-- `coach_block(text)` — wraps a coach string in the standard
-  `<aside class="coach">` callout, or empty if `text` is `None`/blank.
-- `_heading(label, key)` — section heading with tooltip-key wiring.
-- `_has_risk_flag(longevity_state, key)` — risk-flag gate for PII copy
-  (Parkinson, PrEP). Currently card-internal; on the backlog to move
-  to a shared helper.
+Every `card_*` still returns a complete `<section>`. Renderer modules
+remain presentation-only: no disk I/O and no analytics imports.
 
 ## Pipeline at a glance
 
@@ -330,9 +289,8 @@ Shared:
   can be imported in isolation (REPL, ad-hoc tests). See
   [`../CLAUDE.md`](../CLAUDE.md) for the full convention.
 - Renderer modules **do not** import from analytics modules and vice
-  versa. The interface between them is the tracker JSON shape (see
-  `read_tracker.py`'s `out` dict assembly). Adding a typed contract for
-  this is on the backlog (`references/code-health-audit.md` #6).
+  versa. The interface between them is the tracker JSON shape in
+  [`../tracker/contracts.py`](../tracker/contracts.py).
 - No external HTTP / CDN / web font dependencies in the dashboard.
   Verify with `grep -E '<script src|<link href="http|@import url'` on
   the rendered HTML — must be zero matches.
@@ -349,7 +307,7 @@ Shared:
 
 **Add a new card.**
 1. Implement `card_yournew(data, coach_text)` in
-   [`lib/render_cards.py`](lib/render_cards.py).
+   the focused card module for its tab/domain.
 2. Add CSS for any new classes in `STYLESHEET` in
    [`lib/render_assets.py`](lib/render_assets.py). Reference CSS
    variables, not raw hex.

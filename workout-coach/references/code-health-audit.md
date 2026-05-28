@@ -7,6 +7,11 @@ or product direction.
 
 > **Status**: 2026-05-24. Re-audit when the next 2-3 PRs land or when
 > `lib/health.py` / `lib/render_cards.py` change shape materially.
+>
+> **2026-05-28 cleanup note**: `health.py` and `render_cards.py` are now
+> compatibility facades. Their implementations were split into focused
+> `health_*` and `render_cards_*` modules; see `workout-coach/CODE_MAP.md`
+> for the current source of truth.
 
 ---
 
@@ -343,8 +348,8 @@ Scoring: **Impact** (high/med/low) × **Effort** (S/M/L) × **Risk**
 | 7 | `scripts/silent_gap_audit.py` — classify every leaf in tracker JSON as Expected / Data caveat / Pipeline gap | med | M | low | `scripts/silent_gap_audit.py`, `lib/constants.py` (EXPECTED_NULLS map) |
 | 8 | Renderer snapshot tests: `tests/test_render_dashboard_snapshot.py` against existing Nihad+Fabian fixtures | high | M | low | `tests/test_render_dashboard_snapshot.py`, `tests/snapshots/` |
 | 9 | Generalize person-specific copy: extract Parkinson / PrEP / vegan / creatine strings + per-person profiles into `references/people.md` (or YAML); make code comments person-agnostic | med | M | low | `references/people.md`, `lib/sleep.py`, `lib/constants.py`, `references/training-science.md` |
-| 10 | Split `lib/health.py` into `health_windowing.py`, `health_recovery.py`, `health_longevity.py`, `health_session_rec.py`; keep `health.py` as a thin facade for back-compat imports | high | M | med | 5 new+modified files in `lib/` |
-| 11 | Split `lib/render_cards.py` into `render_cards_today.py` + `render_cards_trajectory.py`; move `_has_risk_flag` to a shared helper | med | M | med | 2 new files in `lib/`, `scripts/render_dashboard.py` |
+| 10 | ~~Split `lib/health.py` into `health_windowing.py`, `health_recovery.py`, `health_longevity.py`, `health_session_rec.py`; keep `health.py` as a thin facade for back-compat imports~~ ✅ done in 2026-05-28 cleanup | high | M | med | `lib/health*.py` |
+| 11 | ~~Split `lib/render_cards.py` into focused card modules while keeping `render_cards.py` as a facade~~ ✅ done in 2026-05-28 cleanup | med | M | med | `lib/render_cards*.py` |
 | 12 | Extract `lib/design_tokens.py`; programmatically generate tints from semantic colors; rewrite `:root` block from tokens | med | M | med | `lib/design_tokens.py`, `lib/render_assets.py` |
 | 13 | Refactor `compute_longevity_score` into per-component `_norm_X()` helpers + weighted-average top level | med | M | med | `lib/health_longevity.py` (post-split) |
 | 14 | Generalize capability plumbing: `INPUT_CAPABILITY_REQ` map + single filter step in `compute_longevity_score` (and `recovery_score`, if applicable) | low | M | low | `lib/constants.py`, `lib/health_*.py` |

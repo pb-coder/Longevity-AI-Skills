@@ -69,7 +69,9 @@ For known issues / planned cleanup, see
 | Per-muscle HR creep / strength session HR / e1RM slope | [`lib/strength.py`](lib/strength.py) |
 | CSV store schemas and upserts | [`../shared/csv_store_dense.py`](../shared/csv_store_dense.py) and [`../shared/csv_store_periodic.py`](../shared/csv_store_periodic.py) |
 | Monthly workout CSV canonicalization/upserts | [`../shared/monthly_csv_canonicalize.py`](../shared/monthly_csv_canonicalize.py) and [`../shared/monthly_csv_upsert.py`](../shared/monthly_csv_upsert.py) |
-| Apple Health import semantics | [`../shared/import_apple_health.py`](../shared/import_apple_health.py) (Apple XML) or [`../shared/import_health_auto_export.py`](../shared/import_health_auto_export.py) (HealthAutoExport) |
+| Apple XML daily/sleep aggregation | [`../shared/apple_health_daily.py`](../shared/apple_health_daily.py) |
+| Apple XML strength/swim helper payloads | [`../shared/apple_health_strength.py`](../shared/apple_health_strength.py) and [`../shared/apple_health_swim.py`](../shared/apple_health_swim.py) |
+| Apple Health import orchestration | [`../shared/import_apple_health.py`](../shared/import_apple_health.py) (Apple XML) or [`../shared/import_health_auto_export.py`](../shared/import_health_auto_export.py) (HealthAutoExport) |
 | Dashboard spec / card contracts | [`references/assessment-dashboard.md`](references/assessment-dashboard.md) |
 | Visual design system — colours, typography, pills, card chrome | [`Skills/DESIGN.md`](../DESIGN.md) |
 | Coach behavioral rules (Phase 2 planning) | [`SKILL.md`](SKILL.md) |

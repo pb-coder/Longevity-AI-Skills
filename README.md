@@ -34,6 +34,11 @@ file I/O, canonicalization, and upserts split across
 `monthly_csv_schema.py`, `monthly_csv_values.py`, `monthly_csv_io.py`,
 `monthly_csv_canonicalize.py`, and `monthly_csv_upsert.py`.
 
+Apple XML import logic is split so `shared/import_apple_health.py`
+stays the CLI orchestration layer; daily aggregation, parsing, strength
+clustering, and swim payload construction live in `apple_health_*.py`
+modules.
+
 Code quality rules for this repo:
 
 - Preserve command names, CSV schemas, file locations, and generated

@@ -157,6 +157,13 @@ shared/               # Code + docs imported by multiple skills
                           # Usage: python3 shared/import_apple_health.py
                           #          --person <Person> [--since YYYY-MM-DD]
                           #          [--dry-run] [--keep-export]
+  apple_health_core.py    # Shared XML timestamp / numeric parsing helpers.
+  apple_health_daily.py   # DayAggregator: daily health metrics + sleep-night
+                          # aggregation from Record elements.
+  apple_health_strength.py
+                          # Apple strength-session clustering for monthly
+                          # TOTAL-row metadata.
+  apple_health_swim.py    # Swim workout/lap CSV payload construction.
   import_health_auto_export.py
                           # HealthAutoExport ZIP importer (<OtherPerson>). Same
                           # full tracker surface as import_apple_health.py
@@ -388,6 +395,10 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   pins `source` (`xml` / `health_auto_export`) and `auto_cardio` (bool).
   `import_apple_health.py` handles `Export*.zip` (Apple's native XML);
   `import_health_auto_export.py` handles `HealthAutoExport*.zip`.
+  XML helper behavior lives in `apple_health_core.py`,
+  `apple_health_daily.py`, `apple_health_strength.py`, and
+  `apple_health_swim.py`; keep `import_apple_health.py` as the CLI
+  orchestration layer.
   The /log skill dispatches by filename; /coach gates report sections
   on `capabilities`. Both active sources expose the full recovery,
   sleep, and per-workout-HR capability surface. `auto_cardio` defaults

@@ -11,6 +11,13 @@ from monthly_csv_schema import (
     STRENGTH_METADATA_DRIFT_THRESHOLD,
 )
 
+__all__ = [
+    "DURATION_VS_ELAPSED_RATIO_THRESHOLD",
+    "PACE_MIN_PER_KM_LOWER",
+    "PACE_MIN_PER_KM_UPPER",
+    "date_str",
+]
+
 # ============================================================ Helpers
 
 

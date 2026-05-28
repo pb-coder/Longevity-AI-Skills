@@ -14,6 +14,10 @@ from monthly_csv_schema import MONTHLY_COLS, MONTHLY_FIELDS, MONTHLY_HEADERS, TO
 from monthly_csv_values import _numeric_cell
 from person_paths import monthly_csv as monthly_csv_path
 
+__all__ = [
+    "read_monthly",
+]
+
 # ============================================================ CSV I/O
 def _serialize_value(v) -> str:
     """Inverse of ``_numeric_cell`` for CSV output."""

@@ -19,6 +19,10 @@ from monthly_csv_values import (
     date_str,
 )
 
+__all__ = [
+    "canonicalize_monthly_csv",
+]
+
 # ============================================================ canonicalize
 def _build_data_row(session_num: int, rd: dict, kind: str,
                     is_strength: bool) -> dict:

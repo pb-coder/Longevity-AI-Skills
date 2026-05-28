@@ -5,6 +5,14 @@ import csv
 from csv_store_common import _date_str, _serialize_value
 from person_paths import ensure_data_dir, profile_csv
 
+__all__ = [
+    "PROFILE_KEYS",
+    "PROFILE_DEFAULTS",
+    "read_profile",
+    "write_profile",
+    "ensure_profile",
+]
+
 # ============================================================ Profile (CSV)
 PROFILE_KEYS = (
     "source", "auto_cardio", "birthday", "sex",

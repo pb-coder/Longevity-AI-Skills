@@ -23,6 +23,13 @@ from monthly_csv_values import (
 )
 from person_paths import ensure_monthly_dir, monthly_csv as monthly_csv_path, monthly_dir
 
+__all__ = [
+    "upsert_rows",
+    "upsert_monthly_cardio",
+    "upsert_monthly_strength_session",
+    "list_year_months",
+]
+
 # ============================================================ upsert_rows
 def upsert_rows(person: str, year_month: str, rows: list[dict]) -> None:
     """Append a batch of dict-rows to the per-month CSV, then canonicalize.

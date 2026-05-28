@@ -29,6 +29,41 @@ from person_paths import (
     thermal_sessions_csv,
 )
 
+__all__ = [
+    "SWIM_WORKOUTS_HEADERS",
+    "SWIM_WORKOUTS_FIELDS",
+    "SWIM_LAPS_HEADERS",
+    "SWIM_LAPS_FIELDS",
+    "SLEEP_NIGHTS_HEADERS",
+    "SLEEP_NIGHTS_FIELDS",
+    "THERMAL_SESSIONS_HEADERS",
+    "THERMAL_SESSIONS_FIELDS",
+    "HEAT_TYPES",
+    "COLD_TYPES",
+    "HEAT_TYPE_DEFAULT_TEMP_C",
+    "LIGHT_THERAPY_SESSIONS_HEADERS",
+    "LIGHT_THERAPY_SESSIONS_FIELDS",
+    "LIGHT_TYPES",
+    "LIGHT_BODY_AREAS",
+    "LIGHT_MODALITIES",
+    "HEATED_CABIN_AMBIENT_TEMP_C",
+    "NUTRITION_PHASE_TYPES",
+    "NUTRITION_PHASES_HEADERS",
+    "NUTRITION_PHASES_FIELDS",
+    "read_swim_workouts",
+    "upsert_swim_workouts",
+    "read_swim_laps",
+    "upsert_swim_laps",
+    "read_sleep_nights",
+    "upsert_sleep_nights",
+    "read_thermal_sessions",
+    "upsert_thermal_sessions",
+    "read_light_therapy_sessions",
+    "upsert_light_therapy_sessions",
+    "read_nutrition_phases",
+    "upsert_nutrition_phases",
+]
+
 # ============================================================ Swim (per-workout)
 # Per-swim aggregate row. Dedupe key = (date, start). Sorted DESC by
 # date+start to mirror workout_sessions.csv layout. Notes is reserved

@@ -17,6 +17,13 @@ from tracker.csv_table import (  # noqa: E402
     write_csv_atomic as _table_write_csv_atomic,
 )
 
+__all__ = [
+    "CsvTableSpec",
+    "ensure_data_dir_for",
+    "replace_upsert_records",
+    "sparse_upsert_records",
+]
+
 
 def _read_csv_rows(path: Path) -> tuple[list[str], list[list[str]]]:
     """Return ``(header, rows)`` from a CSV. Empty file -> ``([], [])``."""

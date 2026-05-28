@@ -1,6 +1,17 @@
 """Monthly workout CSV schema constants."""
 from __future__ import annotations
 
+__all__ = [
+    "MONTHLY_HEADERS",
+    "MONTHLY_FIELDS",
+    "TOTAL_LABEL",
+    "DELOAD_MARKER_TEXT",
+    "MONTHLY_COLS",
+    "AUTO_IMPORT_NOTE",
+    "CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN",
+    "STRENGTH_METADATA_DRIFT_THRESHOLD",
+]
+
 # ============================================================ Schema
 # Order matches the historical xlsx columns A..Q plus Source — readers and
 # writers across the codebase still treat column index as semantic.

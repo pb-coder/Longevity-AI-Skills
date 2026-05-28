@@ -7,6 +7,18 @@ from csv_store_common import _date_str, _parse_value, _read_csv_rows, _write_csv
 from csv_store_profile import read_profile
 from person_paths import health_metrics_csv, workout_sessions_csv
 
+__all__ = [
+    "HEALTH_METRICS_HEADERS_BY_SOURCE",
+    "HEALTH_METRICS_FIELDS_BY_SOURCE",
+    "WORKOUT_SESSIONS_HEADERS_BY_SOURCE",
+    "WORKOUT_SESSIONS_FIELDS_BY_SOURCE",
+    "STRENGTH_METADATA_DRIFT_THRESHOLD",
+    "read_health_metrics",
+    "upsert_health_metrics",
+    "read_workout_sessions",
+    "upsert_workout_sessions",
+]
+
 # ============================================================ Schema (HM + WS)
 # Source-aware column sets. ``xml`` is Apple's native export (full HRV /
 # Resting HR / Wrist Temp / sleep stages / per-workout HR).

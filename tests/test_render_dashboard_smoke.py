@@ -70,6 +70,16 @@ class RenderDashboardSmokeTests(unittest.TestCase):
             html = out_html.read_text(encoding="utf-8")
             self.assertIn("<!doctype html>", html)
             self.assertIn("data-tab=\"today\"", html)
+            self.assertIn("data-tab=\"trajectory\"", html)
+            for marker in (
+                "session-call-card",
+                "<h2>Recovery</h2>",
+                "Why recovery moved",
+                "Training load over 90 days",
+                "longevity-headline",
+                "Decision history &middot; last 14 days",
+            ):
+                self.assertIn(marker, html)
 
 
 if __name__ == "__main__":

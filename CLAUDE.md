@@ -25,6 +25,10 @@ the `Longevity-AI-Skills` repository; edit here and push.
   person names, relationships, locations, ages, medication details, lab
   status, or other profile facts. Use `<Person>` / `<OtherPerson>`
   placeholders. Private context lives only in uncommitted per-person data.
+  Before pushing, run the committed-text scrub with a caller-supplied
+  sensitive-token pattern:
+  `rg -n -i "$PRIVATE_IDENTIFIER_PATTERN" -g '!*.pyc' -g '!plans/**' -g '!<Person>/**' -g '!<OtherPerson>/**' .`
+  The pattern value must not be committed.
 
 ## Layout
 
@@ -329,6 +333,8 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   alongside it via
   `sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))`
   and then `from <module> import …` flat (no package namespace).
+  This bootstrap style is compatibility debt, not a pattern to expand;
+  track the package-conversion follow-up in GitHub issue #7.
 - **`canonicalize_monthly_csv` is canonical**: the single source of
   truth for monthly-CSV layout (sort by Date+#+Set, recompute Volume
   and Pace, rebuild SESSION numbering, rebuild TOTAL rows, hoist

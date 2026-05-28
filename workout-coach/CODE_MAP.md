@@ -30,6 +30,12 @@ compatibility facade; use `csv_store_profile.py`, `csv_store_dense.py`,
 `csv_store_periodic.py`, and `csv_store_common.py` when changing storage
 behavior.
 
+Monthly workout CSV behavior is also split under [`../shared/`](../shared/):
+`monthly_csv.py` is the compatibility facade; use
+`monthly_csv_schema.py`, `monthly_csv_values.py`, `monthly_csv_io.py`,
+`monthly_csv_canonicalize.py`, and `monthly_csv_upsert.py` for real
+changes.
+
 For known issues / planned cleanup, see
 [`references/code-health-audit.md`](references/code-health-audit.md).
 
@@ -62,6 +68,7 @@ For known issues / planned cleanup, see
 | Light-therapy summary | [`lib/light_therapy.py`](lib/light_therapy.py) |
 | Per-muscle HR creep / strength session HR / e1RM slope | [`lib/strength.py`](lib/strength.py) |
 | CSV store schemas and upserts | [`../shared/csv_store_dense.py`](../shared/csv_store_dense.py) and [`../shared/csv_store_periodic.py`](../shared/csv_store_periodic.py) |
+| Monthly workout CSV canonicalization/upserts | [`../shared/monthly_csv_canonicalize.py`](../shared/monthly_csv_canonicalize.py) and [`../shared/monthly_csv_upsert.py`](../shared/monthly_csv_upsert.py) |
 | Apple Health import semantics | [`../shared/import_apple_health.py`](../shared/import_apple_health.py) (Apple XML) or [`../shared/import_health_auto_export.py`](../shared/import_health_auto_export.py) (HealthAutoExport) |
 | Dashboard spec / card contracts | [`references/assessment-dashboard.md`](references/assessment-dashboard.md) |
 | Visual design system — colours, typography, pills, card chrome | [`Skills/DESIGN.md`](../DESIGN.md) |

@@ -28,6 +28,12 @@ keys, `csv_store_dense.py` owns health metrics and workout sessions,
 `csv_store_periodic.py` owns swim/sleep/thermal/light/nutrition stores,
 and `csv_store_common.py` owns shared table helpers.
 
+Monthly workout CSV logic follows the same pattern: `shared/monthly_csv.py`
+is the compatibility facade, with schema constants, value coercion,
+file I/O, canonicalization, and upserts split across
+`monthly_csv_schema.py`, `monthly_csv_values.py`, `monthly_csv_io.py`,
+`monthly_csv_canonicalize.py`, and `monthly_csv_upsert.py`.
+
 Code quality rules for this repo:
 
 - Preserve command names, CSV schemas, file locations, and generated

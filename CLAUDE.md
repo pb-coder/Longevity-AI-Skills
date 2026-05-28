@@ -108,27 +108,23 @@ shared/               # Code + docs imported by multiple skills
                       # Per-month/per-phase stores: swim, sleep, thermal,
                       # light therapy, nutrition. Sparse merge and
                       # replace-on-match semantics live beside their schemas.
-  monthly_csv.py      # Per-month CSV reader / writer / canonicalizer.
-                      # Replaces the old tracker_sheet.py xlsx authority.
+  monthly_csv.py      # Compatibility facade for monthly workout CSVs.
+  monthly_csv_schema.py
                       # MONTHLY_HEADERS / MONTHLY_FIELDS / TOTAL_LABEL /
-                      # DELOAD_MARKER_TEXT constants; coercions (date_str,
-                      # _numeric_cell, _parse_duration_minutes,
-                      # _format_pace_min_per_km, _format_duration_mmss,
-                      # _format_elapsed_hms,
-                      # _reconcile_duration_and_elapsed — defensive guard
-                      # that prefers Elapsed when Duration disagrees by
-                      # >=3x); read_monthly(person, ym),
-                      # upsert_rows(person, ym, rows),
-                      # upsert_monthly_cardio (manual-wins dedupe +
-                      # Matrix/GymKit overlap filtering),
-                      # upsert_monthly_strength_session (5% drift guard
-                      # on TOTAL-row metadata),
-                      # canonicalize_monthly_csv (sort + recompute Volume
-                      # / Pace / Total Cal / SESSION + rebuild TOTAL rows
-                      # + hoist deload markers — pure-CSV equivalent of
-                      # the old style_monthly_sheet). Current-month gate
-                      # (_current_month_key) bounds where importers can
-                      # write; past months are "finished". Idempotent.
+                      # DELOAD_MARKER_TEXT and import policy constants.
+  monthly_csv_values.py
+                      # Date/number/duration/pace coercion, source migration,
+                      # row classification, and drift checks.
+  monthly_csv_io.py   # read_monthly plus raw row/dict translation and atomic
+                      # writes.
+  monthly_csv_canonicalize.py
+                      # canonicalize_monthly_csv: sort + recompute Volume /
+                      # Pace / Total Cal / SESSION + rebuild TOTAL rows +
+                      # hoist deload markers. Idempotent.
+  monthly_csv_upsert.py
+                      # upsert_rows, upsert_monthly_cardio, and
+                      # upsert_monthly_strength_session. Current-month gate
+                      # bounds importer writes; past months are "finished".
   exercises-database.md  # Canonical exercise catalog (muscle → pattern →
                          # exercises). Source of truth (no xlsx mirror — the
                          # Exercises Database tab was retired in PR1). Read

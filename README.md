@@ -10,6 +10,29 @@ Claude Code skills for workout logging, training analysis, and longevity researc
 
 A maintenance utility lives at `shared/maintain.py`. Run it directly when you need to sweep canonicalize across all months (after a schema change or manual edit to a past month) or validate the CSV store: `python3 Skills/shared/maintain.py --person <Name>`.
 
+## Architecture
+
+The Git repo root is `Skills/`. Per-person data (`../Nihad`,
+`../Fabian`) and generated plans (`../plans`) stay outside Git.
+
+Public CLIs remain stable and thin: they parse arguments, resolve a
+person, call domain code, and print status or JSON. Shared primitives
+that should not be copied between skills live in `tracker/`: CSV table
+mechanics, command context, typed contracts, and benchmark helpers.
+Skill-specific behavior stays in `shared/`, `workout-logger/`, and
+`workout-coach/`.
+
+Code quality rules for this repo:
+
+- Preserve command names, CSV schemas, file locations, and generated
+  output semantics unless a change is explicitly documented.
+- Keep one source of truth per concept: path rules, schemas, CSV I/O,
+  date parsing, exercise catalog loading, and capability gating.
+- Keep disk I/O in store modules; keep analytics functions pure where
+  practical.
+- Measure performance changes with reproducible commands before adding
+  caching or complexity.
+
 ## Data store
 
 CSV under `<Person>/data/`, sibling to the skill repo:
@@ -50,4 +73,8 @@ e1RM regression skips user-tagged context-change rows (gym swap, cable ratio rec
 
 ## Status
 
-In active personal use. Not packaged. Read the code; lift what's useful.
+In active personal use. The current test baseline is
+`python3 -m unittest discover -s tests -v`. On 2026-05-28,
+`read_tracker.py --person Nihad` ran in about 0.43s and Fabian in about
+0.29s on the local data set; `maintain.py --dry-run` ran in about 0.15s
+per person. Treat those as sanity checks, not hard performance targets.

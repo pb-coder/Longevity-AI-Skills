@@ -3,6 +3,25 @@
 Source for the Claude Code skills used by pb-coder. Cloned from
 [`pb-coder/Longevity-AI-Skills`](https://github.com/pb-coder/Longevity-AI-Skills); edit here and push.
 
+## Engineering contract
+
+- The repo root is `Skills/`. Per-person tracker data and generated
+  plans live one directory above it and are intentionally not committed.
+- Preserve public CLIs, CSV schemas, file locations, and generated output
+  semantics unless the PR explicitly documents a migration.
+- Public scripts stay thin: parse args, build a `TrackerContext`, call
+  domain code, print status/JSON, return an exit code.
+- Shared primitives live in `tracker/`; domain storage and import policy
+  lives in `shared/`; skill behavior lives in each skill folder.
+- One concept gets one source of truth. Do not copy path rules, schema
+  constants, CSV I/O, date parsing, capability gates, or exercise catalog
+  parsing into another module.
+- Optimize by removing wasted work first: repeated reads, repeated full
+  scans, duplicate canonicalization, unnecessary rewrites, and reparsing
+  static markdown inside one command. Add caching only after measurement.
+- Refactors need regression coverage. The default verification command is
+  `python3 -m unittest discover -s tests -v` from this directory.
+
 ## Layout
 
 Per-person directories sit at the workout-tracker root: `Nihad/`,

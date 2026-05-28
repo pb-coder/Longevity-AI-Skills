@@ -21,6 +21,10 @@ A fresh agent or contributor should land here in this order:
    (tokens, pills, card chrome). Read before touching CSS or any
    rendering code.
 
+Cross-skill primitives live in [`../tracker/`](../tracker/): command
+context, CSV table mechanics, typed command contracts, and benchmark
+helpers. Do not copy those concerns into `workout-coach/lib/`.
+
 For known issues / planned cleanup, see
 [`references/code-health-audit.md`](references/code-health-audit.md).
 
@@ -34,7 +38,8 @@ For known issues / planned cleanup, see
 | An SVG component (training-load chart, sparkline, muscle bar, freshness / recovery scale, ring, driver bar) | [`lib/render_components.py`](lib/render_components.py) |
 | Coach-text validation rules / em-dash check / length cap | [`lib/render_validators.py`](lib/render_validators.py)::`validate_coach_reads` |
 | Add a tooltip for a new abbreviation in coach text | [`lib/render_validators.py`](lib/render_validators.py)::`KNOWN_TERMS` |
-| Tracker JSON shape (what fields the renderer reads) | [`scripts/read_tracker.py`](scripts/read_tracker.py) + the relevant `lib/*.py` analytics module |
+| Tracker JSON shape (what fields the renderer reads) | [`../tracker/contracts.py`](../tracker/contracts.py)::`TrackerJSON` + [`scripts/read_tracker.py`](scripts/read_tracker.py) |
+| Coach reads JSON shape | [`../tracker/contracts.py`](../tracker/contracts.py)::`CoachReads` + [`lib/render_validators.py`](lib/render_validators.py) |
 | Recovery score formula / drivers | [`lib/health.py`](lib/health.py)::`recovery_score` |
 | **5-tier session recommendation (Phase 2 binding gate)** | [`lib/health.py`](lib/health.py)::`compute_session_recommendation` |
 | 14-day tier history (the decision-history strip) | [`lib/health.py`](lib/health.py)::`compute_tier_history` |

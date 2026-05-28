@@ -32,9 +32,13 @@ from pathlib import Path
 
 # Sibling lib/ on sys.path so the renderer can import its building blocks.
 _LIB = Path(__file__).resolve().parents[1] / "lib"
+_SKILLS_ROOT = Path(__file__).resolve().parents[2]
+if str(_SKILLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SKILLS_ROOT))
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 
+from tracker.contracts import CoachReads, TrackerJSON
 from render_helpers import esc
 from render_validators import auto_wrap_terms, validate_coach_reads
 from render_components import build_load_series, embed_workout_markdown, ring
@@ -67,7 +71,7 @@ from render_cards import (
 )
 
 
-def render(j, coach, workout_md, person):
+def render(j: TrackerJSON, coach: CoachReads, workout_md: str, person: str) -> str:
     today = j.get("today")
     recovery = j.get("recovery") or {}
     training_load = j.get("training_load") or {}
@@ -239,7 +243,7 @@ def main():
     else:
         j = json.loads(Path(args.tracker).read_text())
 
-    coach = json.loads(Path(args.coach).read_text())
+    coach: CoachReads = json.loads(Path(args.coach).read_text())
     errors, warnings = validate_coach_reads(coach)
     for w in warnings:
         print(f"coach_reads warning: {w}", file=sys.stderr)

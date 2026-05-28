@@ -2,6 +2,20 @@
 
 Hypertrophy + longevity training logs for Nihad (account owner) and his boyfriend Fabian (28), who share the same goals and conventions. Used with a set of Claude skills.
 
+## Implementation principles
+
+The tracker is a CSV-backed product with stable file contracts. Code
+changes must preserve public commands, CSV schemas, person-relative
+paths, and coach/log semantics unless a migration is explicitly planned.
+The implementation should be boring: typed command boundaries, isolated
+I/O, pure analytics where practical, atomic writes, idempotent upserts,
+and measured performance changes.
+
+The `Skills/tracker/` package is the home for cross-skill primitives
+such as `TrackerContext`, CSV table mechanics, typed JSON contracts, and
+benchmark helpers. Domain-specific policy remains in `Skills/shared/`
+and the individual skill folders.
+
 ## Files
 
 Two parallel trackers live in per-person folders inside this directory:

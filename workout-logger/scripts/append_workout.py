@@ -98,7 +98,6 @@ sys.path.insert(0, str(SKILLS_ROOT))
 sys.path.insert(0, str(SKILLS_ROOT / "shared"))
 from tracker import TrackerContext  # noqa: E402
 from monthly_csv import (  # noqa: E402
-    canonicalize_monthly_csv,
     upsert_rows as monthly_upsert_rows,
 )
 from csv_store import (  # noqa: E402
@@ -494,10 +493,6 @@ def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
             created = not target.exists()
             payload = [_to_monthly_row(r) for r in month_rows]
             monthly_upsert_rows(person, ym, payload)
-            # upsert_rows already calls canonicalize, but call it again
-            # defensively in case a future refactor short-circuits the
-            # internal call.
-            canonicalize_monthly_csv(person, ym)
             dates = sorted({r["date"] for r in month_rows})
             tag = " (new sheet)" if created else ""
             status.append(

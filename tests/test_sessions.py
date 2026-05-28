@@ -34,13 +34,17 @@ class BuildMonthlySessionsTests(unittest.TestCase):
              "elevation_m": 8, "elapsed": "6:18", "source": "apple"},
         ]
         out = sessions.build_monthly_sessions(rows, {}, {}, [])
-        self.assertEqual(len(out), 1)
-        s = out[0]
-        self.assertEqual(s["session_kind"], "strength")
-        self.assertIsNone(s["duration_min"])
-        self.assertIsNone(s["elevation_m"])
-        self.assertIsNone(s["avg_hr"])
-        self.assertIsNone(s["active_cal"])
+        self.assertEqual(len(out), 2)
+        strength = out[0]
+        cardio = out[1]
+        self.assertEqual(strength["session_kind"], "strength")
+        self.assertIsNone(strength["duration_min"])
+        self.assertIsNone(strength["elevation_m"])
+        self.assertIsNone(strength["avg_hr"])
+        self.assertIsNone(strength["active_cal"])
+        self.assertEqual(cardio["session_kind"], "cardio")
+        self.assertEqual(cardio["duration_min"], 14.1)
+        self.assertEqual(cardio["avg_hr"], 150)
 
     def test_strength_session_uses_total_summary_when_present(self) -> None:
         # Mixed day with HealthAutoExport TOTAL summary present: strength

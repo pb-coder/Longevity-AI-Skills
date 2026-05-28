@@ -10,6 +10,50 @@ Claude Code skills for workout logging, training analysis, and longevity researc
 
 A maintenance utility lives at `shared/maintain.py`. Run it directly when you need to sweep canonicalize across all months (after a schema change or manual edit to a past month) or validate the CSV store: `python3 Skills/shared/maintain.py --person <Name>`.
 
+## Architecture
+
+The Git repo root is `Skills/`. Per-person data (`../<Person>`) and
+generated plans (`../plans`) stay outside Git.
+
+Public CLIs remain stable and thin: they parse arguments, resolve a
+person, call domain code, and print status or JSON. Shared primitives
+that should not be copied between skills live in `tracker/`: CSV table
+mechanics, command context, typed contracts, and benchmark helpers.
+Skill-specific behavior stays in `shared/`, `workout-logger/`, and
+`workout-coach/`.
+
+CSV storage is split by responsibility: `shared/csv_store.py` is the
+backward-compatible import facade, `csv_store_profile.py` owns profile
+keys, `csv_store_dense.py` owns health metrics and workout sessions,
+`csv_store_periodic.py` owns swim/sleep/thermal/light/nutrition stores,
+and `csv_store_common.py` owns shared table helpers.
+
+Monthly workout CSV logic follows the same pattern: `shared/monthly_csv.py`
+is the compatibility facade, with schema constants, value coercion,
+file I/O, canonicalization, and upserts split across
+`monthly_csv_schema.py`, `monthly_csv_values.py`, `monthly_csv_io.py`,
+`monthly_csv_canonicalize.py`, and `monthly_csv_upsert.py`.
+
+Apple XML import logic is split so `shared/import_apple_health.py`
+stays the CLI orchestration layer; daily aggregation, parsing, strength
+clustering, and swim payload construction live in `apple_health_*.py`
+modules.
+
+Code quality rules for this repo:
+
+- Preserve command names, CSV schemas, file locations, and generated
+  output semantics unless a change is explicitly documented.
+- Keep one source of truth per concept: path rules, schemas, CSV I/O,
+  date parsing, exercise catalog loading, and capability gating.
+- Keep disk I/O in store modules; keep analytics functions pure where
+  practical.
+- Measure performance changes with reproducible commands before adding
+  caching or complexity.
+- Do not commit real person names, relationships, locations, ages,
+  medication details, lab status, or other profile facts in docs. Use
+  `<Person>` / `<OtherPerson>` placeholders and load private context
+  from the uncommitted per-person data folders at runtime.
+
 ## Data store
 
 CSV under `<Person>/data/`, sibling to the skill repo:
@@ -50,4 +94,6 @@ e1RM regression skips user-tagged context-change rows (gym swap, cable ratio rec
 
 ## Status
 
-In active personal use. Not packaged. Read the code; lift what's useful.
+In active personal use. The current test baseline is
+`python3 -m unittest discover -s tests -v`. Treat local benchmark
+numbers as sanity checks, not hard performance targets.

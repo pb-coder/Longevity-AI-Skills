@@ -67,6 +67,7 @@ sys.path.insert(0, str(SKILLS_ROOT))
 sys.path.insert(0, str(SKILLS_ROOT / "shared"))
 sys.path.insert(0, str(SKILLS_ROOT / "workout-coach" / "lib"))
 from tracker import TrackerContext  # noqa: E402
+from tracker.contracts import TrackerJSON  # noqa: E402
 from csv_store import read_profile  # noqa: E402
 from person_paths import monthly_dir  # noqa: E402
 from constants import DEFAULT_DATA_SOURCE, SOURCE_CAPABILITIES  # noqa: E402
@@ -372,7 +373,7 @@ def _build_week_over_week(today_d: date,
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--person", required=True,
-                    help="Tracker owner (Nihad or Fabian).")
+                    help="Tracker owner (<Person> or <OtherPerson>).")
     ap.add_argument("--months", type=int, default=3,
                     help="How many months back to load from monthly sheets. The data is used internally for "
                          "all roll-ups regardless of --include-rows.")
@@ -627,7 +628,7 @@ def main() -> int:
         estimated_rest_hr=rest_hr,
     )
 
-    out = {
+    out: TrackerJSON = {
         "today": today_d.strftime("%Y-%m-%d"),
         "data_source": data_source,
         "capabilities": capabilities,

@@ -373,16 +373,11 @@ def compute_sleep_regularity_index(nights: list[dict], today_d: date,
 
 def flag_rem_sleep_anomalies(nights: list[dict], today_d: date,
                               window_days: int = 28) -> dict | None:
-    """REM-sleep anomaly count for Parkinson-surveillance signal.
+    """REM-sleep anomaly count for profile-gated surveillance signals.
 
-    Nihad's profile has a two-generation paternal Parkinson family
-    history; REM Sleep Behavior Disorder is one of the earliest non-motor
-    prodromal markers (>50% conversion to PD over 14 yrs, Postuma 2019).
-    We don't have movement-during-REM hypnograms, but a sustained drop
-    in REM proportion (or unusually fragmented REM nights) is the closest
-    proxy the data exposes. Returns counts of nights where REM dropped
-    below 15% of total sleep in the window. Returns ``None`` if no REM
-    data in the window.
+    We do not have movement-during-REM hypnograms; this only counts
+    nights where REM dropped below 15% of total sleep in the window.
+    Returns ``None`` if no REM data exists in the window.
     """
     if not nights:
         return None

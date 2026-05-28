@@ -18,7 +18,7 @@ The matching segment-span fallback is also applied inside
 ``import_apple_health.py`` so new imports stay consistent.
 
 Usage:
-    python3 Skills/shared/backfill_sleep_efficiency.py --person Nihad [--dry-run]
+    python3 Skills/shared/backfill_sleep_efficiency.py --person <Person> [--dry-run]
 """
 from __future__ import annotations
 

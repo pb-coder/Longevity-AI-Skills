@@ -7,6 +7,11 @@ or product direction.
 
 > **Status**: 2026-05-24. Re-audit when the next 2-3 PRs land or when
 > `lib/health.py` / `lib/render_cards.py` change shape materially.
+>
+> **2026-05-28 cleanup note**: `health.py` and `render_cards.py` are now
+> compatibility facades. Their implementations were split into focused
+> `health_*` and `render_cards_*` modules; see `workout-coach/CODE_MAP.md`
+> for the current source of truth.
 
 ---
 
@@ -20,12 +25,12 @@ or product direction.
 2. **Capability gating actually works.** `recovery_score()` filters drivers
    on `capabilities`; `compute_longevity_score()` accepts an optional
    `capabilities` arg (PR #5); HealthAutoExport-only sources don't render
-   misleading "missing input" pills for Fabian.
+   misleading "missing input" pills for <OtherPerson>.
 3. **Renderer ↔ analytics separation is enforced by convention and reality.**
    `render_*` modules don't import from analytics modules and vice versa.
    The seam is the tracker JSON shape — clear contract, easy to mock.
 4. **DESIGN.md is normative, not aspirational.** Tokens live in YAML front
-   matter; the `:root` block in `render_assets.py` is the only place hex
+   matter; the `:root` block in `render_styles.py` is the only place hex
    appears; the rest of the CSS references CSS vars. The lint rule
    (`rg "#[0-9a-fA-F]{3,6}"` against `lib/`) is documented and trivially
    enforceable.
@@ -45,7 +50,7 @@ or product direction.
    *Fixed in PR-A (this sweep).*
 2. **Zero test coverage on the workout-coach skill itself.** `Skills/tests/`
    exists and covers `shared/` (CSV store, importers, monthly_csv,
-   sessions) with Nihad+Fabian fixtures — but no test exercises
+   sessions) with <Person>+<OtherPerson> fixtures — but no test exercises
    `render_validators`, `health.py` scoring, or any `render_*` rendering.
    The Phase 2 mandate added in PR #4 is enforced only by the agent's
    willingness to honor it, with no machine check.
@@ -92,14 +97,14 @@ or product direction.
   future risk-gated copy can reuse it.
 - **Pill-class usage verified clean**: `.pill`, `.pill.good/.amber/.warn/
   .muted`, `.pill-adherence.{on-target,below-target,above-target}` all
-  defined in `render_assets.py` and used in `render_cards.py`. No
+  defined in `render_styles.py` and used in card modules. No
   orphans.
 - **DESIGN.md hex-literal rule violation** (fixed in PR-A): `card_sleep`
   used to inline sleep-stage colors as `style="background:#a8b6d9"`
   (Core / Deep / REM / Awake) at lines 422–428 and again in the legend
   at 572–575 — 9 hex literals outside `:root`. Migrated to
   `--stage-{core,deep,rem,awake}` tokens in `:root` plus `.stage-*` /
-  `.dot.stage-*` rules in `render_assets.py`; the cards now use class
+  `.dot.stage-*` rules in `render_styles.py`; the cards now use class
   names only. Lint
   (`rg --pcre2 '(?<!&)#[0-9a-fA-F]{6}\b' lib/render_cards.py`) returns
   zero matches.
@@ -111,9 +116,12 @@ or product direction.
   helper). Two tabs, two files. Reduces grep noise and keeps the
   today-flow tight.
 
-### `lib/render_assets.py` — 998 lines
-- `.pill` base style **is** defined (line 157). All CSS classes used in
-  `render_cards.py` are defined here. No orphans.
+### Dashboard assets
+- `lib/render_assets.py` is now a compatibility facade. CSS lives in
+  `lib/render_styles.py`; inline dashboard JavaScript lives in
+  `lib/render_scripts.py`.
+- `.pill` base style is defined in the stylesheet. All CSS classes used
+  in the focused card modules are defined there. No orphans.
 - No tier-border CSS leftovers from PR #4 — PR #5 cleaned them up.
 - **Token duplication risk**: color tokens (`--good: #34c759`) and their
   tint variants (`--good-tint: rgba(52,199,89,0.12)`) are both hardcoded
@@ -122,7 +130,7 @@ or product direction.
   generates tints from hex would remove this manual sync.
 - **Split recommendation**: extract `lib/design_tokens.py` that exports
   `TOKENS: dict` + a `tokens_to_css_root() -> str` function.
-  `STYLESHEET` in `render_assets.py` interpolates the `:root` block
+  `STYLESHEET` in `render_styles.py` interpolates the `:root` block
   from that. Keeps the stylesheet as final output but moves token math
   to a typed home and aligns `lib/` with DESIGN.md's YAML front matter
   (the tokens become programmatic, not text-duplicated).
@@ -164,8 +172,10 @@ or product direction.
   walking nested ifs.
 
 ### Other `lib/` modules
-- `render_components.py` (752 lines) — cohesive SVG/HTML components,
-  fine as-is.
+- `render_components.py` is now a compatibility facade. Component code
+  is split by purpose across `render_components_load.py`,
+  `render_components_recovery.py`, `render_components_volume.py`,
+  `render_components_domain.py`, and `render_components_misc.py`.
 - `cardio.py` (609), `extract.py` (550), `strength.py` (512),
   `constants.py` (463), `sleep.py` (422), `swim.py` (347),
   `thermal.py` (336), `sessions.py` (267), `render_validators.py` (186),
@@ -186,7 +196,7 @@ or product direction.
 ### `references/`
 - `assessment-dashboard.md` — card spec + coach-reads schema. Current.
 - `training-science.md` — physiology refs + person profiles. Profiles
-  for Nihad and Fabian are heavily inlined; cosmetic person-coupling to
+  for <Person> and <OtherPerson> are heavily inlined; cosmetic person-coupling to
   generalize.
 - `substitute-protocols.md` — Tier A–E substitute templates. Current.
 - `swim-coaching.md` — current.
@@ -240,8 +250,8 @@ or product direction.
    assert tier (A–E) + headline + top-3 rationale. Pins the Phase 2
    mandate so a refactor can't silently break the 5-tier logic.
 3. **`tests/test_render_dashboard_snapshot.py`** — runs
-   `render_dashboard.py` against `tests/fixtures/Nihad/` and
-   `tests/fixtures/Fabian/`, diffs against a stored
+   `render_dashboard.py` against `tests/fixtures/<Person>/` and
+   `tests/fixtures/<OtherPerson>/`, diffs against a stored
    `tests/snapshots/{nihad,fabian}-dashboard.html` (strip the
    `generated at` timestamp line). Catches empty-state suppression,
    capability gating, pill orphans, hex regressions.
@@ -250,17 +260,17 @@ or product direction.
    against an `EXPECTED_NULLS` map. Runnable as a pre-commit check.
 
 Test scope lives at `Skills/tests/` next to the existing test suite.
-Reuses the existing `tests/fixtures/Nihad/` and `tests/fixtures/Fabian/`
+Reuses the existing `tests/fixtures/<Person>/` and `tests/fixtures/<OtherPerson>/`
 trees. No new harness needed.
 
 ### Person-specific copy generalization
 Inline person profiles in `training-science.md` (§Context) and
 person-specific code comments in `lib/sleep.py` (Parkinson surveillance
 context) and `lib/constants.py` (XML vs HealthAutoExport split)
-reference Nihad / Fabian by name. Extract to a `references/people.md`
+reference <Person> / <OtherPerson> by name. Extract to a `references/people.md`
 (or YAML data file) keyed by person, loaded on demand by anything
 that needs profile context. Code comments stay generic ("the user's
-family history may indicate X" rather than "Nihad's paternal
+family history may indicate X" rather than "<Person>'s paternal
 Parkinson history").
 
 ### Agent ergonomics
@@ -277,7 +287,7 @@ types alone — no need to read 1.6kloc files top-to-bottom.
 ### PR #3 — `c034af2` — Dashboard data fidelity
 - **Cleanup**: `band_class_map` dict introduced inline duplicates an
   earlier band→CSS mapping; should normalize to one constant in
-  `render_assets.py` or `lib/constants.py`.
+  `render_styles.py` or `lib/constants.py`.
 - **Inconsistency**: the empty-recovery-practices early-return pattern at
   `card_recovery_practices` is not mirrored in other zero-data cards
   (`card_strength`, `card_vitals`, etc.). The "hide-don't-placeholder"
@@ -294,9 +304,9 @@ types alone — no need to read 1.6kloc files top-to-bottom.
   (PR #5 finished the job).
 - **PII copy without central gating**: Parkinson surveillance string in
   `lib/sleep.py` and PrEP BMD prompt in `render_cards.py` were
-  introduced here as hardcoded strings keyed to Nihad. PR #5 added
+  introduced here as hardcoded strings keyed to <Person>. PR #5 added
   `_has_risk_flag()` to gate display; the underlying strings remain
-  Nihad-specific. Move to a person-keyed `references/people.md`.
+  <Person>-specific. Move to a person-keyed `references/people.md`.
 
 ### PR #5 — `009ba11` — Design system + cleanup
 - **Pattern introduced but not fully applied**: `.pill-adherence.*` family
@@ -341,17 +351,17 @@ Scoring: **Impact** (high/med/low) × **Effort** (S/M/L) × **Risk**
 | 5 | Session-recommendation tier-gate tests: `tests/test_session_recommendation.py` with synthetic inputs for each of A/B/C/D/E tiers | high | M | low | `tests/test_session_recommendation.py`, `tests/fixtures/synthetic/` |
 | 6 | TypedDict contracts in `lib/contracts.py`: `TrackerJSON`, `CoachReads`, `SessionRecommendation`, `Recovery`, etc. Annotate `read_tracker.py` and `render_dashboard.py` | high | M | low | `lib/contracts.py`, `scripts/read_tracker.py`, `scripts/render_dashboard.py`, `lib/render_validators.py` |
 | 7 | `scripts/silent_gap_audit.py` — classify every leaf in tracker JSON as Expected / Data caveat / Pipeline gap | med | M | low | `scripts/silent_gap_audit.py`, `lib/constants.py` (EXPECTED_NULLS map) |
-| 8 | Renderer snapshot tests: `tests/test_render_dashboard_snapshot.py` against existing Nihad+Fabian fixtures | high | M | low | `tests/test_render_dashboard_snapshot.py`, `tests/snapshots/` |
+| 8 | Renderer snapshot tests: `tests/test_render_dashboard_snapshot.py` against existing <Person>+<OtherPerson> fixtures | high | M | low | `tests/test_render_dashboard_snapshot.py`, `tests/snapshots/` |
 | 9 | Generalize person-specific copy: extract Parkinson / PrEP / vegan / creatine strings + per-person profiles into `references/people.md` (or YAML); make code comments person-agnostic | med | M | low | `references/people.md`, `lib/sleep.py`, `lib/constants.py`, `references/training-science.md` |
-| 10 | Split `lib/health.py` into `health_windowing.py`, `health_recovery.py`, `health_longevity.py`, `health_session_rec.py`; keep `health.py` as a thin facade for back-compat imports | high | M | med | 5 new+modified files in `lib/` |
-| 11 | Split `lib/render_cards.py` into `render_cards_today.py` + `render_cards_trajectory.py`; move `_has_risk_flag` to a shared helper | med | M | med | 2 new files in `lib/`, `scripts/render_dashboard.py` |
-| 12 | Extract `lib/design_tokens.py`; programmatically generate tints from semantic colors; rewrite `:root` block from tokens | med | M | med | `lib/design_tokens.py`, `lib/render_assets.py` |
+| 10 | ~~Split `lib/health.py` into `health_windowing.py`, `health_recovery.py`, `health_longevity.py`, `health_session_rec.py`; keep `health.py` as a thin facade for back-compat imports~~ ✅ done in 2026-05-28 cleanup | high | M | med | `lib/health*.py` |
+| 11 | ~~Split `lib/render_cards.py` into focused card modules while keeping `render_cards.py` as a facade~~ ✅ done in 2026-05-28 cleanup | med | M | med | `lib/render_cards*.py` |
+| 12 | Extract `lib/design_tokens.py`; programmatically generate tints from semantic colors; rewrite `:root` block from tokens | med | M | med | `lib/design_tokens.py`, `lib/render_styles.py` |
 | 13 | Refactor `compute_longevity_score` into per-component `_norm_X()` helpers + weighted-average top level | med | M | med | `lib/health_longevity.py` (post-split) |
 | 14 | Generalize capability plumbing: `INPUT_CAPABILITY_REQ` map + single filter step in `compute_longevity_score` (and `recovery_score`, if applicable) | low | M | low | `lib/constants.py`, `lib/health_*.py` |
 | 15 | `CoachContext` TypedDict carrying person/capabilities/risk_flags/longevity_state; replace separate dict params across renderers | low | L | med | `lib/contracts.py`, all renderer signatures |
 | 16 | `validate_workout_md`: check the workout markdown opening contains the gate's `headline` + top-3 rationale; close the Phase 2 social-contract loop | med | M | low | `lib/render_validators.py`, `scripts/render_dashboard.py` |
 | 17 | Add `card_skeleton(...)` helper for empty-state convention; backfill across cards that hand-roll empty-state branches | low | M | low | `lib/render_cards.py` (or split files) |
-| 18 | ~~Migrate 9 inline sleep-stage hex literals in `card_sleep` to `--stage-{core,deep,rem,awake}` CSS variables in `:root`; restore the "no hex outside `:root`" invariant~~ ✅ done in PR-A | med | S | low | `lib/render_assets.py`, `lib/render_cards.py` (lines 422–428, 572–575) |
+| 18 | ~~Migrate 9 inline sleep-stage hex literals in `card_sleep` to `--stage-{core,deep,rem,awake}` CSS variables in `:root`; restore the "no hex outside `:root`" invariant~~ ✅ done in PR-A | med | S | low | `lib/render_styles.py`, `lib/render_cards.py` (lines 422–428, 572–575) |
 
 ---
 
@@ -381,8 +391,8 @@ Each is small, shippable, and moves the needle without big-bang risk.
   optional keys).
 - Add `tests/test_session_recommendation.py` (synthetic inputs →
   A/B/C/D/E tier assertions + headline + top-3 rationale).
-- Add `tests/test_render_dashboard_snapshot.py` (snapshot the Nihad +
-  Fabian fixtures, stripping the `generated at` timestamp).
+- Add `tests/test_render_dashboard_snapshot.py` (snapshot the <Person> +
+  <OtherPerson> fixtures, stripping the `generated at` timestamp).
 - **Verification**: `python -m pytest Skills/tests/` passes;
   `python -m mypy Skills/workout-coach/` shows no new errors on
   annotated entry points.
@@ -412,9 +422,9 @@ component-normalization refactor (#13), and the silent-gap-audit script
 
 After each PR:
 1. `python -m pytest Skills/tests/ -v` — all tests pass (after PR-B).
-2. `python3 Skills/workout-coach/scripts/read_tracker.py --person Nihad --pretty | head` — JSON shape unchanged.
-3. `python3 Skills/workout-coach/scripts/render_dashboard.py --person Nihad ...` against current fixtures — HTML diff under snapshot test passes
+2. `python3 Skills/workout-coach/scripts/read_tracker.py --person <Person> --pretty | head` — JSON shape unchanged.
+3. `python3 Skills/workout-coach/scripts/render_dashboard.py --person <Person> ...` against current fixtures — HTML diff under snapshot test passes
    (`diff <(grep -v 'generated at' before.html) <(grep -v 'generated at' after.html)` is empty).
-4. `rg "#[0-9a-fA-F]{3,6}" Skills/workout-coach/lib/` — only hits inside the `:root` block in `render_assets.py` (or `lib/design_tokens.py` after #12).
+4. `rg "#[0-9a-fA-F]{3,6}" Skills/workout-coach/lib/` — only hits inside the `:root` block in `render_styles.py` (or `lib/design_tokens.py` after #12).
 5. After CODE_MAP rewrite: every function name in the doc greps to a definition; every link works.
-6. Manually open a rendered HTML in Safari at mobile + desktop breakpoint, verify session-call card + tier-history strip + longevity score render correctly with capability differences between Nihad (xml) and Fabian (health_auto_export).
+6. Manually open a rendered HTML in Safari at mobile + desktop breakpoint, verify session-call card + tier-history strip + longevity score render correctly with capability differences between <Person> (xml) and <OtherPerson> (health_auto_export).

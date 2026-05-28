@@ -54,7 +54,8 @@ target only if citable evidence supports it.
 ## Clinical Monitoring Principle
 
 Follow current clinical guidelines as the minimum frequency. If
-PrEP-mandated monitoring (eGFR + creatinine) is in place for this user
+Medication-mandated renal monitoring may apply depending on the private
+profile.
 (check `state.md` and `profile.md`), that's the floor — all other intervals
 should be derived from current guidelines at query time.
 
@@ -138,7 +139,7 @@ particularly when prior tenofovir exposure makes accurate renal monitoring
 load-bearing.
 
 **Vitamin D and high-latitude residence:** Cutaneous synthesis is near-zero
-October–March above ~45°N (e.g., Berlin 52°N, Copenhagen 55°N, Stockholm 59°N). Also note: magnesium is a cofactor for vitamin D
+October-March above ~45°N. Also note: magnesium is a cofactor for vitamin D
 activation. If 25-OH-D comes back low despite supplementation, evaluate
 magnesium status before increasing dose.
 

@@ -168,7 +168,8 @@ def build_monthly_sessions(rows: list[dict],
         is_cardio_row = _is_cardio_row(r)
         bucket = date_kinds.setdefault(d, {
             "has_strength": False, "has_cardio": False,
-            "strength_first": None, "cardio_first": None,
+            "has_other": False,
+            "strength_first": None, "cardio_first": None, "other_first": None,
         })
         if is_strength_row:
             bucket["has_strength"] = True
@@ -178,6 +179,10 @@ def build_monthly_sessions(rows: list[dict],
             bucket["has_cardio"] = True
             if bucket["cardio_first"] is None:
                 bucket["cardio_first"] = r.get("exercise")
+        if not is_strength_row and not is_cardio_row:
+            bucket["has_other"] = True
+            if bucket["other_first"] is None:
+                bucket["other_first"] = r.get("exercise")
 
     # Pass 2: build the entries, keyed by ``(date, kind)``. Each date with
     # both kinds yields two entries; pure days yield one.
@@ -197,6 +202,15 @@ def build_monthly_sessions(rows: list[dict],
                 "date": d,
                 "session_kind": "cardio",
                 "exercise_first": bucket["cardio_first"],
+                "active_cal":  None, "total_cal":   None,
+                "elevation_m": None, "elapsed":     None,
+                "avg_hr":      None, "duration_min": None,
+            }
+        if bucket["has_other"] and not bucket["has_strength"] and not bucket["has_cardio"]:
+            by_key[(d, "other")] = {
+                "date": d,
+                "session_kind": "other",
+                "exercise_first": bucket["other_first"],
                 "active_cal":  None, "total_cal":   None,
                 "elevation_m": None, "elapsed":     None,
                 "avg_hr":      None, "duration_min": None,

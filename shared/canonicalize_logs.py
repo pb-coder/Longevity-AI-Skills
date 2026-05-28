@@ -12,7 +12,7 @@ Ambiguous names (e.g. bare 'Leg Curl' which could be Lying or Seated)
 are reported but not auto-renamed.
 
 Usage:
-    python3 canonicalize_logs.py --person Nihad
+    python3 canonicalize_logs.py --person <Person>
 """
 from __future__ import annotations
 
@@ -188,6 +188,6 @@ def main(person: str) -> int:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--person", required=True,
-                    help="Tracker owner (Nihad or Fabian).")
+                    help="Tracker owner (<Person> or <OtherPerson>).")
     args = ap.parse_args()
     sys.exit(main(args.person))

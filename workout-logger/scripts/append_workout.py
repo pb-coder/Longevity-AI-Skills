@@ -83,8 +83,8 @@ Rows must arrive pre-sorted: by date ascending, then by num ascending, then by s
 The script does not re-sort — it trusts the caller.
 
 Usage:
-    python3 append_workout.py --person Nihad <payload_json_path>
-    python3 append_workout.py --person Nihad -    # read JSON from stdin
+    python3 append_workout.py --person <Person> <payload_json_path>
+    python3 append_workout.py --person <Person> -    # read JSON from stdin
 """
 from __future__ import annotations
 
@@ -98,7 +98,6 @@ sys.path.insert(0, str(SKILLS_ROOT))
 sys.path.insert(0, str(SKILLS_ROOT / "shared"))
 from tracker import TrackerContext  # noqa: E402
 from monthly_csv import (  # noqa: E402
-    canonicalize_monthly_csv,
     upsert_rows as monthly_upsert_rows,
 )
 from csv_store import (  # noqa: E402
@@ -494,10 +493,6 @@ def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
             created = not target.exists()
             payload = [_to_monthly_row(r) for r in month_rows]
             monthly_upsert_rows(person, ym, payload)
-            # upsert_rows already calls canonicalize, but call it again
-            # defensively in case a future refactor short-circuits the
-            # internal call.
-            canonicalize_monthly_csv(person, ym)
             dates = sorted({r["date"] for r in month_rows})
             tag = " (new sheet)" if created else ""
             status.append(
@@ -607,7 +602,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--person", required=True,
-                    help="Tracker owner (Nihad or Fabian).")
+                    help="Tracker owner (<Person> or <OtherPerson>).")
     ap.add_argument("payload", type=str,
                     help="Path to payload JSON, or '-' to read from stdin.")
     args = ap.parse_args()

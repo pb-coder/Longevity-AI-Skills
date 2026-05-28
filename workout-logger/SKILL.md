@@ -16,13 +16,13 @@ description: >
 ## Who is this for?
 
 Two trackers live in per-person folders inside the workout directory:
-- `Nihad/data/` (CSV store: monthly/ + dense + swimming/)
-- `Fabian/data/` (same shape; HealthAutoExport-backed, no swim-lap store unless native XML data exists)
+- `<Person>/data/` (CSV store: monthly/ + dense + swimming/)
+- `<OtherPerson>/data/` (same shape; HealthAutoExport-backed, no swim-lap store unless native XML data exists)
 
 Resolve which person this log is for BEFORE running the script:
-- If the user names a person ("log Fabian's push day", "this is for Nihad"), use that name.
-- If the user uses pronouns or context that clearly refer to one person ("my bf" / "boyfriend" → Fabian; "I" / "me" / "my" with no other person mentioned → Nihad, since Nihad is the account owner), use that name.
-- Otherwise ask: **"Is this for Nihad or Fabian?"** before proceeding.
+- If the user names a person or tracker, use that name.
+- If the user uses pronouns or context that clearly refer to one tracker, use that tracker.
+- Otherwise ask which tracker/person this is for before proceeding.
 
 Pass the resolved name via `--person <Name>`. The path resolver
 (`Skills/shared/person_paths.py`) finds the right `data/` folder.
@@ -88,7 +88,7 @@ line. Don't search the filesystem.
    }
    ```
    Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `sleep` entirely if the user didn't include a sleep line — **never prompt for sleep**. Omit `thermal` entirely if the user didn't include a `sauna` / `cold` line — **never prompt for thermal**. Omit `light_therapy` entirely if the user didn't include a light-therapy line — **never prompt for light therapy**. Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually; it comes from the Apple Health import only. Per-night segment metadata (`n_segments`, `first_segment_start`, `last_segment_end`) also can't be entered manually — only the Apple importer populates those.
-3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `Nihad` or `Fabian`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), dual-writes any sleep entries into both `<Person>/data/sleep/YYYY.MM.nights.csv` (rich per-night detail) and `<Person>/data/health_metrics.csv` (headline Total/Deep/REM/Time in Bed for the recovery score), writes any thermal entries to `<Person>/data/thermal/YYYY.MM.sessions.csv` (sparse-merge; `heat_total_min` auto-derived from the per-round durations), and writes any light-therapy entries to `<Person>/data/light_therapy/YYYY.MM.sessions.csv` (sparse-merge; `modality` auto-defaults to `cabin` when `ambient_temp_c ≥ 30`). Sleep Efficiency is auto-derived inside the upsert when both Total and Time in Bed are present.
+3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `<Person>` or `<OtherPerson>`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), dual-writes any sleep entries into both `<Person>/data/sleep/YYYY.MM.nights.csv` (rich per-night detail) and `<Person>/data/health_metrics.csv` (headline Total/Deep/REM/Time in Bed for the recovery score), writes any thermal entries to `<Person>/data/thermal/YYYY.MM.sessions.csv` (sparse-merge; `heat_total_min` auto-derived from the per-round durations), and writes any light-therapy entries to `<Person>/data/light_therapy/YYYY.MM.sessions.csv` (sparse-merge; `modality` auto-defaults to `cabin` when `ambient_temp_c ≥ 30`). Sleep Efficiency is auto-derived inside the upsert when both Total and Time in Bed are present.
 4. **Verify the write succeeded.** Capture the script's stdout and exit code:
    - If the exit code is non-zero, print the exact stderr output and stop. Do not report success.
    - If the exit code is 0 but stdout does not contain the word `Appended`, print the exact stdout and stop with: "Unexpected script output — please check the tracker manually."
@@ -215,7 +215,7 @@ Light therapy is opt-in. The user includes a light-therapy line (`rlt`, `red lig
 
 The module is broad on purpose: it stores red-light cabins, near-IR probes, blue-light SAD lamps, and any future photobiomodulation modality under one schema. Pick the keyword that matches what the user wrote and let the upsert apply the defaults.
 
-Light-therapy entries are written to `<Person>/data/light_therapy/YYYY.MM.sessions.csv` (manual-/log-only — Apple Health doesn't classify light-therapy sessions). Sparse-merge by `(date, start)`; `Notes` is manual-wins. `modality` is auto-defaulted to `cabin` inside `upsert_light_therapy_sessions` when `ambient_temp_c ≥ 30` and the user didn't specify a modality (heated walk-in inference, e.g. Holmes Place-style RLT cabins).
+Light-therapy entries are written to `<Person>/data/light_therapy/YYYY.MM.sessions.csv` (manual-/log-only — Apple Health doesn't classify light-therapy sessions). Sparse-merge by `(date, start)`; `Notes` is manual-wins. `modality` is auto-defaulted to `cabin` inside `upsert_light_therapy_sessions` when `ambient_temp_c ≥ 30` and the user didn't specify a modality (heated walk-in inference).
 
 **No pairing with thermal.** A sauna+RLT session in real life lands as **two payload entries** (one in `thermal`, one in `light_therapy`), both keyed to the same date. They live in two stores. If the user actually used a sauna-integrated red-light panel, set `modality: "sauna_integrated"` on the light-therapy entry.
 

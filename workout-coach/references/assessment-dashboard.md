@@ -100,7 +100,7 @@ The NEAT card has no coach callout slot; the three stat cells are glanceable on 
 | Health vitals | `health_metrics_weekly` (HRV / RHR / wrist temp / sleep / deep / REM / VO2max series), `vo2max_latest`, `vo2max_trend_per_4w`, `bodyweight_latest`, `bodyweight_trend_kg_per_week`, `bodyweight_weekly` | One clean table, no inline coach rows. Sparklines colored by per-row status. **Wrist temp** State is computed dynamically (stable / rising / elevated / insufficient data) from the latest week's z-score vs. the prior 3-week mean, matching the HRV/RHR pattern but inverted (higher = warning). **Bodyweight** carries a sparkline driven by the new `bodyweight_weekly` series (ISO-week means). Sparkline column hides at ≤ 480 px. Column widths set via `.vitals-table` class. |
 | Sleep | `sleep_summary.{means_h, sleep_efficiency_pct, fragmentation, schedule_consistency, resp_rate, breath_disturbances, outliers}` | Dedicated card after Health vitals. Hero shows average total + Time in Bed proxy. Stack chart breaks down Core / Deep / REM / Awake. Six diagnostic rows (Deep+REM, efficiency, fragmentation, schedule, respiratory rate, breathing disturbances) each with a colored row-start dot + the value itself colored by band (no separate status-word column; the status word remains accessible via the row's hover tooltip via "Status: ..."). Newer iOS doesn't emit explicit `InBed` segments, so the importer + `Skills/shared/backfill_sleep_efficiency.py` derive Time in Bed from the first-to-last segment span. |
 | Recovery practices | `thermal_summary.heat`, `thermal_summary.cold`, `thermal_summary.cold.recent_sessions`, `thermal_summary.adherence`, `light_therapy_summary` | Three sub-cards, identical layout. Cold sub-card lists recent sessions with their temperature (the `dose_hint: "amber"` flag for cold_air ≥ 18 °C tags weak doses). |
-| Swim trajectory | `swim_summary.window_14d.*` (verdict, 14d aggregates, deltas vs prior 14d, PR flags), `swim_summary.css`, `swim_summary.css_retest_due` | **Gated card — renders iff `swim_summary` is non-null in tracker JSON.** Trajectory tab; sits between Cardio domain and Recovery domain so the cardio narrative reads as one block. Hero = 14d session count + distance + improvement verdict ("getting better" / "regressing" / "mixed signals" / "holding steady" / "not enough swims yet"). Three trend rows: pace per 100m, SPL, SWOLF, each with current value + signed delta vs prior 14d (lower = better for all three; the renderer applies the sign-flip). Optional PR chips when current-14d best beats prior-14d best on pace or SWOLF. CSS context block when set; CSS-retest prompt when retest is due. Coach callout key: `swim_trajectory_callout`. Skipped silently for trackers without swim data (no Fabian regression). |
+| Swim trajectory | `swim_summary.window_14d.*` (verdict, 14d aggregates, deltas vs prior 14d, PR flags), `swim_summary.css`, `swim_summary.css_retest_due` | **Gated card — renders iff `swim_summary` is non-null in tracker JSON.** Trajectory tab; sits between Cardio domain and Recovery domain so the cardio narrative reads as one block. Hero = 14d session count + distance + improvement verdict ("getting better" / "regressing" / "mixed signals" / "holding steady" / "not enough swims yet"). Three trend rows: pace per 100m, SPL, SWOLF, each with current value + signed delta vs prior 14d (lower = better for all three; the renderer applies the sign-flip). Optional PR chips when current-14d best beats prior-14d best on pace or SWOLF. CSS context block when set; CSS-retest prompt when retest is due. Coach callout key: `swim_trajectory_callout`. Skipped silently for trackers without swim data (no <OtherPerson> regression). |
 | Nutrition phase | `nutrition_phase.{current, targets, actuals, status, stop_signals_triggered, coach_action_hint, history}` | **Gated card — renders iff `nutrition_phase` is non-null in tracker JSON (i.e. the person has an open phase row in `<person>/data/nutrition_phases.csv`).** Trajectory tab; sits directly under Body composition so the two body-comp signals read together. Hero = phase type + weeks elapsed + observed-vs-target rate (`+0.24 kg/wk observed vs +0.25 kg/wk target`). Status word reads from `status` (on track / too fast / too slow / flat / regressing / insufficient data); color map: good / warn / amber / amber / warn / muted. Secondary rows: protein target, kcal delta, observed-rate-vs-target ratio. Always-shown pill carrying the binding `coach_action_hint` token (`Continue phase` / `Add calories` / `Slow intake` / `Consider ending` / `End now`). When `stop_signals_triggered` is non-empty, a left-bordered alert block lists them. The user's pre-committed off-ramp text from `targets.stop_conditions` renders as a muted footer line. Coach callout key: `nutrition_phase_callout`. The coach is required to read `references/bulking-science.md` before authoring the callout when `current.phase_type == "bulk"`. |
 | Week over week | `week_over_week.rows` | Trend arrows are color-inverted for RHR and wrist temp (a rising RHR is bad). Column widths set via `.wow-table` class. |
 
@@ -131,7 +131,7 @@ The tab strip sticks to the top of the viewport on scroll so the user can toggle
 - Reintroduce em-dashes anywhere in machine-emitted copy. (User-authored workout markdown sub-bullets are exempt.)
 - Hand-author HTML inside SKILL.md or any other file. All HTML lives in the renderer (the card templates in `lib/render_cards.py` and the asset constants in `lib/render_assets.py`).
 
-## Coach-reads example (Nihad, 2026-05-20)
+## Coach-reads example (<Person>, 2026-05-20)
 
 ```json
 {
@@ -154,10 +154,10 @@ The tab strip sticks to the top of the viewport on scroll so the user can toggle
 ```
 python3 Skills/workout-coach/scripts/render_dashboard.py \
   --tracker /tmp/tracker.json \
-  --coach plans/Nihad/2026-05-20-coach_reads.json \
-  --workout-md plans/Nihad/2026-05-20-workout.md \
-  --out plans/Nihad/2026-05-20-assessment.html \
-  --person Nihad
+  --coach plans/<Person>/2026-05-20-coach_reads.json \
+  --workout-md plans/<Person>/2026-05-20-workout.md \
+  --out plans/<Person>/2026-05-20-assessment.html \
+  --person <Person>
 ```
 
 The renderer prints one line on success and exits 0; on validation failure it prints one line per error to stderr and exits 2. The HTML is written atomically (last; the file is replaced on success, untouched on failure).

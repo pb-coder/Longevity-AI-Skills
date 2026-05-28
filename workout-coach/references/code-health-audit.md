@@ -30,7 +30,7 @@ or product direction.
    `render_*` modules don't import from analytics modules and vice versa.
    The seam is the tracker JSON shape — clear contract, easy to mock.
 4. **DESIGN.md is normative, not aspirational.** Tokens live in YAML front
-   matter; the `:root` block in `render_assets.py` is the only place hex
+   matter; the `:root` block in `render_styles.py` is the only place hex
    appears; the rest of the CSS references CSS vars. The lint rule
    (`rg "#[0-9a-fA-F]{3,6}"` against `lib/`) is documented and trivially
    enforceable.
@@ -97,14 +97,14 @@ or product direction.
   future risk-gated copy can reuse it.
 - **Pill-class usage verified clean**: `.pill`, `.pill.good/.amber/.warn/
   .muted`, `.pill-adherence.{on-target,below-target,above-target}` all
-  defined in `render_assets.py` and used in `render_cards.py`. No
+  defined in `render_styles.py` and used in card modules. No
   orphans.
 - **DESIGN.md hex-literal rule violation** (fixed in PR-A): `card_sleep`
   used to inline sleep-stage colors as `style="background:#a8b6d9"`
   (Core / Deep / REM / Awake) at lines 422–428 and again in the legend
   at 572–575 — 9 hex literals outside `:root`. Migrated to
   `--stage-{core,deep,rem,awake}` tokens in `:root` plus `.stage-*` /
-  `.dot.stage-*` rules in `render_assets.py`; the cards now use class
+  `.dot.stage-*` rules in `render_styles.py`; the cards now use class
   names only. Lint
   (`rg --pcre2 '(?<!&)#[0-9a-fA-F]{6}\b' lib/render_cards.py`) returns
   zero matches.
@@ -116,9 +116,12 @@ or product direction.
   helper). Two tabs, two files. Reduces grep noise and keeps the
   today-flow tight.
 
-### `lib/render_assets.py` — 998 lines
-- `.pill` base style **is** defined (line 157). All CSS classes used in
-  `render_cards.py` are defined here. No orphans.
+### Dashboard assets
+- `lib/render_assets.py` is now a compatibility facade. CSS lives in
+  `lib/render_styles.py`; inline dashboard JavaScript lives in
+  `lib/render_scripts.py`.
+- `.pill` base style is defined in the stylesheet. All CSS classes used
+  in the focused card modules are defined there. No orphans.
 - No tier-border CSS leftovers from PR #4 — PR #5 cleaned them up.
 - **Token duplication risk**: color tokens (`--good: #34c759`) and their
   tint variants (`--good-tint: rgba(52,199,89,0.12)`) are both hardcoded
@@ -127,7 +130,7 @@ or product direction.
   generates tints from hex would remove this manual sync.
 - **Split recommendation**: extract `lib/design_tokens.py` that exports
   `TOKENS: dict` + a `tokens_to_css_root() -> str` function.
-  `STYLESHEET` in `render_assets.py` interpolates the `:root` block
+  `STYLESHEET` in `render_styles.py` interpolates the `:root` block
   from that. Keeps the stylesheet as final output but moves token math
   to a typed home and aligns `lib/` with DESIGN.md's YAML front matter
   (the tokens become programmatic, not text-duplicated).
@@ -282,7 +285,7 @@ types alone — no need to read 1.6kloc files top-to-bottom.
 ### PR #3 — `c034af2` — Dashboard data fidelity
 - **Cleanup**: `band_class_map` dict introduced inline duplicates an
   earlier band→CSS mapping; should normalize to one constant in
-  `render_assets.py` or `lib/constants.py`.
+  `render_styles.py` or `lib/constants.py`.
 - **Inconsistency**: the empty-recovery-practices early-return pattern at
   `card_recovery_practices` is not mirrored in other zero-data cards
   (`card_strength`, `card_vitals`, etc.). The "hide-don't-placeholder"
@@ -350,13 +353,13 @@ Scoring: **Impact** (high/med/low) × **Effort** (S/M/L) × **Risk**
 | 9 | Generalize person-specific copy: extract Parkinson / PrEP / vegan / creatine strings + per-person profiles into `references/people.md` (or YAML); make code comments person-agnostic | med | M | low | `references/people.md`, `lib/sleep.py`, `lib/constants.py`, `references/training-science.md` |
 | 10 | ~~Split `lib/health.py` into `health_windowing.py`, `health_recovery.py`, `health_longevity.py`, `health_session_rec.py`; keep `health.py` as a thin facade for back-compat imports~~ ✅ done in 2026-05-28 cleanup | high | M | med | `lib/health*.py` |
 | 11 | ~~Split `lib/render_cards.py` into focused card modules while keeping `render_cards.py` as a facade~~ ✅ done in 2026-05-28 cleanup | med | M | med | `lib/render_cards*.py` |
-| 12 | Extract `lib/design_tokens.py`; programmatically generate tints from semantic colors; rewrite `:root` block from tokens | med | M | med | `lib/design_tokens.py`, `lib/render_assets.py` |
+| 12 | Extract `lib/design_tokens.py`; programmatically generate tints from semantic colors; rewrite `:root` block from tokens | med | M | med | `lib/design_tokens.py`, `lib/render_styles.py` |
 | 13 | Refactor `compute_longevity_score` into per-component `_norm_X()` helpers + weighted-average top level | med | M | med | `lib/health_longevity.py` (post-split) |
 | 14 | Generalize capability plumbing: `INPUT_CAPABILITY_REQ` map + single filter step in `compute_longevity_score` (and `recovery_score`, if applicable) | low | M | low | `lib/constants.py`, `lib/health_*.py` |
 | 15 | `CoachContext` TypedDict carrying person/capabilities/risk_flags/longevity_state; replace separate dict params across renderers | low | L | med | `lib/contracts.py`, all renderer signatures |
 | 16 | `validate_workout_md`: check the workout markdown opening contains the gate's `headline` + top-3 rationale; close the Phase 2 social-contract loop | med | M | low | `lib/render_validators.py`, `scripts/render_dashboard.py` |
 | 17 | Add `card_skeleton(...)` helper for empty-state convention; backfill across cards that hand-roll empty-state branches | low | M | low | `lib/render_cards.py` (or split files) |
-| 18 | ~~Migrate 9 inline sleep-stage hex literals in `card_sleep` to `--stage-{core,deep,rem,awake}` CSS variables in `:root`; restore the "no hex outside `:root`" invariant~~ ✅ done in PR-A | med | S | low | `lib/render_assets.py`, `lib/render_cards.py` (lines 422–428, 572–575) |
+| 18 | ~~Migrate 9 inline sleep-stage hex literals in `card_sleep` to `--stage-{core,deep,rem,awake}` CSS variables in `:root`; restore the "no hex outside `:root`" invariant~~ ✅ done in PR-A | med | S | low | `lib/render_styles.py`, `lib/render_cards.py` (lines 422–428, 572–575) |
 
 ---
 
@@ -420,6 +423,6 @@ After each PR:
 2. `python3 Skills/workout-coach/scripts/read_tracker.py --person <Person> --pretty | head` — JSON shape unchanged.
 3. `python3 Skills/workout-coach/scripts/render_dashboard.py --person <Person> ...` against current fixtures — HTML diff under snapshot test passes
    (`diff <(grep -v 'generated at' before.html) <(grep -v 'generated at' after.html)` is empty).
-4. `rg "#[0-9a-fA-F]{3,6}" Skills/workout-coach/lib/` — only hits inside the `:root` block in `render_assets.py` (or `lib/design_tokens.py` after #12).
+4. `rg "#[0-9a-fA-F]{3,6}" Skills/workout-coach/lib/` — only hits inside the `:root` block in `render_styles.py` (or `lib/design_tokens.py` after #12).
 5. After CODE_MAP rewrite: every function name in the doc greps to a definition; every link works.
 6. Manually open a rendered HTML in Safari at mobile + desktop breakpoint, verify session-call card + tier-history strip + longevity score render correctly with capability differences between <Person> (xml) and <OtherPerson> (health_auto_export).

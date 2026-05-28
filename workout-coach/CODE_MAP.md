@@ -47,8 +47,8 @@ For known issues / planned cleanup, see
 | Trajectory health/recovery cards | [`lib/render_cards_health.py`](lib/render_cards_health.py) |
 | Trajectory longevity-domain cards | [`lib/render_cards_domains.py`](lib/render_cards_domains.py) |
 | Trajectory risk/swim/nutrition cards | [`lib/render_cards_programs.py`](lib/render_cards_programs.py) |
-| CSS / styling / colors | [`lib/render_assets.py`](lib/render_assets.py) (the `STYLESHEET` string) |
-| Inline JavaScript (tabs, tooltips, chart scrubber, markdown viewer) | [`lib/render_assets.py`](lib/render_assets.py) (the `INLINE_JS` string) |
+| CSS / styling / colors | [`lib/render_styles.py`](lib/render_styles.py) (the `STYLESHEET` string) |
+| Inline JavaScript (tabs, tooltips, chart scrubber, markdown viewer) | [`lib/render_scripts.py`](lib/render_scripts.py) (the `INLINE_JS` string) |
 | An SVG component (training-load chart, sparkline, muscle bar, freshness / recovery scale, ring, driver bar) | [`lib/render_components.py`](lib/render_components.py) |
 | Coach-text validation rules / em-dash check / length cap | [`lib/render_validators.py`](lib/render_validators.py)::`validate_coach_reads` |
 | Add a tooltip for a new abbreviation in coach text | [`lib/render_validators.py`](lib/render_validators.py)::`KNOWN_TERMS` |
@@ -116,7 +116,9 @@ Skills/workout-coach/
     ├── render_helpers.py (50)            esc, fmt, signed, parse_date — zero-dep helpers
     ├── render_validators.py (186)        KNOWN_TERMS catalog, validate_coach_reads, auto_wrap_terms
     ├── render_components.py (752)        SVG / HTML components (chart, rings, bars, scales, sparkline)
-    ├── render_assets.py (998)            STYLESHEET (CSS) + INLINE_JS strings
+    ├── render_assets.py (11)             compatibility facade for dashboard assets
+    ├── render_styles.py (731)            STYLESHEET string
+    ├── render_scripts.py (256)           INLINE_JS string
     ├── render_cards.py (76)              compatibility facade for card modules
     ├── render_cards_common.py (39)       shared heading + coach callout helpers
     ├── render_cards_today.py (472)       Today tab card templates
@@ -216,22 +218,25 @@ complete fragment. Grouped by purpose:
 - **Small indicators**: `confidence_dots(conf)`, `sparkline(values,
   status_class)`, `embed_workout_markdown(md_text)`.
 
-### [`lib/render_assets.py`](lib/render_assets.py) (~998 lines)
+### Dashboard assets
 
-Two module-level string constants — pure data, no functions.
+Two module-level string constants — pure data, no functions — split by
+asset type. [`lib/render_assets.py`](lib/render_assets.py) remains a
+compatibility facade that re-exports both names.
 
 **Implements the design system documented in
 [`Skills/DESIGN.md`](../DESIGN.md).** Read that first before touching
 CSS — token values (colours, typography, spacing) come from its YAML
-front matter and must be referenced via CSS variables here. **No raw
+front matter and must be referenced via CSS variables in
+[`lib/render_styles.py`](lib/render_styles.py). **No raw
 hex literals outside the `:root` block** (lint: `rg
 "#[0-9a-fA-F]{3,6}" lib/` should only hit `:root`).
 
-- `STYLESHEET` — the full inline CSS. Owns colors (CSS custom
+- `render_styles.STYLESHEET` — the full inline CSS. Owns colors (CSS custom
   properties at the top, mapping `Skills/DESIGN.md` tokens), card
   chrome, every visual component's layout, tooltip styling, mobile
   breakpoints.
-- `INLINE_JS` — inline JavaScript embedded at the bottom of the HTML.
+- `render_scripts.INLINE_JS` — inline JavaScript embedded at the bottom of the HTML.
   Tab switching with URL hash mirroring, hover tooltip positioning,
   interactive training-load chart scrubber + tooltip, tiny markdown
   renderer for the Workout tab.
@@ -324,7 +329,7 @@ remain presentation-only: no disk I/O and no analytics imports.
 1. Implement `card_yournew(data, coach_text)` in
    the focused card module for its tab/domain.
 2. Add CSS for any new classes in `STYLESHEET` in
-   [`lib/render_assets.py`](lib/render_assets.py). Reference CSS
+   [`lib/render_styles.py`](lib/render_styles.py). Reference CSS
    variables, not raw hex.
 3. Wire the call into
    [`scripts/render_dashboard.py`](scripts/render_dashboard.py)::`render()`
@@ -337,8 +342,8 @@ remain presentation-only: no disk I/O and no analytics imports.
    callout warns.
 
 **Change a card's layout.**
-- HTML / structure: [`lib/render_cards.py`](lib/render_cards.py).
-- CSS: [`lib/render_assets.py`](lib/render_assets.py).
+- HTML / structure: the focused `lib/render_cards_*.py` module.
+- CSS: [`lib/render_styles.py`](lib/render_styles.py).
 - New SVG glyph or chart: add a function to
   [`lib/render_components.py`](lib/render_components.py) and call it
   from the card.

@@ -39,6 +39,7 @@ if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 
 from tracker.contracts import CoachReads, TrackerJSON
+from tracker.validation import validate_tracker_json
 from render_helpers import esc
 from render_validators import auto_wrap_terms, validate_coach_reads
 from render_components import build_load_series, embed_workout_markdown, ring
@@ -241,9 +242,17 @@ def main():
     if args.tracker == "-":
         j = json.load(sys.stdin)
     else:
-        j = json.loads(Path(args.tracker).read_text())
+        j = json.loads(Path(args.tracker).read_text(encoding="utf-8"))
 
-    coach: CoachReads = json.loads(Path(args.coach).read_text())
+    tracker_errors, tracker_warnings = validate_tracker_json(j)
+    for w in tracker_warnings:
+        print(f"tracker_json warning: {w}", file=sys.stderr)
+    if tracker_errors:
+        for e in tracker_errors:
+            print(f"tracker_json validation error: {e}", file=sys.stderr)
+        return 2
+
+    coach: CoachReads = json.loads(Path(args.coach).read_text(encoding="utf-8"))
     errors, warnings = validate_coach_reads(coach)
     for w in warnings:
         print(f"coach_reads warning: {w}", file=sys.stderr)

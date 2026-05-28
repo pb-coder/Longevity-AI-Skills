@@ -1,8 +1,9 @@
 """Typed contracts for the tracker command boundaries.
 
-The runtime still emits plain JSON-serializable dictionaries. These types make
-the load-bearing shapes explicit at construction and rendering boundaries so
-future refactors can detect schema drift before it reaches a skill prompt.
+The runtime still emits plain JSON-serializable dictionaries. These types
+document the load-bearing shapes at construction and rendering boundaries.
+Runtime validators in ``tracker.validation`` enforce the renderer seams; the
+TypedDicts themselves are not a substitute for wiring a static checker into CI.
 """
 from __future__ import annotations
 
@@ -59,14 +60,37 @@ class TrainingLoad(TypedDict, total=False):
     load_band: str | None
 
 
+SessionLabel = Literal[
+    "rest",
+    "reactive_deload",
+    "downgrade",
+    "green",
+    "over_recovered",
+]
+
+
+class SessionSubstitute(TypedDict, total=False):
+    kind: str
+    prescription: str
+    duration_min: float | int | None
+    notes: str
+
+
+class SessionRationaleEntry(TypedDict, total=False):
+    signal: str
+    value: JsonValue
+    threshold: JsonValue
+    note: str
+
+
 class SessionRecommendation(TypedDict, total=False):
     tier: Tier
+    label: SessionLabel
     headline: str
-    rationale: list[str]
-    constraints: list[str]
-    substitutions: list[str]
-    allowed_session_types: list[str]
-    avoid: list[str]
+    substitute: SessionSubstitute | None
+    rationale: list[SessionRationaleEntry]
+    override_allowed: bool
+    override_message: str
 
 
 class CoachReads(TypedDict, total=False):

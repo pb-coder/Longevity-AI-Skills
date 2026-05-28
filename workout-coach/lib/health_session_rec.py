@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from tracker.contracts import SessionRecommendation, SessionRationaleEntry
 from health_recovery import _z_score_signal, recovery_score
 from health_windowing import baseline_60d, latest_metric, _mean_or_none, _values_in_window
 from parsing import _parse_iso_date
@@ -126,7 +127,7 @@ def compute_session_recommendation(*,
                                     auto_deload_candidates: list[str] | None,
                                     health_all: list[dict],
                                     today_d: date,
-                                    estimated_max_hr: float | None) -> dict:
+                                    estimated_max_hr: float | None) -> SessionRecommendation:
     """Top-down 5-tier gate. First gate to fire wins. Returns the
     operational recommendation that the SKILL.md prompt MUST honor before
     generating any workout.
@@ -197,9 +198,9 @@ def compute_session_recommendation(*,
         if hint.startswith("rising"):
             hr_creep_muscles.append(muscle)
 
-    rationale: list[dict] = []
+    rationale: list[SessionRationaleEntry] = []
 
-    def add(signal, value, threshold, note):
+    def add(signal: str, value, threshold, note: str) -> None:
         rationale.append({
             "signal": signal, "value": value,
             "threshold": threshold, "note": note,
@@ -469,4 +470,3 @@ def compute_tier_history(*,
             "dominant_signal": dominant_signal,
         })
     return out
-

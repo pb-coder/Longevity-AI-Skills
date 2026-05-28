@@ -9,6 +9,7 @@ from pathlib import Path
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILLS_ROOT / "workout-coach" / "lib"))
 
+from tracker.contracts import SessionRecommendation  # noqa: E402
 from health import compute_session_recommendation  # noqa: E402
 
 
@@ -37,6 +38,11 @@ class SessionRecommendationTests(unittest.TestCase):
         rec = recommendation()
         self.assertEqual(rec["tier"], "D")
         self.assertEqual(rec["headline"], "Train as planned.")
+
+    def test_recommendation_keys_match_declared_contract(self) -> None:
+        rec = recommendation()
+        declared = set(SessionRecommendation.__optional_keys__)
+        self.assertTrue(set(rec.keys()).issubset(declared), set(rec.keys()) - declared)
 
     def test_high_fatigue_triggers_zone_2_reactive_deload(self) -> None:
         rec = recommendation(training_load={"tsb": -16})

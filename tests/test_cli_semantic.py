@@ -36,8 +36,8 @@ class CliSemanticTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return json.loads(proc.stdout)
 
-    def test_read_tracker_nihad_semantic_golden(self) -> None:
-        data = self.read_tracker("Nihad")
+    def test_read_tracker_person_a_semantic_golden(self) -> None:
+        data = self.read_tracker("person_a")
         self.assertEqual(len(data["monthly_sessions"]), 3)
         self.assertEqual(len(data["estimated_1rm"]), 2)
         self.assertEqual(data["unknown_exercises"], [])
@@ -51,15 +51,15 @@ class CliSemanticTests(unittest.TestCase):
         self.assertTrue(data["capabilities"]["light_therapy_log"])
         self.assertGreater(data["estimated_max_hr"], 150)
 
-    def test_read_tracker_fabian_semantic_golden(self) -> None:
-        data = self.read_tracker("Fabian")
+    def test_read_tracker_person_b_semantic_golden(self) -> None:
+        data = self.read_tracker("person_b")
         self.assertEqual(data["data_source"], "health_auto_export")
         self.assertEqual(len(data["monthly_sessions"]), 2)
         self.assertEqual(len(data["estimated_1rm"]), 1)
         self.assertEqual(data["unknown_exercises"], [])
         self.assertIn("sleep_summary", data)
         self.assertNotIn("swim_summary", data)
-        # Fabian has no light_therapy/ folder yet → key absent.
+        # person_b has no light_therapy/ folder yet → key absent.
         self.assertNotIn("light_therapy_summary", data)
         self.assertTrue(data["capabilities"]["hrv"])
         self.assertTrue(data["capabilities"]["per_workout_hr_strength"])
@@ -68,15 +68,15 @@ class CliSemanticTests(unittest.TestCase):
 
     def test_maintain_dry_run_is_read_only_and_explainable(self) -> None:
         maintain = str(SKILLS_ROOT / "shared" / "maintain.py")
-        nihad = self.run_cmd(maintain, "--person", "Nihad", "--dry-run")
-        self.assertEqual(nihad.returncode, 0, nihad.stderr)
-        self.assertIn("Dry run", nihad.stdout)
-        self.assertIn("health_metrics.csv", nihad.stdout)
+        person_a = self.run_cmd(maintain, "--person", "person_a", "--dry-run")
+        self.assertEqual(person_a.returncode, 0, person_a.stderr)
+        self.assertIn("Dry run", person_a.stdout)
+        self.assertIn("health_metrics.csv", person_a.stdout)
 
-        fabian = self.run_cmd(maintain, "--person", "Fabian", "--dry-run")
-        self.assertEqual(fabian.returncode, 0, fabian.stderr)
-        self.assertIn("Dry run", fabian.stdout)
-        self.assertIn("health_metrics.csv", fabian.stdout)
+        person_b = self.run_cmd(maintain, "--person", "person_b", "--dry-run")
+        self.assertEqual(person_b.returncode, 0, person_b.stderr)
+        self.assertIn("Dry run", person_b.stdout)
+        self.assertIn("health_metrics.csv", person_b.stdout)
 
 
 if __name__ == "__main__":

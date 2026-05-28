@@ -373,7 +373,7 @@ def _build_week_over_week(today_d: date,
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--person", required=True,
-                    help="Tracker owner (Nihad or Fabian).")
+                    help="Tracker owner (<Person> or <OtherPerson>).")
     ap.add_argument("--months", type=int, default=3,
                     help="How many months back to load from monthly sheets. The data is used internally for "
                          "all roll-ups regardless of --include-rows.")

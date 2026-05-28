@@ -33,7 +33,7 @@ class AppendWorkoutTests(unittest.TestCase):
             target = Path(td) / "2026.05.csv"
             with patch.object(append_workout, "monthly_csv_path", return_value=target), \
                  patch.object(append_workout, "monthly_upsert_rows") as upsert:
-                status = append_workout.write_payload("Nihad", rows, [])
+                status = append_workout.write_payload("person_a", rows, [])
 
         upsert.assert_called_once()
         self.assertIn("Appended 1 row(s) to 2026.05 (new sheet)", status[0])

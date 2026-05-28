@@ -25,6 +25,11 @@ Cross-skill primitives live in [`../tracker/`](../tracker/): command
 context, CSV table mechanics, typed command contracts, and benchmark
 helpers. Do not copy those concerns into `workout-coach/lib/`.
 
+CSV stores live in [`../shared/`](../shared/): `csv_store.py` is only the
+compatibility facade; use `csv_store_profile.py`, `csv_store_dense.py`,
+`csv_store_periodic.py`, and `csv_store_common.py` when changing storage
+behavior.
+
 For known issues / planned cleanup, see
 [`references/code-health-audit.md`](references/code-health-audit.md).
 
@@ -56,6 +61,7 @@ For known issues / planned cleanup, see
 | Sauna + cold-exposure summary | [`lib/thermal.py`](lib/thermal.py) |
 | Light-therapy summary | [`lib/light_therapy.py`](lib/light_therapy.py) |
 | Per-muscle HR creep / strength session HR / e1RM slope | [`lib/strength.py`](lib/strength.py) |
+| CSV store schemas and upserts | [`../shared/csv_store_dense.py`](../shared/csv_store_dense.py) and [`../shared/csv_store_periodic.py`](../shared/csv_store_periodic.py) |
 | Apple Health import semantics | [`../shared/import_apple_health.py`](../shared/import_apple_health.py) (Apple XML) or [`../shared/import_health_auto_export.py`](../shared/import_health_auto_export.py) (HealthAutoExport) |
 | Dashboard spec / card contracts | [`references/assessment-dashboard.md`](references/assessment-dashboard.md) |
 | Visual design system — colours, typography, pills, card chrome | [`Skills/DESIGN.md`](../DESIGN.md) |
@@ -350,5 +356,5 @@ diff <(grep -v 'generated at' before.html) <(grep -v 'generated at' after.html)
 ```
 
 Backlog item: snapshot tests (`tests/test_render_dashboard_snapshot.py`)
-will automate this against the existing `tests/fixtures/Nihad/` and
-`tests/fixtures/Fabian/` trees. See `references/code-health-audit.md` #8.
+will automate this against the existing `tests/fixtures/<Person>/` and
+`tests/fixtures/<OtherPerson>/` trees. See `references/code-health-audit.md` #8.

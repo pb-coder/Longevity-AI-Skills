@@ -21,7 +21,7 @@ if a downstream bug damages the CSVs. Re-export from iPhone if you need
 to backfill.
 
 Usage:
-    python3 import_apple_health.py --person Nihad \\
+    python3 import_apple_health.py --person <Person> \\
         [--since YYYY-MM-DD]      # default: 6 months back from today
         [--allow-past-months]     # bypass the current-month auto-cardio gate
         [--dry-run]
@@ -1131,7 +1131,7 @@ def _resolve_export_zip(person: str) -> Path | None:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--person", required=True,
-                    help="Tracker owner (e.g. Nihad or Fabian). "
+                    help="Tracker owner (e.g. <Person> or <OtherPerson>). "
                          "Resolves the per-person data/ folder via "
                          "Skills/shared/person_paths.py.")
     ap.add_argument("--zip", default=None, type=Path,

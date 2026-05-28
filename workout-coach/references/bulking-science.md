@@ -78,7 +78,7 @@ The numbers above sit on the trained-lifter lean-bulk consensus from:
 
 When coaching language references a specific number from this doc, the coach is encouraged to mention the source ("Iraki et al. recommends 200-400 kcal surplus" reads more grounded than "literature suggests").
 
-## Vegan bulks (Nihad-specific)
+## Plant-Based Bulks
 
 The plant-protein context tightens the protein target — clear 2.0-2.2 g/kg/day, distributed across 4-5 meals each hitting the leucine threshold. The default macro stack:
 

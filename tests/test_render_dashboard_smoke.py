@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -9,6 +10,7 @@ from pathlib import Path
 
 
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_ROOT = SKILLS_ROOT / "tests" / "fixtures"
 
 
 class RenderDashboardSmokeTests(unittest.TestCase):
@@ -19,17 +21,20 @@ class RenderDashboardSmokeTests(unittest.TestCase):
             coach_json = tmp / "coach_reads.json"
             workout_md = tmp / "workout.md"
             out_html = tmp / "assessment.html"
+            env = os.environ.copy()
+            env["WORKOUT_TRACKER_ROOT"] = str(FIXTURE_ROOT)
 
             read_proc = subprocess.run(
                 [
                     sys.executable,
                     "workout-coach/scripts/read_tracker.py",
                     "--person",
-                    "Nihad",
+                    "person_a",
                     "--today",
                     "2026-05-28",
                 ],
                 cwd=SKILLS_ROOT,
+                env=env,
                 capture_output=True,
                 text=True,
             )
@@ -54,9 +59,10 @@ class RenderDashboardSmokeTests(unittest.TestCase):
                     "--out",
                     str(out_html),
                     "--person",
-                    "Nihad",
+                    "person_a",
                 ],
                 cwd=SKILLS_ROOT,
+                env=env,
                 capture_output=True,
                 text=True,
             )

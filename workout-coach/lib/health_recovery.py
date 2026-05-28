@@ -59,7 +59,7 @@ SIGNAL_WEIGHT_FLOOR_FOR_GATE = 0.10
 def recovery_score(health_all: list[dict], today_d: date,
                    capabilities: dict) -> dict:
     """Renormalized weighted-average composite of per-signal personal
-    z-scores, mapped to [0, 10]. Score = 5 means "average for this user
+    z-scores, mapped to [0, 10]. Score = 5 means "average for this person
     across whatever signals are available", *not* "base 5 minus what's
     missing" — so trackers with fewer signals (HL) aren't structurally
     biased downward.
@@ -217,4 +217,3 @@ def recovery_score(health_all: list[dict], today_d: date,
 # =============================================================================
 # Longevity score, percentile resolver, state parser (Trajectory tab)
 # =============================================================================
-

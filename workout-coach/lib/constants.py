@@ -83,8 +83,8 @@ SOURCE_CAPABILITIES = {
 }
 
 # Applied when the Profile sheet is missing or unset — treat the data as
-# coming from XML so existing Nihad trackers (created before the Profile
-# sheet existed) keep their full capability surface. New Fabian trackers
+# coming from XML so existing <Person> trackers (created before the Profile
+# sheet existed) keep their full capability surface. New <OtherPerson> trackers
 # get bootstrapped to ``health_auto_export`` by
 # ``import_health_auto_export.py``.
 DEFAULT_DATA_SOURCE = "xml"

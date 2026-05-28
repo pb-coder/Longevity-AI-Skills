@@ -1,7 +1,7 @@
 # Skills
 
-Source for the Claude Code skills used by pb-coder. Cloned from
-[`pb-coder/Longevity-AI-Skills`](https://github.com/pb-coder/Longevity-AI-Skills); edit here and push.
+Source for the Claude Code skills used by the repo owner. Cloned from
+the `Longevity-AI-Skills` repository; edit here and push.
 
 ## Engineering contract
 
@@ -21,11 +21,15 @@ Source for the Claude Code skills used by pb-coder. Cloned from
   static markdown inside one command. Add caching only after measurement.
 - Refactors need regression coverage. The default verification command is
   `python3 -m unittest discover -s tests -v` from this directory.
+- Privacy rule: committed docs and code comments must not include real
+  person names, relationships, locations, ages, medication details, lab
+  status, or other profile facts. Use `<Person>` / `<OtherPerson>`
+  placeholders. Private context lives only in uncommitted per-person data.
 
 ## Layout
 
-Per-person directories sit at the workout-tracker root: `Nihad/`,
-`Fabian/`. Each holds a `data/` folder with every CSV the skills read
+Per-person directories sit at the workout-tracker root: `<Person>/`.
+Each holds a `data/` folder with every CSV the skills read
 or write — there is no xlsx anywhere post-PR3a. Apple Health exports
 drop into the root and get **archived to `<root>/.processed/`** after a
 successful import — the CSVs are the persistent record; the archive
@@ -33,7 +37,7 @@ keeps a forensic trail in case a downstream bug damages the CSVs.
 
 ```
 <root>/
-├── Nihad/
+├── <Person>/
 │   └── data/
 │       ├── health_metrics.csv             # date-keyed, sparse-merge
 │       ├── workout_sessions.csv           # (date,start)-keyed
@@ -60,13 +64,13 @@ keeps a forensic trail in case a downstream bug damages the CSVs.
 │           ├── state.md                   # current snapshot (conditions, meds; live metrics pulled from health_metrics.csv)
 │           ├── interventions.md           # daily/weekly protocol (supplements, diet, training, skincare) + status tracker
 │           └── biomarkers.md              # append-only lab history
-├── Fabian/                                # same shape (no swimming/, thermal/, or light_therapy/ until populated)
+├── <OtherPerson>/                          # same shape (folders appear only when populated)
 ├── plans/                                 # /coach output — dated per generation; one folder per person
-│   ├── Nihad/
+│   ├── <Person>/
 │   │   ├── YYYY-MM-DD-assessment.html     # self-contained dashboard (inline CSS / SVG / JS, no CDN)
 │   │   ├── YYYY-MM-DD-workout.md          # lean exercise list — bullets only, no tables, sparse sub-bullet notes
 │   │   └── …
-│   └── Fabian/
+│   └── <OtherPerson>/
 │       └── …
 └── Skills/
     └── shared/
@@ -92,14 +96,18 @@ shared/               # Code + docs imported by multiple skills
                          # Used by /log at parse time when an exercise misses
                          # the database — the agent dispatches a research
                          # sub-agent and routes the proposal here.
-  csv_store.py        # CSV-backed store for the dense data. Same functional
-                      # surface as the old xlsx upserts: read_health_metrics,
-                      # upsert_health_metrics (sparse-merge, schema-by-source),
-                      # read_workout_sessions, upsert_workout_sessions
-                      # (dedupe by date+start), read_profile, write_profile,
-                      # ensure_profile. HEALTH_METRICS_HEADERS_BY_SOURCE and
-                      # WORKOUT_SESSIONS_HEADERS_BY_SOURCE are the schema
-                      # constants. Atomic writes via tmp + rename.
+  csv_store.py        # Compatibility facade. Keep public imports here.
+  csv_store_common.py # Shared typed table helpers and atomic CSV writes.
+  csv_store_profile.py
+                      # Profile key/value store: read_profile,
+                      # write_profile, ensure_profile.
+  csv_store_dense.py  # Dense daily/session stores: Health Metrics and
+                      # Workout Sessions schemas, reads, upserts, and source
+                      # resolution.
+  csv_store_periodic.py
+                      # Per-month/per-phase stores: swim, sleep, thermal,
+                      # light therapy, nutrition. Sparse merge and
+                      # replace-on-match semantics live beside their schemas.
   monthly_csv.py      # Per-month CSV reader / writer / canonicalizer.
                       # Replaces the old tracker_sheet.py xlsx authority.
                       # MONTHLY_HEADERS / MONTHLY_FIELDS / TOTAL_LABEL /
@@ -133,8 +141,8 @@ shared/               # Code + docs imported by multiple skills
                         # database)" Notes once the exercise is canonical.
                         # Reports ambiguous names (e.g. bare "Leg Curl")
                         # instead of auto-renaming. Re-runnable.
-                        # Usage: python3 shared/canonicalize_logs.py --person Nihad
-  import_apple_health.py  # Apple Health zipped XML importer (Nihad). Streams
+                        # Usage: python3 shared/canonicalize_logs.py --person <Person>
+  import_apple_health.py  # Apple Health zipped XML importer (<Person>). Streams
                           # Export.xml with iterparse, writes per-day Health
                           # Metrics (VO2max, RHR, HRV, sleep stages, wrist
                           # temp, exercise minutes, BodyMass) and per-workout
@@ -151,10 +159,10 @@ shared/               # Code + docs imported by multiple skills
                           # workouts pre-empt overlapping Watch-only ones.
                           # Deletes the export zip on success.
                           # Usage: python3 shared/import_apple_health.py
-                          #          --person Nihad [--since YYYY-MM-DD]
+                          #          --person <Person> [--since YYYY-MM-DD]
                           #          [--dry-run] [--keep-export]
   import_health_auto_export.py
-                          # HealthAutoExport ZIP importer (Fabian). Same
+                          # HealthAutoExport ZIP importer (<OtherPerson>). Same
                           # full tracker surface as import_apple_health.py
                           # where HealthAutoExport exposes it: VO2max, RHR,
                           # HRV, walking HR, wrist temp, breathing
@@ -167,7 +175,7 @@ shared/               # Code + docs imported by multiple skills
                           # the HealthAutoExport rows. Archives the source
                           # ZIP on success.
                           # Usage: python3 shared/import_health_auto_export.py
-                          #          --person Fabian [--zip PATH_OR_GLOB]
+                          #          --person <OtherPerson> [--zip PATH_OR_GLOB]
                           #          [--since YYYY-MM-DD] [--until YYYY-MM-DD]
                           #          [--allow-past-months] [--replace-range]
                           #          [--dry-run] [--keep-export]
@@ -190,7 +198,7 @@ shared/               # Code + docs imported by multiple skills
                         # suspected. Auto-canonicalize on every /log write
                         # keeps the current month clean — this script handles
                         # the cross-month sweep.
-                        # Usage: python3 Skills/shared/maintain.py --person Nihad
+                        # Usage: python3 Skills/shared/maintain.py --person <Person>
 
 workout-logger/       # /log — append a parsed workout to the tracker.
   SKILL.md            # Agent entry point. Flow §1 has an unknown-exercise
@@ -404,7 +412,7 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   cold-air outdoor temperature when present, week-over-week comparison)
   and per-card "coach's read" lines that absorb what the old `## Why
   this plan` block used to do. Old root-level files (`workout_plan -
-  Nihad.md` / `workout_plan - Fabian.md`) are frozen history and never
+  <Person>.md` / `workout_plan - <OtherPerson>.md`) are frozen history and never
   rewritten. Path resolvers in `shared/person_paths.py`:
   `plans_dir(person)`, `workout_plan_md(person, date)`,
   `assessment_html(person, date)`. **Each workout heading is followed
@@ -477,8 +485,8 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   required field; everything else is optional. Independent of the
   thermal store — sauna + RLT in one real-life session lands as two
   rows in two stores (the schemas don't mix). The store is broad on
-  purpose: it captures red-light cabins (Holmes Place-style ~45°C
-  heated walk-ins), near-IR probes, blue-light SAD lamps, and any
+  purpose: it captures heated red-light cabins, near-IR probes,
+  blue-light SAD lamps, and any
   future photobiomodulation modality.
   `csv_store.read_light_therapy_sessions` aggregates across all
   months on read; `upsert_light_therapy_sessions` is sparse-merge by

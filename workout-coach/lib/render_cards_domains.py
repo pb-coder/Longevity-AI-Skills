@@ -388,12 +388,10 @@ def card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text,
     if rem_anomaly:
         low = rem_anomaly.get("low_rem_nights", 0)
         mean_pct = rem_anomaly.get("mean_rem_pct", 0)
-        # The Parkinson surveillance note only renders when the person's
-        # longevity profile carries the parkinson_surveillance risk flag.
-        # Without that gate the line would leak to everyone with a low-REM
-        # window, including people without family history of Parkinson's.
+        # This note only renders when the private longevity profile carries
+        # the matching risk flag; never infer it from low REM alone.
         parkinson_note = (
-            " Relevant for paternal Parkinson family history surveillance."
+            " Relevant for the family-history surveillance marker."
             if _has_risk_flag(longevity_state, "parkinson_surveillance") else ""
         )
         rem_watch = f'''
@@ -453,14 +451,12 @@ def card_body_comp_domain(bw, bw_trend, longevity_state, coach_text):
         ),
     ]
 
-    # Gate the PrEP-specific BMD prompt on the prep_monitoring risk flag —
-    # otherwise it would leak to every user whose profile is populated,
-    # not just the ones actually on PrEP.
+    # Gate medication-specific BMD copy on the private risk flag.
     if has_profile and _has_risk_flag(longevity_state, "prep_monitoring"):
         dexa_msg = (
             '<strong>DEXA pending.</strong> Visceral adipose tissue (VAT), '
             'appendicular lean mass (ALMI), and bone density (BMD) need a DEXA scan to populate. '
-            'PrEP users should book one for BMD baseline anyway.'
+            'The medication-monitoring marker also calls for a BMD baseline.'
         )
     elif has_profile:
         dexa_msg = (
@@ -487,7 +483,7 @@ def card_body_comp_domain(bw, bw_trend, longevity_state, coach_text):
 def card_metabolic_domain(longevity_state, coach_text):
     """Metabolic-health domain card. Placeholder until a blood panel
     lands. Reads the personalized panel-design hints from longevity_state
-    (vegan emphasis, Berlin vitamin D window, PrEP markers)."""
+    (dietary context, seasonal vitamin D windows, medication markers)."""
     if not longevity_state:
         return f'''
 <section class="card domain-card">
@@ -578,4 +574,3 @@ def card_behavioral_domain(movement_consistency, sleep_regularity, acwr,
   {coach_block(coach_text)}
 </section>
 '''
-

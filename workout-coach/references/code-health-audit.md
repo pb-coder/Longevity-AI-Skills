@@ -25,7 +25,7 @@ or product direction.
 2. **Capability gating actually works.** `recovery_score()` filters drivers
    on `capabilities`; `compute_longevity_score()` accepts an optional
    `capabilities` arg (PR #5); HealthAutoExport-only sources don't render
-   misleading "missing input" pills for Fabian.
+   misleading "missing input" pills for <OtherPerson>.
 3. **Renderer ↔ analytics separation is enforced by convention and reality.**
    `render_*` modules don't import from analytics modules and vice versa.
    The seam is the tracker JSON shape — clear contract, easy to mock.
@@ -50,7 +50,7 @@ or product direction.
    *Fixed in PR-A (this sweep).*
 2. **Zero test coverage on the workout-coach skill itself.** `Skills/tests/`
    exists and covers `shared/` (CSV store, importers, monthly_csv,
-   sessions) with Nihad+Fabian fixtures — but no test exercises
+   sessions) with <Person>+<OtherPerson> fixtures — but no test exercises
    `render_validators`, `health.py` scoring, or any `render_*` rendering.
    The Phase 2 mandate added in PR #4 is enforced only by the agent's
    willingness to honor it, with no machine check.
@@ -191,7 +191,7 @@ or product direction.
 ### `references/`
 - `assessment-dashboard.md` — card spec + coach-reads schema. Current.
 - `training-science.md` — physiology refs + person profiles. Profiles
-  for Nihad and Fabian are heavily inlined; cosmetic person-coupling to
+  for <Person> and <OtherPerson> are heavily inlined; cosmetic person-coupling to
   generalize.
 - `substitute-protocols.md` — Tier A–E substitute templates. Current.
 - `swim-coaching.md` — current.
@@ -245,8 +245,8 @@ or product direction.
    assert tier (A–E) + headline + top-3 rationale. Pins the Phase 2
    mandate so a refactor can't silently break the 5-tier logic.
 3. **`tests/test_render_dashboard_snapshot.py`** — runs
-   `render_dashboard.py` against `tests/fixtures/Nihad/` and
-   `tests/fixtures/Fabian/`, diffs against a stored
+   `render_dashboard.py` against `tests/fixtures/<Person>/` and
+   `tests/fixtures/<OtherPerson>/`, diffs against a stored
    `tests/snapshots/{nihad,fabian}-dashboard.html` (strip the
    `generated at` timestamp line). Catches empty-state suppression,
    capability gating, pill orphans, hex regressions.
@@ -255,17 +255,17 @@ or product direction.
    against an `EXPECTED_NULLS` map. Runnable as a pre-commit check.
 
 Test scope lives at `Skills/tests/` next to the existing test suite.
-Reuses the existing `tests/fixtures/Nihad/` and `tests/fixtures/Fabian/`
+Reuses the existing `tests/fixtures/<Person>/` and `tests/fixtures/<OtherPerson>/`
 trees. No new harness needed.
 
 ### Person-specific copy generalization
 Inline person profiles in `training-science.md` (§Context) and
 person-specific code comments in `lib/sleep.py` (Parkinson surveillance
 context) and `lib/constants.py` (XML vs HealthAutoExport split)
-reference Nihad / Fabian by name. Extract to a `references/people.md`
+reference <Person> / <OtherPerson> by name. Extract to a `references/people.md`
 (or YAML data file) keyed by person, loaded on demand by anything
 that needs profile context. Code comments stay generic ("the user's
-family history may indicate X" rather than "Nihad's paternal
+family history may indicate X" rather than "<Person>'s paternal
 Parkinson history").
 
 ### Agent ergonomics
@@ -299,9 +299,9 @@ types alone — no need to read 1.6kloc files top-to-bottom.
   (PR #5 finished the job).
 - **PII copy without central gating**: Parkinson surveillance string in
   `lib/sleep.py` and PrEP BMD prompt in `render_cards.py` were
-  introduced here as hardcoded strings keyed to Nihad. PR #5 added
+  introduced here as hardcoded strings keyed to <Person>. PR #5 added
   `_has_risk_flag()` to gate display; the underlying strings remain
-  Nihad-specific. Move to a person-keyed `references/people.md`.
+  <Person>-specific. Move to a person-keyed `references/people.md`.
 
 ### PR #5 — `009ba11` — Design system + cleanup
 - **Pattern introduced but not fully applied**: `.pill-adherence.*` family
@@ -346,7 +346,7 @@ Scoring: **Impact** (high/med/low) × **Effort** (S/M/L) × **Risk**
 | 5 | Session-recommendation tier-gate tests: `tests/test_session_recommendation.py` with synthetic inputs for each of A/B/C/D/E tiers | high | M | low | `tests/test_session_recommendation.py`, `tests/fixtures/synthetic/` |
 | 6 | TypedDict contracts in `lib/contracts.py`: `TrackerJSON`, `CoachReads`, `SessionRecommendation`, `Recovery`, etc. Annotate `read_tracker.py` and `render_dashboard.py` | high | M | low | `lib/contracts.py`, `scripts/read_tracker.py`, `scripts/render_dashboard.py`, `lib/render_validators.py` |
 | 7 | `scripts/silent_gap_audit.py` — classify every leaf in tracker JSON as Expected / Data caveat / Pipeline gap | med | M | low | `scripts/silent_gap_audit.py`, `lib/constants.py` (EXPECTED_NULLS map) |
-| 8 | Renderer snapshot tests: `tests/test_render_dashboard_snapshot.py` against existing Nihad+Fabian fixtures | high | M | low | `tests/test_render_dashboard_snapshot.py`, `tests/snapshots/` |
+| 8 | Renderer snapshot tests: `tests/test_render_dashboard_snapshot.py` against existing <Person>+<OtherPerson> fixtures | high | M | low | `tests/test_render_dashboard_snapshot.py`, `tests/snapshots/` |
 | 9 | Generalize person-specific copy: extract Parkinson / PrEP / vegan / creatine strings + per-person profiles into `references/people.md` (or YAML); make code comments person-agnostic | med | M | low | `references/people.md`, `lib/sleep.py`, `lib/constants.py`, `references/training-science.md` |
 | 10 | ~~Split `lib/health.py` into `health_windowing.py`, `health_recovery.py`, `health_longevity.py`, `health_session_rec.py`; keep `health.py` as a thin facade for back-compat imports~~ ✅ done in 2026-05-28 cleanup | high | M | med | `lib/health*.py` |
 | 11 | ~~Split `lib/render_cards.py` into focused card modules while keeping `render_cards.py` as a facade~~ ✅ done in 2026-05-28 cleanup | med | M | med | `lib/render_cards*.py` |
@@ -386,8 +386,8 @@ Each is small, shippable, and moves the needle without big-bang risk.
   optional keys).
 - Add `tests/test_session_recommendation.py` (synthetic inputs →
   A/B/C/D/E tier assertions + headline + top-3 rationale).
-- Add `tests/test_render_dashboard_snapshot.py` (snapshot the Nihad +
-  Fabian fixtures, stripping the `generated at` timestamp).
+- Add `tests/test_render_dashboard_snapshot.py` (snapshot the <Person> +
+  <OtherPerson> fixtures, stripping the `generated at` timestamp).
 - **Verification**: `python -m pytest Skills/tests/` passes;
   `python -m mypy Skills/workout-coach/` shows no new errors on
   annotated entry points.
@@ -417,9 +417,9 @@ component-normalization refactor (#13), and the silent-gap-audit script
 
 After each PR:
 1. `python -m pytest Skills/tests/ -v` — all tests pass (after PR-B).
-2. `python3 Skills/workout-coach/scripts/read_tracker.py --person Nihad --pretty | head` — JSON shape unchanged.
-3. `python3 Skills/workout-coach/scripts/render_dashboard.py --person Nihad ...` against current fixtures — HTML diff under snapshot test passes
+2. `python3 Skills/workout-coach/scripts/read_tracker.py --person <Person> --pretty | head` — JSON shape unchanged.
+3. `python3 Skills/workout-coach/scripts/render_dashboard.py --person <Person> ...` against current fixtures — HTML diff under snapshot test passes
    (`diff <(grep -v 'generated at' before.html) <(grep -v 'generated at' after.html)` is empty).
 4. `rg "#[0-9a-fA-F]{3,6}" Skills/workout-coach/lib/` — only hits inside the `:root` block in `render_assets.py` (or `lib/design_tokens.py` after #12).
 5. After CODE_MAP rewrite: every function name in the doc greps to a definition; every link works.
-6. Manually open a rendered HTML in Safari at mobile + desktop breakpoint, verify session-call card + tier-history strip + longevity score render correctly with capability differences between Nihad (xml) and Fabian (health_auto_export).
+6. Manually open a rendered HTML in Safari at mobile + desktop breakpoint, verify session-call card + tier-history strip + longevity score render correctly with capability differences between <Person> (xml) and <OtherPerson> (health_auto_export).

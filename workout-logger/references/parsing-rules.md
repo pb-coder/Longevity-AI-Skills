@@ -158,14 +158,14 @@ If (and only if) the `/log` message contains an explicit `sauna` or `cold` line,
 
   | Alias | Resolves to | Default temp (°C) |
   |---|---|---|
-  | `finnish` / `dry` | `dry` | 90 (Holmes Place Finnische Sauna anchor) |
-  | `bio` / `sanarium` | `bio` | 55 (German Bio-Sauna / Sanarium, ~50% RH) |
+  | `finnish` / `dry` | `dry` | 90 |
+  | `bio` / `sanarium` | `bio` | 55 (bio-sauna / sanarium range) |
   | `steam` / `dampfbad` | `steam` | 45 (Dampfbad, warm-damp) |
   | `infrared` / `IR` / `infrarot` | `infrared` | 45 (radiant heat, low ambient) |
   | `banya` / `russian` | `banya` | 70 (löyly, humid) |
 
   Anything else falls through to `dry`. `aufguss` is NOT a type — it's a ritual within a Finnish sauna; if it matters, write `"aufguss"` in Notes (a legitimate user annotation).
-- **Temperature:** integer Celsius, suffixed `C` (e.g. `90C`). **Optional** — if omitted, the upsert auto-fills the type default from the table above. Anchors target Germany / Holmes Place practice (the user's primary gym chain); the user can always override per-session.
+- **Temperature:** integer Celsius, suffixed `C` (e.g. `90C`). **Optional** — if omitted, the upsert auto-fills the type default from the table above. Defaults are broad facility norms; the user can always override per-session.
 
 ### Cold line
 
@@ -253,7 +253,7 @@ This module is broad on purpose: it covers red-light therapy (RLT) cabins, near-
 
 - **Duration**: integer or decimal minutes. Required.
 - **Wavelength**: integer nanometers (e.g. `660`, `850`). Optional.
-- **Ambient temp**: integer Celsius, suffix `C`. Optional. Captures heated RLT cabins (Holmes Place-style ~45°C). When set at/above 30°C and the user didn't specify a modality, the upsert defaults `modality=cabin`.
+- **Ambient temp**: integer Celsius, suffix `C`. Optional. Captures heated RLT cabins. When set at/above 30°C and the user didn't specify a modality, the upsert defaults `modality=cabin`.
 - **Light type aliases (case-insensitive)**:
 
   | Alias | Resolves to |

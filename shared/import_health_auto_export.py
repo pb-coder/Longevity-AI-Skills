@@ -2,11 +2,11 @@
 
 HealthAutoExport exports a daily aggregate CSV plus a workout aggregate CSV
 and optional per-workout metric files. This importer treats that export as the
-rich source for Fabian: daily HRV / resting HR / walking HR / wrist temp /
+rich source for <OtherPerson>: daily HRV / resting HR / walking HR / wrist temp /
 sleep stages / exercise minutes, plus per-workout average/max HR.
 
 Usage:
-    python3 import_health_auto_export.py --person Fabian \\
+    python3 import_health_auto_export.py --person <OtherPerson> \\
         --zip HealthAutoExport_20260517143632-1.zip \\
         --since 2026-04-01 --until 2026-05-17 \\
         --allow-past-months --replace-range
@@ -631,7 +631,7 @@ def resolve_zip(pattern: str | None) -> Path | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--person", required=True, help="Tracker owner, e.g. Fabian.")
+    ap.add_argument("--person", required=True, help="Tracker owner, e.g. <OtherPerson>.")
     ap.add_argument("--zip", default=None, help="HealthAutoExport ZIP path or glob. Defaults to latest HealthAutoExport*.zip.")
     ap.add_argument("--since", default=None, type=parse_since, help="Start date, YYYY-MM-DD. Default: 6 months back.")
     ap.add_argument("--until", default=None, type=parse_since, help="End date, YYYY-MM-DD. Default: no upper bound.")

@@ -48,7 +48,7 @@ The skill is split into two layers:
 - **Frameworks** (`references/` — committed to the skill repo, no PII): how to think about biomarkers, interventions, behavior, response triggers.
 - **Personal data** (`<Person>/data/longevity/` at the workout-tracker root — outside the skill repo, never committed): identity, current state, daily interventions, lab history.
 
-Resolve which person `/longevity` is about the same way `/coach` does (named, pronoun context, or ask). For now the only populated personal dataset is `Nihad/data/longevity/`. Fabian extension would mirror that path.
+Resolve which person `/longevity` is about the same way `/coach` does (named, pronoun context, or ask). For now the only populated personal dataset is `<Person>/data/longevity/`. <OtherPerson> extension would mirror that path.
 
 Load files only when relevant to the current query:
 

@@ -92,7 +92,8 @@ Rate benchmarks (early intermediate, squat 60-70kg):
 
 Flat weights and reps across weeks = single biggest red flag.
 
-Bodyweight: At 78kg pursuing hypertrophy, weight should trend upward (0.25-0.5kg/week). Flat = insufficient surplus.
+Bodyweight: during a hypertrophy-focused surplus, weight should trend
+upward at roughly 0.25-0.5 kg/week. Flat = insufficient surplus.
 
 ## §7 Tendon-Muscle Mismatch
 
@@ -127,7 +128,9 @@ VO2 max: strongest all-cause mortality predictor. Low fitness = 4-6x mortality r
 
 Zone 2: 150 min/week minimum. NOT uniquely optimal for mitochondria (higher intensity better per unit time: Inglis 2024, Granata 2018). Advantage: lowest recovery cost.
 
-User: 1x/week is below every recommendation. Target: 3x30-45min Zone 2 + 1x/week Zone 4-5 intervals (20 min). VO2 max 48 → target 52+ (25M).
+For low cardio frequency, a default target is 3x30-45 min Zone 2 plus
+1x/week Zone 4-5 intervals (about 20 min). Apply VO2max targets from
+the person's private age/sex profile rather than hardcoding a number.
 
 Interference: same-session cardio + strength produces the worst lower-body hypertrophy outcome (Schumann 2022 meta-analysis, Sports Medicine). Temporal separation of 3-6 hours largely neutralizes the effect; longer is fine but not required. Modality matters more than intensity: impact-eccentric cardio (running) compounds with strength-induced damage, low-impact concentric modalities (cycling, swimming, rowing) don't (Casuso N=18 inflammation comparison). Total cardio duration is the dominant variable, not bioenergetic zone. For early intermediate trainees, interference is a minor practical concern; specialization-driven divergence emerges near genetic ceiling.
 
@@ -166,9 +169,14 @@ Autoregulation alternative (Helms 2023-25, practitioner consensus; Promising): f
 
 ## §12 User Context
 
-**Nihad** (account owner): 25M, 180cm, 78kg, Berlin. Early intermediate (squat/DL 60-70kg). Strict vegan 10yr. Protein 2.0-2.2g/kg (156-172g); plant protein at adequate dose matches animal for hypertrophy (Hevia-Larraín 2021). Recently stopped TDF/FTC PrEP. 10g creatine/day (non-negotiable per user). 900mg Ca + D3 5000IU + K2. HRV weekday 30-40ms / weekend 60-70ms. Sleep 7.5-8h, 95%+. No blood work. No deloads. No effort tracking. No bodyweight trend. No protein tracking.
+Do not store private person profiles in committed reference docs. Load
+person-specific context from `<Person>/data/profile.csv`,
+`<Person>/data/longevity/*.md`, and the tracker JSON emitted by
+`scripts/read_tracker.py`.
 
-**Fabian** (Nihad's boyfriend): 28M, flexitarian (occasional meat). 5g creatine/day. No other supplements known. Height, weight, training history, sleep, HRV, blood work — TBD.
+Committed training-science references should stay generic: use the
+rules, thresholds, and citations in this file, then apply them to the
+private tracker data at runtime.
 
 ## §13 Tracker Blind Spots
 
@@ -201,7 +209,7 @@ Each training block runs 4-6 weeks before a deload (§11). Within that block, so
 
 **What the evidence says about progression form:** Israetel et al. (2019) proposed that weekly set volume progression is the best-supported overload form within a mesocycle. Zourdos et al. (2020) rebutted that proactive week-to-week progression may be unnecessary in trained individuals, and that performance improvement itself is sufficient evidence of overload. Chaves et al. (2024) found load progression and rep progression produce equivalent hypertrophy and strength gains in early trainees. Periodization model (linear vs. undulating) does not affect hypertrophy when volume is equated (Moesgaard et al. 2022, meta-analysis; Grgic et al. 2017, meta-analysis). Undulating may have a small strength advantage in trained individuals only (Moesgaard et al. 2022).
 
-**Practical model for this user (early intermediate):**
+**Practical model for an early intermediate trainee:**
 
 For compounds, use double progression: keep the weight constant, push for more reps each session until hitting the top of the prescribed range for all sets. Then add load (per §6 benchmarks) and reset to the bottom of the range. This is simple, trackable, and evidence-equivalent to more complex models for this training stage.
 
@@ -298,7 +306,7 @@ Apple emits per-workout HR statistics (avg / max / min) on every `Workout` recor
 **Trend matters more than absolute.** A user with a low resting HR and good cardiac fitness can run a session at 125-135 bpm and hit failure on every set; another can sit at 145 bpm with the same effort. The cleanest fatigue signal is **per-muscle HR creep at constant volume** — `hr_at_volume_divergence[muscle].slope_bpm_per_4w` controls for volume changes that would otherwise confound the read. `hint == "rising HR at constant volume"` (slope ≥ +5 bpm/4w with ≥6 sessions) means the body is working harder for the same output. Hold load on that muscle group, finish the block, then deload.
 
 **Cardio sessions, avg HR bands** (for Apple workouts of type Running / Cycling / Walking / Outdoor* / Indoor*):
-- Zone 2: 65-75% of max HR. For a 25M with HR_max ~195, that's ~127-146 bpm. The avg should sit firmly in this band; if it drifts above 150, the session was tempo, not Zone 2.
+- Zone 2: 65-75% of max HR. Compute the actual range from the person's estimated max HR; if the average drifts above the upper band, the session was tempo, not Zone 2.
 - Intervals: avg HR is meaningless for intervals — read max HR (should hit 165+ during work blocks).
 
 **What NOT to do:** match a stretching session's low HR to "low effort" (different stimulus type), compare across activity types, or react to a single high-HR session without a 4-session window. Sleep/caffeine/heat affect HR substantially day-to-day.
@@ -367,4 +375,4 @@ Pre-sleep protein: there is no casein analogue in plants, but a pea + wheat blen
 
 Supplemental free leucine, BCAAs, EAAs, and HMB add no measurable hypertrophy benefit above a well-distributed 2.0-2.2 g/kg vegan diet. Don't recommend them for hypertrophy. (The "acute MPS amplitude" advantage shown in 3-hour isotope-tracer studies normalizes over 24-hour integration when total daily protein exceeds 1.6 g/kg.)
 
-Creatine and vegans: 5 g/day monohydrate amplifies strength and lean-mass gains slightly more in vegans than omnivores due to lower baseline intramuscular phosphocreatine (Solis 2020, Burke 2003). At Nihad's 10 g/day dose, the relevant marker is intramuscular saturation, not further dose escalation. The high creatinine artifact on standard eGFR is real and is addressed in `longevity-optimizer/references/biomarkers.md` Interpretation Notes.
+Creatine and vegans: 5 g/day monohydrate amplifies strength and lean-mass gains slightly more in vegans than omnivores due to lower baseline intramuscular phosphocreatine (Solis 2020, Burke 2003). Once intramuscular saturation is reached, the relevant marker is maintenance, not further dose escalation. The high creatinine artifact on standard eGFR is real and is addressed in `longevity-optimizer/references/biomarkers.md` Interpretation Notes.

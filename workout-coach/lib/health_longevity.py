@@ -326,7 +326,7 @@ def read_longevity_state(person: str, today_d: date) -> dict | None:
     - ``risk_flags``: list of dicts {key, label, status, hint} where
       ``status`` is one of "tracked" / "due" / "overdue" / "active".
 
-    Returns ``None`` when the directory doesn't exist (so Fabian without a
+    Returns ``None`` when the directory doesn't exist (so <OtherPerson> without a
     longevity/ folder gets a clean "no profile" state). Renderer reads
     this directly.
     """
@@ -449,7 +449,7 @@ def read_longevity_state(person: str, today_d: date) -> dict | None:
             "key":    "parkinson_surveillance",
             "label":  "Parkinson early-marker watch",
             "status": "tracked",
-            "hint":   "Two-generation paternal family history. Watch REM sleep behavior (acted-out dreams), olfactory function, autonomic symptoms.",
+            "hint":   "Family-history marker present. Watch REM sleep behavior, olfactory function, and autonomic symptoms.",
         })
     if "prep" in med_text or "prep" in (state_md.lower()):
         flags.append({
@@ -465,16 +465,22 @@ def read_longevity_state(person: str, today_d: date) -> dict | None:
             "status": "due" if out.get("bloodwork_status") == "none-yet" else "tracked",
             "hint":   "Test ferritin (not just hemoglobin), homocysteine (functional B12), serum + spot urine zinc / iodine, omega-3 index, 25-OH-D.",
         })
-    # Berlin / 52°N vitamin D winter window.
+    # High-latitude vitamin D winter window. Keep the trigger generic:
+    # private locations live in per-person data, not committed code.
     location_text = (out.get("location") or "").lower()
-    if "berlin" in location_text or "52°n" in location_text or "52n" in location_text:
+    high_latitude = (
+        "high latitude" in location_text
+        or "northern europe" in location_text
+        or bool(_re.search(r"\b(?:4[8-9]|[5-8]\d)(?:\.\d+)?\s*(?:°?\s*n|north)\b", location_text))
+    )
+    if high_latitude:
         month = today_d.month
         in_winter = month <= 3 or month >= 10
         flags.append({
             "key":    "vitamin_d_winter",
             "label":  "Vitamin D supplementation window",
             "status": "active" if in_winter else "tracked",
-            "hint":   ("Cutaneous synthesis is ~0 from October through March at 52°N. "
+            "hint":   ("Cutaneous synthesis is near zero during winter at high latitudes. "
                        "Test 25-OH-D late winter to isolate the supplementation effect.")
                        if in_winter else "Outside the supplementation-mandatory window.",
         })

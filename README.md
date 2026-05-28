@@ -12,8 +12,8 @@ A maintenance utility lives at `shared/maintain.py`. Run it directly when you ne
 
 ## Architecture
 
-The Git repo root is `Skills/`. Per-person data (`../Nihad`,
-`../Fabian`) and generated plans (`../plans`) stay outside Git.
+The Git repo root is `Skills/`. Per-person data (`../<Person>`) and
+generated plans (`../plans`) stay outside Git.
 
 Public CLIs remain stable and thin: they parse arguments, resolve a
 person, call domain code, and print status or JSON. Shared primitives
@@ -21,6 +21,12 @@ that should not be copied between skills live in `tracker/`: CSV table
 mechanics, command context, typed contracts, and benchmark helpers.
 Skill-specific behavior stays in `shared/`, `workout-logger/`, and
 `workout-coach/`.
+
+CSV storage is split by responsibility: `shared/csv_store.py` is the
+backward-compatible import facade, `csv_store_profile.py` owns profile
+keys, `csv_store_dense.py` owns health metrics and workout sessions,
+`csv_store_periodic.py` owns swim/sleep/thermal/light/nutrition stores,
+and `csv_store_common.py` owns shared table helpers.
 
 Code quality rules for this repo:
 
@@ -32,6 +38,10 @@ Code quality rules for this repo:
   practical.
 - Measure performance changes with reproducible commands before adding
   caching or complexity.
+- Do not commit real person names, relationships, locations, ages,
+  medication details, lab status, or other profile facts in docs. Use
+  `<Person>` / `<OtherPerson>` placeholders and load private context
+  from the uncommitted per-person data folders at runtime.
 
 ## Data store
 
@@ -74,7 +84,5 @@ e1RM regression skips user-tagged context-change rows (gym swap, cable ratio rec
 ## Status
 
 In active personal use. The current test baseline is
-`python3 -m unittest discover -s tests -v`. On 2026-05-28,
-`read_tracker.py --person Nihad` ran in about 0.43s and Fabian in about
-0.29s on the local data set; `maintain.py --dry-run` ran in about 0.15s
-per person. Treat those as sanity checks, not hard performance targets.
+`python3 -m unittest discover -s tests -v`. Treat local benchmark
+numbers as sanity checks, not hard performance targets.

@@ -6,7 +6,7 @@ every script that needs to find files.
 Layout (post-PR3a — pure CSV, no xlsx):
 
     Workout Tracker/                       ← WORKOUT_TRACKER_ROOT
-    ├── Nihad/
+    ├── <Person>/
     │   └── data/
     │       ├── health_metrics.csv
     │       ├── workout_sessions.csv
@@ -23,13 +23,13 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │       │   └── YYYY.MM.sessions.csv
     │       └── light_therapy/             # manual /log only; absent until first RLT / PBM log
     │           └── YYYY.MM.sessions.csv
-    ├── Fabian/
+    ├── <OtherPerson>/
     │   └── (same; no swimming/, thermal/, or light_therapy/ until populated)
     ├── plans/                             # /coach output — dated per generation
-    │   ├── Nihad/
+    │   ├── <Person>/
     │   │   ├── YYYY-MM-DD-assessment.html
     │   │   └── YYYY-MM-DD-workout.md
-    │   └── Fabian/
+    │   └── <OtherPerson>/
     │       └── …
     ├── Skills/
     │   └── shared/                        ← this file
@@ -37,7 +37,7 @@ Layout (post-PR3a — pure CSV, no xlsx):
     └── .processed/                        ← consumed export archive
 
 Every importer / logger / coach / maintain script accepts ``--person
-<Name>`` (e.g. ``--person Nihad``) and resolves the rest via this
+<Name>`` (e.g. ``--person <Person>``) and resolves the rest via this
 module. No raw filesystem paths in the CLI surface.
 """
 from __future__ import annotations
@@ -54,7 +54,7 @@ WORKOUT_TRACKER_ROOT = Path(
 
 
 def person_dir(person: str) -> Path:
-    """Return the per-person folder, e.g. ``<root>/Nihad``.
+    """Return the per-person folder, e.g. ``<root>/<Person>``.
 
     The folder is *not* created here — callers that write should use
     ``ensure_data_dir`` instead, which creates ``<person>/data/``.
@@ -268,7 +268,7 @@ def nutrition_phases_csv(person: str) -> Path:
 
 
 def plans_dir(person: str) -> Path:
-    """Return the per-person plans folder, e.g. ``<root>/plans/Nihad``.
+    """Return the per-person plans folder, e.g. ``<root>/plans/<Person>``.
 
     Holds the coach's generated outputs — paired dated files
     ``YYYY-MM-DD-assessment.html`` (rich dashboard) and

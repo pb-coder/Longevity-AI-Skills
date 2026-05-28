@@ -16,9 +16,9 @@ lives in ``<Person>/data/swimming/YYYY.MM.{workouts,laps}.csv``;
 per-month sleep data in ``<Person>/data/sleep/YYYY.MM.nights.csv``.
 
 Usage (from the workout-tracker root):
-    python3 Skills/shared/maintain.py --person Nihad
-    python3 Skills/shared/maintain.py --person Nihad --dry-run
-    python3 Skills/shared/maintain.py --person Nihad --fix-distance-units
+    python3 Skills/shared/maintain.py --person <Person>
+    python3 Skills/shared/maintain.py --person <Person> --dry-run
+    python3 Skills/shared/maintain.py --person <Person> --fix-distance-units
 """
 from __future__ import annotations
 
@@ -522,7 +522,7 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--person", required=True,
-                    help="Tracker owner (e.g. Nihad or Fabian).")
+                    help="Tracker owner (e.g. <Person> or <OtherPerson>).")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--fix-distance-units", action="store_true",
                     help="Run the meter-as-km historical sweep across all CSVs")

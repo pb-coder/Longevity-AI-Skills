@@ -582,7 +582,7 @@ def daily_activity_28d(health_all: list[dict],
     # Assessment basis: prefer Apple exercise_min when present, else use
     # walking minutes per day as a NEAT proxy. HL trackers still get a
     # band so the daily-activity gate in the coach doesn't quietly fall
-    # through on Fabian-style sources.
+    # through on <OtherPerson>-style sources.
     if exercise_min_daily_avg is not None:
         basis = exercise_min_daily_avg
     elif walking_minutes_28d > 0:

@@ -1,6 +1,8 @@
 # Workout Tracker
 
-Hypertrophy + longevity training logs for Nihad (account owner) and his boyfriend Fabian (28), who share the same goals and conventions. Used with a set of Claude skills.
+Hypertrophy + longevity training logs for multiple per-person trackers
+that share the same goals and conventions. Used with a set of Claude
+skills.
 
 ## Implementation principles
 
@@ -22,7 +24,7 @@ Two parallel trackers live in per-person folders inside this directory:
 
 ```
 <root>/
-├── Nihad/
+├── <Person>/
 │   └── data/
 │       ├── health_metrics.csv           # per-day Apple Health aggregates
 │       ├── workout_sessions.csv         # one row per Apple Workout
@@ -37,7 +39,7 @@ Two parallel trackers live in per-person folders inside this directory:
 │       │   └── YYYY.MM.nights.csv       # per-night architecture (per month)
 │       └── thermal/                     # manual /log only; absent until first session
 │           └── YYYY.MM.sessions.csv     # per-session sauna + cold exposure (per month)
-├── Fabian/                              # same shape (no swimming/ unless native XML lap data exists)
+├── <OtherPerson>/                              # same shape (no swimming/ unless native XML lap data exists)
 └── Skills/
 ```
 
@@ -140,9 +142,9 @@ Both files are dated per generation and accumulate (no `latest-*` symlink — op
 
 Every skill invocation must resolve a person before touching a file:
 
-- If the user names a person ("log Fabian's push day", "coach Nihad"), use that tracker.
-- If the user uses pronouns or context that clearly refer to one person ("my bf" / "boyfriend" → Fabian; "I" / "me" / "my" with no other person mentioned → Nihad, since Nihad is the account owner), use that tracker.
-- Otherwise ask: **"Is this for Nihad or Fabian?"** before running.
+- If the user names a person or tracker, use that tracker.
+- If the user uses pronouns or context that clearly refer to one tracker, use that tracker.
+- Otherwise ask which tracker/person this is for before running.
 
 Never mix data across trackers in a single skill run.
 
@@ -170,7 +172,9 @@ Every set row's Volume cell is `reps × kg` written as a literal number, recompu
 
 ## Skills
 
-Skill source lives in [pb-coder/Longevity-AI-Skills](https://github.com/pb-coder/Longevity-AI-Skills), cloned locally at `Skills/`. Edit the unzipped source there and commit changes. See `Skills/CLAUDE.md` for the repo layout.
+Skill source lives in the `Longevity-AI-Skills` repository, cloned
+locally at `Skills/`. Edit the unzipped source there and commit
+changes. See `Skills/CLAUDE.md` for the repo layout.
 
 - `/coach` — reads the per-person CSVs, reports on training state, and generates new workout plans (`Skills/workout-coach/`). Each strength workout in the output has a `**Date:** ___________` placeholder under its heading; fill it in when you train so the date is visible when you later `/log` the session. The script (`scripts/read_tracker.py`) emits compact JSON by default with the per-set `rows` array gated behind `--include-rows`; the report sections shown to the user are gated on the per-tracker `capabilities`.
 - `/log` — append a workout to the current monthly CSV (`Skills/workout-logger/`). Safe to backfill past dates — `canonicalize_monthly_csv` self-sorts every monthly file on every append, and non-contiguous same-date blocks merge back into one session automatically. After every run, the logger asks once whether to refresh Apple Health data; on confirm it dispatches `import_apple_health.py --person <Person>` for `Export*.zip` or `import_health_auto_export.py --person <Person>` for `HealthAutoExport*.zip` based on what's in the workout-tracker root. Both importers archive the source export to `<root>/.processed/` on success.
@@ -179,7 +183,7 @@ Skill source lives in [pb-coder/Longevity-AI-Skills](https://github.com/pb-coder
 ## Conventions
 
 - **Notes columns are for user-supplied, row-unique annotations only.** Writers (importers, /log) must never stash pipeline-state strings in Notes — anything that recurs as the same string across more than a handful of rows is a category, not an annotation, and belongs in a typed column. Two violations were cleaned up in the 2026-05 Notes-hygiene pass: `"incidental walk"` (68 workout_sessions rows) → typed `Incidental` boolean column; `"auto-imported from Apple [ | source: <Device>]"` (24 monthly cardio rows) → typed `Source` column with values `manual` / `apple` / `gymkit:<Device>`. Going forward: if a Note would be the same string on every matching row, route it through a column instead. Applies to every CSV in `<Person>/data/`.
-- **Heat-temperature auto-fill (sauna).** When the user types `sauna 5min` without a temperature, `upsert_thermal_sessions` fills `heat_temp_c` from a hardcoded type-default table (`dry`=90, `bio`=55, `steam`=45, `infrared`=45, `banya`=70 — anchored to Germany / Holmes Place practice). Explicit user input always wins; named-sauna aliases (`finnish`/`dry`, `bio`/`sanarium`, `IR`/`infrared`/`infrarot`, etc.) resolve to a type and inherit its default. Per-tracker override via `profile.csv` `sauna_default_temp_c` is a future-easy follow-up.
+- **Heat-temperature auto-fill (sauna).** When the user types `sauna 5min` without a temperature, `upsert_thermal_sessions` fills `heat_temp_c` from a hardcoded type-default table (`dry`=90, `bio`=55, `steam`=45, `infrared`=45, `banya`=70). Explicit user input always wins; named-sauna aliases resolve to a type and inherit its default. Per-tracker override via `profile.csv` `sauna_default_temp_c` is a future-easy follow-up.
 - Exercise names use title case (`Dumbbell Flat Bench Press`, not `dumbbell flat bench press`). Compare case-insensitively when matching across sessions.
 - Cable machine weights increment in 5kg steps.
 - New exercises get added to the canonical markdown at `Skills/shared/exercises-database.md` under the appropriate muscle → pattern section. There's no xlsx mirror anymore — both `/log` and `/coach` read the markdown directly. Plurals, synonyms, and old typo'd names go in `Skills/workout-logger/references/aliases.md` so `/log` auto-canonicalizes them.

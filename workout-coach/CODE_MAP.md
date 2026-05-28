@@ -49,7 +49,10 @@ For known issues / planned cleanup, see
 | Trajectory risk/swim/nutrition cards | [`lib/render_cards_programs.py`](lib/render_cards_programs.py) |
 | CSS / styling / colors | [`lib/render_styles.py`](lib/render_styles.py) (the `STYLESHEET` string) |
 | Inline JavaScript (tabs, tooltips, chart scrubber, markdown viewer) | [`lib/render_scripts.py`](lib/render_scripts.py) (the `INLINE_JS` string) |
-| An SVG component (training-load chart, sparkline, muscle bar, freshness / recovery scale, ring, driver bar) | [`lib/render_components.py`](lib/render_components.py) |
+| Training-load chart components | [`lib/render_components_load.py`](lib/render_components_load.py) |
+| Recovery scales / driver bars / sparklines | [`lib/render_components_recovery.py`](lib/render_components_recovery.py) |
+| Per-muscle volume bars | [`lib/render_components_volume.py`](lib/render_components_volume.py) |
+| Trajectory-domain gauges and strips | [`lib/render_components_domain.py`](lib/render_components_domain.py) |
 | Coach-text validation rules / em-dash check / length cap | [`lib/render_validators.py`](lib/render_validators.py)::`validate_coach_reads` |
 | Add a tooltip for a new abbreviation in coach text | [`lib/render_validators.py`](lib/render_validators.py)::`KNOWN_TERMS` |
 | Tracker JSON shape (what fields the renderer reads) | [`../tracker/contracts.py`](../tracker/contracts.py)::`TrackerJSON` + [`scripts/read_tracker.py`](scripts/read_tracker.py) |
@@ -115,7 +118,13 @@ Skills/workout-coach/
     └── # ---- Renderer modules (consumed by render_dashboard.py) ----
     ├── render_helpers.py (50)            esc, fmt, signed, parse_date — zero-dep helpers
     ├── render_validators.py (186)        KNOWN_TERMS catalog, validate_coach_reads, auto_wrap_terms
-    ├── render_components.py (752)        SVG / HTML components (chart, rings, bars, scales, sparkline)
+    ├── render_components.py (23)         compatibility facade for component modules
+    ├── render_components_load.py (135)   training-load chart + EWMA series
+    ├── render_components_recovery.py (258)
+    │                                      driver bars, scales, sparklines, metric rows
+    ├── render_components_volume.py (109) per-muscle volume bars
+    ├── render_components_domain.py (192) comparison strips, dials, tier history
+    ├── render_components_misc.py (40)    rings + workout markdown embed
     ├── render_assets.py (11)             compatibility facade for dashboard assets
     ├── render_styles.py (731)            STYLESHEET string
     ├── render_scripts.py (256)           INLINE_JS string
@@ -196,26 +205,27 @@ Constants: `KNOWN_TERMS` (abbreviation → tooltip), `COACH_CARD_KEYS`,
 Functions: `validate_coach_reads(coach) -> (errors, warnings)`,
 `auto_wrap_terms(text)`.
 
-### [`lib/render_components.py`](lib/render_components.py) (~752 lines)
+### Dashboard Components
 
 SVG and HTML components used by the cards. Each function returns a
-complete fragment. Grouped by purpose:
+complete fragment. `lib/render_components.py` is a compatibility facade;
+real component code is grouped by purpose:
 
-- **Training-load chart**: `build_load_series` (CTL/ATL/TSB EWMA over
+- **Training-load chart** (`render_components_load.py`): `build_load_series` (CTL/ATL/TSB EWMA over
   N days, with pre-window seeding) + `load_chart_svg` (interactive line
   chart with hover scrubber).
-- **Activity rings**: `ring(actual, target, label, sub)`.
-- **Recovery drivers**: `metric_label`, `metric_tip`, `driver_bars`
+- **Activity rings** (`render_components_misc.py`): `ring(actual, target, label, sub)`.
+- **Recovery drivers** (`render_components_recovery.py`): `metric_label`, `metric_tip`, `driver_bars`
   (diverging horizontal bars; filters out penalty-only `z=None`
   signals).
-- **Per-muscle volume**: `muscle_bars(weekly_volume)` (4-band stack
+- **Per-muscle volume** (`render_components_volume.py`): `muscle_bars(weekly_volume)` (4-band stack
   with MEV / MAV tick marks).
-- **Hero scales**: `freshness_scale(tsb)` (−15..+15 strip),
+- **Hero scales** (`render_components_recovery.py`): `freshness_scale(tsb)` (−15..+15 strip),
   `recovery_scale(score)` (0..10 strip). Both share viewBox + band-
   label conventions so the two hero cards look like siblings.
-- **Tier strip**: `tier_history_strip(history)` — 14-day decision
+- **Tier strip** (`render_components_domain.py`): `tier_history_strip(history)` — 14-day decision
   history (one square per day, coloured by tier).
-- **Small indicators**: `confidence_dots(conf)`, `sparkline(values,
+- **Small indicators** (`render_components_recovery.py` / `render_components_misc.py`): `confidence_dots(conf)`, `sparkline(values,
   status_class)`, `embed_workout_markdown(md_text)`.
 
 ### Dashboard assets
@@ -344,9 +354,10 @@ remain presentation-only: no disk I/O and no analytics imports.
 **Change a card's layout.**
 - HTML / structure: the focused `lib/render_cards_*.py` module.
 - CSS: [`lib/render_styles.py`](lib/render_styles.py).
-- New SVG glyph or chart: add a function to
-  [`lib/render_components.py`](lib/render_components.py) and call it
-  from the card.
+- New SVG glyph or chart: add a function to the focused
+  `lib/render_components_*.py` module and re-export it from
+  [`lib/render_components.py`](lib/render_components.py) if existing
+  imports need it.
 
 **Change the recovery score formula.**
 - Drivers and weights: [`lib/health.py`](lib/health.py)::`recovery_score`.

@@ -172,8 +172,10 @@ or product direction.
   walking nested ifs.
 
 ### Other `lib/` modules
-- `render_components.py` (752 lines) — cohesive SVG/HTML components,
-  fine as-is.
+- `render_components.py` is now a compatibility facade. Component code
+  is split by purpose across `render_components_load.py`,
+  `render_components_recovery.py`, `render_components_volume.py`,
+  `render_components_domain.py`, and `render_components_misc.py`.
 - `cardio.py` (609), `extract.py` (550), `strength.py` (512),
   `constants.py` (463), `sleep.py` (422), `swim.py` (347),
   `thermal.py` (336), `sessions.py` (267), `render_validators.py` (186),

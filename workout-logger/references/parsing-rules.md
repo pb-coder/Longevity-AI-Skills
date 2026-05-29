@@ -29,6 +29,12 @@ The output name must ALWAYS be a canonical name from `../../shared/exercises-dat
 
 1. **Exact match** (case-insensitive) → use database casing, no Notes annotation.
 2. **Known alias** → check `aliases.md`, use canonical name, no Notes annotation.
+   If the alias table's Notes column says to flag ambiguity or names a
+   context requirement, honor that before resolving. Example:
+   `Abdominal crunch: 30kgx10` can resolve to `Ab Crunch Machine` because
+   the load implies a machine; `Abdominal crunch: 20 reps` is bodyweight
+   context and should be treated as ambiguous rather than silently mapped
+   to the machine.
 3. **Substring match** → input contained in canonical name or vice versa, resolved with equipment context (e.g. `incline press` + no equipment word + user context → `Incline Chest Press Machine`). No Notes annotation.
 4. **Equipment-qualified fuzzy** → if the input contains an equipment word (`cable`, `dumbbell`, `machine`, `barbell`), prefer the canonical name that has both that equipment word and the highest string-similarity to the rest. Use it and add Notes: `fuzzy match from: "user's input"`.
 5. **difflib fuzzy match** → apply `difflib.get_close_matches(user_input.lower(), [name.lower() for name in canonical_names], n=1, cutoff=0.7)`. If there's a hit, use that canonical name (in its database casing) and add Notes: `fuzzy match from: "user's input"`. You can do the ratio in your head for obvious cases; for borderline ones run the inline snippet.
@@ -139,6 +145,34 @@ Never invent or guess sleep numbers. If no sleep line is present, omit `sleep` f
 
 If (and only if) the `/log` message contains an explicit `sauna` or `cold` line, parse it into a `thermal` entry keyed to that session's date. All forms case-insensitive. **Absent ≡ didn't happen** — if no sauna / cold line appears, omit `thermal` from the payload entirely. **Never prompt.**
 
+### Coach recovery placeholder line
+
+Coach plans write a single parse-friendly placeholder:
+
+`Recovery: sauna ___ / cold ___ / rlt ___`
+
+Treat a filled `Recovery:` line exactly like modality-specific lines under
+the same workout header. Split on `/`, ignore blanks, `___`, `skipped`,
+`none`, or `no`, and parse each clause by the modality keyword it starts
+with:
+
+- `Recovery: sauna 5min finnish / cold 30s shower / rlt ___`
+- `Recovery: sauna 10min 45C infrared / cold shower`
+- `Recovery: 5mins Finnish sauna, then cold shower`
+
+The last form is legacy narrative text from the old coach template. It is
+still explicit because the line begins with `Recovery:` and contains
+`sauna` / `cold`. Normalize it before payload construction:
+
+- `5mins Finnish sauna` -> `heat_type=dry`, `heat_round_durations_min=[5]`
+- `10 minutes 45 degrees sauna` -> `heat_type=dry`, `heat_temp_c=45`,
+  `heat_round_durations_min=[10]`
+- `then cold shower` -> `cold_type=cold_shower`, `cold_duration_sec=null`
+
+When the cold duration is not stated, leave `cold_duration_sec` null; do
+not invent 30 seconds or another default. Pair sauna + cold from one
+`Recovery:` line into one thermal row.
+
 ### Sauna line
 
 `sauna <duration>[+<duration>...]min [<temp>C] [<type>]`
@@ -194,6 +228,12 @@ If (and only if) the `/log` message contains an explicit `sauna` or `cold` line,
 A `sauna` line and a `cold` line under the same workout's header within one `/log` message become **one row** in `thermal/YYYY.MM.sessions.csv` — they're assumed to be one protocol session (sauna → cold).
 
 Force separate rows by placing them under different workout headers (e.g. a morning standalone cold shower + an evening post-workout sauna+cold = two rows for that date).
+
+The store dedupes by `(date, start, heat_type, cold_type)`. If `start`
+is absent, same-day entries with different heat/cold types can coexist;
+same-day entries with the same blank-start protocol shape intentionally
+merge. When the user logs two same-type thermal sessions on one date,
+include a start time.
 
 ### Payload entry shape (one row → one entry)
 

@@ -105,7 +105,7 @@ Assessment: ./<YYYY-MM-DD>-assessment.html
 
 ## Workout 1: <TYPE>
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - Exercise: weight × reps (or `///`-separated sets for weighted)
 - Exercise: …
@@ -114,7 +114,7 @@ Recovery (sauna / cold / light): ___
 
 ## Workout 2: <TYPE>
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - …
 
@@ -127,7 +127,7 @@ Recovery (sauna / cold / light): ___
 
 **No `## Report` section. No tables. No "Why this plan" block** — the dashboard's coach's-read lines (per card) replace it.
 
-The `Date:` and `Recovery:` placeholders stay on their own lines (separate lines aid mid-workout filling).
+The `Date:` and `Recovery:` placeholders stay on their own lines (separate lines aid mid-workout filling). The recovery placeholder is parse-shaped on purpose: the user replaces each blank with the logger grammar (`sauna 12min dry`, `cold 30s shower`, `rlt 5min`) or leaves that modality blank.
 
 Write both files in one pass at the end. Don't stream sections to chat while thinking.
 
@@ -780,7 +780,7 @@ Re-read this block before every load suggestion in the workout tables.
 
 The workout markdown is a **lean exercise list**, nothing more. No tables. No rationale paragraphs. The "why" lives in the assessment dashboard (and only there). The user trains from this file on their phone in the gym — every line they don't need slows them down.
 
-Each workout heading is immediately followed by `Date: ___` on its own line, then `Recovery (sauna / cold / light): ___` on its own line, then a blank line, then the bullets. The two placeholder lines are kept on **separate lines** — the visual break aids mid-workout filling. The user fills in the date when they actually train (so the session can be logged later without guessing) and the recovery slot if they did any post-workout protocol. The recovery slot is free-text — the user can write `sauna 12+8min 85C / cold 5min air -2C`, `sauna 10min 85C`, `rlt 10min 45C`, `sauna 10min / rlt 5min`, `skipped`, or leave it blank. `/log` parses each modality independently per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)` for sauna/cold; `## Light therapy (opt-in)` for RLT / blue light / PBM). Sauna+RLT in one line emits two payload entries — one `thermal`, one `light_therapy` — both keyed to the same date. Both lines apply to every strength workout — cardio sections do not need them.
+Each workout heading is immediately followed by `Date: ___` on its own line, then `Recovery: sauna ___ / cold ___ / rlt ___` on its own line, then a blank line, then the bullets. The two placeholder lines are kept on **separate lines** — the visual break aids mid-workout filling. The user fills in the date when they actually train (so the session can be logged later without guessing) and replaces each recovery blank only for modalities they performed. Examples: `Recovery: sauna 12+8min 85C dry / cold 30s shower / rlt ___`, `Recovery: sauna 10min 85C / cold ___ / rlt 5min 45C`, `Recovery: skipped`, or leave it blank. `/log` parses each modality independently per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)` for sauna/cold; `## Light therapy (opt-in)` for RLT / blue light / PBM). Sauna+RLT in one line emits two payload entries — one `thermal`, one `light_therapy` — both keyed to the same date. Both lines apply to every strength workout — cardio sections do not need them.
 
 **Exercise bullets** — one line per exercise. No code fences. Format:
 - Bodyweight or single-rep: `Exercise Name: reps` (e.g., `Plank: 45s hold`)
@@ -830,7 +830,7 @@ Full example (markdown — no code fence around it in the actual file):
 ```
 ## Workout 1: UPPER PUSH + CORE
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - Jumping Jacks: 50
 - Band Pull-Apart: 15

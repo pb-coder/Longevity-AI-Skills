@@ -90,6 +90,39 @@ class StorageTests(unittest.TestCase):
                 }],
             )
 
+    def test_thermal_missing_start_dedupes_by_protocol_shape(self) -> None:
+        csv_store.upsert_thermal_sessions(
+            "Test",
+            [{
+                "date": "2026-05-03",
+                "heat_type": "dry",
+                "heat_round_durations_min": [10],
+            }],
+        )
+        csv_store.upsert_thermal_sessions(
+            "Test",
+            [{
+                "date": "2026-05-03",
+                "cold_type": "cold_shower",
+                "cold_duration_sec": 60,
+            }],
+        )
+        csv_store.upsert_thermal_sessions(
+            "Test",
+            [{
+                "date": "2026-05-03",
+                "heat_type": "dry",
+                "heat_round_durations_min": [12],
+            }],
+        )
+
+        rows = csv_store.read_thermal_sessions("Test")
+        self.assertEqual(len(rows), 2)
+        dry = [r for r in rows if r.get("heat_type") == "dry"][0]
+        cold = [r for r in rows if r.get("cold_type") == "cold_shower"][0]
+        self.assertEqual(dry["heat_total_min"], 12)
+        self.assertEqual(cold["cold_duration_sec"], 60)
+
     def test_light_therapy_defaults_and_roundtrip(self) -> None:
         csv_store.upsert_light_therapy_sessions(
             "Test",

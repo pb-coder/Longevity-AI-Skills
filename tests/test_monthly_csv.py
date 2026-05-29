@@ -168,6 +168,23 @@ class MonthlyCsvTests(unittest.TestCase):
         )
         self.assertFalse(person_paths.monthly_csv("Test", "2026.04").exists())
         self.assertIn("past months are not re-scanned", "\n".join(summary))
+        self.assertIn("2026.04: 1 (Hike=1)", "\n".join(summary))
+        self.assertIn("--allow-past-months", "\n".join(summary))
+
+    def test_auto_cardio_past_month_gate_reports_month_and_type_breakdown(self) -> None:
+        summary = monthly_csv.upsert_monthly_cardio(
+            "Test",
+            [
+                {"date": "2026-03-20", "exercise": "Hike", "duration_min": 45},
+                {"date": "2026-04-20", "exercise": "Outdoor Run", "duration_min": 30},
+                {"date": "2026-04-21", "exercise": "Outdoor Run", "duration_min": 31},
+            ],
+            today_d=date(2026, 5, 15),
+        )
+        text = "\n".join(summary)
+        self.assertIn("3 input rows skipped", text)
+        self.assertIn("2026.03: 1 (Hike=1)", text)
+        self.assertIn("2026.04: 2 (Outdoor Run=2)", text)
 
 
 if __name__ == "__main__":

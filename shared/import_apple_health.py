@@ -74,6 +74,9 @@ from .apple_health_swim import build_swim_csv_payloads  # noqa: E402
 # filters these out when reasoning about training load — a 5-minute stroll
 # to the bakery is not a Zone 2 session.
 INCIDENTAL_WALK_MAX_MIN = 15.0
+NEGLIGIBLE_SWIM_MAX_DURATION_MIN = 3.0
+NEGLIGIBLE_SWIM_MAX_DISTANCE_KM = 0.05
+SPLIT_SWIM_GAP_NOTE_MAX_MIN = 15.0
 
 # Apple emits the activity type as e.g. ``HKWorkoutActivityTypeRunning``;
 # strip that prefix for human readability in the sheet.
@@ -409,6 +412,74 @@ def _drop_watch_overlapping_machine(workouts: list[dict]) -> tuple[list[dict], l
     return kept, notes
 
 
+def _drop_negligible_swims(workouts: list[dict]) -> tuple[list[dict], list[str]]:
+    """Remove tiny Apple swim artifacts before any store writes.
+
+    Apple Watch occasionally records accidental swim starts as a handful
+    of metres over one or two minutes. Those rows are below any useful
+    training threshold and create churn in monthly SESSION numbering when
+    auto-cardio imports them. Drop only when both duration and distance
+    are present and both are below the artifact thresholds.
+    """
+    kept: list[dict] = []
+    notes: list[str] = []
+    for w in workouts:
+        if w.get("apple_type") != "Swimming":
+            kept.append(w)
+            continue
+        duration = w.get("duration_min")
+        distance = w.get("distance_km")
+        try:
+            duration_f = float(duration) if duration is not None else None
+            distance_f = float(distance) if distance is not None else None
+        except (TypeError, ValueError):
+            kept.append(w)
+            continue
+        if (
+            duration_f is not None
+            and distance_f is not None
+            and duration_f < NEGLIGIBLE_SWIM_MAX_DURATION_MIN
+            and distance_f < NEGLIGIBLE_SWIM_MAX_DISTANCE_KM
+        ):
+            notes.append(
+                "Swim Workouts: skipped negligible swim "
+                f"{w.get('date')} {w.get('start') or ''} "
+                f"({duration_f:g} min, {distance_f:g} km)"
+            )
+            continue
+        kept.append(w)
+    return kept, notes
+
+
+def _note_nearby_swims(workouts: list[dict]) -> list[str]:
+    """Return summary notes for same-day swims split by a short gap.
+
+    The importer keeps these as separate Apple workouts because merging
+    aggregates and lap payloads safely requires explicit user intent.
+    The note makes the behavior visible in stdout.
+    """
+    swims = sorted(
+        [w for w in workouts if w.get("apple_type") == "Swimming"],
+        key=lambda w: (w.get("date") or "", w.get("dt_start") or datetime.min),
+    )
+    notes: list[str] = []
+    for prev, cur in zip(swims, swims[1:]):
+        if prev.get("date") != cur.get("date"):
+            continue
+        prev_end = prev.get("dt_end")
+        cur_start = cur.get("dt_start")
+        if prev_end is None or cur_start is None:
+            continue
+        gap_min = (cur_start - prev_end).total_seconds() / 60.0
+        if 0 <= gap_min <= SPLIT_SWIM_GAP_NOTE_MAX_MIN:
+            notes.append(
+                "Swim Workouts: nearby swims kept separate "
+                f"on {cur.get('date')} ({prev.get('start')} and "
+                f"{cur.get('start')}, {gap_min:g} min gap)"
+            )
+    return notes
+
+
 # ---------- main streaming pass ----------
 # Clear ONLY top-level container tags. iterparse fires the `end` event on
 # every closing tag — clearing a child element (e.g. WorkoutStatistics)
@@ -543,6 +614,8 @@ def main():
     aggregator = DayAggregator()
     workout_rows: list[dict] = []
     consume_apple_export(zip_path, since, aggregator, workout_rows)
+    workout_rows, negligible_swim_notes = _drop_negligible_swims(workout_rows)
+    nearby_swim_notes = _note_nearby_swims(workout_rows)
 
     metric_entries = list(aggregator.emit(since))
     sleep_night_entries = list(aggregator.emit_sleep_nights(since))
@@ -556,6 +629,10 @@ def main():
               f"{sleep_night_entries[-1]['date'] if sleep_night_entries else '-'})")
         print(f"Workout Sessions: {len(workout_rows)} sessions would be written "
               f"({sum(1 for r in workout_rows if r.get('incidental'))} walks flagged incidental)")
+        for note in negligible_swim_notes:
+            print(note)
+        for note in nearby_swim_notes:
+            print(note)
         return 0
 
     out_lines = []
@@ -572,6 +649,8 @@ def main():
 
     out_lines.extend(upsert_health_metrics(person, metric_entries))
     out_lines.extend(upsert_workout_sessions(person, workout_rows))
+    out_lines.extend(negligible_swim_notes)
+    out_lines.extend(nearby_swim_notes)
 
     # Sleep nights CSV pipeline. XML only — HL exports don't carry
     # per-stage data, so this folder never exists on HL trackers.

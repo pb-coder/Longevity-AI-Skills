@@ -350,6 +350,9 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   removed (2026-05); swim lap count is now sourced exclusively from
   `<Person>/data/swimming/YYYY.MM.workouts.csv`. Older 17-col rows
   pad `Source` to blank and self-migrate on the next canonicalize pass.
+  `SESSION` is display-only and intentionally ephemeral: inserting an
+  earlier-dated workout renumbers later sessions in that month. Never
+  use it as a stable external ID.
 - **Computed cells are pre-evaluated on canonicalize.** `Volume =
   reps × kg`, `Pace = duration/distance` (MM:SS, blank outside
   [0.5, 60] min/km), and per-month SESSION counters are written as
@@ -412,7 +415,9 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   to true on both sources; when on, eligible Apple workouts (Running /
   Hiking / Cycling / Swimming / HIIT) flow into the matching
   `monthly/YYYY.MM.csv`, with manual-wins dedupe (date + exercise,
-  ±1min duration tolerance).
+  ±1min duration tolerance). When the current-month gate skips
+  historical rows, importer stdout prints a per-month and per-exercise
+  breakdown plus the `--allow-past-months` rerun hint.
 - **Coach plan output is split into a dated HTML dashboard + a lean
   workout markdown, both under `plans/<Person>/`.** Each `/coach` run
   writes two paired files: `plans/<Person>/<YYYY-MM-DD>-assessment.html`
@@ -468,9 +473,9 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   becomes one row (paired protocol session); standalone cold (morning
   cold shower) is a row with heat columns blank.
   `csv_store.read_thermal_sessions` aggregates across all months on
-  read; `upsert_thermal_sessions` is sparse-merge by `(date, start)`
-  with manual-wins on Notes; `heat_total_min` and (when absent)
-  `heat_rounds` are auto-derived from `heat_round_durations_min` on
+  read; `upsert_thermal_sessions` is sparse-merge by
+  `(date, start, heat_type, cold_type)` with manual-wins on Notes;
+  `heat_total_min` and (when absent) `heat_rounds` are auto-derived from `heat_round_durations_min` on
   every write so the file is internally consistent. **Almost never
   prompts** — the one carved-out exception: when the parsed payload
   carries a `cold_air` entry whose `cold_temp_c` is null, `/log` asks
@@ -529,6 +534,10 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   correct month by date. Stroke style enum → string map lives in
   `apple_workout_types.HK_SWIMMING_STROKE_STYLE` (0=Unknown, 1=Mixed,
   2=Freestyle, 3=Backstroke, 4=Breaststroke, 5=Butterfly, 6=Kickboard).
+  The XML importer drops negligible swim artifacts when both
+  `duration_min < 3` and `distance_km < 0.05`, and reports the skipped
+  row. Nearby same-day swims with a short gap are reported but kept as
+  separate Apple workouts; merging them requires explicit user intent.
   `csv_store.upsert_swim_laps` is replace-on-match (not sparse-merge):
   re-exports authoritatively replace stored lap data so a corrected
   stroke style flows through cleanly.

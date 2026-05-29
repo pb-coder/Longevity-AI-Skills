@@ -21,7 +21,7 @@ Assessment: ./<date>-assessment.html
 
 ## Rest day
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - 20-min easy walk (RPE 2–3, conversational pace)
 - Hydration: front-load fluids today
@@ -52,7 +52,7 @@ Assessment: ./<date>-assessment.html
 
 ## Zone 2 cardio + mobility
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - Zone 2 cardio: 45–60 min at ~<estimated_max_hr × 0.65> bpm
   — bike / outdoor walk-jog / rower — choose by what's accessible
@@ -81,7 +81,7 @@ Assessment: ./<date>-assessment.html
 
 ## Deload Session 1
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - <Compound 1>: <last working weight> × <last reps>, <halved set count>
   — hold load, halve sets
@@ -91,13 +91,13 @@ Recovery (sauna / cold / light): ___
 
 ## Deload Session 2
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - <…>
 
 ## Deload Session 3
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - <…>
 
@@ -124,7 +124,7 @@ Assessment: ./<date>-assessment.html
 
 ## Mobility + sauna
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - Mobility flow: 30 min
   — hip 90/90, thoracic rotations, shoulder dislocates, ankle rocks, deep squat hold
@@ -159,7 +159,7 @@ Assessment: ./<date>-assessment.html
 
 ## Workout 1: PUSH
 Date: ___
-Recovery (sauna / cold / light): ___
+Recovery: sauna ___ / cold ___ / rlt ___
 
 - Dumbbell Flat Bench Press: 50 kg × 8 /// 50 kg × 8
   — hold last session's load

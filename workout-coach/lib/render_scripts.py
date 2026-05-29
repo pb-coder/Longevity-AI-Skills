@@ -136,7 +136,7 @@ INLINE_JS = r"""
   //   ## Workout N: TYPE          (becomes a card)
   //   ## Cardio N: ...            (becomes a card)
   //   Date: ___                    (placeholder line at top of card)
-  //   Recovery (...): ___         (placeholder line at top of card)
+  //   Recovery: sauna ___ / ...   (placeholder line at top of card)
   //   - Exercise: weight x reps   (bullet)
   //     - sub note  (or `  — sub note` with em-dash)
   function renderMarkdownInto(elt, md) {
@@ -199,8 +199,8 @@ INLINE_JS = r"""
         continue;
       }
 
-      // Date: ___  /  Recovery (...): ___  → placeholder rows
-      if (/^Date:/i.test(line) || /^Recovery\s*\(/i.test(line)) {
+      // Date: ___  /  Recovery: ...  → placeholder rows
+      if (/^Date:/i.test(line) || /^Recovery\s*(?:\(|:)/i.test(line)) {
         addPlaceholder(line);
         continue;
       }

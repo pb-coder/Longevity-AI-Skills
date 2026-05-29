@@ -372,7 +372,10 @@ def upsert_sleep_nights(person: str, entries: Iterable[dict]) -> list[str]:
 # sessions. One row can be heat-only (sauna without cold), cold-only
 # (e.g. standalone morning cold shower), or paired (sauna → cold exposure).
 # Mirrors the per-month-CSV pattern of ``monthly/``, ``swimming/``, and
-# ``sleep/`` for scalability.
+# ``sleep/`` for scalability. Dedupe uses
+# ``(date, start, heat_type, cold_type)`` so two same-day entries without
+# explicit start times do not collide unless they describe the same
+# protocol shape.
 #
 # Multi-round saunas ("2 saunas after each other") are stored as a single
 # row with ``Heat Round Durations (min)`` = comma-separated per-round
@@ -490,7 +493,8 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
     """Sparse-merge per-session thermal rows into the right
     ``<person>/data/thermal/YYYY.MM.sessions.csv``.
 
-    Dedupe key = ``(date, start)`` within the month. Notes is manual-wins.
+    Dedupe key = ``(date, start, heat_type, cold_type)`` within the
+    month. Notes is manual-wins.
     ``heat_total_min`` is auto-derived from
     ``heat_round_durations_min`` on every write (whether the caller
     supplied it or not) so the file is internally consistent.
@@ -511,7 +515,7 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
     spec = CsvTableSpec(
         headers=THERMAL_SESSIONS_HEADERS,
         fields=["date"] + THERMAL_SESSIONS_FIELDS + ["notes"],
-        key_fields=("date", "start"),
+        key_fields=("date", "start", "heat_type", "cold_type"),
         sort_fields=("date", "start"),
         sort_reverse=True,
     )

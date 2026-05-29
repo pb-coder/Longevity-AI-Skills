@@ -22,7 +22,7 @@
 | Outdoor Cycling, Bike Ride, Cycling | Outdoor Cycling | — |
 | Romain Chair Sit-Up, Romain Chair | Roman Chair Sit-Up | — |
 | Belt Squad Machine | Belt Squat Machine | — |
-| Abdominal crunch | Ab Crunch Machine | — |
+| Abdominal crunch | Ab Crunch Machine | resolve only when load/equipment context implies the machine; otherwise flag ambiguous |
 | abductor machine | Hip Abductor Machine | — |
 | seated abductor | Hip Abductor Machine | — |
 | row machine without chest support | Seated Row Machine | — |

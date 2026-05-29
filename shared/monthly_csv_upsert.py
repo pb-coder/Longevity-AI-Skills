@@ -84,6 +84,34 @@ def upsert_monthly_cardio(person: str,
 
     current_month = _current_month_key(today_d)
     skipped_past_month = 0
+    skipped_past_by_month: dict[str, dict[str, int]] = {}
+
+    def _past_month_skip_summaries() -> list[str]:
+        if not skipped_past_month:
+            return []
+        out = [
+            f"Auto-cardio: {skipped_past_month} input rows skipped "
+            f"(dated outside the current month {current_month})"
+        ]
+        breakdown_parts = []
+        for month_key in sorted(skipped_past_by_month):
+            exercise_counts = skipped_past_by_month[month_key]
+            type_bits = ", ".join(
+                f"{name}={exercise_counts[name]}"
+                for name in sorted(exercise_counts)
+            )
+            breakdown_parts.append(
+                f"{month_key}: {sum(exercise_counts.values())}"
+                + (f" ({type_bits})" if type_bits else "")
+            )
+        if breakdown_parts:
+            out.append(
+                "Auto-cardio past-month skipped breakdown: "
+                + "; ".join(breakdown_parts)
+                + ". Rerun with --allow-past-months for an intentional backfill."
+            )
+        return out
+
     by_month: dict[str, list[dict]] = {}
     for r in rows:
         d = str(r.get("date") or "")[:10]
@@ -92,6 +120,9 @@ def upsert_monthly_cardio(person: str,
         key = f"{d[:4]}.{d[5:7]}"
         if not allow_past_months and key != current_month:
             skipped_past_month += 1
+            exercise = str(r.get("exercise") or "unknown").strip() or "unknown"
+            month_counts = skipped_past_by_month.setdefault(key, {})
+            month_counts[exercise] = month_counts.get(exercise, 0) + 1
             continue
         by_month.setdefault(key, []).append(r)
 
@@ -100,7 +131,7 @@ def upsert_monthly_cardio(person: str,
             return [
                 f"Auto-cardio: 0 rows considered "
                 f"({skipped_past_month} skipped — past months are not re-scanned)"
-            ]
+            ] + _past_month_skip_summaries()
         return ["Auto-cardio: 0 rows considered (no valid dates)"]
 
     summaries: list[str] = []
@@ -282,11 +313,7 @@ def upsert_monthly_cardio(person: str,
         f"Auto-cardio total: {total_appended} appended, "
         f"{total_skipped} skipped across {len(by_month)} month(s)"
     )
-    if skipped_past_month:
-        summaries.append(
-            f"Auto-cardio: {skipped_past_month} input rows skipped "
-            f"(dated outside the current month {current_month})"
-        )
+    summaries.extend(_past_month_skip_summaries())
     return summaries
 
 

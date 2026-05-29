@@ -87,6 +87,12 @@ Swim workouts get richer treatment than other cardio because Apple emits per-lap
 
 HealthAutoExport ZIPs currently do not provide the per-lap swim event payload consumed by this tracker, so `swimming/` remains native-XML-only. The coach skips the swim section automatically when no swim summary is present. `/log` cannot append per-lap detail manually.
 
+Apple XML swim import drops negligible swim artifacts when both
+`duration_min < 3` and `distance_km < 0.05`; importer stdout reports the
+skipped row. Same-day swims separated by a short gap stay separate
+Apple workouts, but stdout flags them so the user can interpret session
+counts correctly.
+
 **CSS test workflow.** When the user logs a 400m + 200m time-trial pair on the same day with `CSS test` on the header line, `/log`'s parser includes a `css_test` field in the payload. `append_workout.py` computes `(t400_sec - t200_sec) / 2` and writes `swim_css_sec_per_100m` + `swim_css_set_at` to `profile.csv`. CSS detection is never automatic — only the explicit `CSS test` keyword triggers the write.
 
 ### Sleep architecture
@@ -113,7 +119,7 @@ Per-night schema (`Date` is dedupe key, sparse-merge with manual-wins on Notes):
 
 Heat and cold exposure get their own per-month store at `<Person>/data/sleep/`'s sibling `<Person>/data/thermal/YYYY.MM.sessions.csv`. **Manual `/log` only** — Apple Health doesn't classify sauna sessions reliably, so there's no importer-side write path; the `thermal/` folder is absent until the user logs their first session. One row captures one heat-and/or-cold protocol session (heat-only, cold-only, or paired heat → cold).
 
-Per-session schema (`(Date, Start)` is dedupe key, sparse-merge with manual-wins on Notes):
+Per-session schema (`(Date, Start, Heat Type, Cold Type)` is dedupe key, sparse-merge with manual-wins on Notes):
 
 - **Heat:** `Heat Type` (`dry` / `steam` / `infrared` / `banya` / `none`), `Heat Temp (°C)`, `Heat Rounds`, `Heat Round Durations (min)` (comma-separated per-round minutes for multi-round saunas, e.g. `"12,8"`), `Heat Total (min)` (auto-derived sum).
 - **Cold:** `Cold Type` (`none` / `cold_air` / `cold_shower` / `cold_plunge` / `cold_water`), `Cold Duration (sec)`, `Cold Temp (°C)`.
@@ -154,7 +160,7 @@ Columns (18, in order): `SESSION | Date | # | Exercise | Set | Reps | kg | Volum
 
 Each set is one row. Date, #, and Exercise are populated on every row (no carry-forward shorthand). `#` restarts at 1 per date and is shared by all sets of the same exercise. Cardio rows use the cardio columns (Distance through Elapsed); strength rows leave them blank.
 
-`SESSION` is a per-month session number (1, 2, 3…) repeated on every row of the same date — including that session's trailing TOTAL row. It's populated by `canonicalize_monthly_csv`, not by hand.
+`SESSION` is a per-month display number (1, 2, 3…) repeated on every row of the same date — including that session's trailing TOTAL row. It's populated by `canonicalize_monthly_csv`, not by hand. It is intentionally ephemeral: inserting an earlier-dated workout later in the month renumbers following sessions. Do not use `SESSION` as a stable external identifier; use `(Date, Exercise, Start/Duration/Source)` or the source workout row when you need identity.
 
 **TOTAL row carries the strength session's full session-level summary.** Each strength session ends with a `TOTAL` row that holds:
 - `Date` (col 2) — the session date.

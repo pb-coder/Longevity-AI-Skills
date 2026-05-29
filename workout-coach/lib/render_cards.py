@@ -10,7 +10,6 @@ the focused module for the card surface it changes.
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 
 from .render_cards_common import coach_block

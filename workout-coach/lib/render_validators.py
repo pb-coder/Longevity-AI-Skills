@@ -23,7 +23,6 @@ Public surface:
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 
 from .render_helpers import esc

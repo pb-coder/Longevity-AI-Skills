@@ -17,7 +17,6 @@ Public surface:
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 
 from .parsing import _parse_iso_date

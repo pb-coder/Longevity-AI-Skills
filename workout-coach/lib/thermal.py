@@ -23,7 +23,6 @@ Adherence anchors:
 from __future__ import annotations
 
 from datetime import date, timedelta
-from pathlib import Path
 
 
 from .parsing import _parse_iso_date

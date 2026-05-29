@@ -1,7 +1,6 @@
 """Shared CSV-store primitives used by the focused store modules."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable, Iterable
 
 from tracker.csv_table import (

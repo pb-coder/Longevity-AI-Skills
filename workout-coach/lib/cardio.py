@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import math
 from datetime import date, timedelta
-from pathlib import Path
 
 
 from .health import _values_in_window

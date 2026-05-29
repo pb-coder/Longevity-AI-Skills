@@ -1,7 +1,6 @@
 """Shared helpers for dashboard card renderers."""
 from __future__ import annotations
 
-from pathlib import Path
 
 
 from .render_helpers import esc

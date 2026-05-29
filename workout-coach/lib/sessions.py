@@ -22,7 +22,6 @@ Functions:
 from __future__ import annotations
 
 from datetime import date  # noqa: F401  (kept for type-hint forward-compat)
-from pathlib import Path
 
 
 from .parsing import _parse_iso_date

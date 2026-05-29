@@ -1,7 +1,6 @@
 """Compatibility facade for trajectory dashboard cards."""
 from __future__ import annotations
 
-from pathlib import Path
 
 
 from .render_cards_health import card_recovery_practices, card_sleep, card_vitals

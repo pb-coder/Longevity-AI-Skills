@@ -1,8 +1,6 @@
 """Monthly CSV file I/O and row translation."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from tracker.csv_table import (
     read_csv_rows as _table_read_csv_rows,
     write_csv_atomic as _table_write_csv_atomic,

@@ -94,6 +94,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Smith Machine Row [Smith] — +biceps, +rear delt
 - Seal Row [BW] — +biceps, +rear delt
 - Landmine Row [LM] — +biceps, +rear delt
+- Low Row Machine [Machine] — +biceps, +rear delt
 
 ### Back — Other
 - Conventional Deadlift [BB] — +glutes, +hamstrings, +erectors (primary: posterior chain)

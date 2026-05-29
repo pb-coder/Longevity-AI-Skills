@@ -78,6 +78,25 @@ class CliSemanticTests(unittest.TestCase):
         self.assertIn("Dry run", person_b.stdout)
         self.assertIn("health_metrics.csv", person_b.stdout)
 
+    def test_public_cli_help_commands_import_cleanly(self) -> None:
+        commands = [
+            ("shared/import_apple_health.py", "--help"),
+            ("shared/import_health_auto_export.py", "--help"),
+            ("shared/canonicalize_logs.py", "--help"),
+            ("workout-logger/scripts/append_workout.py", "--help"),
+        ]
+        for script, arg in commands:
+            with self.subTest(script=script):
+                proc = subprocess.run(
+                    [sys.executable, script, arg],
+                    cwd=SKILLS_ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn("usage:", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

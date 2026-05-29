@@ -331,6 +331,11 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   `workout-coach/lib/` use package-relative imports; do not add
   per-module sibling-directory `sys.path` bootstraps or new flat
   top-level imports.
+  `workout_coach/lib/__init__.py` uses `__path__` to map the underscore
+  Python package onto the hyphenated on-disk directory
+  `workout-coach/lib/`. Add new coach modules to `workout-coach/lib/`
+  as before; they become importable as `workout_coach.lib.<name>`
+  automatically. Do not duplicate them under `workout_coach/lib/`.
 - **`canonicalize_monthly_csv` is canonical**: the single source of
   truth for monthly-CSV layout (sort by Date+#+Set, recompute Volume
   and Pace, rebuild SESSION numbering, rebuild TOTAL rows, hoist

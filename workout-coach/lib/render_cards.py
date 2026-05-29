@@ -10,15 +10,10 @@ the focused module for the card surface it changes.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
-from render_cards_common import coach_block
-from render_cards_today import (
+from .render_cards_common import coach_block
+from .render_cards_today import (
     card_acwr,
     card_drivers,
     card_hero,
@@ -31,7 +26,7 @@ from render_cards_today import (
     card_training_load,
     card_wow,
 )
-from render_cards_trajectory import (
+from .render_cards_trajectory import (
     card_behavioral_domain,
     card_body_comp_domain,
     card_cardio_domain,

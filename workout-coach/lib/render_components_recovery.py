@@ -1,7 +1,7 @@
 """Recovery driver and hero-scale dashboard components."""
 from __future__ import annotations
 
-from render_helpers import esc, fmt, signed
+from .render_helpers import esc, fmt, signed
 
 # ---------- diverging-bar driver chart ----------
 

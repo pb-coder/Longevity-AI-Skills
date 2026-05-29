@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 
-from apple_health_core import parse_apple_dt, to_float
+from .apple_health_core import parse_apple_dt, to_float
 
 # Tier 1 and Tier 2 record types consumed from Export.xml. Everything
 # else is skipped by the streaming importer.

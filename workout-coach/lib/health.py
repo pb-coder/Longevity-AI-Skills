@@ -11,14 +11,9 @@ focused module that owns the behavior being changed.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
-from health_windowing import (
+from .health_windowing import (
     _mean_or_none,
     _values_in_window,
     baseline_60d,
@@ -27,19 +22,19 @@ from health_windowing import (
     metric_trend_per_4w,
     workout_sessions_in_window,
 )
-from health_recovery import (
+from .health_recovery import (
     RECENT_SAMPLE_SUFFICIENCY,
     SIGNAL_WEIGHT_FLOOR_FOR_GATE,
     _z_score_signal,
     recovery_score,
 )
-from health_longevity import (
+from .health_longevity import (
     _safe_norm,
     compute_longevity_score,
     read_longevity_state,
     vo2_percentile_age_sex,
 )
-from health_session_rec import (
+from .health_session_rec import (
     _count_stalled_lifts,
     _muscles_over_mrv,
     _rhr_sustained_elevation_days,

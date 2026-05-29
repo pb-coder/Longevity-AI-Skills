@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import csv
-from csv_store_common import _date_str, _serialize_value
-from person_paths import ensure_data_dir, profile_csv
+from .csv_store_common import _date_str, _serialize_value
+from .person_paths import ensure_data_dir, profile_csv
 
 __all__ = [
     "PROFILE_KEYS",

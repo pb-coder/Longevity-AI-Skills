@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from health_windowing import _values_in_window
+from .health_windowing import _values_in_window
 
 
 def _z_score_signal(health_all: list[dict], key: str, today_d: date,

@@ -37,15 +37,16 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SKILLS_ROOT))
-sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+if __package__ in (None, ""):
+    sys.path.insert(0, str(SKILLS_ROOT))
+    __package__ = "shared"
 from tracker import TrackerContext  # noqa: E402
 from tracker.importing import build_auto_cardio_payload  # noqa: E402
-from monthly_csv import (  # noqa: E402
+from .monthly_csv import (  # noqa: E402
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
 )
-from csv_store import (  # noqa: E402
+from .csv_store import (  # noqa: E402
     ensure_profile,
     upsert_health_metrics,
     upsert_sleep_nights,
@@ -53,21 +54,21 @@ from csv_store import (  # noqa: E402
     upsert_swim_workouts,
     upsert_workout_sessions,
 )
-from person_paths import (  # noqa: E402
+from .person_paths import (  # noqa: E402
     WORKOUT_TRACKER_ROOT,
     archive_processed_export,
 )
-from apple_workout_types import (  # noqa: E402
+from .apple_workout_types import (  # noqa: E402
     APPLE_TO_TRACKER_EXERCISE,
     CARDIO_AUTOLOG_TYPES,
 )
-from apple_health_core import hhmm, parse_apple_dt, to_float  # noqa: E402
-from apple_health_daily import DayAggregator, WANTED_RECORD_TYPES  # noqa: E402
-from apple_health_strength import (  # noqa: E402
+from .apple_health_core import hhmm, parse_apple_dt, to_float  # noqa: E402
+from .apple_health_daily import DayAggregator, WANTED_RECORD_TYPES  # noqa: E402
+from .apple_health_strength import (  # noqa: E402
     STRENGTH_APPLE_TYPES,
     cluster_strength_sessions,
 )
-from apple_health_swim import build_swim_csv_payloads  # noqa: E402
+from .apple_health_swim import build_swim_csv_payloads  # noqa: E402
 
 # Walking sessions shorter than this get the "incidental" tag. The coach
 # filters these out when reasoning about training load — a 5-minute stroll

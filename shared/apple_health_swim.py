@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 
-from apple_workout_types import HK_SWIMMING_STROKE_STYLE
+from .apple_workout_types import HK_SWIMMING_STROKE_STYLE
 
 _STROKE_ABBREV = {
     "Freestyle": "Free",

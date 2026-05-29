@@ -1,12 +1,9 @@
 """Shared CSV-store primitives used by the focused store modules."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Callable, Iterable
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tracker.csv_table import (  # noqa: E402
+from tracker.csv_table import (
     CsvTableSpec,
     date_str as _date_str,
     parse_value as _parse_value,

@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from datetime import date
-from pathlib import Path
 
 
-SKILLS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SKILLS_ROOT / "workout-coach" / "lib"))
-
-from tracker.contracts import SessionRecommendation  # noqa: E402
-from health import compute_session_recommendation  # noqa: E402
+from tracker.contracts import SessionRecommendation
+from workout_coach.lib.health import compute_session_recommendation
 
 
 def recommendation(**overrides):

@@ -19,16 +19,10 @@ Defaults are tunable per tracker via ``profile.csv``.
 """
 from __future__ import annotations
 
-import sys
 from datetime import date, timedelta
-from pathlib import Path
 
-# Sibling lib/ on sys.path so this module is importable on its own.
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
-from parsing import _parse_iso_date
+from .parsing import _parse_iso_date
 
 
 DEFAULT_LT_TARGET_PER_WEEK = 3

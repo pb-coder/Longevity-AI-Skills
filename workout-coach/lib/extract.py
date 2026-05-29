@@ -43,21 +43,9 @@ Profile / HR estimation:
 from __future__ import annotations
 
 import re
-import sys
 from datetime import date, timedelta
-from pathlib import Path
 
-# Sibling lib/ modules + shared/ on sys.path so this module is importable
-# both via the read_tracker entry point (which sets these up) and on its
-# own (for unit tests / REPL inspection).
-_LIB = Path(__file__).resolve().parent
-_SHARED = _LIB.parents[1] / "shared"
-for p in (_LIB, _SHARED):
-    sp = str(p)
-    if sp not in sys.path:
-        sys.path.insert(0, sp)
-
-from constants import (
+from .constants import (
     DELOAD_MARKER,
     EMPTY_STREAK_STOP,
     MONTHLY_RE,
@@ -66,7 +54,7 @@ from constants import (
     SUBSECTION_PRIMARY_HINTS,
     TOTAL_LABEL,
 )
-from parsing import (
+from .parsing import (
     _parse_iso_date,
     parse_distance_km,
     parse_duration_minutes,
@@ -76,12 +64,12 @@ from parsing import (
 
 # Monthly CSVs (post-PR3a) are the canonical authority for monthly
 # workout data. Coercions (date_str, etc.) live in monthly_csv now.
-from monthly_csv import (  # type: ignore[import-not-found]
+from shared.monthly_csv import (
     date_str,
     list_year_months,
     read_monthly,
 )
-import csv_store as _csv_store  # noqa: E402  — CSV-backed HM/WS/Profile reads
+from shared import csv_store as _csv_store
 
 
 def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dict], dict, dict]:

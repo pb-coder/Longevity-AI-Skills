@@ -4,13 +4,13 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from monthly_csv_canonicalize import canonicalize_monthly_csv
-from monthly_csv_io import _dict_to_row, _read_csv_rows, _row_to_dict, _write_csv_atomic
-from monthly_csv_schema import (
+from .monthly_csv_canonicalize import canonicalize_monthly_csv
+from .monthly_csv_io import _dict_to_row, _read_csv_rows, _row_to_dict, _write_csv_atomic
+from .monthly_csv_schema import (
     CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN,
     TOTAL_LABEL,
 )
-from monthly_csv_values import (
+from .monthly_csv_values import (
     _current_month_key,
     _format_duration_mmss,
     _format_elapsed_hms,
@@ -21,7 +21,7 @@ from monthly_csv_values import (
     _strength_metadata_drifts,
     date_str,
 )
-from person_paths import ensure_monthly_dir, monthly_csv as monthly_csv_path, monthly_dir
+from .person_paths import ensure_monthly_dir, monthly_csv as monthly_csv_path, monthly_dir
 
 __all__ = [
     "upsert_rows",

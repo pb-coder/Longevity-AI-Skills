@@ -25,16 +25,17 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SKILLS_ROOT))
-sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+if __package__ in (None, ""):
+    sys.path.insert(0, str(SKILLS_ROOT))
+    __package__ = "shared"
 
 from tracker import TrackerContext  # noqa: E402
 from tracker.importing import build_auto_cardio_payload  # noqa: E402
-from apple_workout_types import (  # noqa: E402
+from .apple_workout_types import (  # noqa: E402
     APPLE_TO_TRACKER_EXERCISE,
     CARDIO_AUTOLOG_TYPES,
 )
-from csv_store import (  # noqa: E402
+from .csv_store import (  # noqa: E402
     HEALTH_METRICS_FIELDS_BY_SOURCE,
     HEALTH_METRICS_HEADERS_BY_SOURCE,
     WORKOUT_SESSIONS_FIELDS_BY_SOURCE,
@@ -49,8 +50,8 @@ from csv_store import (  # noqa: E402
     write_profile,
     _write_csv as _write_store_csv,
 )
-from import_apple_health import cluster_strength_sessions  # noqa: E402
-from monthly_csv import (  # noqa: E402
+from .import_apple_health import cluster_strength_sessions  # noqa: E402
+from .monthly_csv import (  # noqa: E402
     TOTAL_LABEL,
     _dict_to_row,
     _is_auto_imported,
@@ -63,7 +64,7 @@ from monthly_csv import (  # noqa: E402
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
 )
-from person_paths import (  # noqa: E402
+from .person_paths import (  # noqa: E402
     WORKOUT_TRACKER_ROOT,
     archive_processed_export,
     monthly_csv as monthly_csv_path,

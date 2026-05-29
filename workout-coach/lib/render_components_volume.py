@@ -1,7 +1,7 @@
 """Per-muscle volume dashboard components."""
 from __future__ import annotations
 
-from render_helpers import esc
+from .render_helpers import esc
 
 # ---------- per-muscle bar chart ----------
 

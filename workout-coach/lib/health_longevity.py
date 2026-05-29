@@ -13,7 +13,7 @@ def vo2_percentile_age_sex(value: float | None, sex: str | None,
     ("median for your age", "above average", "elite", "longevity-target").
     Returns ``None`` when sex/age unknown or no value provided.
     """
-    from constants import VO2MAX_NORMS, age_band  # local import
+    from .constants import VO2MAX_NORMS, age_band  # local import
     if value is None:
         return None
     bands = age_band(VO2MAX_NORMS, sex or "", age if age is not None else 0)
@@ -74,7 +74,7 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
     The ``bloodwork_pending`` flag is always True until biomarker
     ingestion lands — the score is honest about what it doesn't see.
     """
-    from constants import LONGEVITY_SCORE_WEIGHTS
+    from .constants import LONGEVITY_SCORE_WEIGHTS
     components: dict[str, float] = {}
 
     # 1. VO2 percentile (longevity-most-predictive single signal)

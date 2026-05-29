@@ -23,13 +23,16 @@ import sys
 from pathlib import Path
 
 THIS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(THIS_DIR))
-from monthly_csv import (  # noqa: E402
+if __package__ in (None, ""):
+    sys.path.insert(0, str(THIS_DIR.parent))
+    __package__ = "shared"
+
+from .monthly_csv import (  # noqa: E402
     MONTHLY_HEADERS,
     canonicalize_monthly_csv,
     list_year_months,
 )
-from person_paths import monthly_csv as monthly_csv_path  # noqa: E402
+from .person_paths import monthly_csv as monthly_csv_path  # noqa: E402
 
 # --- canonical-name source --------------------------------------------------
 

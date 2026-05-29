@@ -1,15 +1,10 @@
 """Health time-series primitives and weekly aggregates."""
 from __future__ import annotations
 
-import sys
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
-from parsing import _parse_iso_date
+from .parsing import _parse_iso_date
 
 
 def _values_in_window(entries: list[dict], key: str, today_d: date, days: int) -> list[float]:

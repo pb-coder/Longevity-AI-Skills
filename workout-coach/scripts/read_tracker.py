@@ -63,16 +63,15 @@ from pathlib import Path
 
 # Bring in shared tracker schemas, package utilities, and coach analytics.
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(SKILLS_ROOT))
-sys.path.insert(0, str(SKILLS_ROOT / "shared"))
-sys.path.insert(0, str(SKILLS_ROOT / "workout-coach" / "lib"))
+if str(SKILLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SKILLS_ROOT))
 from tracker import TrackerContext  # noqa: E402
 from tracker.contracts import TrackerJSON  # noqa: E402
-from csv_store import read_profile  # noqa: E402
-from person_paths import monthly_dir  # noqa: E402
-from constants import DEFAULT_DATA_SOURCE, SOURCE_CAPABILITIES  # noqa: E402
-from parsing import _compact, _parse_iso_date  # noqa: E402
-from extract import (  # noqa: E402
+from shared.csv_store import read_profile  # noqa: E402
+from shared.person_paths import monthly_dir  # noqa: E402
+from workout_coach.lib.constants import DEFAULT_DATA_SOURCE, SOURCE_CAPABILITIES  # noqa: E402
+from workout_coach.lib.parsing import _compact, _parse_iso_date  # noqa: E402
+from workout_coach.lib.extract import (  # noqa: E402
     _age_from_birthday,
     estimate_max_hr,
     extract_rows,
@@ -88,7 +87,7 @@ from extract import (  # noqa: E402
     read_thermal_sessions,
     read_workout_sessions,
 )
-from health import (  # noqa: E402
+from workout_coach.lib.health import (  # noqa: E402
     _mean_or_none,
     _values_in_window,
     compute_longevity_score,
@@ -101,19 +100,19 @@ from health import (  # noqa: E402
     recovery_score,
     vo2_percentile_age_sex,
 )
-from sessions import (  # noqa: E402
+from workout_coach.lib.sessions import (  # noqa: E402
     _is_working_set,
     bodyweight_trend_kg_per_week,
     build_monthly_sessions,
     progression_summary,
 )
-from strength import (  # noqa: E402
+from workout_coach.lib.strength import (  # noqa: E402
     estimated_1rm,
     hr_at_volume_divergence,
     stale_exercises,
     weekly_volume_per_muscle,
 )
-from cardio import (  # noqa: E402
+from workout_coach.lib.cardio import (  # noqa: E402
     auto_deload_candidates,
     cardio_hr_zones,
     cardio_last_28d,
@@ -124,15 +123,15 @@ from cardio import (  # noqa: E402
     training_load_summary,
     trimp_per_session,
 )
-from sleep import (  # noqa: E402
+from workout_coach.lib.sleep import (  # noqa: E402
     compute_sleep_regularity_index,
     flag_rem_sleep_anomalies,
     sleep_summary,
 )
-from swim import swim_summary  # noqa: E402
-from thermal import thermal_summary  # noqa: E402
-from light_therapy import light_therapy_summary  # noqa: E402
-from nutrition_phase import nutrition_phase_summary  # noqa: E402
+from workout_coach.lib.swim import swim_summary  # noqa: E402
+from workout_coach.lib.thermal import thermal_summary  # noqa: E402
+from workout_coach.lib.light_therapy import light_therapy_summary  # noqa: E402
+from workout_coach.lib.nutrition_phase import nutrition_phase_summary  # noqa: E402
 
 
 def _wow_trend(this_v: float | None, last_v: float | None,

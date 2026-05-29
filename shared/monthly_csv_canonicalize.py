@@ -1,10 +1,10 @@
 """Monthly CSV canonicalization."""
 from __future__ import annotations
 
-from person_paths import ensure_monthly_dir, monthly_csv as monthly_csv_path
-from monthly_csv_io import _dict_to_row, _read_csv_rows, _row_to_dict, _write_csv_atomic
-from monthly_csv_schema import DELOAD_MARKER_TEXT, TOTAL_LABEL
-from monthly_csv_values import (
+from .person_paths import ensure_monthly_dir, monthly_csv as monthly_csv_path
+from .monthly_csv_io import _dict_to_row, _read_csv_rows, _row_to_dict, _write_csv_atomic
+from .monthly_csv_schema import DELOAD_MARKER_TEXT, TOTAL_LABEL
+from .monthly_csv_values import (
     _classify_session_rows,
     _extract_deload_marker,
     _format_duration_mmss,

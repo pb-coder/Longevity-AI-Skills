@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
 
-SKILLS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SKILLS_ROOT / "workout-coach" / "lib"))
-sys.path.insert(0, str(SKILLS_ROOT / "shared"))
-
-import sessions  # noqa: E402
+from workout_coach.lib import sessions
 
 
 class BuildMonthlySessionsTests(unittest.TestCase):

@@ -7,5 +7,5 @@ can be edited independently:
 """
 from __future__ import annotations
 
-from render_scripts import INLINE_JS  # noqa: F401
-from render_styles import STYLESHEET  # noqa: F401
+from .render_scripts import INLINE_JS  # noqa: F401
+from .render_styles import STYLESHEET  # noqa: F401

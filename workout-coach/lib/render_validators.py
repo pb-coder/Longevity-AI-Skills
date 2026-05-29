@@ -23,15 +23,9 @@ Public surface:
 from __future__ import annotations
 
 import re
-import sys
-from pathlib import Path
 
-# Sibling lib/ on sys.path so this module is importable on its own.
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
-from render_helpers import esc
+from .render_helpers import esc
 
 
 # Terms that get a dotted-underline tooltip when they appear in the

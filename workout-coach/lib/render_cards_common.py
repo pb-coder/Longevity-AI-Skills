@@ -1,15 +1,10 @@
 """Shared helpers for dashboard card renderers."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
-from render_helpers import esc
-from render_validators import auto_wrap_terms
+from .render_helpers import esc
+from .render_validators import auto_wrap_terms
 
 
 DOMAIN_HEADING_TIPS = {

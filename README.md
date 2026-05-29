@@ -20,7 +20,11 @@ person, call domain code, and print status or JSON. Shared primitives
 that should not be copied between skills live in `tracker/`: CSV table
 mechanics, command context, typed contracts, and benchmark helpers.
 Skill-specific behavior stays in `shared/`, `workout-logger/`, and
-`workout-coach/`.
+`workout-coach/`. Python imports are package-based: shared helpers live
+under `shared.*`, tracker primitives under `tracker.*`, and coach
+internals under `workout_coach.lib.*`. The underscore package is an
+import facade for the historical `workout-coach/` skill directory, whose
+public script paths remain unchanged.
 
 CSV storage is split by responsibility: `shared/csv_store.py` is the
 backward-compatible import facade, `csv_store_profile.py` owns profile

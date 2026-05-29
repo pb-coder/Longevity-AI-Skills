@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
 
-SKILLS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SKILLS_ROOT / "workout-coach" / "lib"))
-
-from render_validators import COACH_STRING_MAX, auto_wrap_terms, validate_coach_reads  # noqa: E402
+from workout_coach.lib.render_validators import (
+    COACH_STRING_MAX,
+    auto_wrap_terms,
+    validate_coach_reads,
+)
 
 
 class RenderValidatorTests(unittest.TestCase):

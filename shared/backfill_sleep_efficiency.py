@@ -29,10 +29,11 @@ from datetime import datetime
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
+if __package__ in (None, ""):
+    sys.path.insert(0, str(_HERE.parent))
+    __package__ = "shared"
 
-from person_paths import list_sleep_night_months, sleep_nights_csv  # noqa: E402
+from .person_paths import list_sleep_night_months, sleep_nights_csv  # noqa: E402
 
 # Column names as they appear in the per-night CSVs. Order does not
 # matter for reading; for writing we preserve the existing header.

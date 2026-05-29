@@ -5,7 +5,7 @@ import re
 import sys
 from datetime import date, datetime
 
-from monthly_csv_schema import (
+from .monthly_csv_schema import (
     AUTO_IMPORT_NOTE,
     DELOAD_MARKER_TEXT,
     STRENGTH_METADATA_DRIFT_THRESHOLD,

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from csv_store_common import (
+from .csv_store_common import (
     CsvTableSpec,
     _date_str,
     _group_entries_by_month,
@@ -15,7 +15,7 @@ from csv_store_common import (
     replace_upsert_records,
     sparse_upsert_records,
 )
-from person_paths import (
+from .person_paths import (
     ensure_data_dir,
     ensure_light_therapy_dir,
     ensure_sleep_dir,
@@ -105,7 +105,7 @@ def read_swim_workouts(person: str) -> list[dict]:
     No swim files → ``[]``. Each dict has ``date`` plus the fields in
     ``SWIM_WORKOUTS_FIELDS`` plus ``notes``.
     """
-    from person_paths import list_swim_workout_months
+    from .person_paths import list_swim_workout_months
     out: list[dict] = []
     for ym in list_swim_workout_months(person):
         out.extend(_read_periodic_records(
@@ -170,7 +170,7 @@ def read_swim_laps(person: str) -> list[dict]:
     No swim files → ``[]``. Each dict has ``date`` plus the fields in
     ``SWIM_LAPS_FIELDS``.
     """
-    from person_paths import list_swim_lap_months
+    from .person_paths import list_swim_lap_months
     out: list[dict] = []
     for ym in list_swim_lap_months(person):
         out.extend(_read_periodic_records(
@@ -292,7 +292,7 @@ def read_sleep_nights(person: str) -> list[dict]:
     No sleep files → ``[]``. Each dict has ``date`` plus the fields in
     ``SLEEP_NIGHTS_FIELDS`` plus ``notes``.
     """
-    from person_paths import list_sleep_night_months
+    from .person_paths import list_sleep_night_months
     out: list[dict] = []
     for ym in list_sleep_night_months(person):
         out.extend(_read_periodic_records(
@@ -472,7 +472,7 @@ def read_thermal_sessions(person: str) -> list[dict]:
     fields in ``THERMAL_SESSIONS_FIELDS`` plus ``notes``. Empty when
     the ``thermal/`` folder is absent.
     """
-    from person_paths import list_thermal_session_months
+    from .person_paths import list_thermal_session_months
     out: list[dict] = []
     for ym in list_thermal_session_months(person):
         out.extend(_read_periodic_records(
@@ -640,7 +640,7 @@ def read_light_therapy_sessions(person: str) -> list[dict]:
     fields in ``LIGHT_THERAPY_SESSIONS_FIELDS`` plus ``notes``. Empty
     when the ``light_therapy/`` folder is absent.
     """
-    from person_paths import list_light_therapy_session_months
+    from .person_paths import list_light_therapy_session_months
     out: list[dict] = []
     for ym in list_light_therapy_session_months(person):
         out.extend(_read_periodic_records(

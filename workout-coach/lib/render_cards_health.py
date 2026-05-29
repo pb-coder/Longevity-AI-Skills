@@ -1,15 +1,10 @@
 """Health and recovery-practice trajectory cards."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
-from render_helpers import esc, fmt, signed
-from render_components import (
+from .render_helpers import esc, fmt, signed
+from .render_components import (
     comparison_strip,
     confidence_dots,
     domain_score_dial,
@@ -24,7 +19,7 @@ from render_components import (
     sparkline,
     tier_history_strip,
 )
-from render_cards_common import _heading, coach_block
+from .render_cards_common import _heading, coach_block
 
 def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
     hrv_series = [w.get("hrv_sdnn") for w in weekly]

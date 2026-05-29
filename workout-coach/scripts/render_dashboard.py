@@ -19,7 +19,7 @@ Strict copy rules (enforced by `validate_coach_reads`):
   * Each string <= 280 characters.
 
 This file is the **thin CLI entry point + render orchestrator**. The
-actual building blocks live in flat modules under ``../lib/render_*.py``;
+actual building blocks live under ``workout_coach.lib.render_*``;
 see ``Skills/workout-coach/CODE_MAP.md`` for the directory map.
 """
 from __future__ import annotations
@@ -30,21 +30,17 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-# Sibling lib/ on sys.path so the renderer can import its building blocks.
-_LIB = Path(__file__).resolve().parents[1] / "lib"
 _SKILLS_ROOT = Path(__file__).resolve().parents[2]
 if str(_SKILLS_ROOT) not in sys.path:
     sys.path.insert(0, str(_SKILLS_ROOT))
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
 from tracker.contracts import CoachReads, TrackerJSON
 from tracker.validation import validate_tracker_json
-from render_helpers import esc
-from render_validators import auto_wrap_terms, validate_coach_reads
-from render_components import build_load_series, embed_workout_markdown, ring
-from render_assets import STYLESHEET, INLINE_JS
-from render_cards import (
+from workout_coach.lib.render_helpers import esc
+from workout_coach.lib.render_validators import auto_wrap_terms, validate_coach_reads
+from workout_coach.lib.render_components import build_load_series, embed_workout_markdown, ring
+from workout_coach.lib.render_assets import STYLESHEET, INLINE_JS
+from workout_coach.lib.render_cards import (
     card_acwr,
     card_behavioral_domain,
     card_body_comp_domain,

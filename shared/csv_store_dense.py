@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from csv_store_common import _date_str, _parse_value, _read_csv_rows, _write_csv
-from csv_store_profile import read_profile
-from person_paths import health_metrics_csv, workout_sessions_csv
+from .csv_store_common import _date_str, _parse_value, _read_csv_rows, _write_csv
+from .csv_store_profile import read_profile
+from .person_paths import health_metrics_csv, workout_sessions_csv
 
 __all__ = [
     "HEALTH_METRICS_HEADERS_BY_SOURCE",

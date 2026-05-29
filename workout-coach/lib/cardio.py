@@ -23,18 +23,13 @@ The cardio side of the analytics layer:
 from __future__ import annotations
 
 import math
-import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-# Sibling lib/ on sys.path so this module is importable on its own.
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
-from health import _values_in_window
-from parsing import _parse_iso_date
-from sessions import _is_cardio_row
+from .health import _values_in_window
+from .parsing import _parse_iso_date
+from .sessions import _is_cardio_row
 
 
 # Karvonen / HR-zone definitions (% of HRR — heart rate reserve).
@@ -362,7 +357,7 @@ def compute_hr_recovery_summary(health_all: list[dict],
     in `health.py`). This standalone summary is what the Trajectory tab
     visualizes as a first-class metric.
     """
-    from constants import HRR_1MIN_NORMS  # local import to avoid cycle
+    from .constants import HRR_1MIN_NORMS  # local import to avoid cycle
     vals_28 = _values_in_window(health_all, "hr_recovery_1min", today_d, 28)
     if not vals_28:
         return None
@@ -408,7 +403,7 @@ def compute_acwr(trimps: list[dict], today_d: date) -> dict | None:
 
     Returns ``None`` when either window is empty.
     """
-    from constants import ACWR_BANDS
+    from .constants import ACWR_BANDS
     if not trimps:
         return None
     by_date: dict[date, float] = {}

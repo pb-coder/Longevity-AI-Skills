@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 
-SKILLS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SKILLS_ROOT))
-sys.path.insert(0, str(SKILLS_ROOT / "shared"))
-
-import person_paths  # noqa: E402
-import csv_store  # noqa: E402
+from shared import csv_store, person_paths
 
 
 class StorageTests(unittest.TestCase):

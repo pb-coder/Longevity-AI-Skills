@@ -10,7 +10,7 @@ behavior in the focused modules above.
 """
 from __future__ import annotations
 
-from csv_store_common import (  # noqa: F401
+from .csv_store_common import (  # noqa: F401
     CsvTableSpec,
     _date_str,
     _parse_value,
@@ -21,7 +21,7 @@ from csv_store_common import (  # noqa: F401
     replace_upsert_records,
     sparse_upsert_records,
 )
-from csv_store_dense import (  # noqa: F401
+from .csv_store_dense import (  # noqa: F401
     HEALTH_METRICS_FIELDS_BY_SOURCE,
     HEALTH_METRICS_HEADERS_BY_SOURCE,
     STRENGTH_METADATA_DRIFT_THRESHOLD,
@@ -32,7 +32,7 @@ from csv_store_dense import (  # noqa: F401
     upsert_health_metrics,
     upsert_workout_sessions,
 )
-from csv_store_periodic import (  # noqa: F401
+from .csv_store_periodic import (  # noqa: F401
     COLD_TYPES,
     HEATED_CABIN_AMBIENT_TEMP_C,
     HEAT_TYPES,
@@ -66,7 +66,7 @@ from csv_store_periodic import (  # noqa: F401
     upsert_swim_workouts,
     upsert_thermal_sessions,
 )
-from csv_store_profile import (  # noqa: F401
+from .csv_store_profile import (  # noqa: F401
     PROFILE_DEFAULTS,
     PROFILE_KEYS,
     ensure_profile,
@@ -77,7 +77,7 @@ from csv_store_profile import (  # noqa: F401
 # Back-compat private re-exports for existing scripts:
 # - ``shared/maintain.py`` imports ``_resolve_source``.
 # - ``shared/import_health_auto_export.py`` imports ``_write_csv``.
-from csv_store_dense import _resolve_source  # noqa: F401,E402
+from .csv_store_dense import _resolve_source  # noqa: F401,E402
 
 __all__ = [
     "CsvTableSpec",

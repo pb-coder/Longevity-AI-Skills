@@ -11,8 +11,8 @@ Keep public imports from ``monthly_csv`` stable.
 """
 from __future__ import annotations
 
-from monthly_csv_canonicalize import canonicalize_monthly_csv  # noqa: F401
-from monthly_csv_io import (  # noqa: F401
+from .monthly_csv_canonicalize import canonicalize_monthly_csv  # noqa: F401
+from .monthly_csv_io import (  # noqa: F401
     _dict_to_row,
     _read_csv_rows,
     _row_to_dict,
@@ -20,7 +20,7 @@ from monthly_csv_io import (  # noqa: F401
     _write_csv_atomic,
     read_monthly,
 )
-from monthly_csv_schema import (  # noqa: F401
+from .monthly_csv_schema import (  # noqa: F401
     AUTO_IMPORT_NOTE,
     CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN,
     DELOAD_MARKER_TEXT,
@@ -30,13 +30,13 @@ from monthly_csv_schema import (  # noqa: F401
     STRENGTH_METADATA_DRIFT_THRESHOLD,
     TOTAL_LABEL,
 )
-from monthly_csv_upsert import (  # noqa: F401
+from .monthly_csv_upsert import (  # noqa: F401
     list_year_months,
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
     upsert_rows,
 )
-from monthly_csv_values import (  # noqa: F401
+from .monthly_csv_values import (  # noqa: F401
     DURATION_VS_ELAPSED_RATIO_THRESHOLD,
     PACE_MIN_PER_KM_LOWER,
     PACE_MIN_PER_KM_UPPER,
@@ -62,7 +62,7 @@ from monthly_csv_values import (  # noqa: F401
 # - ``shared/import_health_auto_export.py`` imports row I/O helpers.
 # - ``shared/maintain.py`` imports duration/pace formatting helpers.
 # - legacy monthly CSV tests import classification/canonicalization helpers.
-from monthly_csv_canonicalize import _build_data_row, _build_total_row  # noqa: F401,E402
+from .monthly_csv_canonicalize import _build_data_row, _build_total_row  # noqa: F401,E402
 
 __all__ = [
     "canonicalize_monthly_csv",

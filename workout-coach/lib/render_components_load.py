@@ -5,7 +5,7 @@ import json
 import math
 from datetime import date, timedelta
 
-from render_helpers import parse_date
+from .render_helpers import parse_date
 
 # ---------- training-load EWMA series ----------
 

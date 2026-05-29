@@ -414,7 +414,7 @@ Each is small, shippable, and moves the needle without big-bang risk.
 After PR-A/B/C land, the next wave is the `render_cards.py` split (#11),
 `design_tokens.py` extraction (#12), `compute_longevity_score`
 component-normalization refactor (#13), and the silent-gap-audit script
-(#7) — each independently shippable, no order dependency.
+— each independently shippable, no order dependency.
 
 ---
 

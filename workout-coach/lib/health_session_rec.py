@@ -4,9 +4,9 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from tracker.contracts import SessionRecommendation, SessionRationaleEntry
-from health_recovery import _z_score_signal, recovery_score
-from health_windowing import baseline_60d, latest_metric, _mean_or_none, _values_in_window
-from parsing import _parse_iso_date
+from .health_recovery import _z_score_signal, recovery_score
+from .health_windowing import baseline_60d, latest_metric, _mean_or_none, _values_in_window
+from .parsing import _parse_iso_date
 
 
 def _muscles_over_mrv(weekly_volume: dict | None) -> list[str]:
@@ -143,7 +143,7 @@ def compute_session_recommendation(*,
     Returns a dict with `tier`, `label`, `headline`, `substitute`,
     `rationale` list, and `override_*` fields.
     """
-    from constants import SESSION_GATE_THRESHOLDS as T  # local import
+    from .constants import SESSION_GATE_THRESHOLDS as T  # local import
 
     drivers = (recovery or {}).get("drivers") or []
     hrv_d = next((d for d in drivers if d.get("metric") == "hrv_sdnn"), None)
@@ -433,7 +433,7 @@ def compute_tier_history(*,
     is most accurate for the fast-moving signals (recovery, TSB, ACWR) —
     which dominate Tier A/B classification anyway.
     """
-    from cardio import compute_acwr, training_load_summary, trimp_per_session  # local
+    from .cardio import compute_acwr, training_load_summary, trimp_per_session  # local
     out: list[dict] = []
     # Recompute per-session TRIMPs once over the full window; faster than
     # per-day. Then build training load and ACWR per back-step.

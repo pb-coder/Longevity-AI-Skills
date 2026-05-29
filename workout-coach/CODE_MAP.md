@@ -10,8 +10,7 @@ before touching the code.
 A fresh agent or contributor should land here in this order:
 
 1. **[`Skills/CLAUDE.md`](../CLAUDE.md)** — repo layout, per-person CSV
-   schemas, shared/ module roles, conventions (flat `lib/`, sys.path
-   bootstrap, person-parametric paths).
+   schemas, package import conventions, and person-parametric paths.
 2. **[`SKILL.md`](SKILL.md)** — the `/coach` entry point. Phase 1 (data
    → tracker JSON) and Phase 2 (5-tier recovery gate that BINDS the
    workout plan).
@@ -313,11 +312,10 @@ remain presentation-only: no disk I/O and no analytics imports.
 
 ## Conventions
 
-- All `lib/*.py` modules are **flat top-level** scripts. Each module
-  starts with a docstring + `from __future__ import annotations` +
-  a sys.path bootstrap that adds the sibling `lib/` dir so the module
-  can be imported in isolation (REPL, ad-hoc tests). See
-  [`../CLAUDE.md`](../CLAUDE.md) for the full convention.
+- Coach internals import through `workout_coach.lib.*`. Modules inside
+  `workout-coach/lib/` use package-relative imports; the underscore
+  facade preserves the historical hyphenated skill directory and public
+  script paths.
 - Renderer modules **do not** import from analytics modules and vice
   versa. The interface between them is the tracker JSON shape in
   [`../tracker/contracts.py`](../tracker/contracts.py).

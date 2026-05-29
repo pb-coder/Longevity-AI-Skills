@@ -1,7 +1,7 @@
 """Trajectory-domain dashboard components."""
 from __future__ import annotations
 
-from render_helpers import esc
+from .render_helpers import esc
 
 # ---------- longevity / trajectory components ----------
 

@@ -24,19 +24,14 @@ Functions:
 """
 from __future__ import annotations
 
-import sys
 from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
-# Sibling lib/ on sys.path so this module is importable on its own.
-_LIB = Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
-from constants import VOLUME_LANDMARKS
-from parsing import _parse_iso_date
-from sessions import _is_working_set
+from .constants import VOLUME_LANDMARKS
+from .parsing import _parse_iso_date
+from .sessions import _is_working_set
 
 
 # History length cap for ``estimated_1rm[exercise].e1rm_history``. The slope

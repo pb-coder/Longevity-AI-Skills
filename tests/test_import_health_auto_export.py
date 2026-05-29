@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import sys
 import tempfile
 import unittest
 import zipfile
@@ -9,14 +8,7 @@ from datetime import date
 from pathlib import Path
 
 
-SKILLS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SKILLS_ROOT))
-sys.path.insert(0, str(SKILLS_ROOT / "shared"))
-
-import csv_store  # noqa: E402
-import import_health_auto_export as hae  # noqa: E402
-import monthly_csv  # noqa: E402
-import person_paths  # noqa: E402
+from shared import csv_store, import_health_auto_export as hae, monthly_csv, person_paths
 
 
 def _write_csv_to_zip(zf: zipfile.ZipFile, name: str, header: list[str], rows: list[list]) -> None:

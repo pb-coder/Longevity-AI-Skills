@@ -1,18 +1,16 @@
 """Monthly CSV file I/O and row translation."""
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tracker.csv_table import (  # noqa: E402
+from tracker.csv_table import (
     read_csv_rows as _table_read_csv_rows,
     write_csv_atomic as _table_write_csv_atomic,
 )
 
-from monthly_csv_schema import MONTHLY_COLS, MONTHLY_FIELDS, MONTHLY_HEADERS, TOTAL_LABEL
-from monthly_csv_values import _numeric_cell
-from person_paths import monthly_csv as monthly_csv_path
+from .monthly_csv_schema import MONTHLY_COLS, MONTHLY_FIELDS, MONTHLY_HEADERS, TOTAL_LABEL
+from .monthly_csv_values import _numeric_cell
+from .person_paths import monthly_csv as monthly_csv_path
 
 __all__ = [
     "read_monthly",

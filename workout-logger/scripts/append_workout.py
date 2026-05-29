@@ -94,13 +94,13 @@ import sys
 from pathlib import Path
 
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(SKILLS_ROOT))
-sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+if str(SKILLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SKILLS_ROOT))
 from tracker import TrackerContext  # noqa: E402
-from monthly_csv import (  # noqa: E402
+from shared.monthly_csv import (  # noqa: E402
     upsert_rows as monthly_upsert_rows,
 )
-from csv_store import (  # noqa: E402
+from shared.csv_store import (  # noqa: E402
     upsert_health_metrics,
     upsert_light_therapy_sessions,
     upsert_nutrition_phases,
@@ -108,7 +108,7 @@ from csv_store import (  # noqa: E402
     upsert_thermal_sessions,
     write_profile,
 )
-from person_paths import monthly_csv as monthly_csv_path  # noqa: E402
+from shared.person_paths import monthly_csv as monthly_csv_path  # noqa: E402
 
 
 def sheet_for_date(date_str: str) -> str:

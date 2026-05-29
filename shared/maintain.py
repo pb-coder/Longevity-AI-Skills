@@ -27,12 +27,12 @@ import csv
 import sys
 from pathlib import Path
 
-# This file lives in ``Skills/shared``; Skills root is one level up.
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SKILLS_ROOT))
-sys.path.insert(0, str(SKILLS_ROOT / "shared"))
+if __package__ in (None, ""):
+    sys.path.insert(0, str(SKILLS_ROOT))
+    __package__ = "shared"
 from tracker import TrackerContext  # noqa: E402
-from monthly_csv import (  # noqa: E402
+from .monthly_csv import (  # noqa: E402
     MONTHLY_HEADERS,
     TOTAL_LABEL,
     _format_pace_min_per_km,
@@ -40,7 +40,7 @@ from monthly_csv import (  # noqa: E402
     canonicalize_monthly_csv,
     list_year_months,
 )
-from csv_store import (  # noqa: E402
+from .csv_store import (  # noqa: E402
     HEALTH_METRICS_HEADERS_BY_SOURCE,
     LIGHT_THERAPY_SESSIONS_HEADERS,
     SLEEP_NIGHTS_HEADERS,
@@ -50,7 +50,7 @@ from csv_store import (  # noqa: E402
     WORKOUT_SESSIONS_HEADERS_BY_SOURCE,
     read_profile,
 )
-from person_paths import (  # noqa: E402
+from .person_paths import (  # noqa: E402
     health_metrics_csv,
     light_therapy_sessions_csv,
     monthly_csv as monthly_csv_path,
@@ -135,7 +135,7 @@ def validate_csvs(person: str) -> list[str]:
                                  None),
     }
     # Per-month swim CSVs (XML trackers only — HL exports omit lap data).
-    from person_paths import (
+    from .person_paths import (
         list_light_therapy_session_months,
         list_sleep_night_months,
         list_swim_lap_months,
@@ -360,7 +360,7 @@ def fix_distance_units(person: str, dry_run: bool = False) -> int:
                         writer.writerows(csv_rows)
 
     # 3. Per-month Swim Workouts CSVs.
-    from person_paths import list_swim_workout_months
+    from .person_paths import list_swim_workout_months
     for ym in list_swim_workout_months(person):
         sw_path = swim_workouts_csv(person, ym)
         if not sw_path.exists():
@@ -433,7 +433,7 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
 
     Returns 0 on success.
     """
-    from csv_store import read_workout_sessions, _resolve_source  # noqa
+    from .csv_store import read_workout_sessions, _resolve_source  # noqa
     import csv
 
     path = workout_sessions_csv(person)

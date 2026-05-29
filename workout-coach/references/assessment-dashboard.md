@@ -6,7 +6,7 @@ card spacing, empty-state rules — lives in
 [`Skills/DESIGN.md`](../../DESIGN.md). Read DESIGN.md before changing
 CSS or adding a new visual element.
 
-The dashboard is produced by **`Skills/workout-coach/scripts/render_dashboard.py`** (thin CLI orchestrator) plus the flat `lib/render_*.py` modules — see [`../CODE_MAP.md`](../CODE_MAP.md) for the map of which file owns which concern. The script + lib together own all HTML, CSS, SVG, JavaScript, and layout. The coach LLM authors two inputs:
+The dashboard is produced by **`Skills/workout-coach/scripts/render_dashboard.py`** (thin CLI orchestrator) plus `workout_coach.lib.render_*` modules — see [`../CODE_MAP.md`](../CODE_MAP.md) for the map of which file owns which concern. The script + lib together own all HTML, CSS, SVG, JavaScript, and layout. The coach LLM authors two inputs:
 
 1. **`coach_reads.json`** — short advice strings, one per card.
 2. **`<date>-workout.md`** — the lean workout plan (also written to disk so `/log` can read it; embedded into the HTML for the in-browser Workout tab).

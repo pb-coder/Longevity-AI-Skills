@@ -225,8 +225,9 @@ workout-coach/        # /coach — read tracker, report, plan next workout.
                       # subsection that fires when swim_summary is in the
                       # JSON; gated on data presence.
   lib/                # Internal analytics modules (not directly invoked).
-                      # Each is a flat top-level script, sys.path-importable
-                      # both from the entry point and in isolation.
+                      # Imported through workout_coach.lib.*; the underscore
+                      # package facade preserves the historical hyphenated
+                      # skill directory on disk.
                       #   constants.py — capabilities, landmarks, aliases.
                       #   parsing.py   — coercions + _parse_iso_date + _compact.
                       #   extract.py   — CSV readers (monthly + dense + swim),
@@ -320,21 +321,16 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   Same rule applies going forward: if a Note would be the same string
   on every matching row, route it through a column instead. The rule
   applies to every CSV in `<Person>/data/`.
-- **Python scripts** live under `scripts/` per skill and are invoked by the
-  agent via Bash. Per-skill internal modules (when a skill outgrows a
-  single file) live under `<skill>/lib/` as flat top-level scripts —
-  see `workout-coach/lib/` for the canonical example. Each lib module
-  self-bootstraps its sibling lib dir onto `sys.path` so it can be
-  imported in isolation (REPL, ad-hoc tests).
-- **Shared imports**: consumers add `shared/` to `sys.path` via
-  `sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))`
-  and import from `monthly_csv`, `csv_store`, `person_paths`,
-  `apple_workout_types`. Skills that have a `lib/` add their own dir
-  alongside it via
-  `sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))`
-  and then `from <module> import …` flat (no package namespace).
-  This bootstrap style is compatibility debt, not a pattern to expand;
-  track the package-conversion follow-up in GitHub issue #7.
+- **Python scripts** live under `scripts/` per skill and are invoked by
+  the agent via Bash. Public script paths stay stable; direct script
+  entry points may add `Skills/` to `sys.path` so package imports work
+  when invoked by file path.
+- **Package imports**: shared code imports through `shared.*`, tracker
+  primitives through `tracker.*`, and coach internals through
+  `workout_coach.lib.*`. Modules inside `shared/` and
+  `workout-coach/lib/` use package-relative imports; do not add
+  per-module sibling-directory `sys.path` bootstraps or new flat
+  top-level imports.
 - **`canonicalize_monthly_csv` is canonical**: the single source of
   truth for monthly-CSV layout (sort by Date+#+Set, recompute Volume
   and Pace, rebuild SESSION numbering, rebuild TOTAL rows, hoist

@@ -155,7 +155,7 @@ What the JSON contains:
   - `confidence`: `high` (last 3 top sets all 3-8 reps), `medium` (mixed), `low`. Soften trend language when `low`.
   - `stalled_sessions`: ≥2 consecutive sessions with |Δe1RM| ≤ 0.5kg = real stall, not one-off.
 - `progression_summary`: last vs. previous best working set per exercise.
-- `stale_exercises`: top 5 exercises not logged in ≥28 days, sorted newest-stale first. Use for rotation decisions.
+- `stale_exercises`: top 5 exercises not logged in ≥28 days, sorted newest-stale first. Use for rotation decisions and cautious reintroductions.
 - `unknown_exercises`: names not in the database. Surface in **Missing from your tracking**.
 - `deloads`: list of dates whose TOTAL row has the `Deload Workout` marker.
 - `auto_deload_candidates`: dates where the heuristic detected a deload-like week (≥35% volume drop AND ≥8 bpm avg-HR drop vs prior 4w) that the user **didn't** mark. Surface as a question, not a claim.
@@ -763,6 +763,8 @@ Use Layer 1 analysis plus the training science reference. The reference contains
   - When a single muscle triggers both this rule and the per-muscle HR-creep rule (`hint == "rising HR at constant volume — fatigue or under-recovery"`), the HR-creep rule's "hold or cut" takes precedence over an "add a set" — i.e. when in doubt, prefer reducing load over adding it.
 - **Cardio (§10):** read the Cardio check numbers from the Report. If behind target, add cardio sessions to the plan after the strength sessions. Default weekly target: 3× Zone 2 @ 30-45min + 1× intervals @ 20min. Cap total cardio additions at 4 sessions per `/coach` run — if the user is very behind, note the shortfall and prescribe the max. User can override with `/coach no-cardio` to skip this entirely.
 
+**Stale exercise reintroduction.** When choosing 1-2 entries from `stale_exercises`, use the last reliable working load only if the exercise has multi-session history and no context-change note. If the exercise has a single old session, high-rep noisy e1RM, equipment-change context, or 8+ weeks away, prescribe a conservative submaximal load with normal reps and leave 2-3 reps in reserve. Never infer the restart load from a single stale e1RM projection. Keep the reason in the dashboard coach text; the workout markdown may only say a short action cue such as `first time back; ease in`.
+
 **Core training:** Build strong, developed abs. Program 1-2 core exercises per session, aim for 3-4 sessions/week with core. Prefer weighted core (kneeling cable crunch, cable woodchop, captain's chair knee raise) alongside bodyweight (leg raises, dead bugs, hollow body holds). Vary patterns across sessions: flexion, anti-extension, rotation, isometric. Visibility is a body fat question, not a training question.
 
 **Equipment increment grid (REQUIRED).** Loads are prescribed on the equipment's increment grid. Never suggest off-grid weights.
@@ -821,6 +823,7 @@ A note appears **only** when it answers one of:
 A note **must not** contain:
 - Comparative history ("last time you did 50kg × 8")
 - Rationale for the prescribed weight ("you've been stuck at 40kg, time to push")
+- Reintroduction history ("last logged 15 weeks ago") or load rationale ("start light because...")
 - Generic exhortation ("push hard, you've got this")
 - Restatement of what the bullet already shows (`— do 3 sets` when the bullet shows 3 sets)
 - Cross-references to the dashboard ("see your TSB")

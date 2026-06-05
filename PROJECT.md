@@ -160,7 +160,7 @@ Columns (18, in order): `SESSION | Date | # | Exercise | Set | Reps | kg | Volum
 
 Each set is one row. Date, #, and Exercise are populated on every row (no carry-forward shorthand). `#` restarts at 1 per date and is shared by all sets of the same exercise. Cardio rows use the cardio columns (Distance through Elapsed); strength rows leave them blank.
 
-`SESSION` is a per-month display number (1, 2, 3…) repeated on every row of the same date — including that session's trailing TOTAL row. It's populated by `canonicalize_monthly_csv`, not by hand. It is intentionally ephemeral: inserting an earlier-dated workout later in the month renumbers following sessions. Do not use `SESSION` as a stable external identifier; use `(Date, Exercise, Start/Duration/Source)` or the source workout row when you need identity.
+`SESSION` is a per-month display number (1, 2, 3…) repeated on every row of the same date — including that session's trailing TOTAL row. Mixed-modality days can share the same `SESSION` number: a strength session and an auto-cardio swim/run appended on the same date still have one date-keyed display number. It's populated by `canonicalize_monthly_csv`, not by hand. It is intentionally ephemeral: inserting an earlier-dated workout later in the month renumbers following sessions. Do not use `SESSION` as a stable external identifier; use `(Date, Exercise, Start/Duration/Source)` or the source workout row when you need identity. `read_tracker.py` splits mixed dates into separate `monthly_sessions` entries keyed by `(date, session_kind)`.
 
 **TOTAL row carries the strength session's full session-level summary.** Each strength session ends with a `TOTAL` row that holds:
 - `Date` (col 2) — the session date.

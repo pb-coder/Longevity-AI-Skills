@@ -146,6 +146,7 @@ What the JSON contains:
 
 **Strength + cardio sessions (canonical session-level view):**
 - `monthly_sessions`: one entry per session-date, sorted asc. Each entry: `{date, exercise_first, session_kind, active_cal, total_cal, elevation_m, elapsed, avg_hr, max_hr, duration_min, volume (strength only), is_deload, trimp, load_band, intensity_pct}`. **This is the canonical session record** — it folds in TOTAL-row metadata (Active Cal, Avg HR, Duration, etc.) AND the per-session TRIMP score + load band. Iterate it directly; don't sum `rows` yourself.
+  Mixed-modality dates emit separate entries keyed by `(date, session_kind)`, even though the monthly CSV display-only `SESSION` number is shared across rows on that date.
   - `load_band`: `light` (TRIMP < 50), `moderate` (50–100), `hard` (100–150), `red-line` (>150). Use for one-line session summaries.
   - `intensity_pct`: HRR percent (avg_hr normalised to heart-rate reserve). 50 = Z1, 60-70 = Z2, 70-80 = Z3, 80-90 = Z4, ≥90 = Z5.
   - `is_deload`: True only when the TOTAL row's Notes carries `Deload Workout`.

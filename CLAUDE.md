@@ -352,7 +352,10 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   pad `Source` to blank and self-migrate on the next canonicalize pass.
   `SESSION` is display-only and intentionally ephemeral: inserting an
   earlier-dated workout renumbers later sessions in that month. Never
-  use it as a stable external ID.
+  use it as a stable external ID. It is date-keyed, not modality-keyed:
+  strength and auto-cardio rows on the same date may share one `SESSION`
+  number, while `read_tracker.py` emits separate `monthly_sessions`
+  entries keyed by `(date, session_kind)`.
 - **Computed cells are pre-evaluated on canonicalize.** `Volume =
   reps × kg`, `Pace = duration/distance` (MM:SS, blank outside
   [0.5, 60] min/km), and per-month SESSION counters are written as

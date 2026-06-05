@@ -614,7 +614,7 @@ Hard template (3–5 lines, plain bullets):
 Source-honesty rules:
 - Multi-round saunas are counted as ONE session, not multiple. A 12+8min two-round day = one session, 20 total heat minutes.
 - `cold_air` (sitting outside post-sauna) is a real protocol — don't claim it's "not cold enough" without a temp datapoint. If `cold_temp_c` is set, you can comment.
-- Adherence target defaults to 4×/wk (mid-band of the user's interventions.md 4-6 range). User can override via `profile.csv` `sauna_target_per_week`. Don't claim a higher target unless the JSON shows it.
+- Adherence target defaults to 4×/wk (mid-band of the user's interventions.md 4-6 range). User can override via `profile.csv` `sauna_target_per_week`. Treat this as a configured reachable target; `below-target` means below that configured target, not a moral failure or proof the target is reachable in the user's environment. Don't claim a higher target unless the JSON shows it.
 - Never moralise about hot-yoga / steam / banya vs dry as "better" — the dose math is the same.
 
 Example (filled from a real `thermal_summary`):
@@ -638,7 +638,7 @@ Hard template (2–4 lines, plain bullets):
 Source-honesty rules:
 - The evidence base for light-therapy dosing is far less settled than sauna's HSP induction. Don't quote sham-controlled effect sizes the JSON doesn't carry; the protocol metric is "did it happen" + "at roughly what duration."
 - Wavelength efficacy claims are out of scope. The store captures `light_type` and (optionally) `wavelength_nm`; don't extrapolate "X nm is better than Y nm" from the user's own data.
-- Adherence target defaults to 3×/wk + 10min/session. User can override via `profile.csv` (`light_therapy_target_per_week`, `light_therapy_target_min_per_session`). Don't invent a higher target unless the JSON shows it.
+- Adherence target defaults to 3×/wk + 10min/session. User can override via `profile.csv` (`light_therapy_target_per_week`, `light_therapy_target_min_per_session`). Treat this as a configured reachable target; `below-target` means below that configured target, not proof of poor discipline or lack of access. Don't invent a higher target unless the JSON shows it.
 
 Example (filled from a real `light_therapy_summary`):
 

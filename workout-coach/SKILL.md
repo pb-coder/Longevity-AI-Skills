@@ -693,7 +693,7 @@ Example `nutrition_phase_callout`:
 |---|---|---|
 | **A** | `rest` | A rest day (walk + sleep priority). **No strength.** No "modified" strength either — the plan is the rest. |
 | **B** | `reactive_deload` | Either a reactive-deload week (cut sets to ~50%, hold loads, rotate the over-MRV muscles), OR a Zone 2 / mobility day (per `substitute.kind`). **No on-top strength session.** |
-| **C** | `downgrade` | Planned strength, but pre-modified: −25% volume on secondary lifts, hold loads, drop the conditioning finisher, no PR attempts. Compound lifts stay at planned volume; isolations halve. |
+| **C** | `downgrade` | Planned strength, but pre-modified through `expected_rebound_by_session`: −25% volume on secondary lifts, hold loads, drop the conditioning finisher, no PR attempts. Compound lifts stay at planned volume; isolations halve. Later workout slots may return to normal only if recovery rebounds. |
 | **D** | `green` | Normal plan. The rules below (split rotation, double progression, exercise variation) apply unchanged. |
 | **E** | `over_recovered` | Normal plan + one-line warning that fitness is bleeding off (TSB has been too positive too long). |
 
@@ -717,7 +717,7 @@ Assessment: ./2026-05-24-assessment.html
 
 If the user specified a session count in the `/coach` message (e.g., `/coach plan 3 sessions`), use it directly. Otherwise, ask in chat: **"How many sessions should I plan?"** — and wait for the answer before writing the file.
 
-Generate that many strength workouts (Tier C: with the −25% volume / hold loads / no finisher modifications baked in).
+Generate that many strength workouts. Tier C: apply the −25% volume / hold loads / no finisher rules to workouts `1..expected_rebound_by_session`. For later workout slots, write normal-volume prescriptions only as conditional on recovery rebounding before that session; if the JSON omits `expected_rebound_by_session`, default to workout 1 only.
 
 ### Programming (internal)
 

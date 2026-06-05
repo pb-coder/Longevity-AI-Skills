@@ -98,6 +98,34 @@ def _count_stalled_lifts(estimated_1rm: dict | None) -> int:
     return n
 
 
+def _expected_tier_c_rebound_by_session(
+    *,
+    deloads: list[str] | None,
+    today_d: date,
+    recovery_score: float | None,
+    hr_creep_muscles: list[str],
+) -> int:
+    """Return the last workout slot that should stay Tier C modified.
+
+    Tier C is generated once, but the workout file usually spans several
+    sessions. Keep the default short (slot 1), and extend to slot 2 when
+    the visible signals are more likely to persist into the early week.
+    The cap at slot 2 is intentional: longer changes should come from a
+    fresh /coach run rather than stale recovery-gate state.
+    """
+    recent_deload = False
+    for ds in deloads or []:
+        d = _parse_iso_date(ds)
+        if d is not None and 0 <= (today_d - d).days <= 7:
+            recent_deload = True
+            break
+    if recent_deload or hr_creep_muscles:
+        return 2
+    if recovery_score is not None and recovery_score <= 5.0:
+        return 2
+    return 1
+
+
 def _tsb_sustained_days(today_tsb: float | None, training_load: dict | None,
                         threshold: float, direction: str = "above") -> int:
     """Approximation: returns 1 when the current TSB hits the threshold
@@ -344,6 +372,12 @@ def compute_session_recommendation(*,
             f"HR rising at constant volume on {names} — hold loads on those groups")
 
     if tier_c_fired:
+        rebound_by_session = _expected_tier_c_rebound_by_session(
+            deloads=deloads,
+            today_d=today_d,
+            recovery_score=recovery_score,
+            hr_creep_muscles=hr_creep_muscles,
+        )
         return {
             "tier": "C",
             "label": "downgrade",
@@ -356,7 +390,11 @@ def compute_session_recommendation(*,
             },
             "rationale": rationale[:5],
             "override_allowed": True,
-            "override_message": "If recovery rebounds tomorrow, resume full volume.",
+            "override_message": (
+                f"Keep Tier C modifications through workout {rebound_by_session}; "
+                "later slots can resume full volume only if recovery rebounds."
+            ),
+            "expected_rebound_by_session": rebound_by_session,
         }
 
     # ---- TIER E: over-recovered taper warning ----

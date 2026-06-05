@@ -45,6 +45,26 @@ class SessionRecommendationTests(unittest.TestCase):
         self.assertEqual(rec["label"], "reactive_deload")
         self.assertEqual(rec["substitute"]["kind"], "zone_2")
 
+    def test_tier_c_includes_expected_rebound_slot(self) -> None:
+        rec = recommendation(recovery={
+            "score": 7.2,
+            "drivers": [{"metric": "hrv_sdnn", "z": -0.5}],
+        })
+        self.assertEqual(rec["tier"], "C")
+        self.assertEqual(rec["expected_rebound_by_session"], 1)
+        self.assertIn("workout 1", rec["override_message"])
+
+    def test_tier_c_recent_deload_extends_modification_window(self) -> None:
+        rec = recommendation(
+            recovery={
+                "score": 7.2,
+                "drivers": [{"metric": "hrv_sdnn", "z": -0.5}],
+            },
+            deloads=["2026-05-25"],
+        )
+        self.assertEqual(rec["tier"], "C")
+        self.assertEqual(rec["expected_rebound_by_session"], 2)
+
     def test_over_recovered_triggers_taper_warning(self) -> None:
         rec = recommendation(training_load={"tsb": 16})
         self.assertEqual(rec["tier"], "E")

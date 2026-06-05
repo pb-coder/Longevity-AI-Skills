@@ -34,6 +34,7 @@
 | Prone Leg Curl | Leg Curl (Lying) | — |
 | Reverse Pec Deck | Rear Delt Fly Machine | — |
 | Low Row | Low Row Machine | — |
+| Shoulder Press | Shoulder Press Machine | — |
 
 ## Modifier Handling
 

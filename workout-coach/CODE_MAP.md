@@ -52,7 +52,7 @@ For known issues / planned cleanup, see
 | Recovery scales / driver bars / sparklines | [`lib/render_components_recovery.py`](lib/render_components_recovery.py) |
 | Per-muscle volume bars | [`lib/render_components_volume.py`](lib/render_components_volume.py) |
 | Trajectory-domain gauges and strips | [`lib/render_components_domain.py`](lib/render_components_domain.py) |
-| Coach-text validation rules / em-dash check / length cap | [`lib/render_validators.py`](lib/render_validators.py)::`validate_coach_reads` |
+| Coach/workout validation rules / em-dash check / length cap / catalog names | [`lib/render_validators.py`](lib/render_validators.py)::`validate_coach_reads` + `validate_workout_md` |
 | Add a tooltip for a new abbreviation in coach text | [`lib/render_validators.py`](lib/render_validators.py)::`KNOWN_TERMS` |
 | Tracker JSON shape (what fields the renderer reads) | [`../tracker/contracts.py`](../tracker/contracts.py)::`TrackerJSON` + [`scripts/read_tracker.py`](scripts/read_tracker.py) |
 | Coach reads JSON shape | [`../tracker/contracts.py`](../tracker/contracts.py)::`CoachReads` + [`lib/render_validators.py`](lib/render_validators.py) |
@@ -116,7 +116,7 @@ Skills/workout-coach/
     │
     └── # ---- Renderer modules (consumed by render_dashboard.py) ----
     ├── render_helpers.py (50)            esc, fmt, signed, parse_date — zero-dep helpers
-    ├── render_validators.py (186)        KNOWN_TERMS catalog, validate_coach_reads, auto_wrap_terms
+    ├── render_validators.py (186)        KNOWN_TERMS catalog, validate_coach_reads, validate_workout_md, auto_wrap_terms
     ├── render_components.py (23)         compatibility facade for component modules
     ├── render_components_load.py (135)   training-load chart + EWMA series
     ├── render_components_recovery.py (258)
@@ -202,7 +202,7 @@ Constants: `KNOWN_TERMS` (abbreviation → tooltip), `COACH_CARD_KEYS`,
 `EM_DASH`, `COACH_STRING_MAX`.
 
 Functions: `validate_coach_reads(coach) -> (errors, warnings)`,
-`auto_wrap_terms(text)`.
+`validate_workout_md(text) -> (errors, warnings)`, `auto_wrap_terms(text)`.
 
 ### Dashboard Components
 

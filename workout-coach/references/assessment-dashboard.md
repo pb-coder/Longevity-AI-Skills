@@ -133,6 +133,10 @@ The tab strip sticks to the top of the viewport on scroll so the user can toggle
 - Reintroduce em-dashes anywhere in machine-emitted copy. (User-authored workout markdown sub-bullets are exempt.)
 - Hand-author HTML inside SKILL.md or any other file. All HTML lives in the renderer (the card templates in `lib/render_cards.py` and the asset constants in `lib/render_assets.py`).
 
+## Maintenance Notes
+
+`render_validators.py` validates both authored inputs: `validate_coach_reads` for dashboard callouts and `validate_workout_md` for the lean workout markdown. Keep workout rules in code, not only in prompt text. Repeated self-review caught sub-bullet drift, rationale/history notes, and off-catalog exercise names; the validator is the final guard before the plan reaches the user.
+
 ## Coach-reads example (<Person>, 2026-05-20)
 
 ```json

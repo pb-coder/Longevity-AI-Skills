@@ -60,6 +60,20 @@ def _hr_zone_label_for_hrr_pct(hrr_pct: float) -> str:
     return "Z1"
 
 
+def _cardio_activity_bucket(name: str | None) -> str:
+    """Coarse activity bucket for interpreting Zone-2 dose."""
+    n = (name or "").strip().lower()
+    if "swim" in n:
+        return "swim"
+    if "run" in n or "treadmill" in n:
+        return "run"
+    if "cycling" in n or "bike" in n or "bicycle" in n:
+        return "cycle"
+    if "walk" in n or "hike" in n:
+        return "walk_hike"
+    return "other"
+
+
 def cardio_last_28d(rows: list[dict], today_d: date) -> dict:
     """4-week cardio rollup: total distance, total minutes, total cal, and
     a coarse intervals-vs-non-interval split.
@@ -242,12 +256,15 @@ def cardio_hr_zones(monthly_sessions: list[dict],
     place each session entirely in the zone its avg_hr falls into.
     Coarse but useful for trend (has the user been doing too much Z3
     grey-zone work?). Returns ``{z1..z5: minutes, total_minutes,
-    polarized_pct, pyramidal_pct, threshold_pct}``.
+    polarized_pct, pyramidal_pct, threshold_pct}``. Also includes
+    ``z2_by_activity`` so short swims, runs, rides, and walk/hike time can
+    be interpreted separately even when they share the same HR zone.
     """
     if not max_hr or not rest_hr or max_hr <= rest_hr:
         return {}
     cutoff = today_d - timedelta(days=window_days)
     zone_min: dict[str, float] = {z[0]: 0.0 for z in HR_ZONES_PCT}
+    z2_by_activity: dict[str, float] = {}
     total = 0.0
     for s in monthly_sessions:
         if s.get("session_kind") != "cardio":
@@ -261,12 +278,16 @@ def cardio_hr_zones(monthly_sessions: list[dict],
         dur = s.get("duration_min")
         if not avg_hr or not dur:
             continue
+        dur_f = float(dur)
         hrr = (float(avg_hr) - rest_hr) / (max_hr - rest_hr)
         hrr = max(0.0, min(1.0, hrr))
         for label, lo, hi in HR_ZONES_PCT:
             if hrr < hi or label == "z5":
-                zone_min[label] += float(dur)
-                total += float(dur)
+                zone_min[label] += dur_f
+                if label == "z2":
+                    bucket = _cardio_activity_bucket(s.get("exercise_first"))
+                    z2_by_activity[bucket] = z2_by_activity.get(bucket, 0.0) + dur_f
+                total += dur_f
                 break
     if total <= 0:
         return {}
@@ -279,6 +300,9 @@ def cardio_hr_zones(monthly_sessions: list[dict],
         "window_days":    window_days,
         "total_minutes":  round(total, 1),
         "z1": z1, "z2": z2, "z3": z3, "z4": z4, "z5": z5,
+        "z2_by_activity": {
+            k: round(v, 1) for k, v in sorted(z2_by_activity.items())
+        },
         "z2_pct": round((z2 / total) * 100, 1),
         "z3_pct": round((z3 / total) * 100, 1),
         "z4_z5_pct": round(((z4 + z5) / total) * 100, 1),

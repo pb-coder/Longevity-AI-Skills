@@ -780,6 +780,8 @@ Re-read this block before every load suggestion in the workout tables.
 
 The workout markdown is a **lean exercise list**, nothing more. No tables. No rationale paragraphs. The "why" lives in the assessment dashboard (and only there). The user trains from this file on their phone in the gym — every line they don't need slows them down.
 
+No em-dashes in workout markdown prose. The only allowed em-dashes are the title separator (`# Workout plan — <date>`) and the indented sub-bullet marker (`  — cue`). In `> Today's call:` / `> Why:` blockquote lines, use a period, comma, semicolon, or colon instead; a prose em-dash will fail the renderer.
+
 Each workout heading is immediately followed by `Date: ___` on its own line, then `Recovery: sauna ___ / cold ___ / rlt ___` on its own line, then a blank line, then the bullets. The two placeholder lines are kept on **separate lines** — the visual break aids mid-workout filling. The user fills in the date when they actually train (so the session can be logged later without guessing) and replaces each recovery blank only for modalities they performed. Examples: `Recovery: sauna 12+8min 85C dry / cold 30s shower / rlt ___`, `Recovery: sauna 10min 85C / cold ___ / rlt 5min 45C`, `Recovery: skipped`, or leave it blank. `/log` parses each modality independently per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)` for sauna/cold; `## Light therapy (opt-in)` for RLT / blue light / PBM). Sauna+RLT in one line emits two payload entries — one `thermal`, one `light_therapy` — both keyed to the same date. Both lines apply to every strength workout — cardio sections do not need them.
 
 **Exercise bullets** — one line per exercise. No code fences. Format:

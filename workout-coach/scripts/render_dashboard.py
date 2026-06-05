@@ -37,7 +37,11 @@ if str(_SKILLS_ROOT) not in sys.path:
 from tracker.contracts import CoachReads, TrackerJSON
 from tracker.validation import validate_tracker_json
 from workout_coach.lib.render_helpers import esc
-from workout_coach.lib.render_validators import auto_wrap_terms, validate_coach_reads
+from workout_coach.lib.render_validators import (
+    auto_wrap_terms,
+    validate_coach_reads,
+    validate_workout_md,
+)
 from workout_coach.lib.render_components import build_load_series, embed_workout_markdown, ring
 from workout_coach.lib.render_assets import STYLESHEET, INLINE_JS
 from workout_coach.lib.render_cards import (
@@ -258,6 +262,13 @@ def main():
         return 2
 
     workout_md = Path(args.workout_md).read_text(encoding="utf-8")
+    workout_errors, workout_warnings = validate_workout_md(workout_md)
+    for w in workout_warnings:
+        print(f"workout_md warning: {w}", file=sys.stderr)
+    if workout_errors:
+        for e in workout_errors:
+            print(f"workout_md validation error: {e}", file=sys.stderr)
+        return 2
 
     out = render(j, coach, workout_md, args.person)
     Path(args.out).write_text(out, encoding="utf-8")

@@ -12,6 +12,8 @@ Public surface:
 - ``parse_database()`` → structured dict (muscle → section → list of entries).
 - ``parse_aliases()`` → list of alias rows.
 - ``lookup(name)`` → canonical name (alias-aware, case-insensitive) or None.
+- ``known_name_set()`` → normalized canonical + alias-input names.
+- ``is_known_name(name)`` → True when a name is canonical or an alias input.
 - ``fuzzy_match(name, k=3)`` → top-K (canonical, similarity_0_to_1) pairs.
 - ``propose_exercise(...)`` → atomic write of a new entry into the
   appropriate section, with post-write re-parse to guarantee no
@@ -205,6 +207,29 @@ def lookup(name: str) -> str | None:
             if _normalize_for_match(inp) == target:
                 return row["canonical"]
     return None
+
+
+def known_name_set() -> set[str]:
+    """Return normalized canonical names and alias inputs.
+
+    Use this when a caller needs many membership checks in one command.
+    It avoids repeatedly parsing the catalog and aliases for each row.
+    """
+    names = {_normalize_for_match(n) for n in _all_canonical_names()}
+    for row in parse_aliases():
+        names.update(
+            _normalize_for_match(inp)
+            for inp in row.get("inputs", [])
+        )
+    return names
+
+
+def is_known_name(name: str, known_names: set[str] | None = None) -> bool:
+    """True when ``name`` is canonical or an alias input."""
+    if not name or not name.strip():
+        return False
+    names = known_names if known_names is not None else known_name_set()
+    return _normalize_for_match(name) in names
 
 
 def fuzzy_match(name: str, k: int = 3) -> list[tuple[str, float]]:

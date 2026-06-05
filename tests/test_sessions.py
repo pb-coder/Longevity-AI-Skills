@@ -7,6 +7,24 @@ from workout_coach.lib import sessions
 
 
 class BuildMonthlySessionsTests(unittest.TestCase):
+    def test_bodyweight_trend_can_start_at_nutrition_phase(self) -> None:
+        entries = [
+            {"date": "2026-05-01", "kg": 80.0, "notes": ""},
+            {"date": "2026-05-04", "kg": 79.0, "notes": ""},
+            {"date": "2026-05-07", "kg": 78.0, "notes": ""},
+            {"date": "2026-05-10", "kg": 77.0, "notes": ""},
+            {"date": "2026-05-13", "kg": 77.0, "notes": ""},
+            {"date": "2026-05-17", "kg": 77.0, "notes": ""},
+        ]
+
+        self.assertLess(sessions.bodyweight_trend_kg_per_week(entries), 0)
+        self.assertEqual(
+            sessions.bodyweight_trend_kg_per_week(
+                entries, start_date="2026-05-10",
+            ),
+            0.0,
+        )
+
     def test_strength_session_does_not_inherit_cardio_row_metadata(self) -> None:
         # Mixed-day: manual strength session + 2 auto-imported cycling
         # rides. The strength TOTAL summary is empty (manual session has

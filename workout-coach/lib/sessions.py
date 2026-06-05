@@ -87,13 +87,30 @@ def _is_flagged_nonfasted(entry: dict) -> bool:
     return any(k in notes for k in ("not fasted", "evening", "after", "post-meal"))
 
 
-def bodyweight_trend_kg_per_week(entries: list[dict]) -> float | None:
+def bodyweight_trend_kg_per_week(
+    entries: list[dict],
+    start_date: str | date | None = None,
+) -> float | None:
     """Simple slope over the last 8 entries: (last_kg - first_kg) / weeks_between.
 
     Returns None if fewer than 3 entries or the span is <7 days (too noisy).
-    Excludes entries with notes flagging non-morning/non-fasted context.
+    Excludes entries with notes flagging non-morning/non-fasted context. When
+    ``start_date`` is supplied, the 8-entry window starts no earlier than that
+    date so active nutrition phases are judged inside their own window.
     """
-    clean = [e for e in entries if not _is_flagged_nonfasted(e)]
+    start_d = (
+        start_date if isinstance(start_date, date)
+        else _parse_iso_date(start_date) if start_date else None
+    )
+    clean = []
+    for e in entries:
+        if _is_flagged_nonfasted(e):
+            continue
+        if start_d is not None:
+            d = _parse_iso_date(e.get("date"))
+            if d is None or d < start_d:
+                continue
+        clean.append(e)
     window = clean[-8:]
     if len(window) < 3:
         return None

@@ -104,18 +104,21 @@ The rendering spec, coach-reads schema, validation rules, and tooltip catalog al
 Assessment: ./<YYYY-MM-DD>-assessment.html
 
 ## Workout 1: <TYPE>
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
+- <general warm-up>: e.g. Jumping Jacks: 50
+- <activation matched to the day>: e.g. Arm Circles: 20
 - Exercise: weight × reps (or `///`-separated sets for weighted)
 - Exercise: …
   — optional one-line sub-bullet note (rare)
 - …
 
 ## Workout 2: <TYPE>
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
+- <general warm-up> + <activation>
 - …
 
 ## Cardio 1: Zone 2 (optional, only if behind §10 target)
@@ -127,7 +130,7 @@ Recovery: sauna ___ / cold ___ / rlt ___
 
 **No `## Report` section. No tables. No "Why this plan" block** — the dashboard's coach's-read lines (per card) replace it.
 
-The `Date:` and `Recovery:` placeholders stay on their own lines (separate lines aid mid-workout filling). The recovery placeholder is parse-shaped on purpose: the user replaces each blank with the logger grammar (`sauna 12min dry`, `cold 30s shower`, `rlt 5min`) or leaves that modality blank.
+The `Date:` line ends with a trailing backslash (`Date: ___\`) — a Markdown hard line break — so `Date:` and `Recovery:` render on separate lines in markdown previewers instead of collapsing into one paragraph. Keep them on separate lines (the visual break aids mid-workout filling). The recovery placeholder is parse-shaped on purpose: the user replaces each blank with the logger grammar (`sauna 12min dry`, `cold 30s shower`, `rlt 5min`) or leaves that modality blank.
 
 Write both files in one pass at the end. Don't stream sections to chat while thinking.
 
@@ -739,6 +742,10 @@ Generate that many strength workouts. Tier C: apply the −25% volume / hold loa
 
 **Session duration:** 8-11 working exercises (excluding warmup) fits the 70-85 minute window. Count exercises, don't calculate minutes. At 7, add one. At 12, cut one.
 
+**Warm-up (REQUIRED, bounded).** Every strength workout opens with a brief warm-up — never skip it, and never let it balloon past ~5 min. Two parts:
+- **Two prep movements at the very top**, written as plain bullets (they carry no working volume): one general pulse-raiser (`Jumping Jacks`, `Rowing Machine`, or `Arm Circles`) plus one activation matched to the day — push → `Arm Circles` or `Wall Slide`; pull → `Scapular Pull-Up` or `Dead Hang`; legs → `Bodyweight Squat` or `Glute Bridge`. Use canonical catalog names only; do not prescribe equipment the user doesn't own (there are no band movements in the catalog).
+- **Ramp sets on the first heavy free-weight compound only.** When the day's first working exercise is a heavy barbell or heavy-dumbbell compound (squat, bench, deadlift, RDL, overhead/DB press), precede its working sets with 1-2 ramp sets marked `(warmup)` at roughly ~50% then ~70% of the working load, low reps (≈5 then ≈3): `Barbell Back Squat: 60kgx5 (warmup) /// 80kgx3 (warmup) /// 95kgx8 /// 95kgx8 /// 95kgx8`. The `(warmup)` marker keeps them out of working-set volume and e1RM. **Skip the ramp sets** when the first lift is a light cable / machine / isolation movement — the two prep movements are enough. Never ramp later compounds; by then the user is warm. Ramp sets and prep movements do not count toward the 8-11 working-exercise target above.
+
 Use Layer 1 analysis plus the training science reference. The reference contains the full rules; apply them:
 - **Split selection** (§14): match split to session count. Keep existing split unless there's a problem.
 - **Mesocycle structure** (§15): tell the user where they are in the block and what this week's targets are. No static plans.
@@ -798,7 +805,7 @@ The workout markdown is a **lean exercise list**, nothing more. No tables. No ra
 
 No em-dashes in workout markdown prose. The only allowed em-dashes are the title separator (`# Workout plan — <date>`) and the indented sub-bullet marker (`  — cue`). In `> Today's call:` / `> Why:` blockquote lines, use a period, comma, semicolon, or colon instead; a prose em-dash will fail the renderer.
 
-Each workout heading is immediately followed by `Date: ___` on its own line, then `Recovery: sauna ___ / cold ___ / rlt ___` on its own line, then a blank line, then the bullets. The two placeholder lines are kept on **separate lines** — the visual break aids mid-workout filling. The user fills in the date when they actually train (so the session can be logged later without guessing) and replaces each recovery blank only for modalities they performed. Examples: `Recovery: sauna 12+8min 85C dry / cold 30s shower / rlt ___`, `Recovery: sauna 10min 85C / cold ___ / rlt 5min 45C`, `Recovery: skipped`, or leave it blank. `/log` parses each modality independently per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)` for sauna/cold; `## Light therapy (opt-in)` for RLT / blue light / PBM). Sauna+RLT in one line emits two payload entries — one `thermal`, one `light_therapy` — both keyed to the same date. Both lines apply to every strength workout — cardio sections do not need them.
+Each workout heading is immediately followed by `Date: ___\` (note the trailing backslash — a Markdown hard line break) on its own line, then `Recovery: sauna ___ / cold ___ / rlt ___` on its own line, then a blank line, then the bullets. The backslash keeps the two placeholders on **separate lines** in markdown previewers instead of collapsing into one paragraph — the visual break aids mid-workout filling. The user fills in the date when they actually train (so the session can be logged later without guessing) and replaces each recovery blank only for modalities they performed. Examples: `Recovery: sauna 12+8min 85C dry / cold 30s shower / rlt ___`, `Recovery: sauna 10min 85C / cold ___ / rlt 5min 45C`, `Recovery: skipped`, or leave it blank. `/log` parses each modality independently per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)` for sauna/cold; `## Light therapy (opt-in)` for RLT / blue light / PBM). Sauna+RLT in one line emits two payload entries — one `thermal`, one `light_therapy` — both keyed to the same date. Both lines apply to every strength workout — cardio sections do not need them.
 
 **Exercise bullets** — one line per exercise. No code fences. Format:
 - Bodyweight or single-rep: `Exercise Name: reps` (e.g., `Plank: 45s hold`)
@@ -806,7 +813,7 @@ Each workout heading is immediately followed by `Date: ___` on its own line, the
   - Fixed: `Dumbbell Flat Bench Press: 52kgx10 /// 52kgx10 /// 52kgx10`
   - Range: `Cable Lat Pulldown: 65-70kgx8-10 /// 65-70kgx8-10 /// 65-70kgx8-10`
   - 4 sets = 4 entries. Always.
-- Warmup exercises: same format, no special marking.
+- Warm-up prep movements: same format, no special marking. Warm-up **ramp sets** on the first heavy compound carry a `(warmup)` marker on each ramp set (see the Warm-up rule in Programming) so they stay out of volume and e1RM.
 
 Canonical exercise names (title case from `shared/exercises-database.md`). No lowercase.
 
@@ -848,12 +855,12 @@ Full example (markdown — no code fence around it in the actual file):
 
 ```
 ## Workout 1: UPPER PUSH + CORE
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
 - Jumping Jacks: 50
-- Band Pull-Apart: 15
-- Dumbbell Flat Bench Press: 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10
+- Arm Circles: 20
+- Dumbbell Flat Bench Press: 28kgx5 (warmup) /// 40kgx3 (warmup) /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10
 - Shoulder Press Machine: 45kgx8-10 /// 45kgx8-10 /// 45kgx8-10
   — leave 1-2 in tank
 - Dumbbell Fly: 18kgx10 /// 18kgx10 /// 18kgx10
@@ -863,7 +870,7 @@ Recovery: sauna ___ / cold ___ / rlt ___
 - Dead Bug: 12 per side /// 12 per side
 ```
 
-One sub-bullet, one per-set parenthetical, eight other clean lines. That's the target density.
+Two warm-up prep movements + two ramp sets on the first heavy compound, one sub-bullet, sparse per-set parentheticals, the rest clean lines. That's the target density.
 
 **Ordering & equipment** (unchanged from before): compounds → isolation → accessories; warmup at the top; group cable/bench/machine work within the isolation/accessory block. The increment grid still applies (cables 5kg, dumbbells 1-2kg pair, plate machines 5kg).
 

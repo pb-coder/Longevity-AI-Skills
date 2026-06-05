@@ -21,8 +21,6 @@ Organized by primary muscle group > movement pattern. Tags:
 
 ### Upper Body
 - Arm Circles [BW]
-- Band Pull-Apart [Band]
-- Band Dislocates [Band]
 - Dead Hang [BW]
 - Scapular Pull-Up [BW]
 - Pull-Up (warmup) [BW]
@@ -31,7 +29,6 @@ Organized by primary muscle group > movement pattern. Tags:
 ### Lower Body
 - Bodyweight Squat [BW]
 - Glute Bridge [BW]
-- Hip Circle Walk [Band] — +glutes, +abductors
 
 ---
 
@@ -258,7 +255,6 @@ Organized by primary muscle group > movement pattern. Tags:
 - Single Leg Hip Thrust [BB]
 - Hip Thrust Machine [Machine]
 - Cable Hip Thrust [Cable]
-- Banded Hip Thrust [Band]
 - Reverse Hyperextension Machine [Machine] — +hamstrings, +erectors
 
 ### Isolation

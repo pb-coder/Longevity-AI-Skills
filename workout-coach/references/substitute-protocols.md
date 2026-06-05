@@ -20,7 +20,7 @@ The data says rest. Refuse to write strength. The workout markdown is short.
 Assessment: ./<date>-assessment.html
 
 ## Rest day
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
 - 20-min easy walk (RPE 2–3, conversational pace)
@@ -51,7 +51,7 @@ Zone 2 cardio + light mobility, no strength.
 Assessment: ./<date>-assessment.html
 
 ## Zone 2 cardio + mobility
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
 - Zone 2 cardio: 45–60 min at ~<estimated_max_hr × 0.65> bpm
@@ -80,23 +80,23 @@ A full week of deloading. The markdown lists the deload sessions for the whole w
 Assessment: ./<date>-assessment.html
 
 ## Deload Session 1
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
-- <Compound 1>: <last working weight> × <last reps>, <halved set count>
+- <Compound 1>: <last working weight>x<last reps>, <halved set count>
   — hold load, halve sets
-- <Compound 2>: <last working weight> × <last reps>, <halved set count>
-- <Accessory 1>: <last weight> × <last reps>, <halved set count>
-- <Accessory 2>: <last weight> × <last reps>, <halved set count>
+- <Compound 2>: <last working weight>x<last reps>, <halved set count>
+- <Accessory 1>: <last weight>x<last reps>, <halved set count>
+- <Accessory 2>: <last weight>x<last reps>, <halved set count>
 
 ## Deload Session 2
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
 - <…>
 
 ## Deload Session 3
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
 - <…>
@@ -123,7 +123,7 @@ Lower stimulus than Zone 2, focused on parasympathetic recovery.
 Assessment: ./<date>-assessment.html
 
 ## Mobility + sauna
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
 - Mobility flow: 30 min
@@ -146,6 +146,7 @@ Same session pattern as the planned workout, but with the modifications baked in
 - **Loads**: hold every working weight (compounds, accessories, isolation, core — all of it)
 - **Finisher**: drop the conditioning finisher entirely
 - **PR attempts**: not allowed
+- **Warm-up**: unchanged — keep the two prep movements and the ramp sets into the first heavy compound. A recovery downgrade reduces working volume, not the warm-up.
 
 The workout markdown looks like a normal session but with the held loads explicit:
 
@@ -158,14 +159,16 @@ The workout markdown looks like a normal session but with the held loads explici
 Assessment: ./<date>-assessment.html
 
 ## Workout 1: PUSH
-Date: ___
+Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
-- Dumbbell Flat Bench Press: 50 kg × 8 /// 50 kg × 8
+- Jumping Jacks: 50
+- Arm Circles: 20
+- Dumbbell Flat Bench Press: 25kgx5 (warmup) /// 35kgx3 (warmup) /// 50kgx8 /// 50kgx8
   — hold last session's load
-- Incline Chest Press Machine: 50 kg × 10 /// 50 kg × 10
-- Cable Lateral Raise: 12 kg × 12  *(halved from 3 sets to 2)*
-- Triceps Pushdown: 35 kg × 12  *(halved from 3 sets to 2)*
+- Incline Chest Press Machine: 50kgx10 /// 50kgx10
+- Cable Lateral Raise: 12kgx12  *(halved from 3 sets to 2)*
+- Cable Tricep Pushdown: 35kgx12  *(halved from 3 sets to 2)*
 - (no finisher this session)
 ```
 

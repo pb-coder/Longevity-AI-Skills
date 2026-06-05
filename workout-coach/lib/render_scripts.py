@@ -186,7 +186,9 @@ INLINE_JS = r"""
     }
     while (i < lines.length) {
       var raw = lines[i]; i++;
-      var line = raw.replace(/\s+$/, '');
+      // Strip trailing whitespace, then a trailing backslash (the Markdown
+      // hard-break marker on the Date line) so it never renders literally.
+      var line = raw.replace(/\s+$/, '').replace(/\\+$/, '');
       if (!line.trim()) { ul = null; lastLi = null; continue; }
 
       // Drop the top-level title line and the Assessment link line.

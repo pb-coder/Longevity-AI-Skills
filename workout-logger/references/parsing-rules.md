@@ -4,6 +4,12 @@
 
 `DD.MM` → `YYYY-MM-DD` using current year. If omitted, ask once.
 
+A pasted `Date:` line from a coach plan may end with a trailing backslash
+(`Date: 2026-06-05\`) — that's a Markdown hard-break marker the plan uses to
+keep `Date:` and `Recovery:` on separate lines, not part of the value. Strip a
+trailing backslash (and surrounding whitespace) before parsing. The same
+applies to a pasted `Recovery:` line.
+
 ## Fields
 
 - **#**: One number per exercise. All sets of the same exercise share the number.

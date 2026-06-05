@@ -10,8 +10,9 @@ Functions:
 - ``strength_session_avg_hr_trend(sessions, strength_dates)`` — slope of
   strength-session avg HR per 4 weeks. Catches running-hot patterns.
 - ``weekly_volume_per_muscle(rows, db, today_d, window_days, unknown_out)``
-  — fractional hard-set count per muscle (primary 1.0, synergist 0.5).
-  Reports muscle landmarks alongside the current count.
+  — fractional hard-set count per muscle (primary 1.0, synergist 0.5),
+  normalized to sets-per-week over the window so it is apples-to-apples
+  with the weekly landmarks. Reports muscle landmarks alongside.
 - ``estimated_1rm(rows, deload_dates, include_history)`` — Epley
   projection per exercise with current/prev/best, slope, confidence,
   and stalled-session count.
@@ -123,12 +124,18 @@ def weekly_volume_per_muscle(
     window_days: int,
     unknown_out: set[str],
 ) -> dict:
-    """Fractional hard-set count per muscle over the last ``window_days``.
+    """Fractional hard-set count per muscle, as sets-per-week.
 
     Primary muscle = 1.0 set, each synergist = 0.5 set (per training-science
     §1). Warmup exercises (database section) and warmup-marked sets are
     skipped. Unknown exercises — logged names that don't appear in the db —
     are collected into ``unknown_out`` for the caller to surface.
+
+    ``current`` is **sets-per-week averaged over the window**: counts are
+    summed across the stable ``window_days`` collection window (so the figure
+    isn't a noisy single-week snapshot), then divided by ``window_days / 7``
+    so the number is apples-to-apples with the WEEKLY ``VOLUME_LANDMARKS``
+    (MEV/MAV/MRV). ``window_days`` is returned for transparency.
     """
     cutoff = today_d - timedelta(days=window_days)
     sets: dict[str, float] = defaultdict(float)
@@ -151,7 +158,8 @@ def weekly_volume_per_muscle(
         for syn in entry["synergists"]:
             sets[syn] += 0.5
 
-    current = {m: round(v, 1) for m, v in sets.items()}
+    weeks = window_days / 7.0
+    current = {m: round(v / weeks, 1) for m, v in sets.items()}
     landmarks = {m: VOLUME_LANDMARKS[m] for m in current if m in VOLUME_LANDMARKS}
     return {
         "window_days": window_days,
@@ -375,8 +383,12 @@ def stale_exercises(
     """Exercises whose last appearance is ≥ ``threshold_days`` ago.
 
     Warmup-section exercises are excluded — those cycle on and off by
-    design. Useful for spotting movements that were tried once or twice and
-    dropped; the coach can decide whether to retire or reintroduce them.
+    design. Off-catalog (unknown) exercises are excluded too: a name not in
+    ``db`` can no longer be canonically reintroduced (e.g. a retired
+    ``[Band]`` movement), so surfacing it as "stale" is noise — it already
+    shows up in ``unknown_exercises``. Useful for spotting movements that
+    were tried once or twice and dropped; the coach can decide whether to
+    retire or reintroduce them.
     """
     last_seen: dict[str, str] = {}
     sessions_count: dict[str, set[str]] = defaultdict(set)
@@ -386,7 +398,9 @@ def stale_exercises(
             continue
         key = r["exercise"].lower()
         entry = db.get(key)
-        if entry and (entry.get("is_warmup") or entry.get("is_cardio")):
+        if entry is None:
+            continue
+        if entry.get("is_warmup") or entry.get("is_cardio"):
             continue
         canonical.setdefault(key, r["exercise"])
         if r["date"] > last_seen.get(key, ""):

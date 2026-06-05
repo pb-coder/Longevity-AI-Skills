@@ -51,22 +51,35 @@ Every card with actionable signal carries a **Coach callout** below the data: th
 {
   "headline": "2-3 sentences in plain English. The TL;DR.",
   "cards": {
-    "recovery_drivers":     "one sentence ...",
-    "activity_rings":       "one sentence ...",
-    "training_load":        "one sentence ...",
-    "muscle_volume":        "one sentence ...",
-    "strength":             "one sentence ...",
-    "vitals":               "one to two sentences, signal + action ...",
-    "sleep":                "one sentence ...",
-    "recovery_practices":   "one sentence ...",
-    "// gated (only when the matching tracker block is present)": "",
-    "swim_trajectory_callout":  "one or two sentences. Quote the verdict + 1 thing to fix in the next session. Required when tracker JSON contains swim_summary.",
-    "nutrition_phase_callout":  "one or two sentences. Quote the coach_action_hint + the binding 'why'. Required when tracker JSON contains nutrition_phase. For bulk phases, read references/bulking-science.md first."
+    "// Today tab": "",
+    "session_recommendation_callout":  "narrative gloss on the recovery gate ...",
+    "today_acwr":                       "one sentence on the acute:chronic workload ratio ...",
+    "recovery_drivers":                "one sentence ...",
+    "activity_rings":                  "one sentence ...",
+    "training_load":                   "one sentence ...",
+    "muscle_volume":                   "one sentence ...",
+    "strength":                        "one sentence ...",
+    "// Trajectory tab — domain callouts": "",
+    "trajectory_longevity_score":      "one sentence on the composite longevity score ...",
+    "trajectory_cardio":               "one sentence on the cardio domain ...",
+    "trajectory_recovery":             "one sentence on the recovery domain ...",
+    "trajectory_sleep":                "one sentence on the sleep domain ...",
+    "trajectory_body_comp":            "one sentence on the body-composition domain ...",
+    "trajectory_metabolic":            "one sentence on the metabolic domain ...",
+    "trajectory_behavioral":           "one sentence on the behavioral domain ...",
+    "trajectory_risk_flags":           "one sentence on the risk-flag domain ...",
+    "// Trajectory tab — gated (only when the matching tracker block is present)": "",
+    "swim_trajectory_callout":         "one or two sentences. Quote the verdict + 1 thing to fix in the next session. Required when tracker JSON contains swim_summary.",
+    "nutrition_phase_callout":         "one or two sentences. Quote the coach_action_hint + the binding 'why'. Required when tracker JSON contains nutrition_phase. For bulk phases, read references/bulking-science.md first.",
+    "// Cross-tab cards (render on the Trajectory tab)": "",
+    "vitals":                          "one to two sentences, signal + action ...",
+    "sleep":                           "one sentence ...",
+    "recovery_practices":              "one sentence ..."
   }
 }
 ```
 
-All keys under `cards` are optional. A missing key emits a soft warning to stderr but doesn't block the render — the corresponding card simply renders without a callout. The full list of documented keys lives in `lib/render_validators.py::COACH_CARD_KEYS`. Two keys are gated (`swim_trajectory_callout`, `nutrition_phase_callout`): the validator does NOT warn when they're missing, because their cards only render when the matching tracker block is present. The coach should still author them when the data is present.
+All keys under `cards` are optional. A missing key emits a soft warning to stderr but doesn't block the render — the corresponding card simply renders without a callout. The full list of documented keys lives in `lib/render_validators.py::COACH_CARD_KEYS`, grouped by tab (Today, Trajectory domain callouts, Trajectory gated cards, and retained cross-tab cards). Two keys are gated (`swim_trajectory_callout`, `nutrition_phase_callout`): the validator does NOT warn when they're missing, because their cards only render when the matching tracker block is present (swim data, an open nutrition phase). The coach should still author them when the data is present.
 
 The NEAT card has no coach callout slot; the three stat cells are glanceable on their own.
 

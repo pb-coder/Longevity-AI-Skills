@@ -29,6 +29,12 @@
 | Pulley | Cable Seated Row | — |
 | Rear delt fly dumbbell | Dumbbell Rear Delt Fly | — |
 | Hanging leg raises | Leg Raise | — |
+| Leg raises | Leg Raise | — |
+| Jumping Jack | Jumping Jacks | — |
+| Prone Leg Curl | Leg Curl (Lying) | — |
+| Reverse Pec Deck | Rear Delt Fly Machine | — |
+| Low Row | Low Row Machine | — |
+| Shoulder Press | Shoulder Press Machine | — |
 
 ## Modifier Handling
 

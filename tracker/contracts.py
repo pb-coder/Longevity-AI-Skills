@@ -91,6 +91,7 @@ class SessionRecommendation(TypedDict, total=False):
     rationale: list[SessionRationaleEntry]
     override_allowed: bool
     override_message: str
+    expected_rebound_by_session: int
 
 
 class CoachReads(TypedDict, total=False):

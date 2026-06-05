@@ -554,6 +554,12 @@ def main() -> int:
     nutrition_phase = nutrition_phase_summary(
         nutrition_phases_all, bw_all, today_d, estimated_1rm=e1rm,
     )
+    nutrition_phase_start = (
+        ((nutrition_phase or {}).get("current") or {}).get("start_date")
+    )
+    bw_trend = bodyweight_trend_kg_per_week(
+        bw_all, start_date=nutrition_phase_start,
+    )
 
     # ---- Week-over-week comparison block (used by the assessment HTML
     # dashboard's bottom card). Composes existing extracts; no new data
@@ -584,7 +590,7 @@ def main() -> int:
         acwr=acwr,
         cardio_zones=cardio_zones,
         movement_consistency=movement_consistency,
-        bodyweight_trend_kg_per_week=bodyweight_trend_kg_per_week(bw_all),
+        bodyweight_trend_kg_per_week=bw_trend,
         estimated_1rm=e1rm,
         capabilities=capabilities,
     )
@@ -675,7 +681,7 @@ def main() -> int:
         "estimated_rest_hr": round(rest_hr, 1) if rest_hr else None,
         # ---- Bodyweight ----
         "bodyweight_latest": bw_latest,
-        "bodyweight_trend_kg_per_week": bodyweight_trend_kg_per_week(bw_all),
+        "bodyweight_trend_kg_per_week": bw_trend,
         "bodyweight_weekly": _bodyweight_weekly_kg(bw_all, today_d, weeks=4),
         # ---- Apple Health weekly aggregates (raw daily behind a flag) ----
         "health_metrics_weekly": weekly_health,

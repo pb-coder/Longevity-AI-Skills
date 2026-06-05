@@ -16,12 +16,15 @@ Public surface:
 - ``validate_coach_reads(coach) -> (errors, warnings)`` — hard errors
   vs. soft warnings. Errors fail the render with exit code 2; warnings
   print to stderr but allow the render to proceed.
+- ``validate_workout_md(text) -> (errors, warnings)`` — validates the
+  lean workout markdown before it is embedded in the dashboard.
 - ``auto_wrap_terms(text)`` — wraps each ``KNOWN_TERMS`` key in a
   tooltip span. First-occurrence-only per string by design (avoids
   visual noise on lines that repeat a term).
 """
 from __future__ import annotations
 
+from functools import lru_cache
 import re
 
 
@@ -82,6 +85,20 @@ KNOWN_TERMS = {
 
 EM_DASH = "—"
 COACH_STRING_MAX = 280
+
+WORKOUT_SUB_BULLET_LIMIT = 2
+WORKOUT_SUB_BULLET_RE = re.compile(r"^\s{2,}" + re.escape(EM_DASH) + r"\s+")
+WORKOUT_HEADING_RE = re.compile(r"^##\s+Workout\b", re.IGNORECASE)
+SECTION_HEADING_RE = re.compile(r"^##\s+")
+WORKOUT_EXERCISE_RE = re.compile(r"^-\s+([^:]+):")
+WORKOUT_BANNED_SUB_BULLET_RE = re.compile(
+    r"\b("
+    r"last\s+time|last\s+logged|you(?:'|')?ve\s+been|stuck\s+at|"
+    r"reintroduc(?:e|ing)|start\s+light|hold\s+loads?|no\s+pr\s+attempts?|"
+    r"rationale|because|vs\s+mev|vs\s+mav|vs\s+mrv"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 # Card keys the renderer knows how to surface a coach callout for.
@@ -168,6 +185,95 @@ def validate_coach_reads(coach: dict) -> tuple[list[str], list[str]]:
         if not cards.get(key):
             warnings.append(f"cards.{key} missing or empty; that card will render without a coach callout")
 
+    return (errors, warnings)
+
+
+@lru_cache(maxsize=1)
+def _workout_exercise_name_set() -> set[str]:
+    """Return normalized canonical + alias exercise names for this process."""
+    from shared.exercises_database import known_name_set  # local import avoids CLI cost
+
+    return known_name_set()
+
+
+def _is_known_exercise_name(name: str, known_names: set[str]) -> bool:
+    """Resolve a workout bullet name without reparsing the catalog."""
+    from shared.exercises_database import is_known_name  # local import
+
+    return is_known_name(name, known_names)
+
+
+def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
+    """Validate lean workout markdown before dashboard rendering.
+
+    Hard errors block render output when the markdown would create user
+    friction later: off-catalog exercise names or em-dashes outside the
+    allowed title/sub-bullet positions. Warnings flag coach-writing drift
+    that should be fixed, but can still render.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(text, str) or not text.strip():
+        return (["workout markdown is empty"], warnings)
+
+    in_workout = False
+    workout_title = ""
+    sub_bullet_count = 0
+    known_exercise_names = _workout_exercise_name_set()
+
+    def flush_workout() -> None:
+        if workout_title and sub_bullet_count > WORKOUT_SUB_BULLET_LIMIT:
+            warnings.append(
+                f"{workout_title}: {sub_bullet_count} sub-bullets; "
+                f"recommended max is {WORKOUT_SUB_BULLET_LIMIT}"
+            )
+
+    for lineno, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.rstrip()
+
+        if WORKOUT_HEADING_RE.match(line):
+            flush_workout()
+            in_workout = True
+            workout_title = line.lstrip("# ").strip() or f"line {lineno}"
+            sub_bullet_count = 0
+        elif SECTION_HEADING_RE.match(line):
+            flush_workout()
+            in_workout = False
+            workout_title = ""
+            sub_bullet_count = 0
+
+        if EM_DASH in line:
+            allowed_title = lineno == 1 and line.startswith("# Workout plan ")
+            allowed_sub_bullet = WORKOUT_SUB_BULLET_RE.match(line) is not None
+            if not (allowed_title or allowed_sub_bullet):
+                errors.append(
+                    f"line {lineno}: contains an em-dash outside the title "
+                    "or sub-bullet marker"
+                )
+
+        if not in_workout:
+            continue
+
+        if WORKOUT_SUB_BULLET_RE.match(line):
+            sub_bullet_count += 1
+            if WORKOUT_BANNED_SUB_BULLET_RE.search(line):
+                warnings.append(
+                    f"{workout_title} line {lineno}: sub-bullet contains "
+                    "rationale or comparative-history phrasing"
+                )
+            continue
+
+        m = WORKOUT_EXERCISE_RE.match(line)
+        if not m:
+            continue
+        exercise_name = m.group(1).strip()
+        if not _is_known_exercise_name(exercise_name, known_exercise_names):
+            errors.append(
+                f"line {lineno}: exercise {exercise_name!r} is not in the "
+                "canonical exercise catalog"
+            )
+
+    flush_workout()
     return (errors, warnings)
 
 

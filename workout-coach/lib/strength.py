@@ -260,21 +260,24 @@ def estimated_1rm(rows: list[dict],
         ]
         history = history_full[:E1RM_HISTORY_LIMIT]
 
-        # Count context-change sessions in the slope window; the coach
-        # uses this to soften "Are you getting stronger?" language across
-        # equipment-shift discontinuities.
+        # Count excluded sessions in the slope window; the coach uses
+        # these to soften "Are you getting stronger?" language across
+        # equipment-shift discontinuities and deliberate deloads.
         context_change_excluded = sum(
             1 for d in slope_dates if per_date[d].get("context_change")
         )
+        deload_excluded = sum(1 for d in slope_dates if d in deload_set)
 
         # OLS slope (kg per 28 days) over the last 6 sessions, EXCLUDING
-        # context-change dates. Use ``history_full``, not the emitted
-        # ``history`` — the trim is cosmetic for the JSON output, but the
-        # trend should still see all six non-ctx sessions to stay stable.
+        # context-change and deload dates. Use ``history_full``, not the
+        # emitted ``history`` — the trim is cosmetic for the JSON output,
+        # but the trend should still see all eligible sessions to stay
+        # stable.
         slope = None
         slope_pts_source = [
             h for h in history_full
             if not per_date[h["date"]].get("context_change")
+            and h["date"] not in deload_set
         ]
         if len(slope_pts_source) >= 3:
             pts: list[tuple[date, float]] = []
@@ -310,13 +313,12 @@ def estimated_1rm(rows: list[dict],
         else:
             confidence = "medium"
 
-        # If any session in the trailing window was a context-change row
-        # (gym swap, new machine, different cable scaling), the slope and
-        # delta_vs_prev_kg are noisy across the discontinuity. Drop
-        # confidence one band (high→medium, medium→low). The user sees this
-        # via the new ``context_change_excluded`` key plus the softened
-        # confidence label.
-        if context_change_excluded > 0:
+        # If any session in the trailing window was excluded from slope
+        # (gym swap, new machine, different cable scaling, or deliberate
+        # deload), the remaining trend is narrower. Drop confidence one
+        # band (high→medium, medium→low). The user sees the reason via
+        # ``context_change_excluded`` / ``deload_excluded``.
+        if context_change_excluded > 0 or deload_excluded > 0:
             confidence = {"high": "medium",
                           "medium": "low",
                           "low": "low"}[confidence]
@@ -362,6 +364,7 @@ def estimated_1rm(rows: list[dict],
             "confidence":              confidence,
             "stalled_sessions":        stalled,
             "context_change_excluded": context_change_excluded,
+            "deload_excluded":         deload_excluded,
         }
     return out
 

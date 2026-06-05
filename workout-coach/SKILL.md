@@ -146,6 +146,7 @@ What the JSON contains:
 
 **Strength + cardio sessions (canonical session-level view):**
 - `monthly_sessions`: one entry per session-date, sorted asc. Each entry: `{date, exercise_first, session_kind, active_cal, total_cal, elevation_m, elapsed, avg_hr, max_hr, duration_min, volume (strength only), is_deload, trimp, load_band, intensity_pct}`. **This is the canonical session record** — it folds in TOTAL-row metadata (Active Cal, Avg HR, Duration, etc.) AND the per-session TRIMP score + load band. Iterate it directly; don't sum `rows` yourself.
+  Mixed-modality dates emit separate entries keyed by `(date, session_kind)`, even though the monthly CSV display-only `SESSION` number is shared across rows on that date.
   - `load_band`: `light` (TRIMP < 50), `moderate` (50–100), `hard` (100–150), `red-line` (>150). Use for one-line session summaries.
   - `intensity_pct`: HRR percent (avg_hr normalised to heart-rate reserve). 50 = Z1, 60-70 = Z2, 70-80 = Z3, 80-90 = Z4, ≥90 = Z5.
   - `is_deload`: True only when the TOTAL row's Notes carries `Deload Workout`.
@@ -155,14 +156,14 @@ What the JSON contains:
   - `confidence`: `high` (last 3 top sets all 3-8 reps), `medium` (mixed), `low`. Soften trend language when `low`.
   - `stalled_sessions`: ≥2 consecutive sessions with |Δe1RM| ≤ 0.5kg = real stall, not one-off.
 - `progression_summary`: last vs. previous best working set per exercise.
-- `stale_exercises`: top 5 exercises not logged in ≥28 days, sorted newest-stale first. Use for rotation decisions.
+- `stale_exercises`: top 5 exercises not logged in ≥28 days, sorted newest-stale first. Use for rotation decisions and cautious reintroductions.
 - `unknown_exercises`: names not in the database. Surface in **Missing from your tracking**.
 - `deloads`: list of dates whose TOTAL row has the `Deload Workout` marker.
 - `auto_deload_candidates`: dates where the heuristic detected a deload-like week (≥35% volume drop AND ≥8 bpm avg-HR drop vs prior 4w) that the user **didn't** mark. Surface as a question, not a claim.
 
 **Cardio rollup (28-day window):**
 - `cardio_last_28d`: `{sessions, total_minutes, total_distance_km, total_active_cal, non_interval_minutes, interval_sessions}`. Coarse intervals-vs-non-interval split via Notes keywords + avg_hr ≥165 heuristic. **`non_interval_minutes` is NOT a true Zone-2 measurement** — a 3h hike at avg_hr 110 (Z1) lands in the same bucket as a 45min Z2 ride. Treat it as a coarse fallback, not a Z2 number.
-- `cardio_hr_zones_28d`: time in HR zones using HRR (Karvonen). `{window_days: 28, total_minutes, z1, z2, z3, z4, z5, z2_pct, z3_pct, z4_z5_pct}`. **This is the canonical source for true Zone-2 minutes** (HRR-based, requires per-workout `avg_hr` on cardio sessions). **High z3_pct = grey-zone trap** (too much moderate work, too little easy or hard). Polarized = z2_pct + z4_z5_pct dominant; pyramidal = z2 > z3 > z4_z5 cleanly stepping down.
+- `cardio_hr_zones_28d`: time in HR zones using HRR (Karvonen). `{window_days: 28, total_minutes, z1, z2, z3, z4, z5, z2_by_activity, z2_pct, z3_pct, z4_z5_pct}`. **This is the canonical source for true Zone-2 minutes** (HRR-based, requires per-workout `avg_hr` on cardio sessions). `z2_by_activity` splits Z2 minutes into coarse buckets (`run`, `swim`, `cycle`, `walk_hike`, `other`) so a 5-min swim does not read like the same dose as a 35-min run. **High z3_pct = grey-zone trap** (too much moderate work, too little easy or hard). Polarized = z2_pct + z4_z5_pct dominant; pyramidal = z2 > z3 > z4_z5 cleanly stepping down.
 
 **Daily activity (NEAT — non-exercise activity thermogenesis):**
 - `daily_activity_28d`: `{exercise_min_daily_avg, walking_workouts_count, walking_minutes_28d, walking_distance_km_28d, incidental_walks_count, assessment}`. Exercise minutes are Apple's brisk-activity tally when the source provides it. Walking workouts include both intentional walks and short flagged-incidental walks. **`assessment`** is the band the coach acts on: `low` (<15 min/day basis), `moderate` (15-45), `high` (≥45). Basis is `exercise_min_daily_avg` when present, else `walking_minutes_28d / 28` as a NEAT proxy. Use this to distinguish "sedentary then trains" from "active all day and trains" — the cardio prescription differs.
@@ -174,7 +175,8 @@ What the JSON contains:
 
 **Bodyweight:**
 - `bodyweight_latest`: `{date, kg}` or null.
-- `bodyweight_trend_kg_per_week`: slope over the last 8 clean fasted entries, or null.
+- `bodyweight_trend_kg_per_week`: slope over the last 8 clean fasted entries, or null. When `nutrition_phase.current` is present, this same field is scoped to entries on or after the phase start date so a bulk/cut is judged inside its own window.
+- `bodyweight_weekly`: ISO-week mean bodyweights for the vitals sparkline. This is a weekly average for visual context, not the phase-status source.
 
 **Longevity Trajectory (Trajectory tab inputs):**
 - `longevity_score`: composite 0-100 score with per-component attribution. Shape: `{score, band, label, n_components, components: [{name, score, weight, contribution}, …], bloodwork_pending: True, note}`. Weights renormalize across present components (mirrors `recovery_score`'s missing-signal handling). `band` is `good` / `amber` / `warn`. **Always flagged `bloodwork_pending: True` until a lab panel is on file** — the score is honest about what it doesn't see.
@@ -464,6 +466,14 @@ If data is too limited to judge (history < 2 entries), say that in one sentence 
 
 Cross-reference `references/training-science.md` for the numbers. Don't cite §5 to the user. The entries assume morning/empty-stomach (standing convention); the trend function excludes rows whose Notes flag non-fasted context so intra-day variance doesn't distort the slope.
 
+When an open `nutrition_phase` exists, treat `bodyweight_trend_kg_per_week` as phase-scoped. Do not compare it to pre-phase weight loss/gain; use `nutrition_phase.actuals.rate_kg_per_wk_14d` as the primary phase-status signal and the trend line as supporting context.
+
+Keep the bodyweight signals separate in coach copy:
+- `bodyweight_latest` = the newest morning reading.
+- `bodyweight_trend_kg_per_week` = phase-scoped trend when a phase is open.
+- `nutrition_phase.actuals.rate_kg_per_wk_14d` = primary bulk/cut status number.
+- `bodyweight_weekly` / week-over-week averages = noisy context only.
+
 **Data sufficiency thresholds:**
 - Progression trend: minimum 3 sessions with the same exercise over 2+ weeks. Below that, state "not enough data" for that exercise.
 - Volume analysis: minimum 2 full training weeks. Below that, report what's visible but caveat the sample size in THE VERDICT.
@@ -542,6 +552,8 @@ Compare cardio against §10 targets (150 min Zone 2 + ~20 min intervals per week
 
 **Read `cardio_hr_zones_28d.z2` for the Zone-2 number** — that's the true HRR-based Z2 figure when the source supplies per-workout HR on cardio sessions. Only fall back to `cardio_last_28d.non_interval_minutes` when `cardio_hr_zones_28d` is empty (no avg_hr available on any cardio row in the window). Never quote `non_interval_minutes` as the Zone-2 number when `cardio_hr_zones_28d.z2` is present; it counts Z1 hike time as if it were Z2 stimulus and inflates the value. Read `cardio_last_28d.interval_sessions` for the interval count; that field is fine. The total minutes / distance / kcal in `cardio_last_28d` are also correct.
 
+When `cardio_hr_zones_28d.z2_by_activity` is present, use it to qualify the dose. Short swim Z2 minutes count toward total HR-zone exposure, but they are not equivalent to a dedicated 30-45 min run/ride session for the weekly aerobic-base target. Phrase it as "Z2 includes 5 min swim + 35 min run" when activity mix matters.
+
 **REQUIRED daily-activity gate.** Cross-check the shortfall against `daily_activity_28d.assessment` before prescribing cardio. State the call explicitly with the value and band, e.g. "Daily activity 124 min/day (high). Cardio prescription: hold Z2, add 1 interval session for VO2max." Rules:
 - `assessment: high` (≥45 min/day basis) AND VO2max trending up → keep cardio prescription minimal; the user is already getting aerobic load passively.
 - `assessment: low` (<15 min/day basis) → add a Zone 2 session even if 28d cardio targets are met. The base activity dose is too low.
@@ -602,7 +614,7 @@ Hard template (3–5 lines, plain bullets):
 Source-honesty rules:
 - Multi-round saunas are counted as ONE session, not multiple. A 12+8min two-round day = one session, 20 total heat minutes.
 - `cold_air` (sitting outside post-sauna) is a real protocol — don't claim it's "not cold enough" without a temp datapoint. If `cold_temp_c` is set, you can comment.
-- Adherence target defaults to 4×/wk (mid-band of the user's interventions.md 4-6 range). User can override via `profile.csv` `sauna_target_per_week`. Don't claim a higher target unless the JSON shows it.
+- Adherence target defaults to 4×/wk (mid-band of the user's interventions.md 4-6 range). User can override via `profile.csv` `sauna_target_per_week`. Treat this as a configured reachable target; `below-target` means below that configured target, not a moral failure or proof the target is reachable in the user's environment. Don't claim a higher target unless the JSON shows it.
 - Never moralise about hot-yoga / steam / banya vs dry as "better" — the dose math is the same.
 
 Example (filled from a real `thermal_summary`):
@@ -626,7 +638,7 @@ Hard template (2–4 lines, plain bullets):
 Source-honesty rules:
 - The evidence base for light-therapy dosing is far less settled than sauna's HSP induction. Don't quote sham-controlled effect sizes the JSON doesn't carry; the protocol metric is "did it happen" + "at roughly what duration."
 - Wavelength efficacy claims are out of scope. The store captures `light_type` and (optionally) `wavelength_nm`; don't extrapolate "X nm is better than Y nm" from the user's own data.
-- Adherence target defaults to 3×/wk + 10min/session. User can override via `profile.csv` (`light_therapy_target_per_week`, `light_therapy_target_min_per_session`). Don't invent a higher target unless the JSON shows it.
+- Adherence target defaults to 3×/wk + 10min/session. User can override via `profile.csv` (`light_therapy_target_per_week`, `light_therapy_target_min_per_session`). Treat this as a configured reachable target; `below-target` means below that configured target, not proof of poor discipline or lack of access. Don't invent a higher target unless the JSON shows it.
 
 Example (filled from a real `light_therapy_summary`):
 
@@ -691,7 +703,7 @@ Example `nutrition_phase_callout`:
 |---|---|---|
 | **A** | `rest` | A rest day (walk + sleep priority). **No strength.** No "modified" strength either — the plan is the rest. |
 | **B** | `reactive_deload` | Either a reactive-deload week (cut sets to ~50%, hold loads, rotate the over-MRV muscles), OR a Zone 2 / mobility day (per `substitute.kind`). **No on-top strength session.** |
-| **C** | `downgrade` | Planned strength, but pre-modified: −25% volume on secondary lifts, hold loads, drop the conditioning finisher, no PR attempts. Compound lifts stay at planned volume; isolations halve. |
+| **C** | `downgrade` | Planned strength, but pre-modified through `expected_rebound_by_session`: −25% volume on secondary lifts, hold loads, drop the conditioning finisher, no PR attempts. Compound lifts stay at planned volume; isolations halve. Later workout slots may return to normal only if recovery rebounds. |
 | **D** | `green` | Normal plan. The rules below (split rotation, double progression, exercise variation) apply unchanged. |
 | **E** | `over_recovered` | Normal plan + one-line warning that fitness is bleeding off (TSB has been too positive too long). |
 
@@ -715,11 +727,13 @@ Assessment: ./2026-05-24-assessment.html
 
 If the user specified a session count in the `/coach` message (e.g., `/coach plan 3 sessions`), use it directly. Otherwise, ask in chat: **"How many sessions should I plan?"** — and wait for the answer before writing the file.
 
-Generate that many strength workouts (Tier C: with the −25% volume / hold loads / no finisher modifications baked in).
+Generate that many strength workouts. Tier C: apply the −25% volume / hold loads / no finisher rules to workouts `1..expected_rebound_by_session`. For later workout slots, write normal-volume prescriptions only as conditional on recovery rebounding before that session; if the JSON omits `expected_rebound_by_session`, default to workout 1 only.
 
 ### Programming (internal)
 
 **Split rotation:** The user runs a Push/Pull/Legs cycle. To determine the next sessions, look at the last completed workout's type and continue the rotation. Don't analyze the full history to rediscover this. If the last session was Pull, the next sessions are Legs → Push → Pull → Legs. If Push, next is Pull → Legs → Push → Pull. Fixed.
+
+**Repeated split days in one week.** For a 4-session PPL+repeat week (for example PPLP), the repeated day must not be a clone. Preserve at least one actively progressing anchor lift, but vary the second exposure by changing the lead angle/pattern or the isolation slot. Push example: first Push can lead with flat press and triceps pushdown; second Push can lead with incline press and overhead triceps work. Pull example: pair vertical-pull emphasis with horizontal-row emphasis. Legs example: pair squat/leg-press emphasis with hinge/curl/adductor-calf emphasis.
 
 **Progression data:** The Step 4 summary already gives you weights and reps per exercise. Use that directly. Don't re-derive trends by walking through each exercise's history. Apply the double progression rule from §15: if the user hit the top of the rep range, bump weight. If not, same weight, push reps.
 
@@ -761,6 +775,8 @@ Use Layer 1 analysis plus the training science reference. The reference contains
   - When a single muscle triggers both this rule and the per-muscle HR-creep rule (`hint == "rising HR at constant volume — fatigue or under-recovery"`), the HR-creep rule's "hold or cut" takes precedence over an "add a set" — i.e. when in doubt, prefer reducing load over adding it.
 - **Cardio (§10):** read the Cardio check numbers from the Report. If behind target, add cardio sessions to the plan after the strength sessions. Default weekly target: 3× Zone 2 @ 30-45min + 1× intervals @ 20min. Cap total cardio additions at 4 sessions per `/coach` run — if the user is very behind, note the shortfall and prescribe the max. User can override with `/coach no-cardio` to skip this entirely.
 
+**Stale exercise reintroduction.** When choosing 1-2 entries from `stale_exercises`, use the last reliable working load only if the exercise has multi-session history and no context-change note. If the exercise has a single old session, high-rep noisy e1RM, equipment-change context, or 8+ weeks away, prescribe a conservative submaximal load with normal reps and leave 2-3 reps in reserve. Never infer the restart load from a single stale e1RM projection. Keep the reason in the dashboard coach text; the workout markdown may only say a short action cue such as `first time back; ease in`.
+
 **Core training:** Build strong, developed abs. Program 1-2 core exercises per session, aim for 3-4 sessions/week with core. Prefer weighted core (kneeling cable crunch, cable woodchop, captain's chair knee raise) alongside bodyweight (leg raises, dead bugs, hollow body holds). Vary patterns across sessions: flexion, anti-extension, rotation, isometric. Visibility is a body fat question, not a training question.
 
 **Equipment increment grid (REQUIRED).** Loads are prescribed on the equipment's increment grid. Never suggest off-grid weights.
@@ -779,6 +795,8 @@ Re-read this block before every load suggestion in the workout tables.
 ### Per-workout format in the file
 
 The workout markdown is a **lean exercise list**, nothing more. No tables. No rationale paragraphs. The "why" lives in the assessment dashboard (and only there). The user trains from this file on their phone in the gym — every line they don't need slows them down.
+
+No em-dashes in workout markdown prose. The only allowed em-dashes are the title separator (`# Workout plan — <date>`) and the indented sub-bullet marker (`  — cue`). In `> Today's call:` / `> Why:` blockquote lines, use a period, comma, semicolon, or colon instead; a prose em-dash will fail the renderer.
 
 Each workout heading is immediately followed by `Date: ___` on its own line, then `Recovery: sauna ___ / cold ___ / rlt ___` on its own line, then a blank line, then the bullets. The two placeholder lines are kept on **separate lines** — the visual break aids mid-workout filling. The user fills in the date when they actually train (so the session can be logged later without guessing) and replaces each recovery blank only for modalities they performed. Examples: `Recovery: sauna 12+8min 85C dry / cold 30s shower / rlt ___`, `Recovery: sauna 10min 85C / cold ___ / rlt 5min 45C`, `Recovery: skipped`, or leave it blank. `/log` parses each modality independently per the syntax in `workout-logger/references/parsing-rules.md` (`## Sauna + cold exposure (opt-in)` for sauna/cold; `## Light therapy (opt-in)` for RLT / blue light / PBM). Sauna+RLT in one line emits two payload entries — one `thermal`, one `light_therapy` — both keyed to the same date. Both lines apply to every strength workout — cardio sections do not need them.
 
@@ -817,6 +835,7 @@ A note appears **only** when it answers one of:
 A note **must not** contain:
 - Comparative history ("last time you did 50kg × 8")
 - Rationale for the prescribed weight ("you've been stuck at 40kg, time to push")
+- Reintroduction history ("last logged 15 weeks ago") or load rationale ("start light because...")
 - Generic exhortation ("push hard, you've got this")
 - Restatement of what the bullet already shows (`— do 3 sets` when the bullet shows 3 sets)
 - Cross-references to the dashboard ("see your TSB")

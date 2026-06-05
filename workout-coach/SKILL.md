@@ -723,6 +723,8 @@ Generate that many strength workouts. Tier C: apply the −25% volume / hold loa
 
 **Split rotation:** The user runs a Push/Pull/Legs cycle. To determine the next sessions, look at the last completed workout's type and continue the rotation. Don't analyze the full history to rediscover this. If the last session was Pull, the next sessions are Legs → Push → Pull → Legs. If Push, next is Pull → Legs → Push → Pull. Fixed.
 
+**Repeated split days in one week.** For a 4-session PPL+repeat week (for example PPLP), the repeated day must not be a clone. Preserve at least one actively progressing anchor lift, but vary the second exposure by changing the lead angle/pattern or the isolation slot. Push example: first Push can lead with flat press and triceps pushdown; second Push can lead with incline press and overhead triceps work. Pull example: pair vertical-pull emphasis with horizontal-row emphasis. Legs example: pair squat/leg-press emphasis with hinge/curl/adductor-calf emphasis.
+
 **Progression data:** The Step 4 summary already gives you weights and reps per exercise. Use that directly. Don't re-derive trends by walking through each exercise's history. Apply the double progression rule from §15: if the user hit the top of the rep range, bump weight. If not, same weight, push reps.
 
 **Session duration:** 8-11 working exercises (excluding warmup) fits the 70-85 minute window. Count exercises, don't calculate minutes. At 7, add one. At 12, cut one.

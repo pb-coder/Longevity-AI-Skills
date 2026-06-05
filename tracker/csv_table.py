@@ -8,20 +8,40 @@ leaving domain policy in the caller.
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
 from datetime import date as date_cls, datetime as datetime_cls
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 
-@dataclass(frozen=True)
 class CsvTableSpec:
-    headers: Sequence[str]
-    fields: Sequence[str]
-    key_fields: Sequence[str]
-    sort_fields: Sequence[str] = ("date",)
-    sort_reverse: bool = True
-    notes_field: str | None = "notes"
+    """Per-table schema + key/sort policy used by the CSV-store upserts.
+
+    Plain class with ``__slots__`` instead of ``@dataclass(frozen=True)`` so
+    importing ``tracker.csv_table`` (transitively loaded on every CSV-store
+    read) does not pull in the ``dataclasses`` module. Callers construct
+    with keyword arguments; field semantics match the historical dataclass.
+    """
+
+    __slots__ = (
+        "headers", "fields", "key_fields",
+        "sort_fields", "sort_reverse", "notes_field",
+    )
+
+    def __init__(
+        self,
+        headers: Sequence[str],
+        fields: Sequence[str],
+        key_fields: Sequence[str],
+        sort_fields: Sequence[str] = ("date",),
+        sort_reverse: bool = True,
+        notes_field: str | None = "notes",
+    ) -> None:
+        self.headers = headers
+        self.fields = fields
+        self.key_fields = key_fields
+        self.sort_fields = sort_fields
+        self.sort_reverse = sort_reverse
+        self.notes_field = notes_field
 
 
 def date_str(value) -> str | None:

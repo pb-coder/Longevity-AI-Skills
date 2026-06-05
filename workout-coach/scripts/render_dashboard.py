@@ -34,41 +34,51 @@ _SKILLS_ROOT = Path(__file__).resolve().parents[2]
 if str(_SKILLS_ROOT) not in sys.path:
     sys.path.insert(0, str(_SKILLS_ROOT))
 
-from tracker.contracts import CoachReads, TrackerJSON
 from tracker.validation import validate_tracker_json
 from workout_coach.lib.render_helpers import esc
 from workout_coach.lib.render_validators import (
-    auto_wrap_terms,
     validate_coach_reads,
     validate_workout_md,
 )
-from workout_coach.lib.render_components import build_load_series, embed_workout_markdown, ring
-from workout_coach.lib.render_assets import STYLESHEET, INLINE_JS
-from workout_coach.lib.render_cards import (
+# Direct submodule imports bypass the render_assets / render_components /
+# render_cards / render_cards_trajectory compatibility facades. Each
+# facade is a tiny re-export module; loading them just to forward names
+# is wasted parse + exec cost on every cold render subprocess.
+from workout_coach.lib.render_components_load import build_load_series
+from workout_coach.lib.render_components_misc import embed_workout_markdown, ring
+from workout_coach.lib.render_styles import STYLESHEET
+from workout_coach.lib.render_scripts import INLINE_JS
+from workout_coach.lib.render_cards_today import (
     card_acwr,
+    card_drivers,
+    card_hero,
+    card_muscle_volume,
+    card_neat,
+    card_rings,
+    card_session_call,
+    card_strength,
+    card_tier_history_strip,
+    card_training_load,
+    card_wow,
+)
+from workout_coach.lib.render_cards_health import (
+    card_recovery_practices,
+    card_sleep,
+    card_vitals,
+)
+from workout_coach.lib.render_cards_domains import (
     card_behavioral_domain,
     card_body_comp_domain,
     card_cardio_domain,
-    card_drivers,
-    card_hero,
     card_longevity_score,
     card_metabolic_domain,
-    card_muscle_volume,
-    card_neat,
-    card_nutrition_phase,
     card_recovery_domain,
-    card_recovery_practices,
-    card_rings,
-    card_risk_flags,
-    card_session_call,
-    card_sleep,
     card_sleep_domain,
-    card_strength,
+)
+from workout_coach.lib.render_cards_programs import (
+    card_nutrition_phase,
+    card_risk_flags,
     card_swim_trajectory,
-    card_tier_history_strip,
-    card_training_load,
-    card_vitals,
-    card_wow,
 )
 
 

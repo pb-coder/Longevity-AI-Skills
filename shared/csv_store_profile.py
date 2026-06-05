@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import csv
+from functools import lru_cache
+
 from .csv_store_common import _date_str, _serialize_value
 from .person_paths import ensure_data_dir, profile_csv
 
@@ -86,13 +88,16 @@ def _coerce_int(v):
     return int(round(f))
 
 
-def read_profile(person: str) -> dict:
-    """Return the per-person profile dict.
+@lru_cache(maxsize=8)
+def _read_profile_cached(person: str) -> dict:
+    """Cached read of the per-person profile dict.
 
-    Missing CSV → all defaults. Missing or unrecognised value → that
-    key's default. ``source`` stays ``None`` if the file is empty so
-    callers can treat that as "not yet configured" and inject the
-    inferred source from the export file extension.
+    The read path of ``read_tracker.py`` calls ``read_profile`` directly
+    plus indirectly via ``_resolve_source`` for both Health Metrics and
+    Workout Sessions, so the same tiny CSV gets parsed 3-4 times per
+    cold-CLI invocation. The cache returns the same dict object on hits;
+    ``read_profile`` clones it so callers can mutate safely. Writes call
+    ``_read_profile_cached.cache_clear()`` to invalidate.
     """
     out = dict(PROFILE_DEFAULTS)
     path = profile_csv(person)
@@ -153,6 +158,11 @@ def read_profile(person: str) -> dict:
     return out
 
 
+def read_profile(person: str) -> dict:
+    """Return the per-person profile dict (fresh shallow copy)."""
+    return dict(_read_profile_cached(person))
+
+
 def write_profile(person: str, **updates) -> None:
     """Update one or more profile keys; create the file if missing.
 
@@ -174,6 +184,7 @@ def write_profile(person: str, **updates) -> None:
         for key in PROFILE_KEYS:
             v = current.get(key)
             writer.writerow([key, _serialize_value(v)])
+    _read_profile_cached.cache_clear()
 
 
 def ensure_profile(person: str,

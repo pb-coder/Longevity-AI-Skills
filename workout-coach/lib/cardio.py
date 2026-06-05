@@ -26,7 +26,7 @@ import math
 from datetime import date, timedelta
 
 
-from .health import _values_in_window
+from .health_windowing import _values_in_window
 from .parsing import _parse_iso_date
 from .sessions import _is_cardio_row
 

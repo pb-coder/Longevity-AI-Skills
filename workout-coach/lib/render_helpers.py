@@ -19,13 +19,23 @@ Functions:
 """
 from __future__ import annotations
 
-import html
 import math
 from datetime import datetime
 
 
+# Hand-rolled HTML escape equivalent to ``html.escape(str(s), quote=True)``.
+# Skips the stdlib ``html`` module so the render cold path doesn't transitively
+# load ``html.entities`` (~2ms). Substitutions must run in this order so the
+# ``&`` introduced by later passes is not re-escaped.
 def esc(s) -> str:
-    return html.escape(str(s)) if s is not None else ""
+    if s is None:
+        return ""
+    return (str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&#x27;"))
 
 
 def fmt(v, digits=1, default="·"):

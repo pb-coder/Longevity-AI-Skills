@@ -55,19 +55,30 @@ than re-deriving them each run.
 """
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # Bring in shared tracker schemas, package utilities, and coach analytics.
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
 if str(SKILLS_ROOT) not in sys.path:
     sys.path.insert(0, str(SKILLS_ROOT))
 from tracker import TrackerContext  # noqa: E402
-from tracker.contracts import TrackerJSON  # noqa: E402
-from shared.csv_store import read_profile  # noqa: E402
+# ``tracker.contracts`` is referenced only in type annotations below
+# (``TrackerJSON``). Under ``from __future__ import annotations`` those
+# annotations are strings, so we can hide the import behind TYPE_CHECKING
+# and skip pulling the contracts module + typing's TypedDict machinery
+# at runtime cold-start.
+if TYPE_CHECKING:
+    from tracker.contracts import TrackerJSON  # noqa: F401
+# Direct submodule imports bypass the ``shared.csv_store`` re-export
+# facade so the read subprocess doesn't pay for facade top-level code +
+# extra import-machinery work. ``shared.csv_store_dense`` / ``periodic``
+# still get loaded later via ``workout_coach.lib.extract``; the facade
+# itself is the only thing skipped.
+from shared.csv_store_profile import read_profile  # noqa: E402
 from shared.person_paths import monthly_dir  # noqa: E402
 from workout_coach.lib.constants import DEFAULT_DATA_SOURCE, SOURCE_CAPABILITIES  # noqa: E402
 from workout_coach.lib.parsing import _compact, _parse_iso_date  # noqa: E402
@@ -87,18 +98,26 @@ from workout_coach.lib.extract import (  # noqa: E402
     read_thermal_sessions,
     read_workout_sessions,
 )
-from workout_coach.lib.health import (  # noqa: E402
+# Direct submodule imports bypass the ``workout_coach.lib.health``
+# re-export facade. The four focused modules below are loaded the same
+# way the facade would load them; skipping the facade itself avoids one
+# extra module-level execution on the cold path.
+from workout_coach.lib.health_windowing import (  # noqa: E402
     _mean_or_none,
     _values_in_window,
-    compute_longevity_score,
-    compute_session_recommendation,
-    compute_tier_history,
     health_metrics_weekly,
     latest_metric,
     metric_trend_per_4w,
+)
+from workout_coach.lib.health_recovery import recovery_score  # noqa: E402
+from workout_coach.lib.health_longevity import (  # noqa: E402
+    compute_longevity_score,
     read_longevity_state,
-    recovery_score,
     vo2_percentile_age_sex,
+)
+from workout_coach.lib.health_session_rec import (  # noqa: E402
+    compute_session_recommendation,
+    compute_tier_history,
 )
 from workout_coach.lib.sessions import (  # noqa: E402
     _is_working_set,
@@ -369,29 +388,86 @@ def _build_week_over_week(today_d: date,
     }
 
 
+class _Args:
+    person: str = ""
+    months: int = 3
+    today: str | None = None
+    include_rows: bool = False
+    include_1rm_history: bool = False
+    include_daily_health: bool = False
+    pretty: bool = False
+
+
+def _parse_args(argv: list[str]) -> _Args:
+    """Hand-rolled parser for the 7 supported flags.
+
+    Replaces argparse to avoid pulling in inspect / shutil / lzma / _lzma /
+    _bz2 / gettext / urllib at cold-start. Semantics match the previous
+    argparse setup: --person required, --months int (default 3), --today
+    optional string, four store-true booleans. Supports --foo=value and
+    --foo value forms. Unknown flag → SystemExit(2) with a usage line.
+    """
+    a = _Args()
+    flag_aliases = {
+        "--include-rows": "include_rows",
+        "--include-1rm-history": "include_1rm_history",
+        "--include-daily-health": "include_daily_health",
+        "--pretty": "pretty",
+    }
+    value_aliases = {
+        "--person": "person",
+        "--months": "months",
+        "--today": "today",
+    }
+
+    def _bail(msg: str) -> None:
+        print(f"read_tracker: error: {msg}", file=sys.stderr)
+        raise SystemExit(2)
+
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok in ("-h", "--help"):
+            print(
+                "usage: read_tracker.py --person NAME [--months N] "
+                "[--today YYYY-MM-DD] [--include-rows] "
+                "[--include-1rm-history] [--include-daily-health] [--pretty]"
+            )
+            raise SystemExit(0)
+        if "=" in tok and tok.startswith("--"):
+            key, _, value = tok.partition("=")
+            consumed = 1
+        else:
+            key = tok
+            value = argv[i + 1] if i + 1 < len(argv) else None
+            consumed = 2 if value is not None else 1
+
+        if key in flag_aliases:
+            setattr(a, flag_aliases[key], True)
+            i += 1
+            continue
+        if key in value_aliases:
+            attr = value_aliases[key]
+            if value is None or (consumed == 2 and value.startswith("--")):
+                _bail(f"argument {key}: expected a value")
+            if attr == "months":
+                try:
+                    setattr(a, attr, int(value))
+                except (TypeError, ValueError):
+                    _bail(f"argument --months: invalid int value: {value!r}")
+            else:
+                setattr(a, attr, value)
+            i += consumed
+            continue
+        _bail(f"unrecognized argument: {tok}")
+
+    if not a.person:
+        _bail("the following arguments are required: --person")
+    return a
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--person", required=True,
-                    help="Tracker owner (<Person> or <OtherPerson>).")
-    ap.add_argument("--months", type=int, default=3,
-                    help="How many months back to load from monthly sheets. The data is used internally for "
-                         "all roll-ups regardless of --include-rows.")
-    ap.add_argument("--today", default=None, help="Override today's date (YYYY-MM-DD) for testing")
-    ap.add_argument("--include-rows", action="store_true",
-                    help="Include the flat `rows` array in the JSON. Off by default — the coach already exposes "
-                         "pre-aggregated `monthly_sessions`, `progression_summary`, `weekly_volume_per_muscle`, "
-                         "and `estimated_1rm`. Pass this only for debug deep-dives.")
-    ap.add_argument("--include-1rm-history", action="store_true",
-                    help="Include the per-exercise `e1rm_history` list (last 3 sessions). Off by default — "
-                         "`current_e1rm_kg`, `slope_kg_per_4w`, `confidence`, and `stalled_sessions` cover the "
-                         "coaching decision; the history is debug-only.")
-    ap.add_argument("--include-daily-health", action="store_true",
-                    help="Include the raw daily `health_metrics_recent` (~30 rows × 13 fields). Off by default — "
-                         "the coach reads weekly aggregates from `health_metrics_weekly` instead.")
-    ap.add_argument("--pretty", action="store_true",
-                    help="Pretty-print the JSON (indent=2). Off by default — compact form saves ~20%% of "
-                         "tokens for the LLM consumer. Use for human inspection.")
-    args = ap.parse_args()
+    args = _parse_args(sys.argv[1:])
 
     today_d = (
         datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()

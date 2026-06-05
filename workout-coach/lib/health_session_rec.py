@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import TYPE_CHECKING
 
-from tracker.contracts import SessionRecommendation, SessionRationaleEntry
+if TYPE_CHECKING:
+    from tracker.contracts import SessionRecommendation, SessionRationaleEntry  # noqa: F401
 from .health_recovery import _z_score_signal, recovery_score
 from .health_windowing import baseline_60d, latest_metric, _mean_or_none, _values_in_window
 from .parsing import _parse_iso_date

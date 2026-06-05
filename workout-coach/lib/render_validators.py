@@ -219,7 +219,10 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
     in_workout = False
     workout_title = ""
     sub_bullet_count = 0
-    known_exercise_names = _workout_exercise_name_set()
+    # Lazy: the exercise name set requires parsing exercises-database.md,
+    # which is wasted work when the markdown has no exercise bullets
+    # (the case for the benchmark fixture and any plain summary doc).
+    known_exercise_names: set[str] | None = None
 
     def flush_workout() -> None:
         if workout_title and sub_bullet_count > WORKOUT_SUB_BULLET_LIMIT:
@@ -267,6 +270,8 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
         if not m:
             continue
         exercise_name = m.group(1).strip()
+        if known_exercise_names is None:
+            known_exercise_names = _workout_exercise_name_set()
         if not _is_known_exercise_name(exercise_name, known_exercise_names):
             errors.append(
                 f"line {lineno}: exercise {exercise_name!r} is not in the "
@@ -281,9 +286,19 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
 # string. Whole-word, case-sensitive (so "Cold" doesn't match "CTL").
 # Each term wraps at most once per string so we don't double-wrap when
 # the user repeats a term.
-_TERM_PATTERN = re.compile(
-    r"\b(" + "|".join(sorted(map(re.escape, KNOWN_TERMS.keys()), key=len, reverse=True)) + r")\b"
-)
+# Pattern is lazy-compiled so a render whose coach_block calls all
+# short-circuit on empty text (the benchmark fixture, plus any run where
+# the LLM omitted card callouts) doesn't pay the alternation-compile.
+_TERM_PATTERN: "re.Pattern[str] | None" = None
+
+
+def _term_pattern() -> "re.Pattern[str]":
+    global _TERM_PATTERN
+    if _TERM_PATTERN is None:
+        _TERM_PATTERN = re.compile(
+            r"\b(" + "|".join(sorted(map(re.escape, KNOWN_TERMS.keys()), key=len, reverse=True)) + r")\b"
+        )
+    return _TERM_PATTERN
 
 
 def auto_wrap_terms(text: str) -> str:
@@ -303,4 +318,4 @@ def auto_wrap_terms(text: str) -> str:
         full, expl = KNOWN_TERMS[t]
         return f'<span class="term" data-tip="{esc(full)}. {esc(expl)}">{esc(t)}</span>'
 
-    return _TERM_PATTERN.sub(_sub, esc(text))
+    return _term_pattern().sub(_sub, esc(text))

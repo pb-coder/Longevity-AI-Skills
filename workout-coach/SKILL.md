@@ -176,6 +176,7 @@ What the JSON contains:
 **Bodyweight:**
 - `bodyweight_latest`: `{date, kg}` or null.
 - `bodyweight_trend_kg_per_week`: slope over the last 8 clean fasted entries, or null. When `nutrition_phase.current` is present, this same field is scoped to entries on or after the phase start date so a bulk/cut is judged inside its own window.
+- `bodyweight_weekly`: ISO-week mean bodyweights for the vitals sparkline. This is a weekly average for visual context, not the phase-status source.
 
 **Longevity Trajectory (Trajectory tab inputs):**
 - `longevity_score`: composite 0-100 score with per-component attribution. Shape: `{score, band, label, n_components, components: [{name, score, weight, contribution}, …], bloodwork_pending: True, note}`. Weights renormalize across present components (mirrors `recovery_score`'s missing-signal handling). `band` is `good` / `amber` / `warn`. **Always flagged `bloodwork_pending: True` until a lab panel is on file** — the score is honest about what it doesn't see.
@@ -466,6 +467,12 @@ If data is too limited to judge (history < 2 entries), say that in one sentence 
 Cross-reference `references/training-science.md` for the numbers. Don't cite §5 to the user. The entries assume morning/empty-stomach (standing convention); the trend function excludes rows whose Notes flag non-fasted context so intra-day variance doesn't distort the slope.
 
 When an open `nutrition_phase` exists, treat `bodyweight_trend_kg_per_week` as phase-scoped. Do not compare it to pre-phase weight loss/gain; use `nutrition_phase.actuals.rate_kg_per_wk_14d` as the primary phase-status signal and the trend line as supporting context.
+
+Keep the bodyweight signals separate in coach copy:
+- `bodyweight_latest` = the newest morning reading.
+- `bodyweight_trend_kg_per_week` = phase-scoped trend when a phase is open.
+- `nutrition_phase.actuals.rate_kg_per_wk_14d` = primary bulk/cut status number.
+- `bodyweight_weekly` / week-over-week averages = noisy context only.
 
 **Data sufficiency thresholds:**
 - Progression trend: minimum 3 sessions with the same exercise over 2+ weeks. Below that, state "not enough data" for that exercise.

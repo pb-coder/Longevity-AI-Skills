@@ -6,6 +6,7 @@ from datetime import date
 
 from tracker.contracts import SessionRecommendation
 from workout_coach.lib.health import compute_session_recommendation
+from workout_coach.lib.health_session_rec import _muscles_over_mrv
 
 
 def recommendation(**overrides):
@@ -69,6 +70,16 @@ class SessionRecommendationTests(unittest.TestCase):
         rec = recommendation(training_load={"tsb": 16})
         self.assertEqual(rec["tier"], "E")
         self.assertEqual(rec["label"], "over_recovered")
+
+    def test_mrv_gate_uses_current_sets_per_week(self) -> None:
+        self.assertEqual(
+            _muscles_over_mrv({
+                "window_days": 28,
+                "current": {"chest": 24.0},
+                "landmarks": {"chest": {"mrv": 22}},
+            }),
+            ["chest"],
+        )
 
 
 if __name__ == "__main__":

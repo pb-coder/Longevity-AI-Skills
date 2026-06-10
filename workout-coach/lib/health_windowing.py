@@ -8,7 +8,7 @@ from .parsing import _parse_iso_date
 
 
 def _values_in_window(entries: list[dict], key: str, today_d: date, days: int) -> list[float]:
-    cutoff = today_d - timedelta(days=days)
+    cutoff = today_d - timedelta(days=max(days - 1, 0))
     out = []
     for e in entries:
         v = e.get(key)
@@ -17,7 +17,7 @@ def _values_in_window(entries: list[dict], key: str, today_d: date, days: int) -
         d = _parse_iso_date(e.get("date"))
         if d is None:
             continue
-        if d < cutoff:
+        if d < cutoff or d > today_d:
             continue
         out.append(float(v))
     return out
@@ -65,10 +65,13 @@ def metric_trend_per_4w(entries: list[dict], key: str) -> float | None:
     return round((num / den) * 28.0, 2)
 
 
-def latest_metric(entries: list[dict], key: str) -> dict | None:
-    """Most recent (date, value) pair for ``key``, or None if absent."""
+def latest_metric(entries: list[dict], key: str, today_d: date | None = None) -> dict | None:
+    """Most recent (date, value) pair for ``key`` at or before ``today_d``."""
     for e in reversed(entries):
         v = e.get(key)
+        d = _parse_iso_date(e.get("date"))
+        if today_d is not None and d is not None and d > today_d:
+            continue
         if v is not None:
             return {"date": e["date"], "value": round(float(v), 2)}
     return None
@@ -80,13 +83,13 @@ def baseline_60d(entries: list[dict], key: str, today_d: date) -> float | None:
 
 
 def workout_sessions_in_window(sessions: list[dict], today_d: date, days: int) -> list[dict]:
-    cutoff = today_d - timedelta(days=days)
+    cutoff = today_d - timedelta(days=max(days - 1, 0))
     out = []
     for s in sessions:
         d = _parse_iso_date(s.get("date"))
         if d is None:
             continue
-        if d < cutoff:
+        if d < cutoff or d > today_d:
             continue
         # Filter out incidental walks — those aren't training.
         # Post-2026-05 schema: typed ``incidental`` flag; legacy rows
@@ -117,7 +120,7 @@ def health_metrics_weekly(health_all: list[dict],
     """
     if not health_all:
         return []
-    cutoff = today_d - timedelta(days=weeks * 7)
+    cutoff = today_d - timedelta(days=max(weeks * 7 - 1, 0))
     keys = [
         "vo2max", "resting_hr", "hrv_sdnn", "walking_hr",
         "hr_recovery_1min", "sleep_total_h", "sleep_deep_h", "sleep_rem_h",
@@ -129,7 +132,7 @@ def health_metrics_weekly(health_all: list[dict],
         d = _parse_iso_date(e.get("date"))
         if d is None:
             continue
-        if d < cutoff:
+        if d < cutoff or d > today_d:
             continue
         iso = d.isocalendar()
         wk = (iso.year, iso.week)
@@ -154,4 +157,3 @@ def health_metrics_weekly(health_all: list[dict],
             entry[k] = round(sum(vals) / len(vals), 2)
         out.append(entry)
     return out
-

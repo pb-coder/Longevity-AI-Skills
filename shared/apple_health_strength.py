@@ -28,9 +28,12 @@ def cluster_strength_sessions(workout_rows: list[dict]) -> tuple[list[dict], lis
     for d in sorted(by_date.keys()):
         decorated: list[tuple] = []
         for w in by_date[d]:
-            t = w.get("start") or "00:00"
+            t = str(w.get("start") or "00:00:00")
             try:
-                dt_w = datetime.strptime(f"{d} {t}", "%Y-%m-%d %H:%M")
+                if len(t.split(":")) == 2:
+                    dt_w = datetime.strptime(f"{d} {t}", "%Y-%m-%d %H:%M")
+                else:
+                    dt_w = datetime.strptime(f"{d} {t[:8]}", "%Y-%m-%d %H:%M:%S")
             except ValueError:
                 dt_w = datetime.strptime(d, "%Y-%m-%d")
             decorated.append((dt_w, w))

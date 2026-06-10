@@ -99,7 +99,7 @@ def monthly_csv(person: str, year_month: str) -> Path:
     """Path to the per-month workout CSV (``YYYY.MM.csv``).
 
     ``year_month`` is the same ``YYYY.MM`` key the xlsx-era code used as
-    sheet name. The CSV uses the canonical 17-column monthly schema
+    sheet name. The CSV uses the canonical 18-column monthly schema
     (Laps column retired 2026-05); rows are sorted ASC by
     (Date, num, set), with a TOTAL row appended at each strength
     session boundary.

@@ -1,6 +1,7 @@
 """Shared CSV-store primitives used by the focused store modules."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable, Iterable
 
 from tracker.csv_table import (
@@ -66,14 +67,21 @@ def _read_periodic_records(path: Path,
     header, rows = _read_csv_rows(path)
     if not header:
         return []
+    index_by_header = {name: idx for idx, name in enumerate(header)}
+    field_to_idx: dict[str, int | None] = {}
+    for schema_idx, key in enumerate(fields, start=1):
+        header_name = headers[schema_idx]
+        field_to_idx[key] = index_by_header.get(header_name)
+    notes_idx = index_by_header.get(headers[-1]) if include_notes else None
     out: list[dict] = []
     for row in rows:
         d = _date_str(row[0]) if row else None
         if d is None:
             continue
         rec: dict = {"date": d}
-        for i, key in enumerate(fields, start=1):
-            v = row[i] if len(row) > i else None
+        for key in fields:
+            i = field_to_idx.get(key)
+            v = row[i] if i is not None and len(row) > i else None
             if key in field_parsers:
                 rec[key] = field_parsers[key](v)
             elif key in string_fields:
@@ -81,8 +89,7 @@ def _read_periodic_records(path: Path,
             else:
                 rec[key] = _parse_value(v)
         if include_notes:
-            notes_idx = len(headers) - 1
-            notes = row[notes_idx] if len(row) > notes_idx else None
+            notes = row[notes_idx] if notes_idx is not None and len(row) > notes_idx else None
             rec["notes"] = notes if notes else None
         out.append(rec)
     return out

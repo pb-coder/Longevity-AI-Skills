@@ -549,7 +549,7 @@ def main() -> int:
         rest_hr = 60.0
 
     recovery = recovery_score(health_all, today_d, capabilities)
-    trimps = trimp_per_session(monthly_sessions, max_hr, rest_hr)
+    trimps = trimp_per_session(monthly_sessions, max_hr, rest_hr, sex=profile.get("sex"))
     training_load = training_load_summary(trimps, today_d)
     # Fold TRIMP load_band, intensity_pct, and the cardio session's
     # HR-zone label back onto each monthly_session for the LLM. The zone

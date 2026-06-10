@@ -103,28 +103,28 @@ def load_chart_svg(series, w=900, h=220):
      data-series='{series_json}' data-left="{left}" data-right="{right}">
   <defs>
     <linearGradient id="tsbband" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ff9f0a" stop-opacity="0.16"/>
-      <stop offset="100%" stop-color="#34c759" stop-opacity="0.10"/>
+      <stop offset="0%" stop-color="var(--amber)" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="var(--good)" stop-opacity="0.10"/>
     </linearGradient>
   </defs>
   <rect class="hit" x="{left}" y="14" width="{right-left}" height="{bottom-14}"
         fill="transparent"/>
   <line x1="{left}" y1="{zero_y:.1f}" x2="{right}" y2="{zero_y:.1f}"
-        stroke="#e4e4e6" stroke-width="1" stroke-dasharray="2,3"/>
+        stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="2,3"/>
   <polygon points="{band_top} {band_bot}" fill="url(#tsbband)"/>
-  <polyline points="{atl_pts}" fill="none" stroke="#ff9f0a"
+  <polyline points="{atl_pts}" fill="none" stroke="var(--amber)"
             stroke-width="1.5" stroke-dasharray="4,3"/>
-  <polyline points="{ctl_pts}" fill="none" stroke="#0a84ff" stroke-width="1.75"/>
+  <polyline points="{ctl_pts}" fill="none" stroke="var(--accent)" stroke-width="1.75"/>
   <g class="scrubber" style="display:none;">
-    <line class="scrub-line" y1="14" y2="{bottom}" stroke="#1c1c1e" stroke-width="1" stroke-dasharray="2,3"/>
-    <circle class="scrub-ctl" r="3.5" fill="#0a84ff"/>
-    <circle class="scrub-atl" r="3.5" fill="#ff9f0a"/>
+    <line class="scrub-line" y1="14" y2="{bottom}" stroke="var(--text)" stroke-width="1" stroke-dasharray="2,3"/>
+    <circle class="scrub-ctl" r="3.5" fill="var(--accent)"/>
+    <circle class="scrub-atl" r="3.5" fill="var(--amber)"/>
   </g>
-  <text x="{left}" y="{h-8}" font-size="11" fill="#6b6b6f">{first}</text>
-  <text x="{(left+right)/2:.0f}" y="{h-8}" font-size="11" fill="#6b6b6f" text-anchor="middle">{mid}</text>
-  <text x="{right}" y="{h-8}" font-size="11" fill="#6b6b6f" text-anchor="end">{last}</text>
-  <text x="{left-4}" y="20" font-size="10" fill="#6b6b6f" text-anchor="end">{vmax:.0f}</text>
-  <text x="{left-4}" y="{zero_y+4:.0f}" font-size="10" fill="#6b6b6f" text-anchor="end">0</text>
+  <text x="{left}" y="{h-8}" font-size="11" fill="var(--muted)">{first}</text>
+  <text x="{(left+right)/2:.0f}" y="{h-8}" font-size="11" fill="var(--muted)" text-anchor="middle">{mid}</text>
+  <text x="{right}" y="{h-8}" font-size="11" fill="var(--muted)" text-anchor="end">{last}</text>
+  <text x="{left-4}" y="20" font-size="10" fill="var(--muted)" text-anchor="end">{vmax:.0f}</text>
+  <text x="{left-4}" y="{zero_y+4:.0f}" font-size="10" fill="var(--muted)" text-anchor="end">0</text>
 </svg>
 <div class="load-tooltip" style="display:none;">
   <div class="lt-date"></div>

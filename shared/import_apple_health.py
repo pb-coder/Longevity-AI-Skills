@@ -104,6 +104,29 @@ DISTANCE_UNIT_TO_KM = {
     "yd":  0.0009144,
     "ft":  0.0003048,
 }
+ENERGY_UNIT_TO_KCAL = {
+    "kcal": 1.0,
+    "cal": 0.001,
+    "kj": 0.239005736,
+    "j": 0.000239005736,
+}
+TEMP_UNIT_TO_C = {
+    "degc": lambda v: v,
+    "c": lambda v: v,
+    "degf": lambda v: (v - 32.0) * 5.0 / 9.0,
+    "f": lambda v: (v - 32.0) * 5.0 / 9.0,
+}
+
+
+def _convert_unit(value: float | None, unit: str | None, converters: dict, label: str) -> float | None:
+    if value is None:
+        return None
+    key = (unit or "").strip().lower()
+    conv = converters.get(key)
+    if conv is None:
+        print(f"WARN: unknown {label} unit {key!r}; value skipped", file=sys.stderr)
+        return None
+    return conv(value) if callable(conv) else value * conv
 
 # Marker that the device attribute came from a fitness machine via GymKit
 # (Matrix treadmill, Technogym bike, etc.). Apple wraps these in a
@@ -224,15 +247,15 @@ def extract_workout(elem, since_date):
             max_hr = to_float(a.get("maximum"))
             min_hr = to_float(a.get("minimum"))
         elif ctype == ACTIVE_ENERGY_TYPE:
-            active_cal = to_float(a.get("sum"))
+            active_cal = _convert_unit(to_float(a.get("sum")), a.get("unit") or "kcal", ENERGY_UNIT_TO_KCAL, "energy")
         elif ctype == BASAL_ENERGY_TYPE:
-            basal_cal = to_float(a.get("sum"))
+            basal_cal = _convert_unit(to_float(a.get("sum")), a.get("unit") or "kcal", ENERGY_UNIT_TO_KCAL, "energy")
         elif ctype == SWIM_STROKE_COUNT_TYPE:
             v = to_float(a.get("sum"))
             if v is not None:
                 stroke_count_total = int(round(v))
         elif ctype == WATER_TEMP_TYPE:
-            water_temp_c = to_float(a.get("average"))
+            water_temp_c = _convert_unit(to_float(a.get("average")), a.get("unit") or "degC", TEMP_UNIT_TO_C, "temperature")
         elif ctype in (DISTANCE_WR_TYPE, DISTANCE_CYCLE_TYPE, DISTANCE_SWIM_TYPE):
             # Use whichever distance type matches the activity (Apple
             # records the right one per workout). If multiple, the last
@@ -718,7 +741,11 @@ def main():
     if strength_warnings:
         out_lines.append("Strength clustering warnings:")
         out_lines.extend(strength_warnings)
-    out_lines.extend(upsert_monthly_strength_session(person, strength_sessions))
+    out_lines.extend(upsert_monthly_strength_session(
+        person,
+        strength_sessions,
+        allow_past_months=args.allow_past_months,
+    ))
 
     # Archive the source export on success into <root>/.processed/.
     # Keeps a forensic trail in case a downstream bug damages the CSVs;

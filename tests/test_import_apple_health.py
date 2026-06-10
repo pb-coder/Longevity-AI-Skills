@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from datetime import datetime
 
+from shared.apple_health_core import parse_apple_dt
+from shared.apple_health_strength import cluster_strength_sessions
 from shared import import_apple_health as iah
 
 
@@ -62,6 +64,34 @@ class AppleHealthImportTests(unittest.TestCase):
         self.assertEqual(len(notes), 1)
         self.assertIn("nearby swims kept separate", notes[0])
         self.assertIn("08:07 and 08:19", notes[0])
+
+    def test_strength_clusterer_respects_seconds_and_90_min_window(self) -> None:
+        sessions, warnings = cluster_strength_sessions([
+            {
+                "date": "2026-05-01",
+                "start": "08:00:30",
+                "apple_type": "TraditionalStrengthTraining",
+                "duration_min": 30,
+            },
+            {
+                "date": "2026-05-01",
+                "start": "12:00:30",
+                "apple_type": "TraditionalStrengthTraining",
+                "duration_min": 20,
+            },
+        ])
+
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]["duration_min"], 30)
+        self.assertEqual(len(warnings), 1)
+
+    def test_parse_apple_dt_keeps_offset_for_dst_duration_math(self) -> None:
+        d1, start = parse_apple_dt("2026-10-25 02:50:00 +0200")
+        d2, end = parse_apple_dt("2026-10-25 02:10:00 +0100")
+
+        self.assertEqual(d1, "2026-10-25")
+        self.assertEqual(d2, "2026-10-25")
+        self.assertEqual((end - start).total_seconds() / 60, 20)
 
 
 if __name__ == "__main__":

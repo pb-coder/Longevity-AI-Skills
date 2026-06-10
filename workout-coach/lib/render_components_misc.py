@@ -18,7 +18,7 @@ def ring(actual, target, label, sub):
     return f'''
 <div class="ring-wrap">
   <svg class="ring" viewBox="0 0 36 36">
-    <circle cx="18" cy="18" r="16" fill="none" stroke="#eef0f3" stroke-width="3"></circle>
+    <circle cx="18" cy="18" r="16" fill="none" stroke="var(--track-bg)" stroke-width="3"></circle>
     <circle cx="18" cy="18" r="16" fill="none"
             stroke="{color}" stroke-width="3"
             stroke-dasharray="{dash:.1f} 100.5"

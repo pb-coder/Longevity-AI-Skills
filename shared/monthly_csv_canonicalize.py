@@ -99,8 +99,15 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
 
 def _build_total_row(session_num: int, sess: dict, hoist: dict,
                      volume_sum: float | None,
-                     deload_present: bool) -> dict:
+                     deload_present: bool,
+                     total_notes: str | None = None) -> dict:
     """Build the canonical TOTAL row dict for a strength session."""
+    notes = total_notes
+    if deload_present:
+        notes = (
+            f"{DELOAD_MARKER_TEXT}; {notes}"
+            if notes else DELOAD_MARKER_TEXT
+        )
     return {
         "session":     session_num,
         "date":        sess["date"],
@@ -110,7 +117,7 @@ def _build_total_row(session_num: int, sess: dict, hoist: dict,
         "reps":        None,
         "kg":          None,
         "volume":      round(volume_sum, 2) if volume_sum else None,
-        "notes":       DELOAD_MARKER_TEXT if deload_present else None,
+        "notes":       notes,
         "distance":    None,
         "duration":    hoist.get("duration"),
         "pace":        None,
@@ -213,7 +220,7 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
             "elevation_m": _numeric_cell(total_meta.get("elevation_m")),
             "elapsed":     total_meta.get("elapsed"),
         }
-        deload_present, _ = _extract_deload_marker(total_meta.get("notes"))
+        deload_present, total_notes = _extract_deload_marker(total_meta.get("notes"))
 
         # Hoist from data rows where the TOTAL row didn't already carry
         # the value (legacy rows had warmup-row session metadata).
@@ -227,8 +234,11 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
                     continue
                 if _is_isometric_hold(rd):
                     continue
+                reps = _numeric_cell(rd.get("reps"))
+                kg = _numeric_cell(rd.get("kg"))
                 if hoist["duration"] in (None, "") and rd.get("duration") not in (None, ""):
-                    hoist["duration"] = rd["duration"]
+                    if reps in (None, 0, "") and kg in (None, 0, ""):
+                        hoist["duration"] = rd["duration"]
                 if hoist["avg_hr"] in (None, "") and rd.get("avg_hr") not in (None, ""):
                     hoist["avg_hr"] = _numeric_cell(rd["avg_hr"])
                 if hoist["active_cal"] in (None, "") and rd.get("active_cal") not in (None, ""):
@@ -284,6 +294,7 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
                 session_num, sess, hoist,
                 volume_sum if volume_sum else None,
                 deload_present,
+                total_notes,
             )
             out_rows.append(_dict_to_row(total_row))
             for data_row in cardio_built:

@@ -47,6 +47,25 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(row["sleep_deep_h"], 1.2)
         self.assertEqual(row["wrist_temp_c"], 36.1)
 
+    def test_profile_roundtrips_targets_and_unknown_keys(self) -> None:
+        csv_store.write_profile(
+            "Test",
+            light_therapy_target_per_week=3,
+            light_therapy_target_min_per_session=12,
+            sauna_target_per_week=4,
+        )
+        path = person_paths.profile_csv("Test")
+        with path.open("a", encoding="utf-8", newline="") as f:
+            f.write("custom_key,custom_value\n")
+
+        profile = csv_store.read_profile("Test")
+        self.assertEqual(profile["light_therapy_target_per_week"], 3)
+        self.assertEqual(profile["light_therapy_target_min_per_session"], 12)
+        self.assertEqual(profile["sauna_target_per_week"], 4)
+
+        csv_store.write_profile("Test", auto_cardio=False)
+        self.assertIn("custom_key,custom_value", path.read_text(encoding="utf-8"))
+
     def test_sleep_efficiency_and_notes_are_manual_wins(self) -> None:
         csv_store.upsert_sleep_nights(
             "Test",

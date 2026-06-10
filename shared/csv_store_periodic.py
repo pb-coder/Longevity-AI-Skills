@@ -532,15 +532,11 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
         heat_total = _sum_round_durations(durations) if durations else (
             _parse_value(e.get("heat_total_min"))
         )
-        heat_temp = e.get("heat_temp_c")
-        if heat_temp is None and ht is not None and ht != "none":
-            heat_temp = HEAT_TYPE_DEFAULT_TEMP_C.get(ht)
-
         return {
             "date": e["date"],
             "start": e.get("start") or "",
             "heat_type": ht,
-            "heat_temp_c": heat_temp,
+            "heat_temp_c": e.get("heat_temp_c"),
             "heat_rounds": (
                 e.get("heat_rounds")
                 if e.get("heat_rounds") is not None
@@ -555,6 +551,10 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
         }
 
     def _derive_thermal(rec: dict, _entry: dict | None) -> None:
+        if rec.get("heat_temp_c") is None:
+            ht = rec.get("heat_type")
+            if ht is not None and ht != "none":
+                rec["heat_temp_c"] = HEAT_TYPE_DEFAULT_TEMP_C.get(ht)
         derived = _sum_round_durations(rec.get("heat_round_durations_min"))
         if derived is not None:
             rec["heat_total_min"] = derived

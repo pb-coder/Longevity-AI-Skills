@@ -46,7 +46,29 @@ def upsert_rows(person: str, year_month: str, rows: list[dict]) -> None:
     # Read-existing-or-empty, then append.
     header, existing = _read_csv_rows(path)
     out = list(existing)
+    seen = set()
+    for raw in existing:
+        rd = _row_to_dict(raw)
+        seen.add((
+            date_str(rd.get("date")),
+            str(rd.get("num") or ""),
+            str(rd.get("exercise") or "").strip().lower(),
+            str(rd.get("set") or ""),
+            str(rd.get("reps") or ""),
+            str(rd.get("kg") or ""),
+        ))
     for r in rows:
+        key = (
+            date_str(r.get("date")),
+            str(r.get("num") or ""),
+            str(r.get("exercise") or "").strip().lower(),
+            str(r.get("set") or ""),
+            str(r.get("reps") or ""),
+            str(r.get("kg") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
         out.append(_dict_to_row(r))
     _write_csv_atomic(path, out)
     canonicalize_monthly_csv(person, year_month)
@@ -152,7 +174,7 @@ def upsert_monthly_cardio(person: str,
             existing_dicts.append(rd)
 
         # Build dedupe index: (date, exercise.lower) → list of
-        # (idx_in_existing_dicts, duration_min, is_auto).
+        # (idx_in_existing_dicts, duration_min, start, is_auto).
         existing_index: dict[tuple, list[tuple]] = {}
         for idx, rd in enumerate(existing_dicts):
             ex_v = rd.get("exercise")
@@ -166,8 +188,9 @@ def upsert_monthly_cardio(person: str,
                 continue
             dur_f = _parse_duration_minutes(rd.get("duration"))
             is_auto = _is_auto_imported(rd)
+            start_v = rd.get("elapsed") or rd.get("start") or ""
             existing_index.setdefault((date_v, ex_str.lower()), []).append(
-                (idx, dur_f, is_auto)
+                (idx, dur_f, str(start_v), is_auto)
             )
 
         appended = 0
@@ -187,22 +210,25 @@ def upsert_monthly_cardio(person: str,
             try:
                 dur_f = float(dur) if dur is not None else None
             except (TypeError, ValueError):
-                dur_f = None
+                    dur_f = None
+            start_v = str(r.get("start") or r.get("workout_start") or "")
 
             matches = existing_index.get((d, ex_lower), [])
             has_manual_match = any(
                 (not is_auto) and (idx not in claimed_rows)
-                for idx, _dur, is_auto in matches
+                for idx, _dur, _start, is_auto in matches
             )
             matched_auto_idx = None
             if not has_manual_match:
                 best = None
                 best_diff = None
-                for idx, existing_dur, is_auto in matches:
+                for idx, existing_dur, existing_start, is_auto in matches:
                     if not is_auto or idx in claimed_rows:
                         continue
+                    if start_v and existing_start and start_v != existing_start:
+                        continue
                     if existing_dur is None or dur_f is None:
-                        diff = 0.0
+                        diff = CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN + 0.001
                     else:
                         diff = abs(existing_dur - dur_f)
                         if diff > CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN:
@@ -235,8 +261,10 @@ def upsert_monthly_cardio(person: str,
                         cur[key] = new_val
                         row_changed = True
                     elif _strength_metadata_drifts(existing_val, new_val):
-                        cur[key] = new_val
-                        row_changed = True
+                        # Existing auto rows may have been manually corrected.
+                        # Match the strength TOTAL policy: keep and report via
+                        # no-op rather than silently reverting the cell.
+                        continue
                 if row_changed:
                     refreshed += 1
                 else:
@@ -289,7 +317,7 @@ def upsert_monthly_cardio(person: str,
             # Track the new row in the dedupe index too so two near-duration
             # Apple workouts in the same input batch don't both land.
             existing_index.setdefault((d, ex_lower), []).append(
-                (len(existing_dicts) + len(new_rows_to_append) - 1, dur_f, True)
+                (len(existing_dicts) + len(new_rows_to_append) - 1, dur_f, start_v, True)
             )
             appended += 1
 

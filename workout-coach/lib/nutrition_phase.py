@@ -115,6 +115,39 @@ def recent_phase_rate_kg_per_wk(bodyweight_series: list[dict],
     return round(rate_per_day * 7.0, 3)
 
 
+def _consecutive_rate_breaches(bodyweight_series: list[dict],
+                               start_d: date,
+                               today_d: date,
+                               *,
+                               threshold: float,
+                               direction: str,
+                               windows: int = 3) -> int:
+    """Count trailing weekly windows breaching a gain/loss threshold."""
+    count = 0
+    for offset in range(windows):
+        end = today_d - timedelta(days=offset * 7)
+        begin = max(start_d, end - timedelta(days=6))
+        points = []
+        for entry in bodyweight_series:
+            d = _parse_iso_date(entry.get("date"))
+            kg = entry.get("kg")
+            if d is None or kg is None or d < begin or d > end:
+                continue
+            points.append((d, float(kg)))
+        if len(points) < 2:
+            break
+        points.sort()
+        span = (points[-1][0] - points[0][0]).days
+        if span < 3:
+            break
+        rate = (points[-1][1] - points[0][1]) / span * 7.0
+        breached = rate >= threshold if direction == "above" else rate <= threshold
+        if not breached:
+            break
+        count += 1
+    return count
+
+
 def _phase_target_rate(phase: dict) -> float | None:
     """Resolve the target rate for a phase, falling back to type defaults."""
     explicit = phase.get("target_rate_kg_per_wk")
@@ -182,17 +215,19 @@ def _detect_stop_signals(phase_type: str | None,
                          status: str,
                          weeks_in_phase: float,
                          observed: float | None,
-                         estimated_1rm: dict | None) -> list[str]:
+                         estimated_1rm: dict | None,
+                         consecutive_rate_breaches: int = 0) -> list[str]:
     """Compose the list of pre-committed stop-condition triggers that
     currently match. The conditions mirror the bulking-science doc so a
     triggered signal can be quoted verbatim in the coach callout.
     """
     triggered: list[str] = []
     if phase_type == "bulk":
-        if status == "too_fast":
+        if status == "too_fast" and consecutive_rate_breaches >= 3:
             triggered.append(
                 f"observed rate {observed:+.2f} kg/wk exceeds the 0.5 kg/wk "
-                "fat-partitioning threshold (cite bulking-science.md)"
+                "fat-partitioning threshold for 3 consecutive weekly windows "
+                "(cite bulking-science.md)"
             )
         # Lifts stalled 2+ weeks: count exercises with stalled_sessions >= 2.
         if estimated_1rm:
@@ -207,10 +242,11 @@ def _detect_stop_signals(phase_type: str | None,
                     "be driving hypertrophy"
                 )
     elif phase_type == "cut":
-        if status == "too_fast":
+        if status == "too_fast" and consecutive_rate_breaches >= 2:
             triggered.append(
                 f"observed rate {observed:+.2f} kg/wk exceeds the -1 kg/wk "
-                "lean-tissue-loss threshold (cite bulking-science.md)"
+                "lean-tissue-loss threshold for consecutive weekly windows "
+                "(cite bulking-science.md)"
             )
     return triggered
 
@@ -285,8 +321,24 @@ def nutrition_phase_summary(phases: list[dict],
         ratio = round(observed / target_rate, 2)
 
     status = _classify_status(open_phase.get("phase_type"), observed, target_rate)
+    phase_type = open_phase.get("phase_type")
+    if phase_type == "bulk":
+        consecutive_rate_breaches = _consecutive_rate_breaches(
+            bodyweight_series, start_d, today_d,
+            threshold=_BULK_TOO_FAST_KG_PER_WK,
+            direction="above",
+        )
+    elif phase_type == "cut":
+        consecutive_rate_breaches = _consecutive_rate_breaches(
+            bodyweight_series, start_d, today_d,
+            threshold=_CUT_TOO_FAST_KG_PER_WK,
+            direction="below",
+        )
+    else:
+        consecutive_rate_breaches = 0
     triggered = _detect_stop_signals(
-        open_phase.get("phase_type"), status, weeks, observed, estimated_1rm,
+        phase_type, status, weeks, observed, estimated_1rm,
+        consecutive_rate_breaches=consecutive_rate_breaches,
     )
     hint = _coach_action_hint(status, triggered, weeks)
 
@@ -328,6 +380,7 @@ def nutrition_phase_summary(phases: list[dict],
         "actuals": {
             "rate_kg_per_wk_14d":   observed,
             "rate_vs_target_ratio": ratio,
+            "consecutive_rate_breach_weeks": consecutive_rate_breaches,
         },
         "status":                  status,
         "stop_signals_triggered":  triggered,  # always a list (possibly empty)

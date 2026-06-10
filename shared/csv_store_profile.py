@@ -6,6 +6,7 @@ from functools import lru_cache
 
 from .csv_store_common import _date_str, _serialize_value
 from .person_paths import ensure_data_dir, profile_csv
+from tracker.csv_table import write_csv_atomic
 
 __all__ = [
     "PROFILE_KEYS",
@@ -20,6 +21,7 @@ PROFILE_KEYS = (
     "source", "auto_cardio", "birthday", "sex",
     "swim_css_sec_per_100m", "swim_css_set_at", "swim_pool_length_default",
     "light_therapy_target_per_week", "light_therapy_target_min_per_session",
+    "sauna_target_per_week",
 )
 PROFILE_DEFAULTS = {
     "source":                              None,
@@ -31,6 +33,7 @@ PROFILE_DEFAULTS = {
     "swim_pool_length_default":            None,
     "light_therapy_target_per_week":       None,
     "light_therapy_target_min_per_session": None,
+    "sauna_target_per_week":               None,
 }
 
 
@@ -100,6 +103,7 @@ def _read_profile_cached(person: str) -> dict:
     ``_read_profile_cached.cache_clear()`` to invalidate.
     """
     out = dict(PROFILE_DEFAULTS)
+    out["_unknown_rows"] = []
     path = profile_csv(person)
     if not path.exists():
         return out
@@ -155,12 +159,28 @@ def _read_profile_cached(person: str) -> dict:
                 i = _coerce_int(v)
                 if i is not None:
                     out["swim_pool_length_default"] = i
+            elif k == "light_therapy_target_per_week":
+                i = _coerce_int(v)
+                if i is not None:
+                    out["light_therapy_target_per_week"] = i
+            elif k == "light_therapy_target_min_per_session":
+                i = _coerce_int(v)
+                if i is not None:
+                    out["light_therapy_target_min_per_session"] = i
+            elif k == "sauna_target_per_week":
+                i = _coerce_int(v)
+                if i is not None:
+                    out["sauna_target_per_week"] = i
+            else:
+                out["_unknown_rows"].append([row[0], v])
     return out
 
 
 def read_profile(person: str) -> dict:
     """Return the per-person profile dict (fresh shallow copy)."""
-    return dict(_read_profile_cached(person))
+    out = dict(_read_profile_cached(person))
+    out.pop("_unknown_rows", None)
+    return out
 
 
 def write_profile(person: str, **updates) -> None:
@@ -170,7 +190,9 @@ def write_profile(person: str, **updates) -> None:
     ``true``/``false`` strings so the file stays diffable.
     """
     ensure_data_dir(person)
-    current = read_profile(person)
+    cached = dict(_read_profile_cached(person))
+    unknown_rows = list(cached.pop("_unknown_rows", []))
+    current = dict(cached)
     for k, v in updates.items():
         norm = k.strip().lower()
         if norm not in PROFILE_KEYS:
@@ -178,12 +200,15 @@ def write_profile(person: str, **updates) -> None:
         current[norm] = v
 
     path = profile_csv(person)
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["key", "value"])
-        for key in PROFILE_KEYS:
-            v = current.get(key)
-            writer.writerow([key, _serialize_value(v)])
+    rows = []
+    for key in PROFILE_KEYS:
+        v = current.get(key)
+        rows.append([key, _serialize_value(v)])
+    known = set(PROFILE_KEYS)
+    for row in unknown_rows:
+        if row and str(row[0]).strip().lower() not in known:
+            rows.append(row)
+    write_csv_atomic(path, ["key", "value"], rows)
     _read_profile_cached.cache_clear()
 
 

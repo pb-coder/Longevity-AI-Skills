@@ -35,6 +35,28 @@ SLEEP_UNSPEC_VALUE = "HKCategoryValueSleepAnalysisAsleepUnspecified"
 SLEEP_AWAKE_VALUE = "HKCategoryValueSleepAnalysisAwake"
 SLEEP_IN_BED_VALUE = "HKCategoryValueSleepAnalysisInBed"
 
+MASS_UNIT_TO_KG = {
+    "kg": lambda v: v,
+    "lb": lambda v: v * 0.45359237,
+    "lbs": lambda v: v * 0.45359237,
+    "st": lambda v: v * 6.35029318,
+}
+TEMP_UNIT_TO_C = {
+    "degc": lambda v: v,
+    "c": lambda v: v,
+    "degf": lambda v: (v - 32.0) * 5.0 / 9.0,
+    "f": lambda v: (v - 32.0) * 5.0 / 9.0,
+}
+
+
+def _convert_unit(value: float | None, unit: str | None, converters: dict) -> float | None:
+    if value is None:
+        return None
+    conv = converters.get((unit or "").strip().lower())
+    if conv is None:
+        return None
+    return conv(value)
+
 
 class DayAggregator:
     """Collect per-day metric values during the streaming XML pass."""
@@ -88,7 +110,7 @@ class DayAggregator:
             handler(attrib, d_start, dt_start)
 
     def _h_bodyweight(self, attrib, d, dt):
-        v = to_float(attrib.get("value"))
+        v = _convert_unit(to_float(attrib.get("value")), attrib.get("unit") or "kg", MASS_UNIT_TO_KG)
         if v is not None:
             self._set_latest(self.bodyweight_kg, d, dt, v)
 
@@ -125,7 +147,7 @@ class DayAggregator:
             self.resp_rate_acc[d][1] += 1
 
     def _h_wrist_temp(self, attrib, d, dt):
-        v = to_float(attrib.get("value"))
+        v = _convert_unit(to_float(attrib.get("value")), attrib.get("unit") or "degC", TEMP_UNIT_TO_C)
         if v is None:
             return
         d_end, dt_end = parse_apple_dt(attrib.get("endDate"))

@@ -90,6 +90,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -110,9 +111,13 @@ from shared.csv_store import (  # noqa: E402
 )
 from shared.person_paths import monthly_csv as monthly_csv_path  # noqa: E402
 
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 
 def sheet_for_date(date_str: str) -> str:
     """'2026-04-20' -> '2026.04'."""
+    if not ISO_DATE_RE.match(str(date_str or "")):
+        raise ValueError(f"date must be YYYY-MM-DD: {date_str!r}")
     y, m, _ = date_str.split("-")
     return f"{y}.{m}"
 
@@ -317,7 +322,10 @@ def upsert_thermal(person: str, entries: list[dict]) -> list[str]:
                 t = e["heat_total_min"]
                 bits.append(f"{e['heat_type']} {int(t) if float(t).is_integer() else t}min")
             if e.get("heat_temp_c") is not None:
-                bits[-1] += f"@{e['heat_temp_c']}C"
+                if bits:
+                    bits[-1] += f"@{e['heat_temp_c']}C"
+                else:
+                    bits.append(f"{e['heat_type']} @{e['heat_temp_c']}C")
         if e.get("cold_type") and e.get("cold_type") != "none":
             seg = e["cold_type"].replace("cold_", "")
             if e.get("cold_duration_sec") is not None:
@@ -464,7 +472,7 @@ def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
     if not metric_entries:
         return []
     upsert_health_metrics(person, metric_entries)
-    summary = ", ".join(f"{e['date']}={e['kg']}kg" for e in entries)
+    summary = ", ".join(f"{e['date']}={e['bodyweight_kg']}kg" for e in metric_entries)
     return [f"Bodyweight: mirrored to Health Metrics ({summary})"]
 
 
@@ -568,12 +576,20 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
     else:
         raise ValueError("payload must be a list of rows or a dict wrapper")
 
+    def require_date(e: dict, label: str, key: str = "date") -> None:
+        if key not in e:
+            raise ValueError(f"{label} entry missing {key}: {e!r}")
+        if not ISO_DATE_RE.match(str(e.get(key) or "")):
+            raise ValueError(f"{label} {key} must be YYYY-MM-DD: {e!r}")
+
     for r in rows:
         if "date" not in r or "exercise" not in r or "set" not in r or "num" not in r:
             raise ValueError(f"row missing required field: {r!r}")
+        require_date(r, "row")
     for e in bw:
         if "date" not in e or "kg" not in e:
             raise ValueError(f"bodyweight entry missing date/kg: {e!r}")
+        require_date(e, "bodyweight")
     if css_test is not None:
         if not isinstance(css_test, dict):
             raise ValueError(f"css_test must be a dict: {css_test!r}")
@@ -582,17 +598,15 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
                 f"css_test missing t400_sec / t200_sec: {css_test!r}"
             )
     for e in sleep_entries:
-        if "date" not in e:
-            raise ValueError(f"sleep entry missing date: {e!r}")
+        require_date(e, "sleep")
     for e in thermal_entries:
-        if "date" not in e:
-            raise ValueError(f"thermal entry missing date: {e!r}")
+        require_date(e, "thermal")
     for e in light_therapy_entries:
-        if "date" not in e:
-            raise ValueError(f"light_therapy entry missing date: {e!r}")
+        require_date(e, "light_therapy")
     for e in nutrition_phase_entries:
         if "start_date" not in e:
             raise ValueError(f"nutrition_phase entry missing start_date: {e!r}")
+        require_date(e, "nutrition_phase", "start_date")
 
     return (rows, bw, css_test, sleep_entries, thermal_entries,
             light_therapy_entries, nutrition_phase_entries)
@@ -624,7 +638,7 @@ def main() -> int:
                                   light_therapy=light_therapy_entries,
                                   nutrition_phase=nutrition_phase_entries):
             print(line)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
     return 0

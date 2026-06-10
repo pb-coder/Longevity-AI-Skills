@@ -463,7 +463,8 @@ def clear_workout_sessions_range(person: str, since: date | None, until: date | 
     kept = []
     removed = 0
     for rec in records:
-        if _date_in_range(rec.get("date"), since, until) and str(rec.get("source") or "").lower() != "manual":
+        source = str(rec.get("source") or "").lower()
+        if _date_in_range(rec.get("date"), since, until) and source not in ("", "manual"):
             removed += 1
             continue
         kept.append(rec)
@@ -573,6 +574,11 @@ def import_archive(
         profile = read_profile(person)
 
     if replace_range:
+        current_month_start = date.today().replace(day=1)
+        if not allow_past_months and (since is None or since < current_month_start):
+            raise ValueError(
+                "--replace-range spanning past months requires --allow-past-months"
+            )
         out_lines.append(clear_health_metrics_range(person, since, until))
         out_lines.append(clear_workout_sessions_range(person, since, until))
         out_lines.extend(clear_monthly_machine_range(person, since, until))

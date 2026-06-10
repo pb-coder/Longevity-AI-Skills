@@ -520,4 +520,21 @@ def hr_at_volume_divergence(rows: list[dict],
             "n_sessions":       len(points),
             "hint":             hint,
         }
+    flagged = [
+        m for m, info in out.items()
+        if abs(float(info.get("slope_bpm_per_4w") or 0.0)) >= 5
+    ]
+    if len(flagged) > max(2, int(len(out) * 0.4)):
+        return {
+            "systemic_session_hr": {
+                "slope_bpm_per_4w": round(
+                    sum(out[m]["slope_bpm_per_4w"] for m in flagged) / len(flagged), 2
+                ),
+                "n_muscles": len(flagged),
+                "hint": (
+                    "session HR shifted across many muscles — check bodyweight, "
+                    "deload boundary, heat, or generic fatigue before changing per-muscle volume"
+                ),
+            }
+        }
     return out

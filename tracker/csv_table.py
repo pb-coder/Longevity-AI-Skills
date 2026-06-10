@@ -109,7 +109,7 @@ def write_csv_atomic(path: Path, header: Sequence[str], rows: Iterable[Sequence]
 
 
 def record_key(record: dict, key_fields: Sequence[str]) -> tuple:
-    return tuple(record.get(field) or "" for field in key_fields)
+    return tuple("" if record.get(field) is None else record.get(field) for field in key_fields)
 
 
 def sort_records(records: Iterable[dict], spec: CsvTableSpec) -> list[dict]:

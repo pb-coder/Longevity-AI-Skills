@@ -317,9 +317,9 @@ def card_nutrition_phase(nutrition_phase, coach_text):
     if triggered:
         items = "".join(f"<li>{esc(t)}</li>" for t in triggered)
         stop_html = (
-            '<div class="stop-signals" style="margin-top:.5rem;padding:.5rem .75rem;border-left:3px solid #c33;">'
+            '<div class="stop-signals">'
             '<div class="label warn"><strong>Stop signals triggered</strong></div>'
-            f'<ul style="margin:.25rem 0 0 1rem">{items}</ul>'
+            f'<ul>{items}</ul>'
             '</div>'
         )
 
@@ -362,5 +362,4 @@ def card_nutrition_phase(nutrition_phase, coach_text):
   {coach_block(coach_text)}
 </section>
 '''
-
 

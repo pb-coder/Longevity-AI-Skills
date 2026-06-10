@@ -17,11 +17,8 @@ def _muscles_over_mrv(weekly_volume: dict | None) -> list[str]:
         return []
     current = weekly_volume.get("current") or {}
     landmarks = weekly_volume.get("landmarks") or {}
-    window_days = weekly_volume.get("window_days") or 28
-    weeks_in_window = max(window_days / 7.0, 1.0)
     out = []
-    for m, sets_in_window in current.items():
-        per_wk = sets_in_window / weeks_in_window
+    for m, per_wk in current.items():
         mrv = (landmarks.get(m) or {}).get("mrv")
         if mrv and per_wk > mrv:
             out.append(m)
@@ -66,7 +63,7 @@ def _rhr_sustained_elevation_days(health_all: list[dict], today_d: date,
 
 def _wrist_temp_deviation_c(health_all: list[dict], today_d: date) -> float | None:
     """Latest wrist temp minus the 60-day mean. Positive = above baseline."""
-    latest = latest_metric(health_all, "wrist_temp_c")
+    latest = latest_metric(health_all, "wrist_temp_c", today_d)
     baseline = baseline_60d(health_all, "wrist_temp_c", today_d)
     if not latest or baseline is None:
         return None

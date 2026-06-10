@@ -131,8 +131,9 @@ def cardio_last_28d(rows: list[dict], today_d: date) -> dict:
 
 
 def _trimp(duration_min: float, avg_hr: float,
-           rest_hr: float, max_hr: float) -> float:
-    """Banister TRIMP. ``duration_min × HRr × 0.64 × e^(1.92×HRr)`` (men).
+           rest_hr: float, max_hr: float,
+           sex: str | None = None) -> float:
+    """Banister TRIMP, sex-specific when profile sex is known.
 
     Only positive when HR is above resting. Uses HRR (heart rate
     reserve) normalisation so the same TRIMP score means the same
@@ -146,12 +147,14 @@ def _trimp(duration_min: float, avg_hr: float,
     if hrr <= 0:
         return 0.0
     hrr = min(hrr, 1.0)
-    return round(duration_min * hrr * 0.64 * math.exp(1.92 * hrr), 1)
+    factor, exponent = (0.86, 1.67) if sex == "female" else (0.64, 1.92)
+    return round(duration_min * hrr * factor * math.exp(exponent * hrr), 1)
 
 
 def trimp_per_session(monthly_sessions: list[dict],
                       max_hr: float | None,
-                      rest_hr: float | None) -> list[dict]:
+                      rest_hr: float | None,
+                      sex: str | None = None) -> list[dict]:
     """Compute TRIMP for every session that has both avg_hr and duration.
 
     Returns one entry per session with ``date, kind, trimp, intensity_pct``
@@ -175,7 +178,7 @@ def trimp_per_session(monthly_sessions: list[dict],
             dur_f = float(dur)
         except (TypeError, ValueError):
             continue
-        trimp = _trimp(dur_f, avg_hr_f, rest_hr, max_hr)
+        trimp = _trimp(dur_f, avg_hr_f, rest_hr, max_hr, sex=sex)
         if trimp == 0:
             continue
         hrr_pct = (avg_hr_f - rest_hr) / (max_hr - rest_hr)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -37,6 +38,30 @@ class AppendWorkoutTests(unittest.TestCase):
 
         upsert.assert_called_once()
         self.assertIn("Appended 1 row(s) to 2026.05 (new sheet)", status[0])
+
+    def test_load_payload_rejects_non_iso_dates(self) -> None:
+        with TemporaryDirectory() as td:
+            payload = Path(td) / "payload.json"
+            payload.write_text(json.dumps({
+                "rows": [{
+                    "date": "2026-5-28",
+                    "num": 1,
+                    "exercise": "Dead Hang",
+                    "set": 1,
+                }]
+            }))
+
+            with self.assertRaises(ValueError):
+                append_workout.load_payload(str(payload))
+
+    def test_temp_only_thermal_summary_does_not_crash(self) -> None:
+        with patch.object(append_workout, "upsert_thermal_sessions", return_value=["ok"]):
+            status = append_workout.upsert_thermal(
+                "Test",
+                [{"date": "2026-06-01", "heat_type": "dry", "heat_temp_c": 90}],
+            )
+
+        self.assertIn("dry @90C", status[-1])
 
 
 if __name__ == "__main__":

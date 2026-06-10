@@ -7,3 +7,7 @@ __pycache__/
 # to the duplicate filename instead of merging.
 * [0-9].*
 * [0-9][0-9].*
+* [0-9]
+* [0-9]/**
+* [0-9][0-9]
+* [0-9][0-9]/**

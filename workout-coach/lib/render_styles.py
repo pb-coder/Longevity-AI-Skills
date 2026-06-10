@@ -149,6 +149,15 @@ header.page-head .meta { color: var(--muted); margin-top: 4px;
 .pill-adherence.below-target { color: var(--amber); background: var(--amber-tint); }
 .pill-adherence.above-target { color: var(--accent); background: var(--accent-tint); }
 
+.stop-signals {
+  margin-top: .5rem;
+  padding: .5rem .75rem;
+  background: var(--warn-tint);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.stop-signals ul { margin: .25rem 0 0 1rem; padding: 0; }
+
 .tier-indicator { display: inline-block; padding: 3px 10px;
   border-radius: 999px; font-size: 11.5px; font-weight: 600;
   letter-spacing: 0.02em; margin-bottom: 14px; }

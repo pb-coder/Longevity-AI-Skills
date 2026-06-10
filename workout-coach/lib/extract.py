@@ -526,22 +526,28 @@ def estimate_max_hr(workout_sessions_all: list[dict],
     """Estimate the user's peak HR.
 
     Priority:
-    1. Highest observed ``max_hr`` across all Apple workouts — Apple's
-       per-workout max is conservative (it reflects what the watch saw,
-       not theoretical max), so the absolute observed peak is a sound
-       lower-bound estimate of true max.
+    1. A robust high observed ``max_hr`` across recent Apple workouts,
+       using the 99th percentile instead of the lifetime max so one sensor
+       spike does not permanently distort TRIMP/HR-zone math.
     2. Tanaka formula 208 − 0.7×age, with age computed dynamically from
        ``profile.birthday`` and ``today_d``. Falls back to ``fallback_age``
        (30) when birthday is missing or malformed.
 
     Returns ``None`` only when neither path can produce a number.
     """
-    observed = [
-        s.get("max_hr") for s in (workout_sessions_all or [])
-        if s.get("max_hr") and s.get("max_hr") >= 140
-    ]
+    cutoff = today_d - timedelta(days=365)
+    observed = []
+    for s in (workout_sessions_all or []):
+        d = _parse_iso_date(s.get("date"))
+        if d is not None and d < cutoff:
+            continue
+        v = s.get("max_hr")
+        if v and v >= 140:
+            observed.append(float(v))
     if observed:
-        return float(max(observed))
+        observed.sort()
+        idx = min(len(observed) - 1, int(round((len(observed) - 1) * 0.99)))
+        return float(observed[idx])
     age = _age_from_birthday((profile or {}).get("birthday"), today_d)
     if age is None:
         age = fallback_age

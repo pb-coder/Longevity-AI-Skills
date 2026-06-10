@@ -309,7 +309,9 @@ def upsert_workout_sessions(person: str, entries: Iterable[dict]) -> list[str]:
     headers = WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source]
 
     existing_rows = read_workout_sessions(person)
-    by_key: dict[tuple, dict] = {(r["date"], r.get("start")): r for r in existing_rows}
+    by_key: dict[tuple, dict] = {
+        (r["date"], str(r.get("start") or "")): r for r in existing_rows
+    }
 
     written = 0
     updated = 0
@@ -326,6 +328,11 @@ def upsert_workout_sessions(person: str, entries: Iterable[dict]) -> list[str]:
         if e.get("incidental") is True:
             incidental += 1
         if key in by_key:
+            existing = by_key[key]
+            if existing.get("notes") not in (None, "") and new_rec.get("notes") in (None, ""):
+                new_rec["notes"] = existing.get("notes")
+            if existing.get("incidental") is not None and new_rec.get("incidental") in (None, False, ""):
+                new_rec["incidental"] = existing.get("incidental")
             if by_key[key] != new_rec:
                 by_key[key] = new_rec
                 updated += 1

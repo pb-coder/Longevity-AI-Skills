@@ -329,6 +329,32 @@ class HealthAutoExportTests(unittest.TestCase):
         self.assertEqual(total["duration"], "40:00")
         self.assertEqual(total["avg_hr"], 120)
 
+    def test_replace_range_past_month_requires_past_month_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_root = person_paths.WORKOUT_TRACKER_ROOT
+            old_importer_root = hae.WORKOUT_TRACKER_ROOT
+            person_paths.WORKOUT_TRACKER_ROOT = root
+            hae.WORKOUT_TRACKER_ROOT = root
+            try:
+                csv_store.write_profile("Test", source="health_auto_export", auto_cardio=True)
+                export = root / "HealthAutoExport.zip"
+                build_export_zip(export)
+                with self.assertRaises(ValueError):
+                    hae.import_archive(
+                        "Test",
+                        export,
+                        since=date(2026, 4, 1),
+                        until=date(2026, 4, 1),
+                        allow_past_months=False,
+                        replace_range=True,
+                        dry_run=False,
+                        keep_export=True,
+                    )
+            finally:
+                person_paths.WORKOUT_TRACKER_ROOT = old_root
+                hae.WORKOUT_TRACKER_ROOT = old_importer_root
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -193,7 +193,18 @@ def sleep_summary(nights: list[dict], today_d: date) -> dict | None:
     eff_block = {
         "mean":           _mean(eff_vals),
         "trend_per_week": _slope_per_week(sorted(eff_points)),
+        "source":         "derived_sleep_period",
+        "caveat":         (
+            "Derived from sleep-stage total divided by stored time-in-bed; "
+            "when true Apple InBed is absent this is continuity, not a clinical sleep-efficiency denominator."
+        ) if eff_vals else None,
     }
+    short_sleep_note = None
+    total_mean = means_h.get("total")
+    if total_mean is not None and total_mean < 7.0:
+        short_sleep_note = (
+            "Average sleep is below 7h/night in the 28-day window; do not frame high efficiency as a recovery bright spot by itself."
+        )
 
     n_seg_points: list[tuple[date, float]] = []
     n_seg_vals: list[float] = []
@@ -268,6 +279,7 @@ def sleep_summary(nights: list[dict], today_d: date) -> dict | None:
         "fragmentation":        fragmentation,
         "schedule_consistency": schedule,
         "outliers":             outliers,
+        "absolute_sleep_note":  short_sleep_note,
     }
 
 

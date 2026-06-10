@@ -327,7 +327,7 @@ def _is_auto_imported(rd: dict) -> bool:
     guard, not permanent dual-write.
     """
     src = (rd.get("source") or "").strip().lower()
-    if src in ("apple",) or src.startswith("gymkit:"):
+    if src in ("apple",) or src.startswith("apple@") or src.startswith("gymkit:"):
         return True
     notes_v = rd.get("notes") or ""
     return AUTO_IMPORT_NOTE.lower() in str(notes_v).lower()

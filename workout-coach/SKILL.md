@@ -173,7 +173,8 @@ What the JSON contains:
 
 **Recovery + training load (Python-derived signals — use these instead of eyeballing raw metrics):**
 - `recovery`: `{score: 0-10|null, confidence: low|medium|high, drivers: [...]}`. Score is a **renormalized weighted average of per-signal personal z-scores**, mapped to [0, 10]. Each signal: z-score against rolling personal baseline + stdev (clamped ±2σ), then `component = 5.0 + z × 2.5`. Composite = weighted average over signals with sufficient sample (≥7 readings in baseline window), weights renormalized to sum to 1.0 over present signals. **5.0 means "average for this person across whatever signals are available"** — *not* "base 5 minus what's missing", so trackers with fewer usable signals aren't structurally biased downward. Signals + raw weights (renormalized at runtime): HRV 0.30 (cap-gated), RHR 0.15 (inverted), sleep total 0.20, sleep deep h 0.05 (cap-gated), sleep REM h 0.05 (cap-gated), wrist temp 0.10 (cap-gated, inverted), HR Recovery 0.10, sleep consistency 0.05 (penalty-only). VO2max trend is **not** in the score (chronic fitness signal — see `vo2max_latest` / `vo2max_trend_per_4w` for the fitness check). Each driver entry: `{metric, component_score (0-10), weight (renormalized), z, recent_avg, baseline_mean, baseline_stdev, n_recent, n_baseline}` for z-scored signals; `{metric, component_score, weight, stdev, threshold, n_recent}` for sleep consistency. Drivers sorted by `|component_score - 5|` descending. `score: null` only when zero signals had sufficient sample. **Use the score directly in §18-style "should I train hard today?" decisions**; cite the most-deviating driver(s) by name (the first ones in the list).
-- `training_load`: `{ctl, atl, tsb, trend_7d}`. CTL = chronic load (42-day EWMA of TRIMP), ATL = acute (7-day EWMA), TSB = CTL−ATL ("form": positive = peaked, negative = under load, ≤−10 = high fatigue risk). `trend_7d` = ΔCTL over the last 7 days (positive = building fitness).
+- `training_load`: whole-body `{ctl, atl, tsb, trend_7d}`. CTL = chronic load (42-day EWMA of TRIMP), ATL = acute (7-day EWMA), TSB = CTL−ATL ("form": positive = peaked, negative = under load, ≤−10 = high fatigue risk). `trend_7d` = ΔCTL over the last 7 days (positive = building fitness).
+- `training_load_by_modality`: `{all, strength, cardio}` using the same shape as `training_load`. The deterministic strength-session gate uses `strength` when available so a hard run/ride does not automatically block strength loading; coach copy may still mention whole-body fatigue separately.
 - `hr_at_volume_divergence`: `{muscle: {slope_bpm_per_4w, n_sessions, hint}}` or a single `systemic_session_hr` entry when many muscles flag together. Volume-weighted regression of strength-session avg HR vs time over 8 weeks, per primary muscle group. Slope ≥+5 bpm/4w = **fatigue or under-recovery** (HR creeping at same load); ≤−5 = improving conditioning. When the systemic entry appears, call it a shared session-HR shift and check bodyweight, heat, deload boundaries, or generic fatigue before changing per-muscle volume.
 
 **Bodyweight:**
@@ -192,16 +193,16 @@ What the JSON contains:
 - `movement_consistency`: Days hitting Apple's 30-min exercise threshold (proxy for Paluch 2022 step-days dose-response). Shape: `{threshold_min, days_this_wk, days_28d, target_per_wk}`.
 
 **Apple Health weekly aggregates:**
-- `health_metrics_weekly`: 4 weeks of Mon-anchored aggregates. Each entry: `{week_start, n_days, vo2max, resting_hr, hrv_sdnn, walking_hr, hr_recovery_1min, sleep_total_h, sleep_deep_h, sleep_rem_h, time_in_bed_h, resp_rate, wrist_temp_c, exercise_min}`. Read this for trends; raw daily data is behind `--include-daily-health`. `time_in_bed_h` is the clinical denominator for Sleep Efficiency — pair it with `sleep_total_h` to compute "in-bed quality" when the dedicated `sleep_summary` block is absent.
+- `health_metrics_weekly`: 4 weeks of Mon-anchored aggregates. Each entry: `{week_start, n_days, vo2max, resting_hr, hrv_sdnn, walking_hr, hr_recovery_1min, sleep_total_h, sleep_deep_h, sleep_rem_h, time_in_bed_h, resp_rate, wrist_temp_c, exercise_min}`. Read this for trends; raw daily data is behind `--include-daily-health`. Treat `time_in_bed_h` as source-dependent: on some exports it is derived from the sleep-period span rather than true Apple InBed, so phrase it as continuity / in-bed proxy unless the source explicitly supports InBed.
 - `vo2max_latest`: `{date, value}` of the most recent VO2max.
 - `vo2max_trend_per_4w`: OLS slope per 4 weeks across all logged VO2max readings.
 - `health_metrics_recent`: raw daily rows (last 30). **Only present with `--include-daily-health`** — the weekly rollup is the default lens.
 
 **Sleep architecture (28-day window):**
-- `sleep_summary`: dedicated per-night analysis. Key absent when no nights exist in the window. Shape: `{n_nights_28d, means_h: {core, deep, rem, unspecified, awake, total, time_in_bed}, sleep_efficiency_pct: {mean, trend_per_week}, waso_h_mean, fragmentation: {n_segments_mean, n_segments_trend_per_week}, schedule_consistency: {bedtime_clock_stdev_min, waketime_clock_stdev_min}, outliers: [{date, reason, efficiency_pct, awake_h}, …]}`. Schedule stdevs are **circular** statistics (handle the midnight wraparound), so a 23:50 / 00:10 bedtime pair reports a 20-min stdev, not 23h. `outliers` lists last-14-day nights with efficiency<80% or WASO≥1h. Drives the `### Sleep` report section.
+- `sleep_summary`: dedicated per-night analysis. Key absent when no nights exist in the window. Shape: `{n_nights_28d, means_h: {core, deep, rem, unspecified, awake, total, time_in_bed}, sleep_efficiency_pct: {mean, trend_per_week, source, caveat}, absolute_sleep_note, waso_h_mean, fragmentation: {n_segments_mean, n_segments_trend_per_week}, schedule_consistency: {bedtime_clock_stdev_min, waketime_clock_stdev_min}, outliers: [{date, reason, efficiency_pct, awake_h}, …]}`. Schedule stdevs are **circular** statistics (handle the midnight wraparound), so a 23:50 / 00:10 bedtime pair reports a 20-min stdev, not 23h. `outliers` lists last-14-day nights with efficiency<80% or WASO≥1h. If `absolute_sleep_note` is present, do not call high efficiency a recovery bright spot while total sleep is chronically short.
 
 **Heat + cold exposure (manual /log, 28-day window):**
-- `thermal_summary`: dedicated per-session analysis. Key absent when no manual sauna / cold sessions were logged in the last 28d. Shape: `{n_sessions_28d, heat: {n_sessions_28d, n_sessions_per_week, total_minutes_28d, minutes_per_week, minutes_above_hsp_threshold_per_week, type_distribution, multi_round_sessions_pct, avg_temp_c, avg_session_minutes}, cold: {n_sessions_28d, n_sessions_per_week, type_distribution, paired_with_heat_pct, dominant_type}, adherence: {heat_target_per_week, heat_actual_per_week, heat_status, duration_status}}`. The `heat` and `cold` sub-blocks are independent — a row with heat-only contributes to `heat` only; a row with cold-only contributes to `cold` only. `adherence.heat_status` is `below-target` / `on-target` / `above-target` against `profile.csv`'s `sauna_target_per_week` (default 4×/wk). `adherence.duration_status` is `below-HSP-threshold` / `in-band` / `above-band` against the Laukkanen + mechanistic-HSP consensus band (≥80°C AND ≥20min per session). Drives the `### Heat / Cold exposure` report section.
+- `thermal_summary`: dedicated per-session analysis. Key absent when no manual sauna / cold sessions were logged in the last 28d. Shape: `{n_sessions_28d, heat: {n_sessions_28d, n_sessions_per_week, total_minutes_28d, minutes_per_week, minutes_above_hsp_threshold_per_week, hsp_applicable_minutes_per_week, steam_minutes_per_week, hsp_threshold_note, type_distribution, multi_round_sessions_pct, avg_temp_c, avg_session_minutes}, cold: {n_sessions_28d, n_sessions_per_week, type_distribution, paired_with_heat_pct, dominant_type}, adherence: {heat_target_per_week, heat_actual_per_week, heat_status, duration_status}}`. The `heat` and `cold` sub-blocks are independent. `adherence.heat_status` is `below-target` / `on-target` / `above-target` against `profile.csv`'s `sauna_target_per_week` (default 4×/wk). `adherence.duration_status` evaluates dry/banya heat only against the Laukkanen + mechanistic-HSP consensus band (≥80°C AND ≥20min per session); steam is reported as habit heat minutes, not scored as ≥80°C HSP dose.
 
 **Light therapy (manual /log, 28-day window):**
 - `light_therapy_summary`: dedicated per-session analysis. Key absent when no manual light-therapy sessions (RLT / near-IR / PBM / blue light) were logged in the last 28d. Shape: `{n_sessions_28d, n_sessions_per_week, total_minutes_28d, minutes_per_week, avg_session_minutes, light_type_distribution, modality_distribution, body_area_distribution, dominant_light_type, dominant_modality, adherence: {target_per_week, actual_per_week, status, target_min_per_session, session_dose_status}}`. `adherence.status` is `below-target` / `on-target` / `above-target` against `profile.csv`'s `light_therapy_target_per_week` (default 3×/wk). `adherence.session_dose_status` is `below-min` / `on-target` / `above-min` against `light_therapy_target_min_per_session` (default 10 min). Drives the `### Light therapy` report section. The store is broad — covers red, near-IR, blue, etc. Don't make claims about wavelength efficacy the data can't support.
@@ -391,7 +392,7 @@ How to compute the values:
 - **Strength sessions**: count `monthly_sessions[*]` with `session_kind == "strength"` AND `date` within the last 28d. Average TRIMP = mean of their `trimp` values (rounded to nearest int). Distribution buckets group by `load_band`. If TRIMP and load_band are null on every session in the window, drop the parenthetical entirely and write only the count: `| Strength sessions | 4 |`. Don't explain the absence; the row stays source-honest without lecturing the user about their data source.
 - **Cardio sessions**: count strands with `session_kind == "cardio"`. Z2/Z3/Z4–5 minutes come from `cardio_hr_zones_28d.z2`, `.z3`, `.z4 + .z5`.
 - **Daily activity row**: read `daily_activity_28d` directly. If `exercise_min_daily_avg` is null, substitute `{walking_minutes_28d / 28} min/day walking ({assessment})` and drop the "Apple exercise minutes" wording — same row shape, source-honest.
-- **Training load**: read `training_load.ctl`, `.atl`, `.tsb`. Pick the `state` band from the table above.
+- **Training load**: read `training_load_by_modality.strength` for strength planning when present, with `training_load` as the whole-body context. Pick the `state` band from the table above.
 - **Recovery score**: `recovery.score` and `recovery.confidence`. **Trend descriptor (deterministic procedure — replaces the old `↑/↓/→` arrow):**
   1. Walk `health_metrics_weekly`. For each of HRV / RHR (inverted: lower is better) / sleep_total_h / wrist_temp_c (inverted) / hr_recovery_1min / vo2max, compare the most-recent week's value to the mean of the prior 3 weeks.
   2. Score +1 for "better than prior" (delta exceeds 5% relative magnitude in the favorable direction), −1 for "worse" (5% in the unfavorable direction), 0 when |delta| < 5% relative.
@@ -479,6 +480,7 @@ Keep the bodyweight signals separate in coach copy:
 
 **Data sufficiency thresholds:**
 - Progression trend: minimum 3 sessions with the same exercise over 2+ weeks. Below that, state "not enough data" for that exercise.
+- Effort caveat: the tracker has no RIR/RPE intake. When you call a lift stalled or use reactive-deload language, explicitly say it is inferred from load/reps and not confirmed by effort-in-reserve data.
 - Volume analysis: minimum 2 full training weeks. Below that, report what's visible but caveat the sample size in THE VERDICT.
 - Single-session data: skip ARE YOU GETTING STRONGER entirely. State why.
 - Bodyweight trend: null from `read_tracker.py` → "not enough data for a trend yet." Don't fabricate a direction.
@@ -584,7 +586,7 @@ If `vo2max_trend_per_4w` is null (fewer than 4 readings over 21+ days), drop the
 Hard template (3–5 lines, plain bullets):
 
 - **Stage means (last `n_nights_28d`).** `Total ~{total}h (Core {core} / Deep {deep} / REM {rem} / Awake {awake}h).` Pull from `sleep_summary.means_h`. Round each to 1 decimal. Cite `n_nights_28d` if it's <20 ("over {n} nights — sparse window, treat softly").
-- **Efficiency.** `Sleep efficiency mean {pct}%` from `sleep_summary.sleep_efficiency_pct.mean`. Add the trend chunk when `trend_per_week` is non-null: `(trend {sign}{abs}pp/wk)`. **Anchor**: >85% healthy adult, 80-85% borderline, <80% disturbed. Use the band name once if it informs a call ("borderline — fragmented enough to consider…"); don't lecture.
+- **Efficiency / continuity.** `sleep_summary.sleep_efficiency_pct.mean` is labeled by `sleep_summary.sleep_efficiency_pct.source`. If `source == "derived_sleep_period"`, call it sleep continuity or in-bed proxy, not clinical efficiency. Add the trend chunk when `trend_per_week` is non-null: `(trend {sign}{abs}pp/wk)`. **Anchor**: >85% healthy adult, 80-85% borderline, <80% disturbed. If `absolute_sleep_note` is present, state the short-sleep floor before praising continuity.
 - **Schedule consistency.** From `sleep_summary.schedule_consistency`: `bedtime ±{bedtime_clock_stdev_min}min, waketime ±{waketime_clock_stdev_min}min`. Skip the bullet entirely when both stdevs are null (insufficient data). The 28-day stdev is a circular stat — wraps midnight cleanly. **Anchor**: ±30min is tight, ±60min loose, ±90min+ erratic.
 - **Outlier flag.** If `sleep_summary.outliers` is non-empty, name the count + reason once: `Flag: {N} night(s) with efficiency<80% or WASO≥1h in the last 14d → look at pre-bed routine.` Don't list all dates; the user can drill in if they care.
 
@@ -598,7 +600,7 @@ Example (filled from a real `sleep_summary` with n_nights_28d=24):
 
 ```
 - Total ~7.0h (Core 4.3 / Deep 1.0 / REM 1.3 / Awake 0.4h) over 24 nights.
-- Sleep efficiency mean 88% (trend +0.5pp/wk). Comfortably in the healthy band.
+- Sleep continuity mean 88% (trend +0.5pp/wk). Total sleep is the floor; continuity is good but not a substitute for 7h+.
 - Bedtime ±18min, waketime ±12min — schedule is tight.
 - Flag: 2 nights with efficiency<80% in the last 14d → look at pre-bed routine.
 ```
@@ -610,7 +612,7 @@ Example (filled from a real `sleep_summary` with n_nights_28d=24):
 Hard template (3–5 lines, plain bullets):
 
 - **Heat last 28d.** `{heat.n_sessions_28d} sessions ({heat.n_sessions_per_week}/wk, target {adherence.heat_target_per_week}). Avg {heat.avg_session_minutes}min @ ~{heat.avg_temp_c}°C, type {dominant heat type}.` Pull from `thermal_summary.heat`; cite `adherence.heat_status` ("below-target" / "on-target" / "above-target") as a one-word verdict.
-- **HSP-induction band.** `{heat.minutes_above_hsp_threshold_per_week} min/wk at ≥80°C ≥20min vs ~80 min/wk target — {adherence.duration_status}.` The threshold (≥80°C AND ≥20min per session) is the Laukkanen + mechanistic-HSP consensus band; below either bound is `below-HSP-threshold`. If `duration_status == "below-HSP-threshold"` AND `heat_status` is on/above target, the call is: "frequency is good, push session duration to ~20min if you want the HSP-induction benefit." If both are below, the call is: "frequency first, duration second."
+- **HSP-induction band.** `{heat.minutes_above_hsp_threshold_per_week} min/wk dry/banya at ≥80°C ≥20min vs ~80 min/wk target — {adherence.duration_status}.` The threshold (≥80°C AND ≥20min per session) applies to dry/banya heat only; steam minutes live in `heat.steam_minutes_per_week` and should be described as heat habit / relaxation minutes, not HSP-grade dose. If `duration_status == "below-HSP-threshold"` AND `heat_status` is on/above target, the call is: "frequency is good, push dry/banya session duration to ~20min if you want the HSP-induction benefit." If both are below, the call is: "frequency first, duration second."
 - **Cold.** `{cold.n_sessions_28d} sessions ({cold.n_sessions_per_week}/wk). Dominant: {cold.dominant_type}. Paired with sauna {cold.paired_with_heat_pct}% of the time.` Skip the bullet entirely when `cold` is null. Don't lecture about cold-shower bro-science; the metric is "did the protocol happen," not "is cold beneficial."
 - **Multi-round usage.** Optional. If `heat.multi_round_sessions_pct >= 30`, name it: "{pct}% of sessions are multi-round." Useful signal that the user is doing Finnish-style contrast cycles rather than single-pass exposure. Skip otherwise.
 
@@ -618,13 +620,13 @@ Source-honesty rules:
 - Multi-round saunas are counted as ONE session, not multiple. A 12+8min two-round day = one session, 20 total heat minutes.
 - `cold_air` (sitting outside post-sauna) is a real protocol — don't claim it's "not cold enough" without a temp datapoint. If `cold_temp_c` is set, you can comment.
 - Adherence target defaults to 4×/wk (mid-band of the user's interventions.md 4-6 range). User can override via `profile.csv` `sauna_target_per_week`. Treat this as a configured reachable target; `below-target` means below that configured target, not a moral failure or proof the target is reachable in the user's environment. Don't claim a higher target unless the JSON shows it.
-- Never moralise about hot-yoga / steam / banya vs dry as "better" — the dose math is the same.
+- Never moralise about hot-yoga / steam / banya vs dry as "better". The frequency habit is comparable, but the ≥80°C HSP-dose math is dry/banya-only in the JSON.
 
 Example (filled from a real `thermal_summary`):
 
 ```
 - Heat last 28d: 18 sessions (4.5/wk, target 4) — on-target. Avg 9min @ ~85°C dry.
-- HSP-induction band: 0 min/wk ≥80°C ≥20min — below-HSP-threshold. Frequency is good; push session duration to ~20min for the HSP benefit.
+- HSP-induction band: 0 min/wk dry/banya ≥80°C ≥20min — below-HSP-threshold. Frequency is good; push dry/banya sessions toward ~20min for the HSP benefit.
 - Cold: 16 sessions (4.0/wk). Dominant: cold_air. Paired with sauna 88% of the time.
 ```
 
@@ -662,7 +664,7 @@ Read `references/swim-coaching.md` for SWOLF / SPL / CSS interpretation, retest 
 2. **Name ONE specific signal** driving the verdict — usually the metric in `delta_vs_prior_14d` with the largest absolute movement (lower = better for pace / SPL / SWOLF). When `pace_pr` or `swolf_pr` is True, mention it.
 3. **Give ONE actionable focus** for the next session (e.g., "tempo focus, hold SWOLF" or "log a CSS test"). Don't lecture technique — that's the swim-coaching.md no-go list.
 
-When `swim_summary.css` is null AND `swim_summary.css_test_detected` is non-null, prompt the user via the callout: "Looks like a 400m + 200m pair on {date} — was that a CSS test? Re-log with `CSS test` on the header to write it to your profile." When `swim_summary.css_retest_due: True`, prompt the retest. When `swim_summary.stroke_outliers` is non-empty, flag the lap once as an Apple Watch misclassification candidate (one Butterfly lap in a Freestyle session = noise, not a stroke change).
+When `swim_summary.css` is null AND `swim_summary.css_test_detected` is non-null, prompt the user via the callout: "Looks like a 400m + 200m pair on {date} — was that a CSS test? Re-log with `CSS test` on the header to write it to your profile." When `swim_summary.css_missing_nudge` is present, prompt a CSS test rather than inventing zones. When `swim_summary.css_retest_due: True`, prompt the retest. When `swim_summary.stroke_outliers` is non-empty, flag the lap once as an Apple Watch misclassification candidate (one Butterfly lap in a Freestyle session = noise, not a stroke change).
 
 Source-honesty rules (from swim-coaching.md):
 - Trend over absolute. Don't quote SWOLF / SPL ability brackets unless the user asks.
@@ -683,8 +685,9 @@ The renderer surfaces the structured data — phase type + weeks elapsed, observ
 **What the callout MUST do** (one to two sentences, ≤280 chars):
 
 1. **Quote the `coach_action_hint`** verbatim (`Continue phase` / `Add calories` / `Slow intake` / `Consider ending` / `End now`) — this is the binding decision token, the same way `session_recommendation.headline` is binding for the workout.
-2. **Name the load-bearing 'why'** — the single signal driving the hint. Observed rate vs target ratio, a triggered stop signal, or weeks elapsed when nothing has triggered (e.g. "week 2, on-track, no signals — hold").
-3. **For `consider_ending` / `end_now`**: also quote the matching `stop_signals_triggered[0]` so the user sees which pre-committed line was crossed.
+2. **Protein is target-only unless the JSON says otherwise.** If `nutrition_phase.targets.protein_tracking_status == "target_only"`, say the target is configured but intake adherence is untracked. Do not claim protein is high/low based on the target alone.
+3. **Name the load-bearing 'why'** — the single signal driving the hint. Observed rate vs target ratio, a triggered stop signal, or weeks elapsed when nothing has triggered (e.g. "week 2, on-track, no signals — hold").
+4. **For `consider_ending` / `end_now`**: also quote the matching `stop_signals_triggered[0]` so the user sees which pre-committed line was crossed.
 
 Source-honesty rules (from bulking-science.md):
 - The smoothed-endpoint 14d rate filters daily scale noise. Don't quote raw daily fluctuations.
@@ -763,7 +766,7 @@ Use Layer 1 analysis plus the training science reference. The reference contains
   - `recovery.confidence == "low"`: the score's available signals are still trustworthy, but soften any rule that would otherwise override the deload window. Don't invent triggers from data the source doesn't provide.
   - When `recovery.score < 4` AND `recovery.drivers` has the negative signal persisting (e.g. wrist temp +0.4°C on a multi-week stretch in `health_metrics_weekly`) → flag deload as urgent regardless of `deloads` cadence. Override the standard 4-6 / 6+ week thresholds.
 - **Per-muscle fatigue from HR creep (§19):** read `hr_at_volume_divergence`. For any muscle whose `hint == "rising HR at constant volume — fatigue or under-recovery"`, hold or cut volume on that group this block — don't add sets. Surface in the table's Notes column: `Holding {muscle} volume — HR rising at constant load.` For muscles with `hint == "improving conditioning"` you can add a working set if it's also under MAV. Skip this rule entirely when per-workout HR is unavailable and `hr_at_volume_divergence` is empty.
-- **Training-load gate (§19, REQUIRED):** read `training_load.tsb` and apply the band's rule. The band MUST be cited by name in "Why this plan" — e.g. "TSB −5.4 → balanced/carrying load boundary; this block holds loads."
+- **Training-load gate (§19, REQUIRED):** for strength prescriptions, read `training_load_by_modality.strength.tsb` when present; fall back to `training_load.tsb` only when no strength TRIMP exists. The band MUST be cited by name in "Why this plan" — e.g. "strength TSB −5.4 → balanced/carrying load boundary; this block holds loads." Mention whole-body/cardio TSB only as secondary fatigue context.
 
   | TSB | State | Plan rule |
   |---|---|---|

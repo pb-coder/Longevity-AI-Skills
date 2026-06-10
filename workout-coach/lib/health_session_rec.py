@@ -396,6 +396,25 @@ def compute_session_recommendation(*,
             "expected_rebound_by_session": rebound_by_session,
         }
 
+    if recovery_score is not None and recovery_score < T["tier_d_recovery_score_min"]:
+        add("recovery_score", recovery_score, T["tier_d_recovery_score_min"],
+            f"Recovery {recovery_score:.1f}/10 below green floor — hold load, no PR attempts")
+        return {
+            "tier": "C",
+            "label": "hold_load",
+            "headline": "Modified strength: hold loads, no PR attempts.",
+            "substitute": {
+                "kind": "modified_strength",
+                "prescription": "keep the planned movement pattern · hold loads · no PR attempts · skip conditioning finisher",
+                "duration_min": None,
+                "notes": "This is the Tier-D floor guard: not a deload, but not green.",
+            },
+            "rationale": rationale[:5],
+            "override_allowed": True,
+            "override_message": "Resume normal load progression once recovery is back above the green floor.",
+            "expected_rebound_by_session": 1,
+        }
+
     # ---- TIER E: over-recovered taper warning ----
     if tsb is not None and tsb >= T["tier_e_tsb_high"]:
         add("tsb", tsb, T["tier_e_tsb_high"],

@@ -33,6 +33,7 @@ from .parsing import _parse_iso_date
 HSP_TEMP_THRESHOLD_C = 80
 HSP_DURATION_THRESHOLD_MIN = 20
 DEFAULT_HEAT_TARGET_PER_WEEK = 4
+HSP_APPLICABLE_HEAT_TYPES = {"dry", "banya"}
 
 # Cold-air dose anchor. Above this temperature, a "cold_air" session is
 # barely a cold stressor — adaptation evidence is thin and norepinephrine
@@ -121,6 +122,8 @@ def thermal_summary(
               "total_minutes_28d": float,
               "minutes_per_week": float,
               "minutes_above_hsp_threshold_per_week": float,
+              "hsp_applicable_minutes_per_week": float,
+              "steam_minutes_per_week": float,
               "type_distribution": {"dry": int, "steam": int, ...},
               "multi_round_sessions_pct": float,   # 0-100
               "avg_temp_c": float | None,
@@ -166,6 +169,8 @@ def thermal_summary(
     heat_type_dist: dict[str, int] = {}
     heat_total_min = 0.0
     minutes_above_hsp = 0.0
+    hsp_applicable_min = 0.0
+    steam_min = 0.0
     multi_round_count = 0
     temp_vals: list[float] = []
     session_mins: list[float] = []
@@ -182,12 +187,17 @@ def thermal_summary(
             temp_f = None
         if temp_f is not None:
             temp_vals.append(temp_f)
-        # HSP-induction band: simultaneously >= duration threshold AND
-        # >= temp threshold. Without the temp we can't claim it's in band.
-        if (m >= HSP_DURATION_THRESHOLD_MIN
-                and temp_f is not None
-                and temp_f >= HSP_TEMP_THRESHOLD_C):
-            minutes_above_hsp += m
+        hsp_applicable = ht in HSP_APPLICABLE_HEAT_TYPES
+        if hsp_applicable:
+            hsp_applicable_min += m
+            # HSP-induction band: simultaneously >= duration threshold AND
+            # >= temp threshold. Without the temp we can't claim it's in band.
+            if (m >= HSP_DURATION_THRESHOLD_MIN
+                    and temp_f is not None
+                    and temp_f >= HSP_TEMP_THRESHOLD_C):
+                minutes_above_hsp += m
+        elif ht == "steam":
+            steam_min += m
         rounds = r.get("heat_round_durations_min") or []
         if isinstance(rounds, list) and len(rounds) > 1:
             multi_round_count += 1
@@ -198,6 +208,12 @@ def thermal_summary(
         "total_minutes_28d":                 round(heat_total_min, 1),
         "minutes_per_week":                  round(heat_total_min / 4.0, 1),
         "minutes_above_hsp_threshold_per_week": round(minutes_above_hsp / 4.0, 1),
+        "hsp_applicable_minutes_per_week":   round(hsp_applicable_min / 4.0, 1),
+        "steam_minutes_per_week":            round(steam_min / 4.0, 1),
+        "hsp_threshold_note":                (
+            "HSP threshold applies only to dry/banya heat; steam is reported as heat habit minutes, not >=80C HSP dose."
+            if steam_min else None
+        ),
         "type_distribution":                 heat_type_dist or None,
         "multi_round_sessions_pct":          (
             round(multi_round_count / len(heat_rows) * 100.0, 1)
@@ -302,10 +318,27 @@ def thermal_summary(
     else:
         heat_status = "on-target"
 
-    avg_session_min = (sum(session_mins) / len(session_mins)) if session_mins else 0.0
-    avg_temp_c = (sum(temp_vals) / len(temp_vals)) if temp_vals else None
+    hsp_rows = [
+        r for r in heat_rows
+        if (r.get("heat_type") or "unknown") in HSP_APPLICABLE_HEAT_TYPES
+    ]
+    hsp_session_mins = [_heat_total_min(r) or 0.0 for r in hsp_rows]
+    hsp_temp_vals = []
+    for r in hsp_rows:
+        try:
+            if r.get("heat_temp_c") is not None:
+                hsp_temp_vals.append(float(r.get("heat_temp_c")))
+        except (TypeError, ValueError):
+            pass
+    avg_session_min = (
+        sum(hsp_session_mins) / len(hsp_session_mins)
+        if hsp_session_mins else 0.0
+    )
+    avg_temp_c = (sum(hsp_temp_vals) / len(hsp_temp_vals)) if hsp_temp_vals else None
     if not heat_rows:
         duration_status = "no-heat-data"
+    elif heat_rows and not hsp_rows:
+        duration_status = "not-applicable"
     elif (avg_temp_c is None
           or avg_temp_c < HSP_TEMP_THRESHOLD_C
           or avg_session_min < HSP_DURATION_THRESHOLD_MIN):

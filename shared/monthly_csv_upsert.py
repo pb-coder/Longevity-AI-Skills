@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 
 from .monthly_csv_canonicalize import canonicalize_monthly_csv
 from .monthly_csv_io import _dict_to_row, _read_csv_rows, _row_to_dict, _write_csv_atomic
@@ -22,6 +22,22 @@ from .monthly_csv_values import (
     date_str,
 )
 from .person_paths import ensure_monthly_dir, monthly_csv as monthly_csv_path, monthly_dir
+
+AUTO_CARDIO_ROLLOVER_GRACE_DAYS = 7
+
+
+def _source_with_start(source: str, start: str) -> str:
+    if not start:
+        return source
+    return f"{source}@{start}"
+
+
+def _start_from_source(source: str | None) -> str:
+    s = str(source or "")
+    if "@" not in s:
+        return ""
+    tail = s.rsplit("@", 1)[1]
+    return tail if re.match(r"^\d{2}:\d{2}(:\d{2})?$", tail) else ""
 
 __all__ = [
     "upsert_rows",
@@ -98,13 +114,15 @@ def upsert_monthly_cardio(person: str,
       recomputes Volume / Pace / Total Cal / SESSION / TOTAL.
 
     Current-month gate: rows dated outside the current calendar month
-    are dropped unless ``allow_past_months=True``. Past months are
-    "finished"; deleted rows stay deleted on re-import.
+    are dropped unless ``allow_past_months=True``. A 7-day rollover grace
+    admits late-arriving rows from the prior month, closing the common
+    month-boundary import hole while keeping older deleted rows deleted.
     """
     if not rows:
         return ["Auto-cardio: 0 rows considered"]
 
-    current_month = _current_month_key(today_d)
+    effective_today = today_d or date.today()
+    current_month = _current_month_key(effective_today)
     skipped_past_month = 0
     skipped_past_by_month: dict[str, dict[str, int]] = {}
 
@@ -140,7 +158,19 @@ def upsert_monthly_cardio(person: str,
         if not d or len(d) != 10:
             continue
         key = f"{d[:4]}.{d[5:7]}"
-        if not allow_past_months and key != current_month:
+        row_d = date_str(d)
+        parsed_d = None
+        if row_d:
+            try:
+                y, m, day = row_d.split("-")
+                parsed_d = date(int(y), int(m), int(day))
+            except ValueError:
+                parsed_d = None
+        within_rollover_grace = (
+            parsed_d is not None
+            and parsed_d >= effective_today - timedelta(days=AUTO_CARDIO_ROLLOVER_GRACE_DAYS)
+        )
+        if not allow_past_months and key != current_month and not within_rollover_grace:
             skipped_past_month += 1
             exercise = str(r.get("exercise") or "unknown").strip() or "unknown"
             month_counts = skipped_past_by_month.setdefault(key, {})
@@ -188,7 +218,7 @@ def upsert_monthly_cardio(person: str,
                 continue
             dur_f = _parse_duration_minutes(rd.get("duration"))
             is_auto = _is_auto_imported(rd)
-            start_v = rd.get("elapsed") or rd.get("start") or ""
+            start_v = _start_from_source(rd.get("source")) or rd.get("start") or ""
             existing_index.setdefault((date_v, ex_str.lower()), []).append(
                 (idx, dur_f, str(start_v), is_auto)
             )
@@ -197,6 +227,16 @@ def upsert_monthly_cardio(person: str,
         skipped_dup = 0
         refreshed = 0
         claimed_rows: set = set()
+        next_num_by_date: dict[str, int] = {}
+        for rd in existing_dicts:
+            row_d = date_str(rd.get("date"))
+            if not row_d:
+                continue
+            n = _numeric_cell(rd.get("num"))
+            if isinstance(n, (int, float)):
+                next_num_by_date[row_d] = max(
+                    next_num_by_date.get(row_d, 0), int(n)
+                )
 
         new_rows_to_append: list[dict] = []
 
@@ -279,19 +319,15 @@ def upsert_monthly_cardio(person: str,
             distance = r.get("distance_km")
             avg_hr = r.get("avg_hr")
             machine_tag = r.get("machine_tag")
-            source_value = (
+            source_base = (
                 f"gymkit:{machine_tag}" if machine_tag else "apple"
             )
+            source_value = _source_with_start(source_base, start_v)
 
-            # Per-date # auto-increment (re-uses an existing day's counter
-            # if the user logged strength earlier the same date).
-            existing_nums: list[int] = []
-            for rd in existing_dicts + new_rows_to_append:
-                if date_str(rd.get("date")) == d:
-                    n = _numeric_cell(rd.get("num"))
-                    if isinstance(n, (int, float)):
-                        existing_nums.append(int(n))
-            next_num = (max(existing_nums) + 1) if existing_nums else 1
+            # Per-date # auto-increment, tracked once per batch instead of
+            # rescanning every existing row for every imported workout.
+            next_num = next_num_by_date.get(d, 0) + 1
+            next_num_by_date[d] = next_num
 
             new_row = {
                 "session":     None,  # canonicalize will fill

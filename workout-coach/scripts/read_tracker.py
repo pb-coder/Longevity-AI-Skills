@@ -551,6 +551,20 @@ def main() -> int:
     recovery = recovery_score(health_all, today_d, capabilities)
     trimps = trimp_per_session(monthly_sessions, max_hr, rest_hr, sex=profile.get("sex"))
     training_load = training_load_summary(trimps, today_d)
+    training_load_by_modality = {
+        "all": training_load,
+        "strength": training_load_summary(
+            [t for t in trimps if t.get("kind") == "strength"], today_d
+        ),
+        "cardio": training_load_summary(
+            [t for t in trimps if t.get("kind") == "cardio"], today_d
+        ),
+    }
+    strength_training_load = (
+        training_load_by_modality["strength"]
+        if training_load_by_modality["strength"].get("tsb") is not None
+        else training_load
+    )
     # Fold TRIMP load_band, intensity_pct, and the cardio session's
     # HR-zone label back onto each monthly_session for the LLM. The zone
     # label lets a run/ride/hike entry read as "Z2 hike" or "Z4 interval"
@@ -676,7 +690,7 @@ def main() -> int:
     # single source of truth so the LLM can't rationalize past it.
     session_recommendation = compute_session_recommendation(
         recovery=recovery,
-        training_load=training_load,
+        training_load=strength_training_load,
         acwr=acwr,
         weekly_volume=weekly_volume,
         sleep_regularity=sleep_regularity,
@@ -751,6 +765,7 @@ def main() -> int:
         # ---- Recovery + training load (Python-derived, not raw metrics) ----
         "recovery": recovery,
         "training_load": training_load,
+        "training_load_by_modality": training_load_by_modality,
         "hr_at_volume_divergence": hr_volume_div,
         "age_years": age_years,
         "estimated_max_hr": max_hr,

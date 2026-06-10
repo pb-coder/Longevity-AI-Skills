@@ -42,6 +42,8 @@ Profile / HR estimation:
 """
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
 import re
 from datetime import date, timedelta
 
@@ -423,9 +425,26 @@ def load_exercises_db(path: Path) -> dict[str, dict]:
     can detect gaps by comparing logged exercise names against this dict
     and surfacing anything missing as ``unknown_exercises``.
     """
-    db: dict[str, dict] = {}
+    path = Path(path)
     if not path.exists():
-        return db
+        return {}
+    stat = path.stat()
+    cached = _load_exercises_db_cached(str(path), stat.st_mtime_ns, stat.st_size)
+    # Defensively copy the mutable leaves so consumers cannot mutate the
+    # process-wide parse cache.
+    return {
+        k: {
+            **v,
+            "synergists": list(v.get("synergists") or []),
+        }
+        for k, v in cached.items()
+    }
+
+
+@lru_cache(maxsize=8)
+def _load_exercises_db_cached(path_str: str, _mtime_ns: int, _size: int) -> dict[str, dict]:
+    path = Path(path_str)
+    db: dict[str, dict] = {}
 
     section = None        # e.g. "CHEST"
     subsection_primary = None  # regional override from a ### hint

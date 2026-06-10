@@ -475,7 +475,7 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
             # row is exactly "incidental walk" with no trailing
             # annotation, but be defensive in case future text appears
             # after the marker (e.g. "incidental walk; lower back").
-            after = notes[len("incidental"):].lstrip(" walk").lstrip(" -;,")
+            after = notes[len("incidental"):].removeprefix(" walk").lstrip(" -;,")
             rec["notes"] = after.strip() or None
             migrated += 1
         elif already_flagged:

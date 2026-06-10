@@ -317,6 +317,7 @@ def card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text,
     deep_plus_rem = deep + rem if (deep or rem) else None
     eff_block = (sleep or {}).get("sleep_efficiency_pct") or {}
     eff_mean = eff_block.get("mean") if isinstance(eff_block, dict) else None
+    eff_is_derived = isinstance(eff_block, dict) and eff_block.get("source") == "derived_sleep_period"
 
     # Hero: total sleep with NSF target context
     if total is None:
@@ -355,11 +356,15 @@ def card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text,
         elif eff_mean >= 80: cls, lbl = "amber", "borderline"
         else: cls, lbl = "warn", "disturbed"
         secondaries.append(secondary_metric_row(
-            "Efficiency",
+            "Continuity" if eff_is_derived else "Efficiency",
             f'{eff_mean:.1f} <span class="muted">%</span>',
             cls,
             sublabel=f'target ≥85% · {lbl}',
-            tip="Percent of time in bed actually asleep. Healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools.",
+            tip=(
+                "Derived from sleep-stage total divided by stored sleep-period span; not always a clinical time-in-bed denominator."
+                if eff_is_derived else
+                "Percent of time in bed actually asleep. Healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools."
+            ),
         ))
 
     if sleep_regularity:

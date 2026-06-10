@@ -206,7 +206,7 @@ def upsert_swim_laps(person: str, entries: Iterable[dict]) -> list[str]:
         headers=SWIM_LAPS_HEADERS,
         fields=["date"] + SWIM_LAPS_FIELDS,
         key_fields=("date", "workout_start", "lap_num"),
-        sort_fields=("date", "lap_num"),
+        sort_fields=("date", "workout_start", "lap_num"),
         sort_reverse=False,
         notes_field=None,
     )

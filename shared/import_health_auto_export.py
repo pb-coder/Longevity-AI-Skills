@@ -425,8 +425,9 @@ def _write_health_records(person: str, records: list[dict]) -> None:
     fields = HEALTH_METRICS_FIELDS_BY_SOURCE[SOURCE_NAME]
     headers = HEALTH_METRICS_HEADERS_BY_SOURCE[SOURCE_NAME]
     rows = []
-    for d in sorted((r["date"] for r in records), reverse=True):
-        rec = next(r for r in records if r["date"] == d)
+    by_date = {r["date"]: r for r in records if r.get("date")}
+    for d in sorted(by_date, reverse=True):
+        rec = by_date[d]
         rows.append([d] + [rec.get(k) for k in fields] + [rec.get("notes")])
     _write_store_csv(Path(WORKOUT_TRACKER_ROOT) / person / "data" / "health_metrics.csv", headers, rows)
 

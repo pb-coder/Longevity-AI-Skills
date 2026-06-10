@@ -93,6 +93,35 @@ class AppleHealthImportTests(unittest.TestCase):
         self.assertEqual(d2, "2026-10-25")
         self.assertEqual((end - start).total_seconds() / 60, 20)
 
+    def test_gymkit_dedupe_matches_indoor_outdoor_split_by_overlap(self) -> None:
+        workouts = [
+            {
+                "date": "2026-05-01",
+                "apple_type": "Running",
+                "duration_min": 30,
+                "distance_km": 5,
+                "dt_start": datetime(2026, 5, 1, 23, 50),
+                "dt_end": datetime(2026, 5, 2, 0, 20),
+                "is_machine": False,
+            },
+            {
+                "date": "2026-05-02",
+                "apple_type": "IndoorRunning",
+                "duration_min": 31,
+                "distance_km": 5.1,
+                "dt_start": datetime(2026, 5, 1, 23, 49),
+                "dt_end": datetime(2026, 5, 2, 0, 20),
+                "is_machine": True,
+                "device": "<<HKDevice: 0x1>, name:Matrix, manufacturer:Matrix>",
+            },
+        ]
+
+        kept, notes = iah._drop_watch_overlapping_machine(workouts)
+
+        self.assertEqual(len(kept), 1)
+        self.assertTrue(kept[0]["is_machine"])
+        self.assertEqual(len(notes), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

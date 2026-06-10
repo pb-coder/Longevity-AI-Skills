@@ -58,7 +58,7 @@ Frequency: 2-3x/week per muscle distributes volume better. Per-session cap makes
 
 Hypertrophy improves closer to failure. Strength similar across wide RIR range (Robinson 2024, Sports Med meta-regression). 1-2 RIR = equivalent hypertrophy to failure with less fatigue (Refalo 2024).
 
-Without RIR/RPE in tracker, stimulus quality is invisible. Flag every report.
+Without RIR/RPE in tracker, stimulus quality is invisible. When using stall or reactive-deload language, state that the signal is inferred from load/reps and not confirmed by effort-in-reserve data.
 
 ## §3 Rest Periods
 

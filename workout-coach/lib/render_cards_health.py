@@ -202,6 +202,13 @@ def card_sleep(sleep, coach_text):
 
     # --- Efficiency band ---
     eff_mean = eff.get("mean") if isinstance(eff, dict) else None
+    eff_is_derived = isinstance(eff, dict) and eff.get("source") == "derived_sleep_period"
+    eff_label = "Continuity" if eff_is_derived else "Efficiency"
+    eff_tip = (
+        "Derived sleep continuity from sleep-stage total divided by the stored sleep-period span. This is not always the clinical time-in-bed denominator. "
+        if eff_is_derived else
+        "Sleep efficiency is the percent of time in bed that you were actually asleep. "
+    )
     if eff_mean is None:
         ef_band, ef_word, ef_value = "muted", "not computable", "—"
     elif eff_mean >= 85:
@@ -265,9 +272,9 @@ def card_sleep(sleep, coach_text):
     </div>''')
     if eff_mean is not None:
         sleep_row_parts.append(f'''
-    <div class="sleep-row" data-tip="Sleep efficiency is the percent of time in bed that you were actually asleep. The healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools. Status: {ef_word}.">
+    <div class="sleep-row" data-tip="{esc(eff_tip)}The healthy adult range is 85% or higher; below 80% is what sleep clinics flag as disturbed in screening tools. Status: {ef_word}.">
       <span class="bar-dot band-{band_class_map[ef_band]}"></span>
-      <span class="sleep-row-label">Efficiency</span>
+      <span class="sleep-row-label">{esc(eff_label)}</span>
       <span class="sleep-row-value {ef_band}">{ef_value}</span>
     </div>''')
     if frag_mean is not None:
@@ -372,7 +379,7 @@ def card_recovery_practices(thermal, light, coach_text):
   <div class="big">{fmt(heat.get("n_sessions_per_week"), 2)}<span class="unit">/ wk</span></div>
   {adherence_pill(adherence.get("heat_status"))}
   <div class="detail">Target {adherence.get("heat_target_per_week", 4)} per week. Average session {fmt(heat.get("avg_session_minutes"), 0)} min at about {fmt(heat.get("avg_temp_c"), 0)} °C.</div>
-  <div class="recent">HSP band: {fmt(heat.get("minutes_above_hsp_threshold_per_week"), 0)} min/wk above 80 °C for 20+ min.</div>
+  <div class="recent">Dry/banya HSP band: {fmt(heat.get("minutes_above_hsp_threshold_per_week"), 0)} min/wk above 80 °C for 20+ min. Steam: {fmt(heat.get("steam_minutes_per_week"), 0)} min/wk.</div>
 </div>
 '''
     # Cold-exposure block: weekly count + adherence pill (when adherence
@@ -434,4 +441,3 @@ def card_recovery_practices(thermal, light, coach_text):
   {coach_block(coach_text)}
 </section>
 '''
-

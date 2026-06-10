@@ -186,6 +186,44 @@ class MonthlyCsvTests(unittest.TestCase):
         self.assertIn("2026.03: 1 (Hike=1)", text)
         self.assertIn("2026.04: 2 (Outdoor Run=2)", text)
 
+    def test_auto_cardio_allows_recent_prior_month_rollover(self) -> None:
+        summary = monthly_csv.upsert_monthly_cardio(
+            "Test",
+            [{"date": "2026-04-30", "exercise": "Outdoor Run", "duration_min": 30}],
+            today_d=date(2026, 5, 2),
+        )
+
+        self.assertTrue(person_paths.monthly_csv("Test", "2026.04").exists())
+        self.assertIn("1 cardio rows appended", "\n".join(summary))
+
+    def test_auto_cardio_source_start_keeps_same_duration_workouts_distinct_and_idempotent(self) -> None:
+        payload = [
+            {
+                "date": "2026-05-25",
+                "start": "14:40:57",
+                "exercise": "Swim",
+                "duration_min": 2.2,
+                "distance_km": 0.035,
+            },
+            {
+                "date": "2026-05-25",
+                "start": "14:56:54",
+                "exercise": "Swim",
+                "duration_min": 2.4,
+                "distance_km": 0.080,
+            },
+        ]
+
+        monthly_csv.upsert_monthly_cardio("Test", payload, today_d=date(2026, 5, 25))
+        first = monthly_csv.read_monthly("Test", "2026.05")
+        monthly_csv.upsert_monthly_cardio("Test", payload, today_d=date(2026, 5, 25))
+        second = monthly_csv.read_monthly("Test", "2026.05")
+
+        swims = [r for r in second if r.get("exercise") == "Swim"]
+        self.assertEqual(len(swims), 2)
+        self.assertEqual(len(first), len(second))
+        self.assertEqual({r.get("source") for r in swims}, {"apple@14:40:57", "apple@14:56:54"})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -392,22 +392,28 @@ def _drop_watch_overlapping_machine(workouts: list[dict]) -> tuple[list[dict], l
     and overlap in time; the machine row carries the accurate distance,
     segments, and lap data. The watch row is a phantom duplicate.
 
-    Group by ``(date, apple_type)``. Within each group, if any workout
+    Group by base activity type. Within each group, if any workout
     has ``is_machine=True``, drop every non-machine workout whose time
-    window overlaps a machine workout. Returns the filtered list plus
+    window overlaps a machine workout. This catches indoor/outdoor name
+    splits and midnight-crossing workouts because the actual datetimes,
+    not calendar-date buckets, decide overlap. Returns the filtered list plus
     one human-readable note per drop so the importer can surface them.
 
     No-op when a day has only watch-only workouts or only machine ones —
     the dedupe never collapses across activity types or dates.
     """
     notes: list[str] = []
-    by_key: dict[tuple, list[dict]] = {}
+    def base_type(atype: str | None) -> str:
+        s = str(atype or "")
+        return s[6:] if s.startswith("Indoor") else s
+
+    by_key: dict[str, list[dict]] = {}
     for w in workouts:
-        key = (w.get("date"), w.get("apple_type"))
+        key = base_type(w.get("apple_type"))
         by_key.setdefault(key, []).append(w)
 
     drop_ids = set()
-    for (d, atype), group in by_key.items():
+    for atype, group in by_key.items():
         machines = [w for w in group if w.get("is_machine")]
         watches = [w for w in group if not w.get("is_machine")]
         if not machines or not watches:
@@ -421,7 +427,7 @@ def _drop_watch_overlapping_machine(workouts: list[dict]) -> tuple[list[dict], l
                     drop_ids.add(id(wch))
                     name = _extract_device_name(mch.get("device") or "") or "fitness machine"
                     notes.append(
-                        f"Auto-cardio: dropped Watch-only {atype} on {d} "
+                        f"Auto-cardio: dropped Watch-only {wch.get('apple_type')} on {wch.get('date')} "
                         f"({wch.get('duration_min')} min, "
                         f"{wch.get('distance_km')} km) — overlaps "
                         f"{name} GymKit workout"

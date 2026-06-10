@@ -376,6 +376,13 @@ def nutrition_phase_summary(phases: list[dict],
             "kcal_delta":          open_phase.get("target_kcal_delta"),
             "protein_g_per_kg":    open_phase.get("target_protein_g_per_kg"),
             "stop_conditions":     open_phase.get("stop_conditions"),
+            "protein_tracking_status": (
+                "target_only" if open_phase.get("target_protein_g_per_kg") is not None else None
+            ),
+            "protein_caveat": (
+                "Protein is a configured target only; no intake log is stored here, so do not claim adherence."
+                if open_phase.get("target_protein_g_per_kg") is not None else None
+            ),
         },
         "actuals": {
             "rate_kg_per_wk_14d":   observed,

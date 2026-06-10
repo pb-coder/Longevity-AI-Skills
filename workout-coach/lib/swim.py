@@ -509,5 +509,9 @@ def swim_summary(swim_workouts: list[dict],
             {"sec_per_100m": css, "set_at": css_set_at} if css else None
         ),
         "css_retest_due":           retest_due,
+        "css_missing_nudge":        (
+            "Swims are logged but no CSS pace is set in profile.csv; log a 400m + 200m CSS test so zones are not guessed."
+            if not css else None
+        ),
         "css_test_detected":        css_test_detected,
     }

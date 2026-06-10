@@ -151,7 +151,7 @@ VOLUME_LANDMARKS = {
 # Canonicalise the muscle tokens that appear in exercises-database.md to the
 # snake_case keys used everywhere else (and in VOLUME_LANDMARKS).
 MUSCLE_ALIASES = {
-    "chest": "chest", "upper chest": "upper_chest",
+    "chest": "chest", "upper chest": "chest",
     "back": "back", "lats": "lats",
     "biceps": "biceps", "triceps": "triceps",
     "quads": "quads", "hamstrings": "hamstrings",
@@ -164,7 +164,7 @@ MUSCLE_ALIASES = {
     "side delt": "side_delts",  "side delts":  "side_delts",
     "rear delt": "rear_delts",  "rear delts":  "rear_delts",
     "external rotators": "external_rotators",
-    "shoulders": "shoulders",   "full body": "full_body",
+    "shoulders": None,          "full body": None,
     "posterior chain": None,    # too broad to assign — skip as primary
 }
 

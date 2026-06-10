@@ -289,11 +289,16 @@ def card_nutrition_phase(nutrition_phase, coach_text):
     ratio = actuals.get("rate_vs_target_ratio")
     secondaries = []
     if targets.get("protein_g_per_kg") is not None:
+        protein_sublabel = (
+            "configured target only; intake adherence untracked"
+            if targets.get("protein_tracking_status") == "target_only"
+            else "hit upper end if vegan (leucine ceiling)"
+        )
         secondaries.append(secondary_metric_row(
             "Protein target",
             f'{fmt(targets["protein_g_per_kg"], 1)} <span class="muted">g/kg</span>',
             "muted",
-            sublabel="hit upper end if vegan (leucine ceiling)",
+            sublabel=protein_sublabel,
         ))
     if targets.get("kcal_delta") is not None:
         kcal = targets["kcal_delta"]
@@ -362,4 +367,3 @@ def card_nutrition_phase(nutrition_phase, coach_text):
   {coach_block(coach_text)}
 </section>
 '''
-

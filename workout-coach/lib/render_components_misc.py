@@ -1,6 +1,8 @@
 """Small shared dashboard components."""
 from __future__ import annotations
 
+import re
+
 from .render_helpers import esc
 
 # ---------- ring ----------
@@ -36,5 +38,5 @@ def embed_workout_markdown(md_text: str) -> str:
     """Embed the raw markdown into a script tag so inline JS can render
     it on the Workout tab. The .md file remains the source of truth on
     disk; this is for in-browser viewing only."""
-    safe = (md_text.replace("</script>", "<\\/script>"))
+    safe = re.sub(r"</script", r"<\\/script", md_text, flags=re.IGNORECASE)
     return f'<script type="text/markdown" id="workout-md">{safe}</script>'

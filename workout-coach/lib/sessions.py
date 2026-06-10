@@ -41,7 +41,7 @@ def _is_cardio_row(r: dict) -> bool:
     if (r.get("avg_hr") or 0) > 0:
         return True
     src = (r.get("source") or "").strip().lower()
-    if src in ("apple",) or src.startswith("gymkit:"):
+    if src == "apple" or src.startswith("apple@") or src.startswith("gymkit:"):
         return True
     return False
 
@@ -73,8 +73,8 @@ def progression_summary(rows: list[dict]) -> list[dict]:
         summary.append({
             "exercise": last["exercise"],
             "sessions_logged": len(dates_desc),
-            "last": f"{dates_desc[0]} → {int(last['kg'])}kg x {last['reps']}",
-            "prev": f"{dates_desc[1]} → {int(prev['kg'])}kg x {prev['reps']}" if prev else None,
+            "last": f"{dates_desc[0]} → {last['kg']:g}kg x {last['reps']}",
+            "prev": f"{dates_desc[1]} → {prev['kg']:g}kg x {prev['reps']}" if prev else None,
             "last_notes": last_notes if last_notes else None,
         })
 

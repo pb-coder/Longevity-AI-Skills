@@ -186,10 +186,21 @@ class MonthlyCsvTests(unittest.TestCase):
         self.assertIn("2026.03: 1 (Hike=1)", text)
         self.assertIn("2026.04: 2 (Outdoor Run=2)", text)
 
-    def test_auto_cardio_allows_recent_prior_month_rollover(self) -> None:
+    def test_auto_cardio_strictly_skips_prior_month_without_backfill_flag(self) -> None:
         summary = monthly_csv.upsert_monthly_cardio(
             "Test",
             [{"date": "2026-04-30", "exercise": "Outdoor Run", "duration_min": 30}],
+            today_d=date(2026, 5, 2),
+        )
+
+        self.assertFalse(person_paths.monthly_csv("Test", "2026.04").exists())
+        self.assertIn("dated outside the current month", "\n".join(summary))
+
+    def test_auto_cardio_allow_past_months_is_explicit_backfill_path(self) -> None:
+        summary = monthly_csv.upsert_monthly_cardio(
+            "Test",
+            [{"date": "2026-04-30", "exercise": "Outdoor Run", "duration_min": 30}],
+            allow_past_months=True,
             today_d=date(2026, 5, 2),
         )
 
@@ -223,6 +234,50 @@ class MonthlyCsvTests(unittest.TestCase):
         self.assertEqual(len(swims), 2)
         self.assertEqual(len(first), len(second))
         self.assertEqual({r.get("source") for r in swims}, {"apple@14:40:57", "apple@14:56:54"})
+
+    def test_date_str_rejects_invalid_dates(self) -> None:
+        self.assertIsNone(monthly_csv.date_str("2026-02-31"))
+        self.assertIsNone(monthly_csv.date_str("not-a-date"))
+        self.assertEqual(monthly_csv.date_str("2026-02-28 08:00:00"), "2026-02-28")
+
+    def test_notes_to_source_migration_preserves_trailing_annotations(self) -> None:
+        old_header = monthly_csv.MONTHLY_HEADERS[:-1]
+        row = [
+            "", "2026-05-10", "1", "Outdoor Run", "1", "", "", "",
+            "auto-imported from Apple | source: Matrix T7xi; felt strong",
+            "5", "30:00", "", "150", "", "", "", "",
+        ]
+        path = self.write_month("2026.05", old_header, [row])
+
+        monthly_csv.canonicalize_monthly_csv("Test", "2026.05")
+        _, rows = self.read_rows(path)
+
+        self.assertEqual(rows[0][8], "felt strong")
+        self.assertEqual(rows[0][17], "gymkit:Matrix T7xi")
+
+    def test_auto_cardio_reports_manual_wins_metadata_drift(self) -> None:
+        payload = [{
+            "date": "2026-05-15",
+            "exercise": "Outdoor Run",
+            "duration_min": 30,
+            "distance_km": 5,
+            "active_cal": 100,
+        }]
+        monthly_csv.upsert_monthly_cardio("Test", payload, today_d=date(2026, 5, 15))
+        path = person_paths.monthly_csv("Test", "2026.05")
+        header, rows = self.read_rows(path)
+        active_idx = header.index("Active Cal")
+        for row in rows:
+            if row[3] == "Outdoor Run":
+                row[active_idx] = "150"
+        with path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            writer.writerows(rows)
+
+        summary = monthly_csv.upsert_monthly_cardio("Test", payload, today_d=date(2026, 5, 15))
+
+        self.assertIn("manual-wins warnings", "\n".join(summary))
 
 
 if __name__ == "__main__":

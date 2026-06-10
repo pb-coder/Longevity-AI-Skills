@@ -33,6 +33,7 @@ from .monthly_csv import (  # noqa: E402
     list_year_months,
 )
 from .person_paths import monthly_csv as monthly_csv_path  # noqa: E402
+from tracker.csv_table import write_csv_atomic  # noqa: E402
 
 # --- canonical-name source --------------------------------------------------
 
@@ -148,10 +149,7 @@ def canonicalize_csv(path: Path, canonical: set[str]) -> tuple[int, int, list[tu
                 cleared += 1
 
     if renamed or cleared:
-        with path.open("w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
-            writer.writerows(rows)
+        write_csv_atomic(path, header, rows)
     return renamed, cleared, ambiguous
 
 

@@ -109,7 +109,7 @@ class StorageTests(unittest.TestCase):
                 }],
             )
 
-    def test_thermal_missing_start_dedupes_by_protocol_shape(self) -> None:
+    def test_thermal_missing_start_preserves_same_shape_collisions(self) -> None:
         csv_store.upsert_thermal_sessions(
             "Test",
             [{
@@ -134,12 +134,24 @@ class StorageTests(unittest.TestCase):
                 "heat_round_durations_min": [12],
             }],
         )
+        csv_store.upsert_thermal_sessions(
+            "Test",
+            [{
+                "date": "2026-05-03",
+                "heat_type": "dry",
+                "heat_round_durations_min": [12],
+            }],
+        )
 
         rows = csv_store.read_thermal_sessions("Test")
-        self.assertEqual(len(rows), 2)
-        dry = [r for r in rows if r.get("heat_type") == "dry"][0]
+        self.assertEqual(len(rows), 3)
+        dry_rows = sorted(
+            [r for r in rows if r.get("heat_type") == "dry"],
+            key=lambda r: str(r.get("start") or ""),
+        )
         cold = [r for r in rows if r.get("cold_type") == "cold_shower"][0]
-        self.assertEqual(dry["heat_total_min"], 12)
+        self.assertEqual([r["heat_total_min"] for r in dry_rows], [10, 12])
+        self.assertEqual(dry_rows[1]["start"], "occurrence:2")
         self.assertEqual(cold["cold_duration_sec"], 60)
 
     def test_light_therapy_defaults_and_roundtrip(self) -> None:

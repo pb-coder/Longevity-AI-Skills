@@ -77,6 +77,13 @@ class SessionRecommendationTests(unittest.TestCase):
         self.assertEqual(rec["label"], "hold_load")
         self.assertIn("no PR", rec["headline"])
 
+    def test_tier_d_recovery_floor_is_5_5(self) -> None:
+        below = recommendation(recovery={"score": 5.49, "drivers": []})
+        at_floor = recommendation(recovery={"score": 5.5, "drivers": []})
+
+        self.assertEqual(below["tier"], "C")
+        self.assertEqual(at_floor["tier"], "D")
+
     def test_mrv_gate_uses_current_sets_per_week(self) -> None:
         self.assertEqual(
             _muscles_over_mrv({

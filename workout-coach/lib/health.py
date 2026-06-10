@@ -40,7 +40,6 @@ from .health_session_rec import (
     _rhr_sustained_elevation_days,
     _tsb_sustained_days,
     _wrist_temp_deviation_c,
-    _z_for,
     compute_session_recommendation,
     compute_tier_history,
 )
@@ -66,7 +65,6 @@ __all__ = [
     "_rhr_sustained_elevation_days",
     "_tsb_sustained_days",
     "_wrist_temp_deviation_c",
-    "_z_for",
     "compute_session_recommendation",
     "compute_tier_history",
 ]

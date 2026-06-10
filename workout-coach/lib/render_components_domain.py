@@ -97,7 +97,7 @@ def domain_score_dial(score, band, label, *, n_components=None, w=120, h=80):
     if score is None:
         return (
             f'<div class="domain-dial">'
-            f'<div class="domain-dial-num muted">·</div>'
+            f'<div class="domain-dial-num muted"></div>'
             f'<div class="domain-dial-lbl muted">no data</div></div>'
         )
     s = max(0.0, min(100.0, float(score)))

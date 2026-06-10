@@ -49,7 +49,7 @@ def recent_thermal_sessions(sessions: list[dict], today_d: date,
     """Filter ``sessions`` to the last ``days`` (inclusive of today)."""
     if not sessions:
         return []
-    cutoff = today_d - timedelta(days=days)
+    cutoff = today_d - timedelta(days=max(days - 1, 0))
     out = []
     for s in sessions:
         d = _parse_iso_date(s.get("date"))

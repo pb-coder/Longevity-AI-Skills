@@ -118,6 +118,13 @@ TEMP_UNIT_TO_C = {
 }
 
 
+def _clean_apple_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.replace("\xa0", " ").strip()
+    return cleaned or None
+
+
 def _convert_unit(value: float | None, unit: str | None, converters: dict, label: str) -> float | None:
     if value is None:
         return None
@@ -305,7 +312,7 @@ def extract_workout(elem, since_date):
     if active_cal is not None and basal_cal is not None:
         total_cal = round(active_cal + basal_cal, 1)
 
-    device_str = attrib.get("device") or ""
+    device_str = _clean_apple_text(attrib.get("device")) or ""
     is_machine = FITNESS_MACHINE_DEVICE_MARKER in device_str.lower()
 
     # Derive a single Location string from the swim metadata flags.
@@ -338,7 +345,7 @@ def extract_workout(elem, since_date):
         "elapsed_min":  elapsed_min,
         "distance_km":  round(distance_km, 3) if distance_km is not None else None,
         "laps":         laps if laps > 0 else None,
-        "source":       attrib.get("sourceName"),
+        "source":       _clean_apple_text(attrib.get("sourceName")),
         "device":       device_str or None,
         "is_machine":   is_machine,
         "dt_start":     dt_start,

@@ -9,7 +9,7 @@ Functions:
 
 - ``esc(s)`` — HTML-escape any value; ``None`` becomes ``""``.
 - ``fmt(v, digits, default)`` — number formatter with optional decimal
-  digits. Returns ``default`` (default ``"·"``) when ``v`` is ``None``
+  digits. Returns ``default`` (default ``""``) when ``v`` is ``None``
   or NaN. Integers are rendered without trailing decimals regardless of
   ``digits``.
 - ``signed(v, digits, default)`` — signed number formatter (always
@@ -38,7 +38,7 @@ def esc(s) -> str:
             .replace("'", "&#x27;"))
 
 
-def fmt(v, digits=1, default="·"):
+def fmt(v, digits=1, default=""):
     if v is None:
         return default
     if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -50,7 +50,7 @@ def fmt(v, digits=1, default="·"):
     return str(v)
 
 
-def signed(v, digits=1, default="·"):
+def signed(v, digits=1, default=""):
     if v is None:
         return default
     return f"{v:+.{digits}f}"

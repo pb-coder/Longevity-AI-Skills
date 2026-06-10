@@ -4,7 +4,9 @@ import csv
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stderr
 from datetime import date
+from io import StringIO
 from pathlib import Path
 
 
@@ -229,11 +231,47 @@ class HealthAutoExportTests(unittest.TestCase):
         self.assertEqual(sleep[0]["total_h"], 7.0)
         self.assertIsNone(sleep[0]["time_in_bed_h"])
         run = [w for w in workouts if w["apple_type"] == "Running"][0]
-        self.assertEqual(run["start"], "16:45:21")
+        self.assertEqual(run["start"], "16:45:00")
         self.assertEqual(run["active_cal"], 100.0)
         self.assertEqual(run["total_cal"], 120.0)
         self.assertEqual(run["min_hr"], 100)
         self.assertEqual(run["distance_km"], 5.0)
+
+    def test_missing_hae_columns_warn(self) -> None:
+        err = StringIO()
+        with redirect_stderr(err):
+            metrics, sleep = hae.parse_daily_rows(
+                [{"Date/Time": "2026-05-01 00:00:00"}],
+                date(2026, 5, 1),
+                date(2026, 5, 1),
+            )
+
+        self.assertIn("HealthAutoExport daily column missing", err.getvalue())
+        self.assertEqual(len(metrics), 1)
+        self.assertEqual(sleep, [])
+
+    def test_workout_stamps_use_minute_start_and_report_ambiguous_matches(self) -> None:
+        rows = [{
+            "Workout Type": "Outdoor Run",
+            "Start": "2026-05-01 08:15",
+            "End": "2026-05-01 08:45",
+            "Duration": "00:30:00",
+            "Active Energy (kJ)": "400",
+            "Resting Energy (kJ)": "40",
+            "Avg. Heart Rate (count/min)": "",
+            "Distance (km)": "5",
+        }]
+
+        parsed = hae.parse_workout_rows(
+            rows,
+            {("Outdoor Run", "20260501_0815"): {"20260501_081501", "20260501_081530"}},
+            {},
+            date(2026, 5, 1),
+            date(2026, 5, 1),
+        )
+
+        self.assertEqual(parsed[0]["start"], "08:15:00")
+        self.assertEqual(parsed[0]["stamp_status"], "ambiguous")
 
     def test_replace_range_removes_hl_rows_and_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

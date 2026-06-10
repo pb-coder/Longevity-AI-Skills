@@ -33,6 +33,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(_HERE.parent))
     __package__ = "shared"
 
+from tracker.csv_table import write_csv_atomic  # noqa: E402
 from .person_paths import list_sleep_night_months, sleep_nights_csv  # noqa: E402
 
 # Column names as they appear in the per-night CSVs. Order does not
@@ -109,18 +110,20 @@ def backfill_one_file(path: Path, dry_run: bool) -> dict:
             skipped_short.append(row.get("Date", "?"))
             continue
 
+        changed = False
         if tib is None:
             row[COL_TIB] = round(derived_tib_h, 2)
+            changed = True
         if eff is None and total is not None and derived_tib_h > 0:
             row[COL_EFF] = round(total / derived_tib_h * 100.0, 1)
-        filled += 1
+            changed = True
+        if changed:
+            filled += 1
 
     if filled and not dry_run:
         # Write back, preserving the original header order.
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=list(headers) if headers else [])
-            w.writeheader()
-            w.writerows(rows)
+        fieldnames = list(headers) if headers else []
+        write_csv_atomic(path, fieldnames, [[row.get(h) for h in fieldnames] for row in rows])
 
     return {
         "file": path.name,

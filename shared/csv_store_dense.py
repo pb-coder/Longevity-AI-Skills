@@ -89,36 +89,10 @@ HEALTH_METRICS_FIELDS_BY_SOURCE["health_auto_export"] = HEALTH_METRICS_FIELDS_BY
 WORKOUT_SESSIONS_HEADERS_BY_SOURCE["health_auto_export"] = WORKOUT_SESSIONS_HEADERS_BY_SOURCE["xml"]
 WORKOUT_SESSIONS_FIELDS_BY_SOURCE["health_auto_export"] = WORKOUT_SESSIONS_FIELDS_BY_SOURCE["xml"]
 
-# Strength-metadata drift threshold (preserved verbatim from
-# ``tracker_sheet.STRENGTH_METADATA_DRIFT_THRESHOLD``). Used by Workout
-# Sessions sparse-merge and by the importer's monthly metadata writer.
 STRENGTH_METADATA_DRIFT_THRESHOLD = 0.05
 
 
 # ============================================================ Helpers
-def _strength_metadata_drifts(existing, incoming) -> bool:
-    """5% threshold check for the manual-wins guard.
-
-    Used only on Workout Sessions cells that already have a value; an
-    incoming value within ±5% is treated as Apple jitter (no-op),
-    outside ±5% is treated as a user-edited value the importer must
-    not overwrite.
-    """
-    if existing in (None, ""):
-        return False
-    if incoming in (None, ""):
-        return False
-    try:
-        e = float(existing)
-        i = float(incoming)
-    except (TypeError, ValueError):
-        return str(existing).strip() != str(incoming).strip()
-    if e == 0 and i == 0:
-        return False
-    denom = max(abs(e), abs(i), 1e-9)
-    return abs(e - i) / denom >= STRENGTH_METADATA_DRIFT_THRESHOLD
-
-
 def _resolve_source(person: str) -> str:
     """Read the active source from the person's profile.
 

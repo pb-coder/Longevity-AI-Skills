@@ -70,15 +70,6 @@ def _wrist_temp_deviation_c(health_all: list[dict], today_d: date) -> float | No
     return round(latest["value"] - baseline, 2)
 
 
-def _z_for(health_all: list[dict], key: str, today_d: date,
-           recent_days: int = 7, baseline_days: int = 60,
-           invert: bool = False) -> float | None:
-    """Personal z-score for a single signal. Thin wrapper around
-    `_z_score_signal` that returns just the z value."""
-    info = _z_score_signal(health_all, key, today_d, recent_days, baseline_days, invert=invert)
-    return info["z"] if info else None
-
-
 def _count_stalled_lifts(estimated_1rm: dict | None) -> int:
     """Count lifts with stalled_sessions >= 2 (the Tuchscherer reactive-deload
     trigger). Uses already-computed `estimated_1rm[ex].stalled_sessions`."""

@@ -281,7 +281,11 @@ def main():
         return 2
 
     out = render(j, coach, workout_md, args.person)
-    Path(args.out).write_text(out, encoding="utf-8")
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp.write_text(out, encoding="utf-8")
+    tmp.replace(out_path)
     print(f"wrote {args.out} ({len(out):,} bytes)")
     return 0
 

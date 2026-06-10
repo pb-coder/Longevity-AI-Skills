@@ -37,7 +37,7 @@ def recent_swim_workouts(swim_workouts: list[dict],
     """Filter swim_workouts to the last ``days`` (inclusive of today)."""
     if not swim_workouts:
         return []
-    cutoff = today_d - timedelta(days=days)
+    cutoff = today_d - timedelta(days=max(days - 1, 0))
     out = []
     for w in swim_workouts:
         d = _parse_iso_date(w.get("date"))
@@ -367,8 +367,8 @@ def swim_summary(swim_workouts: list[dict],
     avg_swolf = round(sum(swolf_vals) / len(swolf_vals), 1) if swolf_vals else None
 
     # 4-week SPL trend / 8-week SWOLF trend (units / week).
-    cutoff_4w = today_d - timedelta(days=28)
-    cutoff_8w = today_d - timedelta(days=56)
+    cutoff_4w = today_d - timedelta(days=27)
+    cutoff_8w = today_d - timedelta(days=55)
     spl_pts: list[tuple[date, float]] = []
     swolf_pts: list[tuple[date, float]] = []
     for w in swim_workouts:
@@ -439,15 +439,14 @@ def swim_summary(swim_workouts: list[dict],
     # improvement verdict the renderer + LLM both consume. Falls back to
     # insufficient_data when either window has < 2 swims.
     window_14d = recent_swim_workouts(swim_workouts, today_d, days=14)
-    cutoff_28_inclusive = today_d - timedelta(days=14)
+    prior_14d_start = today_d - timedelta(days=27)
+    prior_14d_end = today_d - timedelta(days=14)
     prior_14d = []
     for w in swim_workouts:
         d_w = _parse_iso_date(w.get("date"))
         if d_w is None or d_w > today_d:
             continue
-        if d_w >= cutoff_28_inclusive:
-            continue
-        if d_w < today_d - timedelta(days=28):
+        if d_w < prior_14d_start or d_w > prior_14d_end:
             continue
         prior_14d.append(w)
 

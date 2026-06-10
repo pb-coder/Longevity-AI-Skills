@@ -140,12 +140,12 @@ def card_swim_trajectory(swim_summary, coach_text):
         }[metric_key]
         delta = deltas.get(metric_key)
         if curr_val is None:
-            return secondary_metric_row(label, '<span class="muted">·</span>', "muted",
+            return secondary_metric_row(label, '<span class="muted"></span>', "muted",
                                         sublabel="no data this window")
         # Arrow + colour: down arrow + good when delta improves; up arrow + warn
         # when delta worsens. Magnitude under threshold reads as flat.
         if delta is None:
-            arrow_html = '<span class="muted">·</span>'
+            arrow_html = '<span class="muted"></span>'
             sub = "no prior-14d comparison"
         elif abs(delta) < sig_threshold:
             arrow_html = '<span class="muted">flat</span>'

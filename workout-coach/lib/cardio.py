@@ -91,7 +91,7 @@ def cardio_last_28d(rows: list[dict], today_d: date) -> dict:
     >= 165 (a rough ceiling that catches Z4+ work without the user
     having to annotate).
     """
-    cutoff = today_d - timedelta(days=28)
+    cutoff = today_d - timedelta(days=27)
     non_interval_min = 0.0
     intervals = 0
     distance = 0.0
@@ -265,7 +265,7 @@ def cardio_hr_zones(monthly_sessions: list[dict],
     """
     if not max_hr or not rest_hr or max_hr <= rest_hr:
         return {}
-    cutoff = today_d - timedelta(days=window_days)
+    cutoff = today_d - timedelta(days=max(window_days - 1, 0))
     zone_min: dict[str, float] = {z[0]: 0.0 for z in HR_ZONES_PCT}
     z2_by_activity: dict[str, float] = {}
     total = 0.0
@@ -327,7 +327,7 @@ def auto_deload_candidates(monthly_sessions: list[dict],
     Conservative — designed to surface candidates the user likely forgot
     to flag, not to second-guess intent.
     """
-    cutoff = today_d - timedelta(days=window_weeks * 7)
+    cutoff = today_d - timedelta(days=max(window_weeks * 7 - 1, 0))
     strength = []
     for s in monthly_sessions:
         if s.get("session_kind") != "strength":
@@ -390,7 +390,6 @@ def compute_hr_recovery_summary(health_all: list[dict],
     mean_28 = sum(vals_28) / len(vals_28)
     vals_7 = _values_in_window(health_all, "hr_recovery_1min", today_d, 7)
     mean_7 = (sum(vals_7) / len(vals_7)) if vals_7 else None
-    latest = max(vals_28)  # most recent isn't trivially extractable; use peak
     # Band classification on the 28-day mean.
     if mean_28 < HRR_1MIN_NORMS["abnormal_below"]:
         band, label = "warn", "abnormal"
@@ -567,7 +566,7 @@ def daily_activity_28d(health_all: list[dict],
     back to walking_minutes_28d / 28 as a NEAT proxy — daily walks are
     the dominant non-exercise movement signal anyway.
     """
-    cutoff = today_d - timedelta(days=28)
+    cutoff = today_d - timedelta(days=27)
 
     # exercise_min daily mean across the last 28 days (XML only).
     exercise_min_vals = _values_in_window(health_all, "exercise_min", today_d, 28)

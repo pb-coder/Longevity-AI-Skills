@@ -138,11 +138,10 @@ Interference: same-session cardio + strength produces the worst lower-body hyper
 
 The Apple Watch VO2max estimate (`vo2max_latest` in `read_tracker.py`) is a regression model fit on outdoor walking/running with HR. It tracks real changes well; absolute calibration is approximate. Use trend more than the single number.
 
-Targets by sex/age (Cooper Institute / FitnessGram bands, M30s):
-- Below average: <43 ml/kg/min
-- Average: 43-46
-- Above average: 47-55
-- Elite: 55+
+Targets are age- and sex-dependent. Use `vo2_percentile` /
+`vo2_percentile_age_sex` from `health_longevity.py` when framing the
+current value; do not hardcode one M30s table for every person. Coach copy
+should say the percentile band and then lean on the 4-week trend for action.
 
 Expected response to consistent Zone 2 + intervals: 1-3 ml/kg/min over 6-12 weeks for an early-intermediate trainee. Faster gains usually mean the baseline measurement was low, not that the user is responding extraordinarily.
 
@@ -286,8 +285,8 @@ Maximum positive: ~9.0; maximum negative: ~1.0; clamped to [0, 10]. `confidence`
 
 **Programming consequences** (applied by SKILL.md "Recovery-aware adjustments"):
 - `recovery.score < 4` → next session is re-entry (drop a working set, "leave 3-4 reps in tank"); lead with the dominant negative driver in "Why this plan".
-- `recovery.score 4–6.5` → hold loads, normal volume, no PR attempts.
-- `recovery.score ≥ 6.5` → green light.
+- `recovery.score 4–5.5` → hold loads, normal volume, no PR attempts.
+- `recovery.score ≥ 5.5` → green light unless another Tier gate binds.
 - A negative driver persisting across multiple `health_metrics_weekly` entries → flag deload as urgent regardless of cadence.
 - Always surface the reason in "Why this plan" — the user should know why the prescription is conservative.
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,13 @@ FIXTURE_ROOT = SKILLS_ROOT / "tests" / "fixtures"
 
 
 class RenderDashboardSmokeTests(unittest.TestCase):
+    def test_dashboard_css_keeps_raw_hex_inside_token_root_only(self) -> None:
+        from workout_coach.lib.render_styles import STYLESHEET
+
+        root_end = STYLESHEET.index("}\n*")
+        outside_root = STYLESHEET[root_end:]
+        self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,6}", outside_root))
+
     def test_render_dashboard_imports_split_card_modules(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)

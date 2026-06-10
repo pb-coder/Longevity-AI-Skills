@@ -37,7 +37,7 @@ def recent_sleep_nights(nights: list[dict], today_d: date,
     """Filter ``nights`` to the last ``days`` (inclusive of today)."""
     if not nights:
         return []
-    cutoff = today_d - timedelta(days=days)
+    cutoff = today_d - timedelta(days=max(days - 1, 0))
     out = []
     for n in nights:
         d = _parse_iso_date(n.get("date"))
@@ -241,7 +241,7 @@ def sleep_summary(nights: list[dict], today_d: date) -> dict | None:
     # Outliers from the last 14 days only — the actionable window for a
     # "look at pre-bed routine" nudge. Two reasons can apply to the same
     # night; surface the worst one.
-    cutoff_14d = today_d - timedelta(days=14)
+    cutoff_14d = today_d - timedelta(days=13)
     outliers: list[dict] = []
     for n in recent:
         d = _parse_iso_date(n.get("date"))
@@ -305,7 +305,7 @@ def compute_sleep_regularity_index(nights: list[dict], today_d: date,
     """
     if not nights:
         return None
-    cutoff = today_d - timedelta(days=window_days)
+    cutoff = today_d - timedelta(days=max(window_days - 1, 0))
     spans: list[tuple[date, int, int]] = []
     for n in nights:
         d = _parse_iso_date(n.get("date"))
@@ -387,7 +387,7 @@ def flag_rem_sleep_anomalies(nights: list[dict], today_d: date,
     """
     if not nights:
         return None
-    cutoff = today_d - timedelta(days=window_days)
+    cutoff = today_d - timedelta(days=max(window_days - 1, 0))
     n_with_rem = 0
     low_rem_nights = 0
     rem_pcts: list[float] = []

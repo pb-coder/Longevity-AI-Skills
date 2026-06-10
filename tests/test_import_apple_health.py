@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import unittest
+import xml.etree.ElementTree as ET
+from contextlib import redirect_stderr
 from datetime import datetime
+from io import StringIO
 
+from shared.apple_health_daily import DayAggregator
 from shared.apple_health_core import parse_apple_dt
 from shared.apple_health_strength import cluster_strength_sessions
 from shared import import_apple_health as iah
@@ -121,6 +125,39 @@ class AppleHealthImportTests(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertTrue(kept[0]["is_machine"])
         self.assertEqual(len(notes), 1)
+
+    def test_extract_workout_normalizes_nbsp_in_source_and_device(self) -> None:
+        elem = ET.fromstring(
+            '<Workout workoutActivityType="HKWorkoutActivityTypeRunning" '
+            'duration="30" durationUnit="min" '
+            'startDate="2026-05-01 08:00:00 +0200" '
+            'endDate="2026-05-01 08:30:00 +0200" '
+            'sourceName="Apple&#160;Watch von Nihad" '
+            'device="&lt;&lt;HKDevice: 0x1&gt;, name:Matrix&#160;T7xi, '
+            'model:com.apple.health.fitnessmachinemodel.treadmill&gt;"/>'
+        )
+
+        row = iah.extract_workout(elem, None)
+
+        self.assertEqual(row["source"], "Apple Watch von Nihad")
+        self.assertIn("Matrix T7xi", row["device"])
+
+    def test_daily_unknown_unit_warns_and_skips_value(self) -> None:
+        agg = DayAggregator()
+        err = StringIO()
+        with redirect_stderr(err):
+            agg.add_record(
+                {
+                    "type": "HKQuantityTypeIdentifierBodyMass",
+                    "value": "170",
+                    "unit": "stone-ish",
+                },
+                "2026-05-01",
+                datetime(2026, 5, 1, 8, 0),
+            )
+
+        self.assertIn("unknown body mass unit", err.getvalue())
+        self.assertEqual(agg.bodyweight_kg, {})
 
 
 if __name__ == "__main__":

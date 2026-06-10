@@ -6,9 +6,6 @@ plus the parsed ``exercises-database.md`` (``db``) and emit decisions
 the LLM can read directly.
 
 Functions:
-
-- ``strength_session_avg_hr_trend(sessions, strength_dates)`` — slope of
-  strength-session avg HR per 4 weeks. Catches running-hot patterns.
 - ``weekly_volume_per_muscle(rows, db, today_d, window_days, unknown_out)``
   — fractional hard-set count per muscle (primary 1.0, synergist 0.5),
   normalized to sets-per-week over the window so it is apples-to-apples
@@ -74,47 +71,6 @@ def _is_context_change_note(notes) -> bool:
         return False
     n = str(notes).lower()
     return any(p in n for p in CONTEXT_CHANGE_NOTES_PATTERNS)
-
-
-def strength_session_avg_hr_trend(
-    sessions: list[dict],
-    strength_dates: set[str],
-) -> float | None:
-    """Slope per 4 weeks of avg HR over the last 8 strength sessions.
-
-    Matches Apple workouts to logged strength sessions by date. A rising
-    avg HR on a stable load is a fatigue signal; the planning rule uses
-    this to hold load when HR is creeping up.
-    """
-    matched: list[tuple[date, float]] = []
-    for s in sessions:
-        if s.get("date") not in strength_dates:
-            continue
-        avg = s.get("avg_hr")
-        if avg in (None, 0):
-            continue
-        d = _parse_iso_date(s.get("date"))
-        if d is None:
-            continue
-        matched.append((d, float(avg)))
-    if len(matched) < 4:
-        return None
-    matched.sort(key=lambda p: p[0])
-    matched = matched[-8:]
-    span_days = (matched[-1][0] - matched[0][0]).days
-    if span_days < 21:
-        return None
-    base = matched[0][0]
-    xs = [(p[0] - base).days for p in matched]
-    ys = [p[1] for p in matched]
-    n = len(xs)
-    mx = sum(xs) / n
-    my = sum(ys) / n
-    num = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
-    den = sum((xs[i] - mx) ** 2 for i in range(n))
-    if den <= 0:
-        return None
-    return round((num / den) * 28.0, 2)
 
 
 def weekly_volume_per_muscle(
@@ -520,21 +476,19 @@ def hr_at_volume_divergence(rows: list[dict],
             "n_sessions":       len(points),
             "hint":             hint,
         }
-    flagged = [
+    rising_flagged = [
         m for m, info in out.items()
-        if abs(float(info.get("slope_bpm_per_4w") or 0.0)) >= 5
+        if float(info.get("slope_bpm_per_4w") or 0.0) >= 5
     ]
-    if len(flagged) > max(2, int(len(out) * 0.4)):
-        return {
-            "systemic_session_hr": {
-                "slope_bpm_per_4w": round(
-                    sum(out[m]["slope_bpm_per_4w"] for m in flagged) / len(flagged), 2
-                ),
-                "n_muscles": len(flagged),
-                "hint": (
-                    "session HR shifted across many muscles — check bodyweight, "
-                    "deload boundary, heat, or generic fatigue before changing per-muscle volume"
-                ),
-            }
+    if len(rising_flagged) > max(2, int(len(out) * 0.4)):
+        out["systemic_session_hr"] = {
+            "slope_bpm_per_4w": round(
+                sum(out[m]["slope_bpm_per_4w"] for m in rising_flagged) / len(rising_flagged), 2
+            ),
+            "n_muscles": len(rising_flagged),
+            "hint": (
+                "session HR rose across many muscles — check bodyweight, "
+                "deload boundary, heat, or generic fatigue before changing per-muscle volume"
+            ),
         }
     return out

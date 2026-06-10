@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import timedelta
+import sys
 
 from .apple_health_core import parse_apple_dt, to_float
 
@@ -49,11 +50,19 @@ TEMP_UNIT_TO_C = {
 }
 
 
-def _convert_unit(value: float | None, unit: str | None, converters: dict) -> float | None:
+_WARNED_UNKNOWN_UNITS: set[tuple[str, str]] = set()
+
+
+def _convert_unit(value: float | None, unit: str | None, converters: dict, label: str) -> float | None:
     if value is None:
         return None
-    conv = converters.get((unit or "").strip().lower())
+    key = (unit or "").strip().lower()
+    conv = converters.get(key)
     if conv is None:
+        warn_key = (label, key)
+        if warn_key not in _WARNED_UNKNOWN_UNITS:
+            print(f"WARN: unknown {label} unit {key!r}; value skipped", file=sys.stderr)
+            _WARNED_UNKNOWN_UNITS.add(warn_key)
         return None
     return conv(value)
 
@@ -110,7 +119,12 @@ class DayAggregator:
             handler(attrib, d_start, dt_start)
 
     def _h_bodyweight(self, attrib, d, dt):
-        v = _convert_unit(to_float(attrib.get("value")), attrib.get("unit") or "kg", MASS_UNIT_TO_KG)
+        v = _convert_unit(
+            to_float(attrib.get("value")),
+            attrib.get("unit") or "kg",
+            MASS_UNIT_TO_KG,
+            "body mass",
+        )
         if v is not None:
             self._set_latest(self.bodyweight_kg, d, dt, v)
 
@@ -147,7 +161,12 @@ class DayAggregator:
             self.resp_rate_acc[d][1] += 1
 
     def _h_wrist_temp(self, attrib, d, dt):
-        v = _convert_unit(to_float(attrib.get("value")), attrib.get("unit") or "degC", TEMP_UNIT_TO_C)
+        v = _convert_unit(
+            to_float(attrib.get("value")),
+            attrib.get("unit") or "degC",
+            TEMP_UNIT_TO_C,
+            "temperature",
+        )
         if v is None:
             return
         d_end, dt_end = parse_apple_dt(attrib.get("endDate"))

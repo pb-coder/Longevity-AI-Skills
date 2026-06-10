@@ -291,13 +291,15 @@ def card_sleep(sleep, coach_text):
       <span class="sleep-row-label">Schedule</span>
       <span class="sleep-row-value {bt_band}">bedtime ± {fmt(bt_stdev, 0)} min · waketime ± {fmt(wt_stdev, 0)} min</span>
     </div>''')
-    sleep_row_parts.append(f'''
+    if rr_mean is not None:
+        sleep_row_parts.append(f'''
     <div class="sleep-row" data-tip="Average respiratory rate during sleep. Typical adult range is 12 to 20 breaths per minute. A sustained rise can precede illness by 24 to 48 hours. Status: {rr_word}.">
       <span class="bar-dot band-{band_class_map[rr_band]}"></span>
       <span class="sleep-row-label">Respiratory rate</span>
       <span class="sleep-row-value {rr_band}">{rr_value}</span>
     </div>''')
-    sleep_row_parts.append(f'''
+    if sbd_mean is not None:
+        sleep_row_parts.append(f'''
     <div class="sleep-row" data-tip="Apple's overnight breathing disturbances signal. Persistently elevated values are a screening signal for sleep apnea and worth raising with a doctor. Below 5 per minute is generally low. Status: {sbd_word}.">
       <span class="bar-dot band-{band_class_map[sbd_band]}"></span>
       <span class="sleep-row-label">Breathing disturbances</span>
@@ -411,9 +413,12 @@ def card_recovery_practices(thermal, light, coach_text):
         f'in last 28 days.</div>'
         if n_28 else ""
     )
+    cold_title = "Cold exposure"
+    if cold.get("dominant_type"):
+        cold_title += f' ({esc(str(cold.get("dominant_type")).replace("_", " "))})'
     cold_html = f'''
 <div class="practice">
-  <div class="title">Cold exposure ({esc((cold.get("dominant_type") or "—").replace("_", " "))})</div>
+  <div class="title">{cold_title}</div>
   <div class="big">{fmt(cold.get("n_sessions_per_week"), 2)}<span class="unit">/ wk</span></div>
   {cold_adherence_html}
   {sessions_count_line}
@@ -421,13 +426,21 @@ def card_recovery_practices(thermal, light, coach_text):
 </div>
 '''
     light_adh = (light or {}).get("adherence") or {}
+    dominant_light = (light or {}).get("dominant_light_type")
+    dominant_modality = (light or {}).get("dominant_modality")
+    light_recent = f'Average session {fmt((light or {}).get("avg_session_minutes"), 0)} min.'
+    if dominant_light or dominant_modality:
+        light_recent += (
+            f' {esc(dominant_light or "unknown")} via '
+            f'{esc(dominant_modality or "unknown")}.'
+        )
     light_html = f'''
 <div class="practice">
   <div class="title">Light therapy</div>
   <div class="big">{fmt((light or {}).get("n_sessions_per_week"), 2)}<span class="unit">/ wk</span></div>
   {adherence_pill(light_adh.get("status"))}
   <div class="detail">Target {light_adh.get("target_per_week", 3)} per week, {light_adh.get("target_min_per_session", 10)} min per session.</div>
-  <div class="recent">Average session {fmt((light or {}).get("avg_session_minutes"), 0)} min. {esc((light or {}).get("dominant_light_type") or "—")} via {esc((light or {}).get("dominant_modality") or "—")}.</div>
+  <div class="recent">{light_recent}</div>
 </div>
 '''
     return f'''

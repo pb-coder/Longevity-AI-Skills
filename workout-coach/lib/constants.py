@@ -442,7 +442,6 @@ SESSION_GATE_THRESHOLDS = {
 
     # ---- Tier E: over-recovered / taper warning ----
     "tier_e_tsb_high":                 10.0,
-    "tier_e_tsb_sustained_days":       5,
 }
 
 

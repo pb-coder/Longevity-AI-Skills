@@ -5,9 +5,9 @@ description: Apple Health-inspired design system for the workout-coach
   generous whitespace, no harsh borders. Tokens here are normative; the
   prose below explains intent and application.
 colors:
-  text:           "#1d1d1f"
-  muted:          "#86868b"
-  bg:             "#ffffff"
+  text:           "#1c1c1e"
+  muted:          "#6b6b6f"
+  bg:             "#f7f7f8"
   card:           "#ffffff"
   border:         "#ececec"
   border-strong:  "#d8d8d9"
@@ -16,10 +16,19 @@ colors:
   amber:          "#ff9f0a"
   warn:           "#ff3b30"
   accent:         "#0a84ff"
-  muscle-low:     "#ff9f0a"
+  muted-tint:     "#eeeeef"
+  tile-bg:        "#fafafa"
+  track-bg:       "#f0f1f3"
+  tooltip-bg:     "#1c1c1e"
+  tooltip-fg:     "#ffffff"
+  muscle-low:     "#ff9500"
   muscle-prod:    "#34c759"
   muscle-push:    "#ffcc00"
   muscle-over:    "#ff3b30"
+  stage-core:     "#a8b6d9"
+  stage-deep:     "#4c6ee0"
+  stage-rem:      "#a86bd1"
+  stage-awake:    "#dadadc"
 typography:
   section:
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif"
@@ -81,8 +90,8 @@ components:
     padding: 3px 10px
     typography: "{typography.status}"
   tooltip:
-    backgroundColor: "#1c1c1e"
-    textColor: "#ffffff"
+    backgroundColor: "{colors.tooltip-bg}"
+    textColor: "{colors.tooltip-fg}"
     rounded: "{rounded.sm}"
     padding: 8px 10px
 ---

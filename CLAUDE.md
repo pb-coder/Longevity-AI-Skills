@@ -128,7 +128,8 @@ shared/               # Code + docs imported by multiple skills
   monthly_csv_upsert.py
                       # upsert_rows, upsert_monthly_cardio, and
                       # upsert_monthly_strength_session. Current-month gate
-                      # bounds importer writes; past months are "finished".
+                      # bounds importer writes; --allow-past-months is the
+                      # explicit backfill path for cardio and TOTAL metadata.
   exercises-database.md  # Canonical exercise catalog (muscle → pattern →
                          # exercises). Source of truth (no xlsx mirror — the
                          # Exercises Database tab was retired in PR1). Read
@@ -317,7 +318,10 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   pass): `"incidental walk"` on 68 workout_sessions rows became the
   typed `Incidental` boolean column; `"auto-imported from Apple [ |
   source: <Device>]"` on 24 monthly cardio rows became the typed
-  `Source` column with values `manual` / `apple` / `gymkit:<Device>`.
+  `Source` column. `Source` values are `manual` or an importer identity:
+  `apple[@HH:MM[:SS]]` / `gymkit:<Device>[@HH:MM[:SS]]`. The optional
+  time suffix is deliberate row identity for same-day same-type imported
+  cardio workouts; consumers must parse the prefix before comparing.
   Same rule applies going forward: if a Note would be the same string
   on every matching row, route it through a column instead. The rule
   applies to every CSV in `<Person>/data/`.
@@ -471,7 +475,10 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   Cold Duration (sec), Cold Temp (°C), Notes. **Manual /log only** —
   Apple Health doesn't classify sauna sessions reliably, so there's no
   importer-side write path; the `thermal/` folder is absent until the
-  user logs their first session. Dedupe by `(date, start)`. A `sauna`
+  user logs their first session. Dedupe by
+  `(date, start, heat_type, cold_type)`. Blank-start same-shape collisions
+  preserve both complete sessions by assigning the later row a synthetic
+  `Start` such as `occurrence:2`. A `sauna`
   + `cold` line under the same workout header in one `/log` message
   becomes one row (paired protocol session); standalone cold (morning
   cold shower) is a row with heat columns blank.

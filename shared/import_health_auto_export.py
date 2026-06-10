@@ -114,6 +114,14 @@ DAILY_COLUMNS = {
     "exercise_min": "Apple Exercise Time (min)",
 }
 
+WORKOUT_REQUIRED_COLUMNS = [
+    "Workout Type",
+    "Start",
+    "Duration",
+    "Active Energy (kJ)",
+    "Resting Energy (kJ)",
+]
+
 RANGE_FIELDS_TO_CLEAR = [
     "vo2max", "resting_hr", "hrv_sdnn", "walking_hr",
     "hr_recovery_1min", "sleep_total_h", "sleep_deep_h", "sleep_rem_h",
@@ -195,6 +203,10 @@ def _parse_daily_date(value: str | None) -> str | None:
 def parse_daily_rows(rows: list[dict], since: date | None, until: date | None) -> tuple[list[dict], list[dict]]:
     metric_entries: list[dict] = []
     sleep_entries: list[dict] = []
+    if rows:
+        missing = [col for col in DAILY_COLUMNS.values() if col not in rows[0]]
+        for col in missing:
+            print(f"WARN: HealthAutoExport daily column missing: {col}", file=sys.stderr)
     for row in rows:
         d = _parse_daily_date(row.get("Date/Time"))
         if not _date_in_range(d, since, until):
@@ -334,6 +346,10 @@ def parse_workout_rows(
     until: date | None,
 ) -> list[dict]:
     out: list[dict] = []
+    if rows:
+        missing = [col for col in WORKOUT_REQUIRED_COLUMNS if col not in rows[0]]
+        for col in missing:
+            print(f"WARN: HealthAutoExport workout column missing: {col}", file=sys.stderr)
     for row in rows:
         raw_type = (row.get("Workout Type") or "").strip()
         start_minute = _parse_workout_minute(row.get("Start"))
@@ -341,7 +357,7 @@ def parse_workout_rows(
             continue
         minute_key = start_minute.strftime("%Y%m%d_%H%M")
         stamps = sorted(stamp_index.get((raw_type, minute_key), set()))
-        start_dt = _parse_stamp(stamps[0]) if len(stamps) == 1 else start_minute
+        start_dt = start_minute
         d = start_dt.date().isoformat()
         if not _date_in_range(d, since, until):
             continue
@@ -393,6 +409,7 @@ def parse_workout_rows(
             "source": WORKOUT_SOURCE_LABEL,
             "incidental": incidental,
             "notes": None,
+            "stamp_status": "ambiguous" if len(stamps) > 1 else None,
         })
     return out
 
@@ -540,11 +557,13 @@ def dry_run_lines(zip_path: Path, metrics: list[dict], sleep: list[dict], workou
     ]
     strength_sessions, _ = cluster_strength_sessions(workouts)
     incidental = sum(1 for w in workouts if w.get("incidental") is True)
+    ambiguous_stamps = sum(1 for w in workouts if w.get("stamp_status") == "ambiguous")
     return [
         f"HealthAutoExport file: {zip_path.name}",
         f"Health Metrics: {len(metrics)} dates would be written (range {_range_text(metrics)})",
         f"Sleep Nights: {len(sleep)} nights would be written (range {_range_text(sleep)})",
         f"Workout Sessions: {len(workouts)} sessions would be written ({incidental} walks flagged incidental)",
+        f"HealthAutoExport: {ambiguous_stamps} workout minute(s) had ambiguous per-workout stamp matches",
         f"Auto-cardio: {len(eligible)} rows would be considered",
         f"Strength sessions: {len(strength_sessions)} sessions would be considered",
     ]
@@ -562,10 +581,15 @@ def import_archive(
     keep_export: bool = False,
 ) -> list[str]:
     metrics, sleep, workouts = parse_health_auto_export_zip(zip_path, since, until)
+    ambiguous_stamps = sum(1 for w in workouts if w.get("stamp_status") == "ambiguous")
     if dry_run:
         return dry_run_lines(zip_path, metrics, sleep, workouts)
 
     out_lines: list[str] = []
+    if ambiguous_stamps:
+        out_lines.append(
+            f"HealthAutoExport: {ambiguous_stamps} workout minute(s) had ambiguous per-workout stamp matches"
+        )
     profile, created = ensure_profile(person, default_source=SOURCE_NAME, default_auto_cardio=True)
     if created:
         out_lines.append("Profile: created (source=health_auto_export, auto_cardio=true)")

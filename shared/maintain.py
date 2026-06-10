@@ -32,6 +32,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(SKILLS_ROOT))
     __package__ = "shared"
 from tracker import TrackerContext  # noqa: E402
+from tracker.csv_table import write_csv_atomic  # noqa: E402
 from .monthly_csv import (  # noqa: E402
     MONTHLY_HEADERS,
     TOTAL_LABEL,
@@ -309,10 +310,7 @@ def fix_distance_units(person: str, dry_run: bool = False) -> int:
                         f"verify distance/duration"
                     ))
         if changed and not dry_run:
-            with path.open("w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(header)
-                writer.writerows(rows)
+            write_csv_atomic(path, header, rows)
             canonicalize_monthly_csv(person, ym)
 
     # 2. Workout Sessions CSV.
@@ -354,10 +352,7 @@ def fix_distance_units(person: str, dry_run: bool = False) -> int:
                             f"distance {distance} → {new_distance} km"
                         ))
                 if csv_changed and not dry_run:
-                    with ws_path.open("w", encoding="utf-8", newline="") as f:
-                        writer = csv.writer(f)
-                        writer.writerow(header)
-                        writer.writerows(csv_rows)
+                    write_csv_atomic(ws_path, header, csv_rows)
 
     # 3. Per-month Swim Workouts CSVs.
     from .person_paths import list_swim_workout_months
@@ -397,10 +392,7 @@ def fix_distance_units(person: str, dry_run: bool = False) -> int:
                     f"distance {distance} → {new_distance} km"
                 ))
         if sw_changed and not dry_run:
-            with sw_path.open("w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(sw_header)
-                writer.writerows(sw_csv_rows)
+            write_csv_atomic(sw_path, sw_header, sw_csv_rows)
 
     if not fixes and not flags:
         print(f"{person}: no fixes needed")
@@ -508,13 +500,7 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
 
     # Sort DESC by (date, start) to match the existing convention.
     out_rows.sort(key=lambda r: (str(r[0] or ""), str(r[1] or "")), reverse=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(headers)
-        for r in out_rows:
-            w.writerow(r)
-    tmp.replace(path)
+    write_csv_atomic(path, headers, out_rows)
     print(f"Wrote {len(out_rows)} rows back to {path.name}.")
     return 0
 

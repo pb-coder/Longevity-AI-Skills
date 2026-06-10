@@ -26,8 +26,7 @@ def date_str(v):
 
     - ``None`` / ``""`` → ``None``.
     - ``datetime`` / ``date`` → ``"YYYY-MM-DD"``.
-    - String → first 10 chars after strip (covers ``"2026-04-20"`` and
-      ``"2026-04-20 00:00:00"``).
+    - String → valid ISO date from the first 10 chars after strip.
     """
     if v is None or v == "":
         return None
@@ -35,7 +34,15 @@ def date_str(v):
         return v.strftime("%Y-%m-%d")
     if isinstance(v, date):
         return v.isoformat()
-    return str(v).strip()[:10]
+    raw = str(v).strip()
+    candidate = raw[:10] if len(raw) >= 10 else raw
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", candidate):
+        return None
+    try:
+        date.fromisoformat(candidate)
+    except ValueError:
+        return None
+    return candidate
 
 
 def _to_num(v) -> float:
@@ -240,7 +247,11 @@ def _migrate_source_from_notes(rd: dict) -> None:
         machine_tag: str | None = None
         idx = notes_str.lower().find("source:")
         if idx >= 0:
-            machine_tag = notes_str[idx + len("source:"):].strip()
+            source_body = notes_str[idx + len("source:"):].strip()
+            sep_positions = [p for p in (source_body.find("|"), source_body.find(";")) if p >= 0]
+            if sep_positions:
+                source_body = source_body[: min(sep_positions)].strip()
+            machine_tag = source_body
             # Trim leading pipes / whitespace that the prefix builder
             # produced (``" | source: <tag>"``).
             machine_tag = machine_tag.lstrip("| ").strip() or None
@@ -258,13 +269,11 @@ def _migrate_source_from_notes(rd: dict) -> None:
             cut = after.lower().find("source:")
             # Find end-of-segment (next pipe / semicolon / end-of-string)
             tail = after[cut + len("source:"):]
-            for sep in ("|", ";"):
-                p = tail.find(sep)
-                if p >= 0:
-                    tail = tail[p + 1:]
-                    break
-                else:
-                    tail = ""
+            sep_positions = [p for p in (tail.find("|"), tail.find(";")) if p >= 0]
+            if sep_positions:
+                tail = tail[min(sep_positions) + 1:]
+            else:
+                tail = ""
             # `before-of-source` was the whitespace/pipe between the
             # marker and "source:" — discard.
             after = tail

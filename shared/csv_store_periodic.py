@@ -559,6 +559,58 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
         if derived is not None:
             rec["heat_total_min"] = derived
 
+    def _thermal_key(rec: dict) -> tuple:
+        return tuple("" if rec.get(field) is None else rec.get(field) for field in spec.key_fields)
+
+    def _has_populated_protocol(rec: dict) -> bool:
+        return any(
+            rec.get(field) not in (None, "")
+            for field in (
+                "heat_temp_c", "heat_rounds", "heat_round_durations_min",
+                "heat_total_min", "cold_duration_sec", "cold_temp_c",
+            )
+        )
+
+    def _would_overwrite_complete_session(existing_rec: dict, entry: dict) -> bool:
+        if not (_has_populated_protocol(existing_rec) and _has_populated_protocol(entry)):
+            return False
+        for field in THERMAL_SESSIONS_FIELDS:
+            if field in spec.key_fields:
+                continue
+            incoming = entry.get(field)
+            if incoming in (None, ""):
+                continue
+            current = existing_rec.get(field)
+            if current not in (None, "") and current != incoming:
+                return True
+        return False
+
+    def _disambiguate_blank_start(entry: dict, occupied: dict[tuple, dict]) -> dict:
+        if entry.get("start"):
+            return entry
+        for candidate in occupied.values():
+            if (
+                candidate.get("date") == entry.get("date")
+                and candidate.get("heat_type") == entry.get("heat_type")
+                and candidate.get("cold_type") == entry.get("cold_type")
+                and not _would_overwrite_complete_session(candidate, entry)
+            ):
+                out = dict(entry)
+                out["start"] = candidate.get("start") or ""
+                return out
+        key = _thermal_key(entry)
+        existing_rec = occupied.get(key)
+        if existing_rec is None or not _would_overwrite_complete_session(existing_rec, entry):
+            return entry
+        out = dict(entry)
+        ordinal = 2
+        while True:
+            out["start"] = f"occurrence:{ordinal}"
+            new_key = _thermal_key(out)
+            if new_key not in occupied:
+                return out
+            ordinal += 1
+
     for ym, month_entries in sorted(by_month_entries.items()):
         path = thermal_sessions_csv(person, ym)
         existing = _read_periodic_records(
@@ -568,9 +620,15 @@ def upsert_thermal_sessions(person: str, entries: Iterable[dict]) -> list[str]:
             string_fields={"start", "heat_type", "cold_type"},
             field_parsers={"heat_round_durations_min": _parse_round_durations},
         )
+        occupied = {_thermal_key(r): dict(r) for r in existing}
+        prepared_entries: list[dict] = []
+        for raw in month_entries:
+            entry = _sanitize_thermal(dict(raw))
+            entry = _disambiguate_blank_start(entry, occupied)
+            prepared_entries.append(entry)
+            occupied[_thermal_key(entry)] = entry
         records, written, updated = sparse_upsert_records(
-            existing, month_entries, spec,
-            sanitize=_sanitize_thermal,
+            existing, prepared_entries, spec,
             derive=_derive_thermal,
         )
         ensure_thermal_dir(person)

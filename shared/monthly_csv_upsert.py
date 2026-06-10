@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import date
 
 from .monthly_csv_canonicalize import canonicalize_monthly_csv
 from .monthly_csv_io import _dict_to_row, _read_csv_rows, _row_to_dict, _write_csv_atomic
@@ -22,9 +22,6 @@ from .monthly_csv_values import (
     date_str,
 )
 from .person_paths import ensure_monthly_dir, monthly_csv as monthly_csv_path, monthly_dir
-
-AUTO_CARDIO_ROLLOVER_GRACE_DAYS = 7
-
 
 def _source_with_start(source: str, start: str) -> str:
     if not start:
@@ -114,9 +111,9 @@ def upsert_monthly_cardio(person: str,
       recomputes Volume / Pace / Total Cal / SESSION / TOTAL.
 
     Current-month gate: rows dated outside the current calendar month
-    are dropped unless ``allow_past_months=True``. A 7-day rollover grace
-    admits late-arriving rows from the prior month, closing the common
-    month-boundary import hole while keeping older deleted rows deleted.
+    are dropped unless ``allow_past_months=True``. That explicit flag is
+    the only path for intentional backfills, so deleted prior-month auto
+    rows stay deleted by default.
     """
     if not rows:
         return ["Auto-cardio: 0 rows considered"]
@@ -158,19 +155,7 @@ def upsert_monthly_cardio(person: str,
         if not d or len(d) != 10:
             continue
         key = f"{d[:4]}.{d[5:7]}"
-        row_d = date_str(d)
-        parsed_d = None
-        if row_d:
-            try:
-                y, m, day = row_d.split("-")
-                parsed_d = date(int(y), int(m), int(day))
-            except ValueError:
-                parsed_d = None
-        within_rollover_grace = (
-            parsed_d is not None
-            and parsed_d >= effective_today - timedelta(days=AUTO_CARDIO_ROLLOVER_GRACE_DAYS)
-        )
-        if not allow_past_months and key != current_month and not within_rollover_grace:
+        if not allow_past_months and key != current_month:
             skipped_past_month += 1
             exercise = str(r.get("exercise") or "unknown").strip() or "unknown"
             month_counts = skipped_past_by_month.setdefault(key, {})
@@ -189,6 +174,7 @@ def upsert_monthly_cardio(person: str,
     summaries: list[str] = []
     total_appended = 0
     total_skipped = 0
+    drift_warnings: list[str] = []
 
     for month_key in sorted(by_month.keys()):
         month_rows = by_month[month_key]
@@ -250,7 +236,7 @@ def upsert_monthly_cardio(person: str,
             try:
                 dur_f = float(dur) if dur is not None else None
             except (TypeError, ValueError):
-                    dur_f = None
+                dur_f = None
             start_v = str(r.get("start") or r.get("workout_start") or "")
 
             matches = existing_index.get((d, ex_lower), [])
@@ -304,6 +290,10 @@ def upsert_monthly_cardio(person: str,
                         # Existing auto rows may have been manually corrected.
                         # Match the strength TOTAL policy: keep and report via
                         # no-op rather than silently reverting the cell.
+                        drift_warnings.append(
+                            f"  - {d} {ex} {key}: kept existing value {existing_val!r} "
+                            f"(Apple reports {new_val!r}, differs >=5%)"
+                        )
                         continue
                 if row_changed:
                     refreshed += 1
@@ -377,6 +367,11 @@ def upsert_monthly_cardio(person: str,
         f"Auto-cardio total: {total_appended} appended, "
         f"{total_skipped} skipped across {len(by_month)} month(s)"
     )
+    if drift_warnings:
+        summaries.append(
+            f"Auto-cardio: {len(drift_warnings)} manual-wins warnings:"
+        )
+        summaries.extend(drift_warnings)
     summaries.extend(_past_month_skip_summaries())
     return summaries
 

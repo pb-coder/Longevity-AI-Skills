@@ -27,8 +27,11 @@ MONTHLY_HEADERS = [
 ]
 
 # Internal keys mirroring header order, for dict↔row translation.
-# ``source`` (added 2026-05): one of ``manual`` / ``apple`` /
-# ``gymkit:<DeviceName>``. Replaces the historic anti-pattern of stashing
+# ``source`` (added 2026-05): ``manual`` or an importer identity:
+# ``apple[@HH:MM[:SS]]`` / ``gymkit:<DeviceName>[@HH:MM[:SS]]``.
+# The optional time suffix is the row identity for same-day same-type
+# auto-cardio workouts; it is part of the Source contract. Replaces the
+# historic anti-pattern of stashing
 # "auto-imported from Apple [ | source: <DeviceName>]" in the Notes
 # column — pipeline-state strings belong in typed columns, not Notes.
 # Pre-existing 17-col rows pad to None on read; canonicalize migrates

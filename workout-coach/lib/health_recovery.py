@@ -151,13 +151,40 @@ def recovery_score(health_all: list[dict], today_d: date,
     if not raw_drivers:
         return {"score": None, "confidence": "low", "drivers": []}
 
-    weight_sum = sum(w for _, w, _, _, _ in raw_drivers)
-    weighted = sum(w * cs for _, w, cs, _, _ in raw_drivers) / weight_sum
-    score = max(0.0, min(10.0, weighted))
+    # Recent-sample sufficiency. A z-scored signal built on too few recent
+    # readings (e.g. ONE HR-Recovery sample) is statistically meaningless:
+    # clamped to -2sigma by one noisy point it would otherwise tank an
+    # otherwise-fine composite. Such signals are EXCLUDED from the weighted
+    # mean (weights renormalized over the sufficient signals, same as the
+    # baseline-sample gate in _z_score_signal) but still surfaced as
+    # zero-weight drivers flagged `under_sampled` so the reading stays
+    # visible, and confidence drops one band. The sleep-consistency penalty
+    # (no `z` in info) is exempt: its `n_recent` is a 7-day window count, not
+    # a precision proxy.
+    def _recent_sufficient(key, info) -> bool:
+        if "z" not in info:
+            return True
+        return info.get("n_recent", 0) >= RECENT_SAMPLE_SUFFICIENCY.get(key, 0)
+
+    counted = [t for t in raw_drivers if _recent_sufficient(t[0], t[3])]
+    excluded_high_weight = [
+        t for t in raw_drivers
+        if not _recent_sufficient(t[0], t[3])
+        and t[1] >= SIGNAL_WEIGHT_FLOOR_FOR_GATE
+    ]
+
+    weight_sum = sum(w for _, w, _, _, _ in counted)
+    if counted and weight_sum > 0:
+        weighted = sum(w * cs for _, w, cs, _, _ in counted) / weight_sum
+        score = max(0.0, min(10.0, weighted))
+    else:
+        # Nothing trustworthy enough to score on.
+        score = None
 
     drivers: list[dict] = []
     for key, weight, cs, info, invert in raw_drivers:
-        weight_norm = weight / weight_sum
+        is_counted = _recent_sufficient(key, info)
+        weight_norm = (weight / weight_sum) if (is_counted and weight_sum > 0) else 0.0
         if "z" in info:  # standard z-scored signal
             d = {
                 "metric":          key,
@@ -172,6 +199,8 @@ def recovery_score(health_all: list[dict], today_d: date,
             }
             if invert:
                 d["invert"] = True
+            if not is_counted:
+                d["under_sampled"] = True
         else:  # sleep consistency penalty
             d = {
                 "metric":          key,
@@ -183,32 +212,26 @@ def recovery_score(health_all: list[dict], today_d: date,
             }
         drivers.append(d)
 
-    # Most-driving signals first.
-    drivers.sort(key=lambda d: abs(d["component_score"] - 5.0), reverse=True)
+    # Counted (score-moving) signals lead, then by deviation from personal
+    # average. Keeps a zero-weight under-sampled reading from heading the list.
+    drivers.sort(key=lambda d: (not d.get("under_sampled", False),
+                                abs(d["component_score"] - 5.0)),
+                 reverse=True)
 
-    n_contrib = len(drivers)
+    n_contrib = len(counted)
     confidence = ("high" if n_contrib >= 4
                   else "medium" if n_contrib >= 2
                   else "low")
 
-    # Per-signal sufficiency gate: if any high-weight z-scored driver is
-    # under-sampled in the recent window, drop confidence one band. The
-    # `stdev` shape (sleep consistency penalty) is exempt — its `n_recent`
-    # is the 7-day window count and isn't a precision proxy in the same
-    # way the z-scored signals are.
-    under_sampled = [
-        d for d in drivers
-        if d.get("weight", 0) >= SIGNAL_WEIGHT_FLOOR_FOR_GATE
-        and "z" in d
-        and d.get("n_recent", 0) < RECENT_SAMPLE_SUFFICIENCY.get(d["metric"], 0)
-    ]
-    if under_sampled:
+    # An excluded high-weight signal means the score leans on fewer signals
+    # than ideal: drop confidence one band.
+    if excluded_high_weight:
         confidence = {"high": "medium",
                       "medium": "low",
                       "low": "low"}[confidence]
 
     return {
-        "score":      round(score, 1),
+        "score":      round(score, 1) if score is not None else None,
         "confidence": confidence,
         "drivers":    drivers,
     }

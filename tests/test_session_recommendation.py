@@ -170,6 +170,28 @@ class SessionRecommendationTests(unittest.TestCase):
         )
         self.assertIn(rec["tier"], {"D", "E"})
 
+    def test_hr_creep_without_corroboration_does_not_downgrade(self) -> None:
+        # Localized HR creep while overall recovery is fine (5.2) and strength
+        # freshness is positive must NOT escalate to a session-wide volume cut.
+        rec = recommendation(
+            hr_at_volume_divergence=_rising_hr("chest", "triceps", "side_delts"),
+            recovery={"score": 5.2, "drivers": []},
+            training_load={"tsb": 1.5},
+        )
+        signals = [r.get("signal") for r in rec.get("rationale", [])]
+        self.assertNotIn("hr_at_volume_divergence", signals)
+
+    def test_hr_creep_with_negative_strength_tsb_downgrades(self) -> None:
+        # Corroborated by negative strength freshness -> the legit downgrade fires.
+        rec = recommendation(
+            hr_at_volume_divergence=_rising_hr("chest", "triceps", "side_delts"),
+            recovery={"score": 6.5, "drivers": []},
+            training_load={"tsb": -2},
+        )
+        self.assertEqual(rec["tier"], "C")
+        signals = [r.get("signal") for r in rec.get("rationale", [])]
+        self.assertIn("hr_at_volume_divergence", signals)
+
     def test_recovery_none_high_tsb_returns_green(self) -> None:
         rec = recommendation(
             recovery={"score": None, "drivers": []},

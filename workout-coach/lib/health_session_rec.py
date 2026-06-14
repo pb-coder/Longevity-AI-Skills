@@ -469,24 +469,33 @@ def compute_session_recommendation(*,
         names = ", ".join(over_mrv_muscles[:5])
         add("muscles_over_mrv", n_over_mrv, T["tier_c_muscles_over_mrv_count"],
             f"{n_over_mrv} muscle(s) over MRV ({names}) — modify the affected groups")
-    # HR creep is downgrade-worthy only when it's plausibly fatigue, not a
-    # known confounder. A systemic shift across many muscles (bodyweight gain
-    # on a bulk, summer heat) is NOT per-muscle fatigue — the metric itself
-    # says to check those first. Require ≥2 muscles, no systemic entry, no
-    # active bulk, not over-recovered, and recovery not green.
+    # HR creep escalates to a session-wide downgrade ONLY when it's plausibly
+    # fatigue AND corroborated by systemic under-recovery. Confounder guards:
+    # a systemic shift across many muscles (bodyweight gain on a bulk, summer
+    # heat) is NOT per-muscle fatigue. Corroboration guard: a localized HR
+    # drift while overall recovery is fine and freshness is positive is weak
+    # evidence for slashing session volume — the per-muscle "hold those groups,
+    # don't add sets" rule (SKILL §19, applied at planning time) covers it
+    # without gutting the workout. Require genuine moderate recovery (< the
+    # Tier C ceiling) OR negative strength freshness before downgrading. This
+    # mirrors the corroboration the stalled-lifts trigger already requires.
     systemic_hr_shift = "systemic_session_hr" in (hr_at_volume_divergence or {})
+    hr_creep_corroborated = (
+        (recovery_score is not None and recovery_score < T["tier_c_recovery_score_hi"])
+        or (strength_tsb is not None and strength_tsb < 0)
+    )
     hr_creep_actionable = (
         len(hr_creep_muscles) >= 2
         and not systemic_hr_shift
         and not bulking
         and not over_recovered
-        and not recovery_green
+        and hr_creep_corroborated
     )
     if hr_creep_actionable:
         tier_c_fired = True
         names = ", ".join(hr_creep_muscles[:5])
         add("hr_at_volume_divergence", len(hr_creep_muscles), 2,
-            f"HR rising at constant volume on {names} with no confounder (bulk/heat) — hold loads on those groups")
+            f"HR rising at constant volume on {names} with no confounder, plus moderate recovery — hold loads on those groups")
 
     if tier_c_fired:
         rebound_by_session = _expected_tier_c_rebound_by_session(

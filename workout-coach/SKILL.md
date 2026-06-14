@@ -157,7 +157,7 @@ What the JSON contains:
 - `estimated_1rm`: `{ExerciseName: {current_e1rm_kg, prev_e1rm_kg, best_e1rm_kg, last_date, delta_vs_prev_kg, slope_kg_per_4w, confidence, stalled_sessions, e1rm_history}}`. Epley projection. `e1rm_history` is **omitted by default**; pass `--include-1rm-history` to opt in.
   - `slope_kg_per_4w`: primary trend signal. Treat this as "is this lift trending up?".
   - `confidence`: `high` (last 3 top sets all 3-8 reps), `medium` (mixed), `low`. Soften trend language when `low`.
-  - `stalled_sessions`: ≥2 consecutive sessions with |Δe1RM| ≤ 0.5kg = real stall, not one-off.
+  - `stalled_sessions`: ≥2 consecutive sessions with |Δe1RM| ≤ 0.5kg — a flat plateau, NOT regression. Flat loads on isolations or comeback lifts are normal; the gate only treats a stall as a reactive-deload trigger when the lift is at/near its best, not trending up, AND corroborated by an independent fatigue signal (see `session_recommendation`).
 - `progression_summary`: last vs. previous best working set per exercise.
 - `stale_exercises`: top 5 exercises not logged in ≥28 days, sorted newest-stale first. Use for rotation decisions and cautious reintroductions.
 - `unknown_exercises`: names not in the database. Surface in **Missing from your tracking**.

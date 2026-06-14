@@ -36,7 +36,9 @@ from .health_longevity import (
 )
 from .health_session_rec import (
     _count_stalled_lifts,
+    _genuinely_stalled_lifts,
     _muscles_over_mrv,
+    _reactive_deload_served,
     _rhr_sustained_elevation_days,
     _tsb_sustained_days,
     _wrist_temp_deviation_c,
@@ -61,6 +63,8 @@ __all__ = [
     "read_longevity_state",
     "vo2_percentile_age_sex",
     "_count_stalled_lifts",
+    "_genuinely_stalled_lifts",
+    "_reactive_deload_served",
     "_muscles_over_mrv",
     "_rhr_sustained_elevation_days",
     "_tsb_sustained_days",

@@ -702,6 +702,7 @@ def main() -> int:
         health_all=health_all,
         today_d=today_d,
         estimated_max_hr=max_hr,
+        bodyweight_trend=bw_trend,
     )
 
     # 14-day tier history strip (Trajectory tab — spot fatigue spirals).
@@ -721,6 +722,7 @@ def main() -> int:
         capabilities=capabilities,
         estimated_max_hr=max_hr,
         estimated_rest_hr=rest_hr,
+        bodyweight_trend=bw_trend,
     )
 
     out: TrackerJSON = {

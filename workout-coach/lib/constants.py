@@ -421,7 +421,7 @@ SESSION_GATE_THRESHOLDS = {
     "tier_b_hrv_z_sustained":         -0.75,   # Altini baseline-below-band
     "tier_b_muscles_over_mrv_count":   3,      # RP MRV-breach protocol
     "tier_b_wow_spike_pct":            60.0,   # 10% rule (10% green, >60% red)
-    "tier_b_stalled_lifts_count":      2,      # Tuchscherer reactive-deload
+    "tier_b_stalled_lifts_count":      4,      # Tuchscherer reactive-deload; broad program-wide ceiling-stall (corroborated by fatigue), not 2 flat isolations
 
     # ---- Tier C: downgrade (modified strength is fine) ----
     "tier_c_recovery_score_lo":        3.0,

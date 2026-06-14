@@ -71,8 +71,10 @@ def _wrist_temp_deviation_c(health_all: list[dict], today_d: date) -> float | No
 
 
 def _count_stalled_lifts(estimated_1rm: dict | None) -> int:
-    """Count lifts with stalled_sessions >= 2 (the Tuchscherer reactive-deload
-    trigger). Uses already-computed `estimated_1rm[ex].stalled_sessions`."""
+    """Count lifts with stalled_sessions >= 2. Raw flat-e1RM count, kept for
+    backward compatibility. NOT used by the gate anymore — see
+    `_genuinely_stalled_lifts`, which excludes comeback lifts and lifts still
+    progressing so a returning trainee holding loads isn't read as fatigue."""
     if not estimated_1rm:
         return 0
     n = 0
@@ -86,6 +88,74 @@ def _count_stalled_lifts(estimated_1rm: dict | None) -> int:
         except (TypeError, ValueError):
             continue
     return n
+
+
+def _genuinely_stalled_lifts(estimated_1rm: dict | None) -> int:
+    """Count lifts that are genuinely stalled *at their ceiling* — the only
+    kind that justifies a reactive deload.
+
+    `stalled_sessions` alone means "e1RM held flat within ±0.5kg for N
+    sessions" (see strength.py). Flatness is NOT fatigue:
+      - a lift well below its best is being re-built after a layoff; repeating
+        a conservative load there is intended, not a stall, so exclude it
+        (`current < 0.9 * best`).
+      - a lift whose 4-week slope is still positive is progressing despite a
+        flat last pair; exclude it (`slope_kg_per_4w > 0`).
+    What remains — flat, at/near best, not trending up — is a true plateau.
+    """
+    if not estimated_1rm:
+        return 0
+    n = 0
+    for v in estimated_1rm.values():
+        if not isinstance(v, dict):
+            continue
+        try:
+            stalled = v.get("stalled_sessions")
+            if stalled is None or int(stalled) < 2:
+                continue
+        except (TypeError, ValueError):
+            continue
+        cur = v.get("current_e1rm_kg")
+        best = v.get("best_e1rm_kg")
+        if cur is None or best is None or best <= 0:
+            continue
+        if cur < 0.9 * best:          # comeback / re-building — not a stall
+            continue
+        slope = v.get("slope_kg_per_4w")
+        if slope is not None and slope > 0:   # still progressing
+            continue
+        n += 1
+    return n
+
+
+def _reactive_deload_served(deloads: list[str] | None, today_d: date,
+                            recovery_score: float | None, hrv_z: float | None,
+                            strength_tsb: float | None,
+                            within_days: int = 10) -> bool:
+    """True when a marked deload happened recently AND the athlete has
+    rebounded, so re-prescribing a reactive deload would just loop.
+
+    Encodes the gate's own note ("return to normal volume next week if
+    recovery score >=6 and HRV trend back in band"). When True, the *slow*
+    Tier B triggers are suppressed so the gate can climb back to C/D. Acute
+    triggers (illness, MRV breach, week-over-week spike) are never gated by
+    this.
+    """
+    recent = False
+    for ds in deloads or []:
+        d = _parse_iso_date(ds)
+        if d is not None and 0 <= (today_d - d).days <= within_days:
+            recent = True
+            break
+    if not recent:
+        return False
+    if recovery_score is None or recovery_score < 6.0:
+        return False
+    if hrv_z is not None and hrv_z < -0.5:
+        return False
+    if strength_tsb is not None and strength_tsb < 0:
+        return False
+    return True
 
 
 def _expected_tier_c_rebound_by_session(
@@ -145,7 +215,8 @@ def compute_session_recommendation(*,
                                     auto_deload_candidates: list[str] | None,
                                     health_all: list[dict],
                                     today_d: date,
-                                    estimated_max_hr: float | None) -> SessionRecommendation:
+                                    estimated_max_hr: float | None,
+                                    bodyweight_trend: float | None = None) -> SessionRecommendation:
     """Top-down 5-tier gate. First gate to fire wins. Returns the
     operational recommendation that the SKILL.md prompt MUST honor before
     generating any workout.
@@ -179,7 +250,30 @@ def compute_session_recommendation(*,
     wrist_temp_dev = _wrist_temp_deviation_c(health_all, today_d)
     rhr_streak = _rhr_sustained_elevation_days(
         health_all, today_d, T["tier_a_rhr_dev_bpm"], baseline_days=14)
-    stalled = _count_stalled_lifts(estimated_1rm)
+    stalled = _genuinely_stalled_lifts(estimated_1rm)
+
+    # ---- Context flags that gate the SLOW (proxy) downgrade/deload triggers.
+    # Acute triggers (illness, MRV breach, week-over-week spike) ignore these.
+    # The passed `training_load` is strength-scoped (read_tracker + tier
+    # history both feed strength TSB), so `tsb` here is strength freshness.
+    strength_tsb = tsb
+    over_recovered = strength_tsb is not None and strength_tsb >= T["tier_e_tsb_high"]
+    bulking = bodyweight_trend is not None and bodyweight_trend >= 0.10
+    recovery_green = (recovery_score is not None
+                      and recovery_score >= T["tier_d_recovery_score_min"])
+    deload_served = _reactive_deload_served(
+        deloads, today_d, recovery_score, hrv_z, strength_tsb)
+    # Slow fatigue proxies don't fire when the athlete is over-recovered
+    # (you can't be peaked and fatigued at once) or has just rebounded from a
+    # served deload.
+    suppress_slow = over_recovered or deload_served
+    # A flat-at-ceiling stall is only a deload trigger when corroborated by an
+    # independent fatigue signal — never on flat loads alone.
+    stalled_corroborated = (
+        (recovery_score is not None and recovery_score < T["tier_d_recovery_score_min"])
+        or (strength_tsb is not None and strength_tsb < 0)
+        or (hrv_z is not None and hrv_z <= T["tier_b_hrv_z_sustained"])
+    )
 
     sleep_means = (sleep_summary or {}).get("means_h") or {}
     sleep_7d_mean = sleep_means.get("total")
@@ -237,9 +331,12 @@ def compute_session_recommendation(*,
         tier_a_fired = True
         add("rhr_sustained_days", rhr_streak, T["tier_a_rhr_sustained_days"],
             f"RHR sustained ≥+{T['tier_a_rhr_dev_bpm']:.0f} bpm above 14-day baseline for {rhr_streak} consecutive days")
+    # NOTE: rhr_z is the INVERTED recovery z (positive = RHR below baseline =
+    # favorable). An autonomic crash means RHR is ELEVATED, i.e. z is strongly
+    # negative — hence `<= -threshold`, not `>= threshold`.
     if (recovery_score is not None and recovery_score < T["tier_a_recovery_score_crash"]
             and hrv_z is not None and hrv_z <= T["tier_a_hrv_z_crash"]
-            and rhr_z is not None and rhr_z >= T["tier_a_rhr_z_crash"]):
+            and rhr_z is not None and rhr_z <= -T["tier_a_rhr_z_crash"]):
         tier_a_fired = True
         add("recovery_crash", recovery_score, T["tier_a_recovery_score_crash"],
             f"Recovery {recovery_score:.1f}/10 with HRV z {hrv_z:+.2f} and RHR z {rhr_z:+.2f} — autonomic crash triad")
@@ -261,39 +358,53 @@ def compute_session_recommendation(*,
         }
 
     # ---- TIER B: reactive deload ----
+    # Triggers split into ACUTE (always fire) and SLOW (gated by
+    # `suppress_slow` so an over-recovered or just-rebounded athlete isn't
+    # pinned in deload by a proxy signal).
     tier_b_fired = False
     tier_b_kind = None  # zone_2 / reactive_deload_week / mobility_sauna
-    if tsb is not None and tsb <= T["tier_b_tsb_high_fatigue"]:
+    # SLOW: high accumulated fatigue. Suppressed only by a served-deload
+    # rebound (over-recovery can't coexist with TSB ≤ -15).
+    if (tsb is not None and tsb <= T["tier_b_tsb_high_fatigue"]
+            and not deload_served):
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "zone_2"
         add("tsb", tsb, T["tier_b_tsb_high_fatigue"],
             f"Freshness (TSB) {tsb:+.1f} ≤ {T['tier_b_tsb_high_fatigue']:.0f} — high accumulated fatigue")
-    if hrv_z is not None and hrv_z <= T["tier_b_hrv_z_sustained"]:
+    # SLOW: sustained HRV suppression.
+    if (hrv_z is not None and hrv_z <= T["tier_b_hrv_z_sustained"]
+            and not suppress_slow):
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "zone_2"
         add("hrv_sdnn_z", round(hrv_z, 2), T["tier_b_hrv_z_sustained"],
             f"HRV z {hrv_z:+.2f} sustained below 60-day baseline (Altini maladaptation signal)")
+    # ACUTE: MRV breach forces the week-long deload regardless of context.
     if n_over_mrv >= T["tier_b_muscles_over_mrv_count"]:
         tier_b_fired = True
-        tier_b_kind = "reactive_deload_week"  # MRV breach forces the week-long deload
+        tier_b_kind = "reactive_deload_week"
         names = ", ".join(over_mrv_muscles[:5])
         add("muscles_over_mrv", n_over_mrv, T["tier_b_muscles_over_mrv_count"],
             f"{n_over_mrv} muscles over MRV ({names}) — RP MRV-breach protocol triggers a reactive deload")
-    if unmarked_deload_recent:
+    # SLOW: an auto-deload candidate is stale once a deload was already served.
+    if unmarked_deload_recent and not deload_served:
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "reactive_deload_week"
         add("auto_deload_candidate", "yes", "—",
             "auto-deload candidate flagged in the last 7 days; the data already looked like a deload was needed")
+    # ACUTE: a sharp week-over-week training-stress spike, regardless of context.
     if wow_pct is not None and wow_pct >= T["tier_b_wow_spike_pct"]:
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "zone_2"
         add("wow_change_pct", round(wow_pct, 1), T["tier_b_wow_spike_pct"],
             f"week-over-week training stress +{wow_pct:.0f}% — sharp ramp into red, cap the next 7 days at +10%")
-    if stalled >= T["tier_b_stalled_lifts_count"]:
+    # SLOW: genuine ceiling-stall, but ONLY when corroborated by fatigue.
+    # Flat loads on isolations / comeback lifts no longer force a deload.
+    if (stalled >= T["tier_b_stalled_lifts_count"]
+            and stalled_corroborated and not suppress_slow):
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "reactive_deload_week"
         add("stalled_lifts", stalled, T["tier_b_stalled_lifts_count"],
-            f"{stalled} top lifts have stalled (≥2 consecutive sessions of regression) — Tuchscherer reactive-deload trigger")
+            f"{stalled} top lifts stalled at/near best for ≥2 sessions and not progressing, with a corroborating fatigue signal — Tuchscherer reactive-deload trigger")
 
     if tier_b_fired:
         if tier_b_kind == "reactive_deload_week":
@@ -330,7 +441,8 @@ def compute_session_recommendation(*,
         tier_c_fired = True
         add("recovery_score", recovery_score, T["tier_c_recovery_score_hi"],
             f"Recovery {recovery_score:.1f}/10 — moderate (not critically low)")
-    if hrv_z is not None and T["tier_c_hrv_z_lo"] < hrv_z <= T["tier_c_hrv_z_hi"]:
+    if (hrv_z is not None and T["tier_c_hrv_z_lo"] < hrv_z <= T["tier_c_hrv_z_hi"]
+            and not over_recovered):
         tier_c_fired = True
         add("hrv_sdnn_z", round(hrv_z, 2), T["tier_c_hrv_z_hi"],
             f"HRV z {hrv_z:+.2f} mildly below baseline")
@@ -346,20 +458,35 @@ def compute_session_recommendation(*,
         tier_c_fired = True
         add("sleep_regularity_index", round(sri, 1), T["tier_c_sri_floor"],
             f"SRI {sri:.0f} below UK Biobank bottom-quintile cutoff ({T['tier_c_sri_floor']:.0f})")
-    if rhr_z is not None and rhr_z >= T["tier_c_rhr_z_floor"]:
+    # rhr_z is inverted (positive = RHR below baseline = good). RHR ELEVATED
+    # above baseline is the unfavorable case, so test the negative tail.
+    if rhr_z is not None and rhr_z <= -T["tier_c_rhr_z_floor"]:
         tier_c_fired = True
-        add("rhr_z", round(rhr_z, 2), T["tier_c_rhr_z_floor"],
-            f"RHR z {rhr_z:+.2f} above baseline")
+        add("rhr_z", round(rhr_z, 2), -T["tier_c_rhr_z_floor"],
+            f"RHR z {rhr_z:+.2f} — resting HR elevated above baseline")
     if n_over_mrv >= T["tier_c_muscles_over_mrv_count"]:
         tier_c_fired = True
         names = ", ".join(over_mrv_muscles[:5])
         add("muscles_over_mrv", n_over_mrv, T["tier_c_muscles_over_mrv_count"],
             f"{n_over_mrv} muscle(s) over MRV ({names}) — modify the affected groups")
-    if hr_creep_muscles:
+    # HR creep is downgrade-worthy only when it's plausibly fatigue, not a
+    # known confounder. A systemic shift across many muscles (bodyweight gain
+    # on a bulk, summer heat) is NOT per-muscle fatigue — the metric itself
+    # says to check those first. Require ≥2 muscles, no systemic entry, no
+    # active bulk, not over-recovered, and recovery not green.
+    systemic_hr_shift = "systemic_session_hr" in (hr_at_volume_divergence or {})
+    hr_creep_actionable = (
+        len(hr_creep_muscles) >= 2
+        and not systemic_hr_shift
+        and not bulking
+        and not over_recovered
+        and not recovery_green
+    )
+    if hr_creep_actionable:
         tier_c_fired = True
         names = ", ".join(hr_creep_muscles[:5])
-        add("hr_at_volume_divergence", len(hr_creep_muscles), 1,
-            f"HR rising at constant volume on {names} — hold loads on those groups")
+        add("hr_at_volume_divergence", len(hr_creep_muscles), 2,
+            f"HR rising at constant volume on {names} with no confounder (bulk/heat) — hold loads on those groups")
 
     if tier_c_fired:
         rebound_by_session = _expected_tier_c_rebound_by_session(
@@ -429,6 +556,13 @@ def compute_session_recommendation(*,
     if recovery_score is not None:
         add("recovery_score", recovery_score, T["tier_d_recovery_score_min"],
             f"Recovery {recovery_score:.1f}/10 — green")
+    else:
+        # Data gap: no recent health import means the recovery score is blind.
+        # Don't let a confounded proxy ratchet the plan down — surface the gap
+        # and lean on freshness (TSB) instead of guessing fatigue.
+        add("recovery_unavailable", None, None,
+            "Recovery score unavailable (no recent health import) — leaning on "
+            "freshness (TSB). Import a fresh export to restore the recovery read.")
     if tsb is not None:
         add("tsb", tsb, None,
             f"Freshness (TSB) {tsb:+.1f} in the productive zone")
@@ -467,7 +601,8 @@ def compute_tier_history(*,
                          auto_deload_candidates: list[str] | None,
                          capabilities: dict,
                          estimated_max_hr: float | None,
-                         estimated_rest_hr: float | None) -> list[dict]:
+                         estimated_rest_hr: float | None,
+                         bodyweight_trend: float | None = None) -> list[dict]:
     """For each of the last ``days`` days, recompute the recovery score,
     training load (CTL/ATL/TSB), ACWR, and run the gate to determine that
     day's tier. Returns a list of ``{date, tier, dominant_signal}`` entries
@@ -485,11 +620,17 @@ def compute_tier_history(*,
     # Recompute per-session TRIMPs once over the full window; faster than
     # per-day. Then build training load and ACWR per back-step.
     trimps = trimp_per_session(monthly_sessions, estimated_max_hr, estimated_rest_hr)
+    strength_trimps = [t for t in trimps if t.get("kind") == "strength"]
     for offset in range(days - 1, -1, -1):
         d = today_d - timedelta(days=offset)
         # Lightweight per-day re-computations of the fast signals
         rec_d = recovery_score(health_all, d, capabilities)
-        tl_d = training_load_summary(trimps, d)
+        tl_all_d = training_load_summary(trimps, d)
+        # Strength-scoped TSB (whole-body fallback when no strength TRIMP yet),
+        # mirroring read_tracker's live gate so cardio blocks don't paint the
+        # decision-history strip as strength fatigue.
+        tl_strength_d = training_load_summary(strength_trimps, d)
+        tl_d = tl_strength_d if tl_strength_d.get("tsb") is not None else tl_all_d
         acwr_d = compute_acwr(trimps, d)
         rec_dict = compute_session_recommendation(
             recovery=rec_d,
@@ -505,6 +646,7 @@ def compute_tier_history(*,
             health_all=health_all,
             today_d=d,
             estimated_max_hr=estimated_max_hr,
+            bodyweight_trend=bodyweight_trend,
         )
         dominant_signal = ""
         rationale = rec_dict.get("rationale") or []

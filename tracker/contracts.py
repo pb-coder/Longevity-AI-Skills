@@ -137,6 +137,8 @@ class TrackerJSON(TypedDict, total=False):
     week_over_week: dict[str, JsonValue]
     session_recommendation: SessionRecommendation
     tier_history: list[dict[str, JsonValue]]
+    session_target_min: int
+    target_working_sets: int
     longevity_score: dict[str, JsonValue]
     longevity_state: dict[str, JsonValue] | None
     vo2_percentile: float | None

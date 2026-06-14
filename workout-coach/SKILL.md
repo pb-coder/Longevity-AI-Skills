@@ -743,7 +743,14 @@ Generate that many strength workouts. Tier C: apply the −25% volume / hold loa
 
 **Progression data:** The Step 4 summary already gives you weights and reps per exercise. Use that directly. Don't re-derive trends by walking through each exercise's history. Apply the double progression rule from §15: if the user hit the top of the rep range, bump weight. If not, same weight, push reps.
 
-**Session duration:** 8-11 working exercises (excluding warmup) fits the 70-85 minute window. Count exercises, don't calculate minutes. At 7, add one. At 12, cut one.
+**Session duration (set-budget, NOT exercise-count):** strength-session length is driven by total **working sets**, not by how many exercises you list. Logged history sits at ~3.3 min per working set plus ~5 min warmup, so a 60-minute session is ~17 working sets, not "8-11 exercises." Counting exercises is the trap that let sessions silently shrink: the same 7 exercises is 40 min at 2 sets each or 65 min at 4 sets each.
+
+Budget to `target_working_sets` from the tracker JSON (derived from the per-person `session_target_min`, default 60; override via `profile.csv` `session_target_min`). Rules:
+- Prescribe enough working sets to land within ±2 of `target_working_sets`. If you're under, **add sets to existing main exercises (3-4 sets each) before adding new exercises** — don't pad the list with 2-set accessories.
+- Default main lifts to 3-4 working sets, isolation/accessory to 2-3. Hitting `target_working_sets` with ~6-8 exercises at 3-ish sets each is the normal shape; do not drop main lifts to 2 sets just to fit more movements.
+- Warm-up prep movements and `(warmup)` ramp sets do NOT count toward `target_working_sets`.
+- Tier C `downgrade` trims the budget (halve isolation sets); Tier C `hold_load` and Tier D keep the full budget. A deload cuts the budget ~50%. State the resulting set count is intentional when it deviates from target.
+- Sanity-check the plan before writing: sum the working sets across the session and confirm it is within ±2 of `target_working_sets`. If not, fix it.
 
 **Warm-up (REQUIRED, bounded).** Every strength workout opens with a brief warm-up — never skip it, and never let it balloon past ~5 min. Two parts:
 - **Two prep movements at the very top**, written as plain bullets (they carry no working volume): one general pulse-raiser (`Jumping Jacks`, `Rowing Machine`, or `Arm Circles`) plus one activation matched to the day — push → `Arm Circles` or `Wall Slide`; pull → `Scapular Pull-Up` or `Dead Hang`; legs → `Bodyweight Squat` or `Glute Bridge`. Use canonical catalog names only; do not prescribe equipment the user doesn't own (there are no band movements in the catalog).

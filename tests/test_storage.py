@@ -66,6 +66,15 @@ class StorageTests(unittest.TestCase):
         csv_store.write_profile("Test", auto_cardio=False)
         self.assertIn("custom_key,custom_value", path.read_text(encoding="utf-8"))
 
+    def test_session_target_min_default_and_override(self) -> None:
+        csv_store.write_profile("Test", source="xml")
+        self.assertEqual(csv_store.read_profile("Test")["session_target_min"], 60)
+        csv_store.write_profile("Test", session_target_min=75)
+        self.assertEqual(csv_store.read_profile("Test")["session_target_min"], 75)
+        # Out-of-range values fall back to the default rather than corrupting.
+        csv_store.write_profile("Test", session_target_min=5)
+        self.assertEqual(csv_store.read_profile("Test")["session_target_min"], 60)
+
     def test_sleep_efficiency_and_notes_are_manual_wins(self) -> None:
         csv_store.upsert_sleep_nights(
             "Test",

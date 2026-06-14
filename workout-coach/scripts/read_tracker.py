@@ -725,6 +725,18 @@ def main() -> int:
         bodyweight_trend=bw_trend,
     )
 
+    # ---- Session-length budget. Strength-session duration is driven by total
+    # WORKING SETS (rest dominates), not exercise count: logged history sits at
+    # ~3.3 min per working set plus ~5 min warmup. So the coach budgets sets to
+    # the per-person target instead of counting exercises (the old heuristic
+    # was blind to sets-per-exercise and let sessions silently shrink). ----
+    SESSION_WARMUP_MIN = 5.0
+    MIN_PER_WORKING_SET = 3.3
+    session_target_min = profile.get("session_target_min") or 60
+    target_working_sets = max(
+        8, round((session_target_min - SESSION_WARMUP_MIN) / MIN_PER_WORKING_SET)
+    )
+
     out: TrackerJSON = {
         "today": today_d.strftime("%Y-%m-%d"),
         "data_source": data_source,
@@ -789,6 +801,9 @@ def main() -> int:
         "session_recommendation": session_recommendation,
         # 14-day rolling tier classifications (Trajectory tab).
         "tier_history":           tier_history,
+        # ---- Session-length budget (set-count driven, per-person target) ----
+        "session_target_min":     session_target_min,
+        "target_working_sets":    target_working_sets,
         # ---- Longevity Trajectory tab ----
         "longevity_score":      longevity_score,
         "longevity_state":      longevity_state,

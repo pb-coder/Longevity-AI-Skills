@@ -318,7 +318,7 @@ Use the path resolvers (`plans_dir`, `workout_plan_md`, `assessment_html` in `sh
   "headline": "2-3 sentences. Plain English. The TL;DR. Anchored on longevity trajectory + today's training call.",
   "cards": {
     "// TODAY tab": "",
-    "today_headline":      "one or two sentences. Workout-intensity recommendation + why.",
+    "session_recommendation_callout": "one or two sentences. Workout-intensity recommendation (hard / moderate / easy / rest) + why. This is the Today recovery-gate card's gloss; the renderer reads THIS key (not `today_headline`). Falls back to the top-level `headline` if omitted.",
     "today_acwr":          "one sentence. Where in the Gabbett band + what to do.",
     "recovery_drivers":    "one sentence",
     "activity_rings":      "one sentence",
@@ -333,9 +333,9 @@ Use the path resolvers (`plans_dir`, `workout_plan_md`, `assessment_html` in `sh
     "trajectory_sleep":           "one or two sentences. SRI + Deep+REM + efficiency.",
     "trajectory_body_comp":       "one sentence. Trend + DEXA pending note.",
     "trajectory_metabolic":       "one sentence. Bloodwork priorities personalised to constraints.",
-    "trajectory_decathlon":       "one sentence. Which capabilities to test next.",
     "trajectory_behavioral":      "one sentence. Active-days + SRI + ACWR composite.",
     "trajectory_risk_flags":      "one or two sentences. Highest-priority surveillance items.",
+    "// NOTE: there is no `today_headline` or `trajectory_decathlon` card. The renderer ignores them. The Today intensity gloss is `session_recommendation_callout` above.": "",
 
     "// Cross-tab (Trajectory)": "",
     "vitals":              "one or two sentences",

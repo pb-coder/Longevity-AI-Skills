@@ -136,6 +136,10 @@ COACH_CARD_KEYS = (
 GATED_COACH_CARD_KEYS = frozenset({
     "swim_trajectory_callout",
     "nutrition_phase_callout",
+    # Renders an empty-state card (and intentionally takes no callout) when no
+    # sauna / cold / light sessions exist in the window, so a missing callout
+    # is not a defect, only noise. See card_recovery_practices.
+    "recovery_practices",
 })
 
 

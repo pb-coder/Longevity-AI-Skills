@@ -122,6 +122,7 @@ class TrackerJSON(TypedDict, total=False):
     daily_activity_28d: dict[str, JsonValue]
     recovery: Recovery
     training_load: TrainingLoad
+    training_load_by_modality: dict[str, TrainingLoad]
     hr_at_volume_divergence: dict[str, JsonValue]
     age_years: int | None
     estimated_max_hr: float | None

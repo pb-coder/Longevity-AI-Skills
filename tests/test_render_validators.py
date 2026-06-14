@@ -34,6 +34,21 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertTrue(any("cards.strength missing" in w for w in warnings))
 
+    def test_gated_cards_do_not_warn_when_missing(self) -> None:
+        # recovery_practices renders an empty-state with no callout when there
+        # is no thermal/light data, so a missing callout must not warn.
+        _, warnings = validate_coach_reads({"headline": "Valid", "cards": {}})
+        joined = "\n".join(warnings)
+        for gated in ("recovery_practices", "swim_trajectory_callout",
+                      "nutrition_phase_callout"):
+            self.assertNotIn(gated, joined)
+
+    def test_session_recommendation_callout_is_a_known_card(self) -> None:
+        # Guards the doc/code drift that silently dropped today_headline.
+        self.assertIn("session_recommendation_callout",
+                      render_validators.COACH_CARD_KEYS)
+        self.assertNotIn("today_headline", render_validators.COACH_CARD_KEYS)
+
     def test_auto_wrap_terms_wraps_first_occurrence_only(self) -> None:
         wrapped = auto_wrap_terms("CTL is up; CTL matters.")
         self.assertEqual(wrapped.count('class="term"'), 1)

@@ -43,6 +43,18 @@ class TrackerJsonValidatorTests(unittest.TestCase):
         self.assertIn("tracker.today must be a YYYY-MM-DD string", errors)
         self.assertEqual(warnings, [])
 
+    def test_training_load_by_modality_is_declared(self) -> None:
+        # read_tracker emits this and the gate consumes it; it must not warn.
+        payload = self.valid_tracker()
+        payload["training_load_by_modality"] = {
+            "all": {"ctl": 12.0, "atl": 11.0, "tsb": 1.0},
+            "strength": {"ctl": 6.0, "atl": 5.0, "tsb": 1.0},
+            "cardio": {"ctl": 6.0, "atl": 6.0, "tsb": 0.0},
+        }
+        errors, warnings = validate_tracker_json(payload)
+        self.assertEqual(errors, [])
+        self.assertNotIn("training_load_by_modality", "\n".join(warnings))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,9 +8,32 @@ from workout_coach.lib import render_validators
 from workout_coach.lib.render_validators import (
     COACH_STRING_MAX,
     auto_wrap_terms,
+    count_working_sets_per_workout,
     validate_coach_reads,
     validate_workout_md,
+    workout_set_budget_warnings,
 )
+
+_PLAN_17 = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 28kgx5 (warmup) /// 40kgx3 (warmup) /// 52kgx8 /// 52kgx8 /// 52kgx8 /// 52kgx8
+- Incline Chest Press Machine: 60kgx8 /// 60kgx8 /// 60kgx8
+- Shoulder Press Machine: 60kgx8 /// 60kgx8 /// 60kgx8
+- Cable Lateral Raise: 14kgx10 /// 14kgx10 /// 14kgx10
+- Cable Overhead Tricep Extension: 19kgx8 /// 19kgx8
+- Chest Press Machine: 60kgx8 /// 60kgx8
+"""
+
+_PLAN_SHORT = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Shoulder Press Machine: 60kgx8 /// 60kgx8
+- Cable Overhead Tricep Extension: 19kgx8 /// 19kgx8
+"""
 
 
 class RenderValidatorTests(unittest.TestCase):
@@ -48,6 +71,22 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertIn("session_recommendation_callout",
                       render_validators.COACH_CARD_KEYS)
         self.assertNotIn("today_headline", render_validators.COACH_CARD_KEYS)
+
+    def test_working_set_count_excludes_warmup_and_prep(self) -> None:
+        counts = count_working_sets_per_workout(_PLAN_17)
+        # 4 bench + 3 incline + 3 shoulder + 3 lateral + 2 tricep + 2 chest = 17;
+        # warmup ramp tokens and the Jumping Jacks prep line are excluded.
+        self.assertEqual(counts["Workout 1: PUSH"], 17)
+
+    def test_set_budget_passes_on_target(self) -> None:
+        self.assertEqual(workout_set_budget_warnings(_PLAN_17, 17), [])
+
+    def test_set_budget_flags_short_session(self) -> None:
+        warns = workout_set_budget_warnings(_PLAN_SHORT, 17)
+        self.assertTrue(any("under" in w and "Workout 1" in w for w in warns))
+
+    def test_set_budget_silent_when_no_target(self) -> None:
+        self.assertEqual(workout_set_budget_warnings(_PLAN_SHORT, None), [])
 
     def test_auto_wrap_terms_wraps_first_occurrence_only(self) -> None:
         wrapped = auto_wrap_terms("CTL is up; CTL matters.")

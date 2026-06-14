@@ -286,6 +286,58 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
     return (errors, warnings)
 
 
+def count_working_sets_per_workout(text: str) -> "dict[str, int]":
+    """Count working sets under each `## Workout` heading.
+
+    A working set is a `///`-separated token on a loaded exercise bullet
+    (body contains `kg` or `x`), excluding any token marked `(warmup)`.
+    Pure prep bullets (`Jumping Jacks: 50`) carry no kg/x and count zero.
+    This mirrors how session duration is actually driven (total working
+    sets ~3.3 min each), so the budget check sees what the user will feel.
+    """
+    out: "dict[str, int]" = {}
+    title = None
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        m = re.match(r"^##\s+(Workout\b.*)$", line, re.IGNORECASE)
+        if m:
+            title = m.group(1).strip()
+            out[title] = 0
+            continue
+        if title and line.startswith("- ") and ":" in line:
+            body = line.split(":", 1)[1]
+            if "kg" in body or "x" in body:
+                toks = [t for t in body.split("///") if "warmup" not in t.lower()]
+                out[title] += len(toks)
+    return out
+
+
+def workout_set_budget_warnings(text: str, target_working_sets,
+                                low_tol: int = 3, high_tol: int = 5) -> "list[str]":
+    """Warn when a workout's working-set count drifts from the budget.
+
+    `target_working_sets` is the per-person, tier-adjusted set budget. The
+    short side is the one that bit us (sessions silently shrank as
+    sets-per-exercise drifted), so the low tolerance is tighter. Warning,
+    not error: an intentional deload/downgrade legitimately undershoots and
+    should still render, just visibly flagged.
+    """
+    warnings: "list[str]" = []
+    if not target_working_sets or target_working_sets <= 0:
+        return warnings
+    for title, n in count_working_sets_per_workout(text).items():
+        if n < target_working_sets - low_tol:
+            warnings.append(
+                f"{title}: {n} working sets vs budget {target_working_sets} "
+                f"({target_working_sets - n} under) — confirm this is an "
+                f"intentional deload/downgrade, else add sets to the main lifts")
+        elif n > target_working_sets + high_tol:
+            warnings.append(
+                f"{title}: {n} working sets vs budget {target_working_sets} "
+                f"({n - target_working_sets} over) — trim a set or two")
+    return warnings
+
+
 # Wrap KNOWN_TERMS with a tooltip span when they appear in any coach
 # string. Whole-word, case-sensitive (so "Cold" doesn't match "CTL").
 # Each term wraps at most once per string so we don't double-wrap when

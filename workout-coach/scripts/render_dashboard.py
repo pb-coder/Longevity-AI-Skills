@@ -39,6 +39,7 @@ from workout_coach.lib.render_helpers import esc
 from workout_coach.lib.render_validators import (
     validate_coach_reads,
     validate_workout_md,
+    workout_set_budget_warnings,
 )
 # Direct submodule imports bypass the render_assets / render_components /
 # render_cards / render_cards_trajectory compatibility facades. Each
@@ -279,6 +280,20 @@ def main():
         for e in workout_errors:
             print(f"workout_md validation error: {e}", file=sys.stderr)
         return 2
+
+    # Working-set budget check (tier-aware). Session length is set-count
+    # driven; deload/downgrade legitimately trim, so scale the budget by tier
+    # before comparing and emit warnings (non-blocking) when a workout drifts.
+    base_budget = j.get("target_working_sets")
+    if base_budget:
+        sr = j.get("session_recommendation") or {}
+        label = sr.get("label")
+        scale = {"reactive_deload": 0.5, "downgrade": 0.6}.get(label, 1.0)
+        if sr.get("tier") == "A":  # rest day — no strength budget
+            scale = 0.0
+        effective = round(base_budget * scale)
+        for w in workout_set_budget_warnings(workout_md, effective):
+            print(f"workout_md set-budget warning: {w}", file=sys.stderr)
 
     out = render(j, coach, workout_md, args.person)
     out_path = Path(args.out)

@@ -55,8 +55,12 @@ class BuildMonthlySessionsTests(unittest.TestCase):
         self.assertIsNone(strength["avg_hr"])
         self.assertIsNone(strength["active_cal"])
         self.assertEqual(cardio["session_kind"], "cardio")
-        self.assertEqual(cardio["duration_min"], 14.1)
-        self.assertEqual(cardio["avg_hr"], 150)
+        # Both cycling bouts aggregate into the single cardio entry:
+        # durations sum (14.1 + 6.3 = 20.4) and avg_hr is the
+        # duration-weighted mean — neither bout is dropped (A1).
+        self.assertAlmostEqual(cardio["duration_min"], 20.4, places=4)
+        expected_hr = (14.1 * 150 + 6.3 * 138) / 20.4
+        self.assertAlmostEqual(cardio["avg_hr"], expected_hr, places=2)
 
     def test_strength_session_uses_total_summary_when_present(self) -> None:
         # Mixed day with HealthAutoExport TOTAL summary present: strength

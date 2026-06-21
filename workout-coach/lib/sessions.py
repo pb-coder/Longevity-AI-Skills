@@ -21,20 +21,63 @@ Functions:
 """
 from __future__ import annotations
 
+import re
 from datetime import date  # noqa: F401  (kept for type-hint forward-compat)
 
 
 from .parsing import _parse_iso_date
 
 
-def _is_cardio_row(r: dict) -> bool:
-    """A row is cardio if it has positive distance, OR a duration paired
-    with cardio context (avg HR or auto-import source). A manual
-    isometric hold (Dead Hang 0:30, Plank 1:00) has duration but no HR
-    and no auto-import source — that's a strength-session "other" row,
-    not cardio.
+# Single source of truth for warmup detection on a Notes cell.
+#
+# ``_WARMUP_MARKER_RE`` matches the structured ``(warmup)`` token the plan /
+# log writer emits — the authoritative tag.
+#
+# ``_WARMUP_WORD_RE`` matches word-bounded free-text variants ("warm-up",
+# "warm up", "warmup"). Word boundaries are the fix for the prior bare-
+# substring rule, which both let "warm-up"/"warm up" slip through (the space
+# / hyphen broke the literal "warmup" match) and could false-exclude.
+#
+# ``_WARMUP_NEGATED_RE`` guards the one phrase the bug calls out explicitly:
+# a real working set annotated "no warmup needed" must NOT be excluded just
+# because the token appears. A "no"/"without"/"skip" qualifier immediately
+# before the token negates it.
+_WARMUP_MARKER_RE = re.compile(r"\(\s*warm[\s-]?up\s*\)", re.IGNORECASE)
+_WARMUP_WORD_RE = re.compile(r"\bwarm[\s-]?up\b", re.IGNORECASE)
+_WARMUP_NEGATED_RE = re.compile(
+    r"\b(?:no|without|skip(?:ped|ping)?|don'?t|not?)\s+warm[\s-]?up\b",
+    re.IGNORECASE,
+)
+
+
+def _notes_has_warmup(notes) -> bool:
+    """True when a Notes cell flags the row as a warmup ramp set.
+
+    Detects the structured ``(warmup)`` marker and word-bounded text
+    variants ("warm-up", "warm up", "warmup"), case-insensitive. A negated
+    mention ("no warmup needed") is NOT a warmup tag and returns False —
+    that's a real working set whose note merely references warmup.
     """
-    if (r.get("distance_km") or 0) > 0:
+    if not notes:
+        return False
+    s = str(notes)
+    if _WARMUP_MARKER_RE.search(s):
+        return True
+    if _WARMUP_NEGATED_RE.search(s):
+        return False
+    return bool(_WARMUP_WORD_RE.search(s))
+
+
+def _is_cardio_row(r: dict) -> bool:
+    """A row is cardio if it has positive *unloaded* distance, OR a
+    duration paired with cardio context (avg HR or auto-import source).
+
+    A loaded carry (Farmer Walk: kg>0 + distance) is strength work, not
+    cardio — the distance→cardio gate only fires when kg is zero. A manual
+    isometric hold (Dead Hang 0:30, Plank 1:00) has duration but no HR and
+    no auto-import source — that's a strength-session "other" row too.
+    """
+    if (r.get("distance_km") or 0) > 0 and (r.get("kg") or 0) <= 0:
         return True
     if (r.get("duration_min") or 0) <= 0:
         return False
@@ -50,7 +93,7 @@ def progression_summary(rows: list[dict]) -> list[dict]:
     """Last and previous best working set per exercise (warmups excluded)."""
     by_ex: dict[str, list[dict]] = {}
     for r in rows:
-        if r.get("notes") and "warmup" in r["notes"].lower():
+        if _notes_has_warmup(r.get("notes")):
             continue
         if not r.get("kg") or not r.get("reps"):
             continue
@@ -227,22 +270,74 @@ def build_monthly_sessions(rows: list[dict],
                 "avg_hr":      None, "duration_min": None,
             }
 
-    # Pass 3: fill cardio entries' metadata from the cardio rows on each
-    # date. Strength entries are left alone here; their metadata comes
-    # from the TOTAL-row summary below. This keeps a cycling ride's
-    # duration / HR from masquerading as the strength session's stats.
+    # Pass 3: AGGREGATE all cardio rows on each date into the single
+    # ``(date, "cardio")`` entry. A day can hold several bouts (an easy
+    # swim, a commute ride, an interval run); the old "fill if empty" rule
+    # kept only the FIRST bout and silently dropped the rest, undercounting
+    # cardio minutes by 23-37% on multi-bout days and corrupting every
+    # downstream cardio metric (HR-zones, per-session TRIMP, CTL/ATL/TSB,
+    # week-over-week). We instead SUM the additive quantities (duration,
+    # calories, distance), take the MAX elevation, the duration-weighted
+    # mean HR, and the first non-empty elapsed string. Strength entries are
+    # left alone here; their metadata comes from the TOTAL-row summary.
+    #
+    # ``_hr_num`` / ``_hr_den`` accumulate the duration-weighted HR. A bout
+    # with HR but no duration still contributes its HR with unit weight so
+    # it isn't silently dropped; a bout with neither is ignored for HR.
+    cardio_agg: dict[str, dict] = {}
     for r in rows:
         d = r.get("date")
         if not d or not _is_cardio_row(r):
             continue
-        s = by_key.get((d, "cardio"))
-        if s is None:
+        if (d, "cardio") not in by_key:
             continue
-        for k in ("active_cal", "total_cal", "elevation_m", "elapsed", "avg_hr"):
-            if s.get(k) in (None, "") and r.get(k) not in (None, ""):
-                s[k] = r.get(k)
-        if s.get("duration_min") in (None, "") and r.get("duration_min"):
-            s["duration_min"] = r.get("duration_min")
+        agg = cardio_agg.setdefault(d, {
+            "duration_min": 0.0, "active_cal": 0.0, "total_cal": 0.0,
+            "distance_km": 0.0, "elevation_m": None, "elapsed": None,
+            "_hr_num": 0.0, "_hr_den": 0.0,
+            "_has_duration": False, "_has_active_cal": False,
+            "_has_total_cal": False, "_has_distance": False,
+        })
+        dur = r.get("duration_min")
+        if dur not in (None, ""):
+            agg["duration_min"] += float(dur)
+            agg["_has_duration"] = True
+        for key, flag in (("active_cal", "_has_active_cal"),
+                          ("total_cal", "_has_total_cal"),
+                          ("distance_km", "_has_distance")):
+            v = r.get(key)
+            if v not in (None, ""):
+                agg[key] += float(v)
+                agg[flag] = True
+        elev = r.get("elevation_m")
+        if elev not in (None, ""):
+            elev_f = float(elev)
+            if agg["elevation_m"] is None or elev_f > agg["elevation_m"]:
+                agg["elevation_m"] = elev_f
+        if agg["elapsed"] in (None, "") and r.get("elapsed") not in (None, ""):
+            agg["elapsed"] = r.get("elapsed")
+        hr = r.get("avg_hr")
+        if hr not in (None, "") and float(hr) > 0:
+            w = float(dur) if dur not in (None, "") and float(dur) > 0 else 1.0
+            agg["_hr_num"] += float(hr) * w
+            agg["_hr_den"] += w
+
+    for d, agg in cardio_agg.items():
+        s = by_key[(d, "cardio")]
+        if agg["_has_duration"]:
+            s["duration_min"] = agg["duration_min"]
+        if agg["_has_active_cal"]:
+            s["active_cal"] = agg["active_cal"]
+        if agg["_has_total_cal"]:
+            s["total_cal"] = agg["total_cal"]
+        if agg["_has_distance"]:
+            s["distance_km"] = agg["distance_km"]
+        if agg["elevation_m"] is not None:
+            s["elevation_m"] = agg["elevation_m"]
+        if agg["elapsed"] not in (None, ""):
+            s["elapsed"] = agg["elapsed"]
+        if agg["_hr_den"] > 0:
+            s["avg_hr"] = agg["_hr_num"] / agg["_hr_den"]
 
     # Pass 4: fold TOTAL-row session summaries into the strength entries
     # (TOTAL rows are not emitted for pure cardio).
@@ -280,13 +375,30 @@ def build_monthly_sessions(rows: list[dict],
 
 
 def _is_working_set(r: dict) -> bool:
-    """A working set has a positive rep count and no 'warmup' in Notes.
-    Bodyweight sets (kg=0, reps>0 like Pull-Up or Plank) count. Cardio rows
-    (reps=0) and warmup-tagged rows are skipped."""
-    reps = r.get("reps") or 0
-    if reps <= 0:
+    """True when a row is a counted hard SET.
+
+    Two shapes count as one set each:
+
+    1. A positive-rep set. Bodyweight (kg=0, reps>0 like Pull-Up) counts.
+    2. A duration hold with reps==0 — an isometric (Plank, Side Plank) or
+       a loaded carry (Farmer Walk) — *provided* it is not a cardio bout
+       and not a pure distance row. The hold time substitutes for reps as
+       the work unit; per-muscle attribution still requires a DB primary
+       at the consumer, so an unknown/cardio-section exercise contributes
+       zero there.
+
+    Cardio rows and warmup-tagged rows (structured ``(warmup)`` marker or
+    word-bounded "warm-up"/"warm up") are always excluded. Isometrics stay
+    out of e1RM/progression — those paths gate on ``kg > 0`` independently.
+    """
+    if _notes_has_warmup(r.get("notes")):
         return False
-    notes = (r.get("notes") or "").lower()
-    if "warmup" in notes:
+    reps = r.get("reps") or 0
+    if reps > 0:
+        return True
+    # reps == 0 (or missing): only a non-cardio duration hold counts.
+    if (r.get("duration_min") or 0) <= 0:
+        return False
+    if _is_cardio_row(r):
         return False
     return True

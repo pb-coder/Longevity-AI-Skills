@@ -361,7 +361,10 @@ def _classify_session_rows(rows: list[dict]) -> tuple[list[str], bool]:
             kinds.append("strength")
             continue
         dist_v = _to_num(rd.get("distance"))
-        if dist_v > 0:
+        # Distance only implies cardio when the row is *unloaded*. A loaded
+        # carry (Farmer Walk: kg>0 + distance, reps 0) is strength work and
+        # must stay with the strength rows, not be demoted to cardio.
+        if dist_v > 0 and kg_v <= 0:
             kinds.append("cardio")
             continue
         if _is_auto_imported(rd):

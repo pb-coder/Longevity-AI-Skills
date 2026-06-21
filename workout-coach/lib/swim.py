@@ -49,15 +49,28 @@ def recent_swim_workouts(swim_workouts: list[dict],
     return out
 
 
+PACE_MIN_SEC_PER_100M = 20.0   # faster than world-record territory — unit error
+PACE_MAX_SEC_PER_100M = 600.0  # 10 min/100m — implausibly slow for a swim workout
+
+
 def pace_per_100m(distance_km: float | None,
                   duration_min: float | None) -> float | None:
-    """Return seconds per 100m, or None when either input is missing/zero."""
+    """Return seconds per 100m, or None when either input is missing/zero or
+    the computed pace falls outside the plausible band [20, 600] sec/100m.
+
+    Values below 20 sec/100m indicate a unit error (e.g. metres stored as km).
+    Values above 600 sec/100m indicate data corruption or a near-stationary
+    reading that should not be treated as a swim pace.
+    """
     if not distance_km or not duration_min:
         return None
     if distance_km <= 0 or duration_min <= 0:
         return None
     # distance_km × 10 = number of 100m blocks. duration_min × 60 = sec.
-    return round((duration_min * 60.0) / (distance_km * 10.0), 1)
+    pace = (duration_min * 60.0) / (distance_km * 10.0)
+    if pace < PACE_MIN_SEC_PER_100M or pace > PACE_MAX_SEC_PER_100M:
+        return None
+    return round(pace, 1)
 
 
 def _slope_per_week(points: list[tuple[date, float]]) -> float | None:

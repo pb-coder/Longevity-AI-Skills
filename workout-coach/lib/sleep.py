@@ -30,6 +30,9 @@ from .parsing import _parse_iso_date
 EFFICIENCY_HEALTHY_MIN_PCT = 85.0
 EFFICIENCY_DISTURBED_MAX_PCT = 80.0
 WASO_OUTLIER_MIN_H = 1.0
+# Single source of truth: the threshold used to count low-REM nights AND
+# the value reported as target_min_pct in flag_rem_sleep_anomalies().
+REM_TARGET_MIN_PCT = 20.0
 
 
 def recent_sleep_nights(nights: list[dict], today_d: date,
@@ -409,7 +412,7 @@ def flag_rem_sleep_anomalies(nights: list[dict], today_d: date,
         n_with_rem += 1
         pct = (rem_f / total_f) * 100.0
         rem_pcts.append(pct)
-        if pct < 15.0:
+        if pct < REM_TARGET_MIN_PCT:
             low_rem_nights += 1
     if n_with_rem == 0:
         return None
@@ -419,5 +422,5 @@ def flag_rem_sleep_anomalies(nights: list[dict], today_d: date,
         "n_nights":          n_with_rem,
         "mean_rem_pct":      round(mean_rem_pct, 1),
         "low_rem_nights":    low_rem_nights,
-        "target_min_pct":    20.0,
+        "target_min_pct":    REM_TARGET_MIN_PCT,
     }

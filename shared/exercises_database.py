@@ -232,22 +232,53 @@ def is_known_name(name: str, known_names: set[str] | None = None) -> bool:
     return _normalize_for_match(name) in names
 
 
+def _per_token_match_avg(query_tokens: list[str],
+                         canonical_tokens: list[str]) -> float:
+    """Average best-match score for each query token against all canonical tokens.
+
+    For each query token, find the highest SequenceMatcher ratio against any
+    canonical token and average those bests. This correctly handles abbreviated
+    query tokens like "lat" matching "lateral" much better than "leg", even
+    though at the whole-string level both "leg raise" and "lateral raise"
+    share the substring "raise" with "lat raise".
+    """
+    if not query_tokens or not canonical_tokens:
+        return 0.0
+    total = 0.0
+    for qt in query_tokens:
+        best = max(
+            difflib.SequenceMatcher(None, qt, ct).ratio()
+            for ct in canonical_tokens
+        )
+        total += best
+    return total / len(query_tokens)
+
+
 def fuzzy_match(name: str, k: int = 3) -> list[tuple[str, float]]:
     """Return top-K (canonical, similarity_0_to_1) pairs against the database.
 
-    Uses ``difflib.SequenceMatcher`` ratio. Cheap, no dependencies. The
-    caller can apply a threshold (e.g. ``≥ 0.85`` → propose as alias of
+    Blends ``difflib.SequenceMatcher`` whole-string ratio (30%) with a
+    per-token best-match average (70%). The blend down-weights false
+    positives from pure sequence matching — e.g. "lat raise" previously
+    matched "Leg Raise" above "Lateral Raise" because the character
+    sequence similarity was high. Per-token matching correctly identifies
+    "lat" as a closer prefix of "lateral" than "leg".
+
+    The caller can apply a threshold (e.g. ``≥ 0.85`` → propose as alias of
     the top hit rather than a new exercise).
     """
     if not name or not name.strip():
         return []
     target = _normalize_for_match(name)
+    target_tokens = target.split()
     scored: list[tuple[str, float]] = []
     for canonical in _all_canonical_names():
-        ratio = difflib.SequenceMatcher(
-            None, target, _normalize_for_match(canonical)
-        ).ratio()
-        scored.append((canonical, round(ratio, 3)))
+        norm_canonical = _normalize_for_match(canonical)
+        canonical_tokens = norm_canonical.split()
+        seq_ratio = difflib.SequenceMatcher(None, target, norm_canonical).ratio()
+        tok_ratio = _per_token_match_avg(target_tokens, canonical_tokens)
+        blended = round(0.3 * seq_ratio + 0.7 * tok_ratio, 3)
+        scored.append((canonical, blended))
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:k]
 

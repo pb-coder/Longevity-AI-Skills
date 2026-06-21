@@ -745,6 +745,7 @@ def main() -> int:
         bodyweight_trend_kg_per_week=bw_trend,
         estimated_1rm=e1rm,
         capabilities=capabilities,
+        phase_type=((nutrition_phase or {}).get("current") or {}).get("phase_type"),
     )
 
     # ---- Session recommendation (the 5-tier gate that SKILL.md Phase 2

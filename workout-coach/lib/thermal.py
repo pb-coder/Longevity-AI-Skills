@@ -313,7 +313,7 @@ def thermal_summary(
     heat_per_week = len(heat_rows) / 4.0 if heat_rows else 0.0
     if heat_per_week < target_per_week - 0.5:
         heat_status = "below-target"
-    elif heat_per_week > target_per_week + 1.5:
+    elif heat_per_week > target_per_week + 0.5:
         heat_status = "above-target"
     else:
         heat_status = "on-target"

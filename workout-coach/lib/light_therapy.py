@@ -123,7 +123,7 @@ def light_therapy_summary(
 
     if per_week < target_per_week - 0.5:
         status = "below-target"
-    elif per_week > target_per_week + 1.5:
+    elif per_week > target_per_week + 0.5:
         status = "above-target"
     else:
         status = "on-target"

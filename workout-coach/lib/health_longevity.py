@@ -58,7 +58,8 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
                             movement_consistency: dict | None,
                             bodyweight_trend_kg_per_week: float | None,
                             estimated_1rm: dict | None,
-                            capabilities: dict | None = None) -> dict | None:
+                            capabilities: dict | None = None,
+                            phase_type: str | None = None) -> dict | None:
     """Composite Longevity Score (0-100) — the Trajectory tab headline.
 
     Weighted average of normalized inputs from ``LONGEVITY_SCORE_WEIGHTS``.
@@ -142,20 +143,53 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
         z2_per_wk = z2 / 4.0  # cardio_zones is 28d window
         components["z2_weekly_adherence"] = _safe_norm(z2_per_wk, 0, 200.0) * 100.0
 
-    # 7. Body composition trend (directional: depends on bw goal — without a
-    # goal field we treat ANY directional change as informative; small
-    # gains in a lean-bulk context = good. 0 weight change = 60 baseline.
+    # 7. Body composition trend — phase-aware.
+    # phase_type: "cut" | "bulk" | "maintain" | None (legacy / unknown).
+    # When phase_type is None, legacy behaviour applies (slight-gain-good).
     if bodyweight_trend_kg_per_week is not None:
         bt = bodyweight_trend_kg_per_week
-        # +0.0 to +0.4 kg/wk = lean-bulk healthy range; >0.6 fat-mass risk;
-        # negative = cutting or unintentional loss. Without goal context,
-        # tight neutral band gets the highest score.
-        if -0.1 <= bt <= 0.4:
-            components["body_comp_trend"] = 75.0
-        elif 0.4 < bt <= 0.6:
-            components["body_comp_trend"] = 60.0
+        if phase_type == "cut":
+            # A well-paced loss (−0.1 to −0.5 kg/wk) is correct on a cut.
+            # Faster loss risks muscle; gain is off-target.
+            if -0.5 <= bt <= -0.1:
+                components["body_comp_trend"] = 75.0
+            elif -0.1 < bt <= 0.1:
+                components["body_comp_trend"] = 60.0  # essentially flat — tolerable
+            elif bt < -0.5:
+                components["body_comp_trend"] = 55.0  # too fast, muscle-loss risk
+            else:
+                components["body_comp_trend"] = 45.0  # gaining during a cut — off-target
+        elif phase_type == "bulk":
+            # +0.0 to +0.4 kg/wk = lean-bulk healthy range; >0.6 fat-mass risk;
+            # negative loss during a bulk = off-target.
+            if 0.0 <= bt <= 0.4:
+                components["body_comp_trend"] = 75.0
+            elif 0.4 < bt <= 0.6:
+                components["body_comp_trend"] = 60.0
+            elif bt < 0.0:
+                components["body_comp_trend"] = 55.0  # losing during bulk
+            else:
+                components["body_comp_trend"] = 50.0  # gaining too fast
+        elif phase_type == "maintain":
+            # Flat (±0.2 kg/wk) is ideal; any strong trend is off-target.
+            if -0.2 <= bt <= 0.2:
+                components["body_comp_trend"] = 75.0
+            elif -0.4 <= bt <= 0.4:
+                components["body_comp_trend"] = 62.0
+            else:
+                components["body_comp_trend"] = 50.0
         else:
-            components["body_comp_trend"] = 50.0
+            # Legacy / no phase context: treat slight gain as good
+            # (lean-bulk default assumed).
+            # +0.0 to +0.4 kg/wk = lean-bulk healthy range; >0.6 fat-mass risk;
+            # negative = cutting or unintentional loss. Without goal context,
+            # tight neutral band gets the highest score.
+            if -0.1 <= bt <= 0.4:
+                components["body_comp_trend"] = 75.0
+            elif 0.4 < bt <= 0.6:
+                components["body_comp_trend"] = 60.0
+            else:
+                components["body_comp_trend"] = 50.0
 
     # 8. Behavioral consistency (movement-min days ≥ threshold per week)
     if movement_consistency:

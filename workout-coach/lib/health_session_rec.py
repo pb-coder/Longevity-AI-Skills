@@ -27,17 +27,26 @@ def _muscles_over_mrv(weekly_volume: dict | None) -> list[str]:
 
 def _rhr_sustained_elevation_days(health_all: list[dict], today_d: date,
                                    bpm_above_baseline: float,
-                                   baseline_days: int = 14) -> int:
+                                   baseline_days: int = 28) -> int:
     """Number of consecutive most-recent days where RHR >= baseline + threshold.
 
     Used by Tier A's "RHR sustained +10 bpm for 3 days" trigger.
+
+    The baseline must EXCLUDE the recent elevated run, or it contaminates
+    itself: a mean taken over a window that contains the elevated days drags
+    the threshold up, so a genuine sustained elevation reads as no streak at
+    all (the field failure this fixes). We mirror the wrist-temp detector's
+    lagged-window discipline (``_wrist_temp_deviation_c`` compares the latest
+    reading to a *trailing* baseline, not one that includes the latest day):
+
+      1. Estimate the run length against a robust reference — the *median*
+         over a long trailing window. A short minority of elevated days can't
+         move the median, so this gives an uncontaminated run estimate.
+      2. Re-take the baseline as the *mean* over the same-length window but
+         LAGGED past that run (window ending ``run`` days before today), so
+         the elevated days are excluded.
+      3. Walk the actual streak against that uncontaminated baseline.
     """
-    baseline = _mean_or_none(
-        _values_in_window(health_all, "resting_hr", today_d, baseline_days)
-    )
-    if baseline is None:
-        return 0
-    threshold = baseline + bpm_above_baseline
     by_date: dict[date, float] = {}
     for e in health_all:
         v = e.get("resting_hr")
@@ -50,15 +59,43 @@ def _rhr_sustained_elevation_days(health_all: list[dict], today_d: date,
             by_date[d] = float(v)
         except (TypeError, ValueError):
             continue
-    streak = 0
-    cur = today_d
-    while True:
-        v = by_date.get(cur)
-        if v is None or v < threshold:
-            break
-        streak += 1
-        cur = cur - timedelta(days=1)
-    return streak
+    if not by_date:
+        return 0
+
+    def _window(end_d: date) -> list[float]:
+        cutoff = end_d - timedelta(days=max(baseline_days - 1, 0))
+        return [v for d, v in by_date.items() if cutoff <= d <= end_d]
+
+    def _streak_against(threshold: float) -> int:
+        n = 0
+        cur = today_d
+        while True:
+            v = by_date.get(cur)
+            if v is None or v < threshold:
+                break
+            n += 1
+            cur = cur - timedelta(days=1)
+        return n
+
+    # 1) Robust run estimate (median is unmoved by a short elevated tail).
+    ref_vals = _window(today_d)
+    if not ref_vals:
+        return 0
+    ref_vals_sorted = sorted(ref_vals)
+    mid = len(ref_vals_sorted) // 2
+    if len(ref_vals_sorted) % 2:
+        ref_median = ref_vals_sorted[mid]
+    else:
+        ref_median = (ref_vals_sorted[mid - 1] + ref_vals_sorted[mid]) / 2.0
+    run = _streak_against(ref_median + bpm_above_baseline)
+    if run == 0:
+        return 0
+
+    # 2) Lagged mean baseline excluding the run, then 3) walk the real streak.
+    baseline = _mean_or_none(_window(today_d - timedelta(days=run)))
+    if baseline is None:
+        return 0
+    return _streak_against(baseline + bpm_above_baseline)
 
 
 def _wrist_temp_deviation_c(health_all: list[dict], today_d: date) -> float | None:
@@ -248,8 +285,10 @@ def compute_session_recommendation(*,
     n_over_mrv = len(over_mrv_muscles)
 
     wrist_temp_dev = _wrist_temp_deviation_c(health_all, today_d)
+    # 28-day baseline window, lagged past the recent run so the elevated days
+    # don't contaminate their own baseline (see _rhr_sustained_elevation_days).
     rhr_streak = _rhr_sustained_elevation_days(
-        health_all, today_d, T["tier_a_rhr_dev_bpm"], baseline_days=14)
+        health_all, today_d, T["tier_a_rhr_dev_bpm"], baseline_days=28)
     stalled = _genuinely_stalled_lifts(estimated_1rm)
 
     # ---- Context flags that gate the SLOW (proxy) downgrade/deload triggers.
@@ -273,6 +312,20 @@ def compute_session_recommendation(*,
         (recovery_score is not None and recovery_score < T["tier_d_recovery_score_min"])
         or (strength_tsb is not None and strength_tsb < 0)
         or (hrv_z is not None and hrv_z <= T["tier_b_hrv_z_sustained"])
+    )
+    # The week-over-week training-stress spike is fed by ALL-modality TRIMPs
+    # (read_tracker), so it's unstable over a small base — one short HIIT after
+    # a quiet week reads as a huge percent. The gate's TSB, by contrast, is
+    # strength-scoped. A raw percent must NOT pin a strength-fresh athlete in
+    # deload off a cardio blip. Corroborate it the same way the soft Tier-C
+    # triggers are corroborated: negative strength freshness AND a meaningful
+    # absolute acute load (acute 7d TRIMP above the floor), so the denominator
+    # artifact can't fire on its own. Genuine high-load ramps (both conditions
+    # met) still fire.
+    acute_load = (acwr or {}).get("acute_7d")
+    wow_spike_corroborated = (
+        strength_tsb is not None and strength_tsb < 0
+        and acute_load is not None and acute_load >= T["tier_b_wow_acute_load_floor"]
     )
 
     # Corroboration for the SOFT recovery/HRV Tier-C triggers and the Tier-D
@@ -349,7 +402,7 @@ def compute_session_recommendation(*,
     if rhr_streak >= T["tier_a_rhr_sustained_days"]:
         tier_a_fired = True
         add("rhr_sustained_days", rhr_streak, T["tier_a_rhr_sustained_days"],
-            f"RHR sustained ≥+{T['tier_a_rhr_dev_bpm']:.0f} bpm above 14-day baseline for {rhr_streak} consecutive days")
+            f"RHR sustained ≥+{T['tier_a_rhr_dev_bpm']:.0f} bpm above the pre-elevation baseline for {rhr_streak} consecutive days")
     # NOTE: rhr_z is the INVERTED recovery z (positive = RHR below baseline =
     # favorable). An autonomic crash means RHR is ELEVATED, i.e. z is strongly
     # negative — hence `<= -threshold`, not `>= threshold`.
@@ -410,12 +463,16 @@ def compute_session_recommendation(*,
         tier_b_kind = tier_b_kind or "reactive_deload_week"
         add("auto_deload_candidate", "yes", "—",
             "auto-deload candidate flagged in the last 7 days; the data already looked like a deload was needed")
-    # ACUTE: a sharp week-over-week training-stress spike, regardless of context.
-    if wow_pct is not None and wow_pct >= T["tier_b_wow_spike_pct"]:
+    # ACUTE: a sharp week-over-week training-stress spike — but only when
+    # corroborated (negative strength freshness + meaningful absolute acute
+    # load), so a big percent off a near-zero base while strength-fresh doesn't
+    # fire. Genuine high-load ramps still trip this.
+    if (wow_pct is not None and wow_pct >= T["tier_b_wow_spike_pct"]
+            and wow_spike_corroborated):
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "zone_2"
         add("wow_change_pct", round(wow_pct, 1), T["tier_b_wow_spike_pct"],
-            f"week-over-week training stress +{wow_pct:.0f}% — sharp ramp into red, cap the next 7 days at +10%")
+            f"week-over-week training stress +{wow_pct:.0f}% with negative strength freshness and high acute load — sharp ramp into red, cap the next 7 days at +10%")
     # SLOW: genuine ceiling-stall, but ONLY when corroborated by fatigue.
     # Flat loads on isolations / comeback lifts no longer force a deload.
     if (stalled >= T["tier_b_stalled_lifts_count"]

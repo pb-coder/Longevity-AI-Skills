@@ -421,6 +421,15 @@ SESSION_GATE_THRESHOLDS = {
     "tier_b_hrv_z_sustained":         -0.75,   # Altini baseline-below-band
     "tier_b_muscles_over_mrv_count":   3,      # RP MRV-breach protocol
     "tier_b_wow_spike_pct":            60.0,   # 10% rule (10% green, >60% red)
+    # Absolute acute-load floor for the WoW spike. A big week-over-week
+    # percent off a near-zero base (e.g. one short HIIT after a quiet week)
+    # is an artifact of a tiny denominator, not accumulated fatigue — the
+    # all-modality TRIMP feeding wow is noisy over a small base while the
+    # gate's TSB is strength-scoped. The spike only fires when corroborated:
+    # negative strength freshness AND acute 7-day TRIMP above this floor, so
+    # a strength-fresh athlete isn't pinned in deload by a cardio blip. This
+    # mirrors the corroboration the soft Tier-C triggers already require.
+    "tier_b_wow_acute_load_floor":     300.0,  # min acute 7d TRIMP to corroborate
     "tier_b_stalled_lifts_count":      4,      # Tuchscherer reactive-deload; broad program-wide ceiling-stall (corroborated by fatigue), not 2 flat isolations
 
     # ---- Tier C: downgrade (modified strength is fine) ----

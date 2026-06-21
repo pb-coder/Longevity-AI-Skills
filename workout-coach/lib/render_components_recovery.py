@@ -106,7 +106,8 @@ def freshness_scale(tsb):
     x = ((t_vis + 15.0) / 30.0) * 600.0
     if t_vis <= -10 or t_vis > 10:
         marker_cls = "warn" if t_vis <= -10 else "amber"
-    elif t_vis <= -5:
+    elif t_vis < -5:
+        # -5.0 itself belongs to the balanced/good band (|tsb| <= 5)
         marker_cls = "amber"
     else:
         marker_cls = "good"

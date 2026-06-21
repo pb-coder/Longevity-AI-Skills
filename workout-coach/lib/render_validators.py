@@ -298,10 +298,10 @@ def count_working_sets_per_workout(text: str) -> "dict[str, int]":
     the budget). Pure prep bullets (`Jumping Jacks: 50`, a single
     bodyweight line with no load and no `///`) count zero.
 
-    Any non-Workout markdown heading (`## Cardio`, `### ...`) resets the
-    active title, so cardio bullets, which contain words like `max` /
-    `VO2max`, never leak into a workout's count (they used to, because
-    the bare `"x" in body` test matched those words).
+    A non-Workout `##` heading (e.g. `## Cardio`) resets the active title so
+    cardio bullets never leak into a workout's count.  Deeper headings
+    (`###`, `####`, ...) are treated as sub-sections within the current
+    workout block and do NOT reset the scope.
     """
     out: "dict[str, int]" = {}
     title = None
@@ -316,8 +316,11 @@ def count_working_sets_per_workout(text: str) -> "dict[str, int]":
             title = m.group(1).strip()
             out[title] = 0
             continue
-        # any other heading ends the current workout's bullet scope
-        if re.match(r"^#{1,6}\s+", line):
+        # only a ## heading (not a ## Workout, which is handled above) ends
+        # the current workout's bullet scope.  ### and deeper headings
+        # (e.g. ### Accessories) are sub-sections within a workout block
+        # and must NOT clear the active title.
+        if re.match(r"^##\s+", line):
             title = None
             continue
         if title and line.startswith("- ") and ":" in line:

@@ -37,6 +37,11 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
     else:
         score_value_html = f'<div class="value">{esc(fmt(score, 1))}<span class="denom"> / 10</span></div>'
 
+    if tsb is None:
+        tsb_value_html = '<div class="value muted" style="font-size:22px;">—</div>'
+    else:
+        tsb_value_html = f'<div class="value">{esc(signed(tsb, 1))}</div>'
+
     return f'''
 <section class="hero">
   <article class="card metric {score_cls}">
@@ -47,7 +52,7 @@ def card_hero(score, score_cls, confidence, tsb, tsb_cls, tsb_label, ctl, atl, t
   </article>
   <article class="card metric {tsb_cls}">
     <h2><span class="term" data-tip="Your fitness minus your current fatigue. Positive numbers mean you are fresh and ready to train hard; negative numbers mean fatigue is accumulating. Above +5 is fresh, below -10 starts to be tired.">Freshness</span></h2>
-    <div class="value">{esc(signed(tsb, 1))}</div>
+    {tsb_value_html}
     {freshness_scale(tsb)}
     <div class="sub" style="color: var(--{arrow_cls});">{arrow} {signed(tsb_trend, 1)} over the last 7 days</div>
   </article>
@@ -96,9 +101,14 @@ def card_neat(daily_activity):
     avg_min = daily_activity.get("exercise_min_daily_avg")
     walk_min_28 = daily_activity.get("walking_minutes_28d")
     walk_km_28 = daily_activity.get("walking_distance_km_28d")
+    assess = (daily_activity.get("assessment") or "").lower()
+    # Suppress the card when all signals are absent/zero and there is no
+    # upstream assessment band — rendering "no signal + 0 min/day" is
+    # misleading and produces a half-empty card.
+    if not assess and not avg_min and not walk_min_28 and not walk_km_28:
+        return ""
     walk_min_daily = (walk_min_28 / 28.0) if walk_min_28 is not None else None
     walk_km_daily = (walk_km_28 / 28.0) if walk_km_28 is not None else None
-    assess = (daily_activity.get("assessment") or "").lower()
     status_cls = {"high": "good", "moderate": "amber",
                   "low": "warn"}.get(assess, "muted")
     status_word = {"high": "high",

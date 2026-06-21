@@ -127,7 +127,6 @@ TOTAL_LABEL = "TOTAL"
 VOLUME_LANDMARKS = {
     "chest":        {"mv": 3,  "mev": 8,  "mav": 16, "mrv": 22},
     "back":         {"mv": 6,  "mev": 10, "mav": 18, "mrv": 25},
-    "lats":         {"mv": 6,  "mev": 10, "mav": 18, "mrv": 25},
     "quads":        {"mv": 4,  "mev": 8,  "mav": 14, "mrv": 18},
     "hamstrings":   {"mv": 2,  "mev": 4,  "mav": 12, "mrv": 16},
     "glutes":       {"mv": 0,  "mev": 4,  "mav": 12, "mrv": 16},
@@ -152,7 +151,7 @@ VOLUME_LANDMARKS = {
 # snake_case keys used everywhere else (and in VOLUME_LANDMARKS).
 MUSCLE_ALIASES = {
     "chest": "chest", "upper chest": "chest",
-    "back": "back", "lats": "lats",
+    "back": "back", "lats": "back",  # lats folded into back (no separate landmark)
     "biceps": "biceps", "triceps": "triceps",
     "quads": "quads", "hamstrings": "hamstrings",
     "glutes": "glutes", "adductors": "adductors",
@@ -165,7 +164,7 @@ MUSCLE_ALIASES = {
     "rear delt": "rear_delts",  "rear delts":  "rear_delts",
     "external rotators": "external_rotators",
     "shoulders": None,          "full body": None,
-    "posterior chain": None,    # too broad to assign — skip as primary
+    "posterior chain": "glutes",  # broad token — primary driver is glutes
 }
 
 # Which ## SECTION header implies which primary muscle. None means "use

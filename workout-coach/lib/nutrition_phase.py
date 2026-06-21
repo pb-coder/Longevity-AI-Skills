@@ -251,7 +251,8 @@ def _detect_stop_signals(phase_type: str | None,
     return triggered
 
 
-def _coach_action_hint(status: str, triggered: list[str], weeks_in_phase: float) -> str:
+def _coach_action_hint(status: str, triggered: list[str], weeks_in_phase: float,
+                       phase_type: str | None = None) -> str:
     """Map status + stop-signals into a single binding action token.
 
     The LLM coach is expected to honor this token in its callout the
@@ -270,6 +271,15 @@ def _coach_action_hint(status: str, triggered: list[str], weeks_in_phase: float)
             return "add_calories"
         if status == "too_fast":
             return "slow_intake"
+        if status == "regressing":
+            # Regressing means losing on a bulk or gaining on a cut — the
+            # opposite of the intended direction. This is the same class of
+            # fall-through bug as insufficient_data: a missing explicit case
+            # that silently became "continue". Handle it explicitly here.
+            if phase_type == "bulk":
+                return "add_calories"
+            if phase_type == "cut":
+                return "slow_intake"
         # on_track, flat, insufficient_data, or any other non-terminal
         # status with zero stop signals: hold course. A brand-new phase
         # has insufficient bodyweight history and MUST read as "continue",
@@ -277,7 +287,7 @@ def _coach_action_hint(status: str, triggered: list[str], weeks_in_phase: float)
         # just started). "consider_ending" is reserved for an actual
         # stop-signal breach below.
         return "continue"
-    if len(triggered) >= 2 or weeks_in_phase >= 12:
+    if len(triggered) >= 2 or weeks_in_phase >= 8:
         return "end_now"
     return "consider_ending"
 
@@ -346,7 +356,7 @@ def nutrition_phase_summary(phases: list[dict],
         phase_type, status, weeks, observed, estimated_1rm,
         consecutive_rate_breaches=consecutive_rate_breaches,
     )
-    hint = _coach_action_hint(status, triggered, weeks)
+    hint = _coach_action_hint(status, triggered, weeks, phase_type=phase_type)
 
     # Prior phases (everything not currently open). Useful for the
     # coach to say "this is your second bulk" or compare current rate

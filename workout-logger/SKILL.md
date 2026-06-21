@@ -96,19 +96,16 @@ line. Don't search the filesystem.
    - If stdout contains `Appended`, the workout-row write is confirmed. Proceed.
 5. Print the summary line before moving on to Apple Health refresh or verification: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)`. If one or more weights were logged, append ` | morning weight: 78.4kg` (or comma-separate multiple dates). The summary comes from the script's `Appended …` stdout line — extract N rows and dates from it. Do not skip this in test runs; if you are validating a `/log` flow, emit the same summary a real `/log` invocation would have emitted.
 
-6. **Apple Health refresh prompt.** After printing the summary line, ALWAYS ask the user via `AskUserQuestion`:
+6. **Apple Health refresh (automatic — no prompt).** After printing the summary line, ALWAYS run the importer for the resolved person automatically. Do **not** ask first — the user drops a fresh export every time they log, so refreshing is the default, not a choice. (Historical note: this step used to fire an `AskUserQuestion` "Refresh now / Skip" prompt on every run; the tracker owner asked for it to be silent-by-default — refresh always, surface the importer summary, never prompt.)
 
-   > Question: "Refresh Apple Health data?"
-   > Options: `Refresh now`, `Skip`
-
-   On `Refresh now`, the importer auto-resolves the export file from the
+   The importer auto-resolves the export file from the
    workout-tracker root (one above the per-person folders):
 
    1. `./Export - <Person>.zip` (Apple's native XML, per-person)
    2. `./Export.zip` (Apple's native XML, single-user fallback)
    3. `./HealthAutoExport*.zip` (HealthAutoExport ZIP; **most recent by mtime wins**)
 
-   If none exists, the script prints `ERROR: no Apple Health export found …` and exits 1 — surface that one line to the user.
+   If none exists, the importer prints `ERROR: no Apple Health export found …` and exits 1 — surface that one line to the user and finish (a missing export is not an error worth a prompt; the user just didn't drop one this time).
 
    Dispatch by filename:
 
@@ -124,9 +121,9 @@ line. Don't search the filesystem.
 
    On `Switch and import`, the importer will update `Profile.source` on its next write. On `Skip import`, finish without running the importer. Sparse-merge means switching mid-stream is safe: existing values aren't erased, and the new source only fills cells it can.
 
-   On `Skip` to the original prompt: print nothing extra, finish.
+   This source-mismatch guardrail is the **only** prompt left in step 6 — it's a data-integrity decision (which source owns the tracker), not a convenience toggle, so it still asks. Everything else refreshes silently.
 
-   The prompt fires on every `/log` run by design — the user opted into this flow. A silent skip is not equivalent to "Skip"; always ask. Idempotent re-runs are fine — the importer's sparse-merge protects existing data.
+   The refresh runs on every `/log` invocation automatically. Idempotent re-runs are fine — the importer's sparse-merge protects existing data, so refreshing when nothing changed is a harmless no-op.
 
 The tracker itself is the output. No markdown tables, no files presented, no narration.
 
@@ -155,7 +152,7 @@ Both also create / read `<Person>/data/profile.csv`, a 2-column key/value file p
 
 **Auto-cardio.** When the importer ingests cardio workouts (Running, Hiking, Cycling, Swimming, HIIT) AND `auto_cardio` in `profile.csv` is True, those workouts also flow into the matching `<Person>/data/monthly/YYYY.MM.csv` as cardio rows tagged `auto-imported from Apple`. Manually-logged rows always win — the dedupe rule (date + exercise + duration ±1 min) skips Apple workouts that match an existing manual entry. Default: `auto_cardio = true` on both native XML and HealthAutoExport trackers. Flip to `false` per-tracker by editing `profile.csv` if a user prefers manual-only logging.
 
-**Step 6 always asks.** No watchers, no cron, no auto-detection. The user picked this flow explicitly: ask every time, accept "Skip" cleanly. Never silently skip just because no export is in the folder.
+**Step 6 always refreshes.** No watchers, no cron — but no prompt either. The tracker owner asked for the refresh to be automatic on every `/log`: run the importer for the resolved person, append its summary to the user-facing output, and finish. If no export is in the folder, surface the importer's one-line `ERROR: no Apple Health export found …` and finish — don't prompt. The lone remaining prompt is the source-mismatch guardrail (xml ⇆ health_auto_export), because that changes which source owns the tracker.
 
 ## Bodyweight (opt-in)
 

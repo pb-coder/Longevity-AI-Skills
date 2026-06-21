@@ -35,6 +35,7 @@
 | Reverse Pec Deck | Rear Delt Fly Machine | — |
 | Low Row | Low Row Machine | — |
 | Shoulder Press | Shoulder Press Machine | — |
+| Adductor machine | Hip Adductor Machine | — |
 
 ## Modifier Handling
 

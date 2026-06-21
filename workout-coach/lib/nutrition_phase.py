@@ -265,12 +265,18 @@ def _coach_action_hint(status: str, triggered: list[str], weeks_in_phase: float)
       - ``end_now``          — multiple stop signals OR a single hard one
                                 with phase length over 8 weeks
     """
-    if not triggered and status in ("on_track", "flat"):
+    if not triggered:
+        if status == "too_slow":
+            return "add_calories"
+        if status == "too_fast":
+            return "slow_intake"
+        # on_track, flat, insufficient_data, or any other non-terminal
+        # status with zero stop signals: hold course. A brand-new phase
+        # has insufficient bodyweight history and MUST read as "continue",
+        # never "consider_ending" (telling someone to quit a phase they
+        # just started). "consider_ending" is reserved for an actual
+        # stop-signal breach below.
         return "continue"
-    if not triggered and status == "too_slow":
-        return "add_calories"
-    if not triggered and status == "too_fast":
-        return "slow_intake"
     if len(triggered) >= 2 or weeks_in_phase >= 12:
         return "end_now"
     return "consider_ending"

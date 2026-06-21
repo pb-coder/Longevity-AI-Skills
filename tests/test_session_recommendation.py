@@ -67,20 +67,17 @@ class SessionRecommendationTests(unittest.TestCase):
         self.assertEqual(rec["substitute"]["kind"], "zone_2")
 
     def test_tier_c_includes_expected_rebound_slot(self) -> None:
-        rec = recommendation(recovery={
-            "score": 7.2,
-            "drivers": [{"metric": "hrv_sdnn", "z": -0.5}],
-        })
+        # Genuinely low recovery (below the hard floor) fires Tier C alone.
+        # A very low score (<= 5.0) extends the modified window to slot 2.
+        rec = recommendation(recovery={"score": 3.5, "drivers": []})
         self.assertEqual(rec["tier"], "C")
-        self.assertEqual(rec["expected_rebound_by_session"], 1)
-        self.assertIn("workout 1", rec["override_message"])
+        self.assertEqual(rec["label"], "downgrade")
+        self.assertEqual(rec["expected_rebound_by_session"], 2)
+        self.assertIn("workout 2", rec["override_message"])
 
     def test_tier_c_recent_deload_extends_modification_window(self) -> None:
         rec = recommendation(
-            recovery={
-                "score": 7.2,
-                "drivers": [{"metric": "hrv_sdnn", "z": -0.5}],
-            },
+            recovery={"score": 3.5, "drivers": []},
             deloads=["2026-05-25"],
         )
         self.assertEqual(rec["tier"], "C")
@@ -92,17 +89,53 @@ class SessionRecommendationTests(unittest.TestCase):
         self.assertEqual(rec["label"], "over_recovered")
 
     def test_recovery_between_tier_c_and_green_holds_load(self) -> None:
-        rec = recommendation(recovery={"score": 5.2, "drivers": []})
+        # Just below the green floor downgrades to hold_load ONLY when
+        # corroborated by negative freshness (strength TSB -8 here).
+        rec = recommendation(recovery={"score": 5.2, "drivers": []},
+                             training_load={"tsb": -8})
         self.assertEqual(rec["tier"], "C")
         self.assertEqual(rec["label"], "hold_load")
         self.assertIn("no PR", rec["headline"])
 
-    def test_tier_d_recovery_floor_is_5_5(self) -> None:
-        below = recommendation(recovery={"score": 5.49, "drivers": []})
+    def test_recovery_floor_only_bites_when_corroborated(self) -> None:
+        # Below the 5.5 green floor but FRESH (TSB 0) is green; the soft
+        # floor only holds loads when corroborated by negative freshness.
+        fresh = recommendation(recovery={"score": 5.49, "drivers": []})
+        under_load = recommendation(recovery={"score": 5.49, "drivers": []},
+                                    training_load={"tsb": -8})
         at_floor = recommendation(recovery={"score": 5.5, "drivers": []})
-
-        self.assertEqual(below["tier"], "C")
+        self.assertEqual(fresh["tier"], "D")
+        self.assertEqual(under_load["tier"], "C")
         self.assertEqual(at_floor["tier"], "D")
+
+    def test_moderate_recovery_while_fresh_is_green(self) -> None:
+        # Regression lock for the over-firing bug: recovery 4.8 with a
+        # mildly-low HRV reading (-0.41) while freshness is positive must be
+        # GREEN, not a Tier C downgrade. A single soft dip is not fatigue.
+        rec = recommendation(
+            recovery={"score": 4.8,
+                      "drivers": [{"metric": "hrv_sdnn", "z": -0.41},
+                                  {"metric": "resting_hr", "z": 0.41}]},
+            training_load={"tsb": 0.2},
+        )
+        self.assertEqual(rec["tier"], "D")
+        self.assertEqual(rec["label"], "green")
+
+    def test_moderate_recovery_under_real_load_downgrades(self) -> None:
+        # Same moderate recovery, but freshness is negative (carrying load):
+        # the soft dip is now corroborated, so Tier C is correct.
+        rec = recommendation(
+            recovery={"score": 4.8, "drivers": [{"metric": "hrv_sdnn", "z": -0.41}]},
+            training_load={"tsb": -8},
+        )
+        self.assertEqual(rec["tier"], "C")
+
+    def test_mild_hrv_dip_with_strong_recovery_is_green(self) -> None:
+        # Great recovery (7.2) plus one mildly-low HRV reading is noise; it
+        # must not downgrade a fresh athlete.
+        rec = recommendation(recovery={
+            "score": 7.2, "drivers": [{"metric": "hrv_sdnn", "z": -0.5}]})
+        self.assertEqual(rec["tier"], "D")
 
     def test_mrv_gate_uses_current_sets_per_week(self) -> None:
         self.assertEqual(

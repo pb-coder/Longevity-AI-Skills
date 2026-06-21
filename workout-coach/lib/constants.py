@@ -434,6 +434,16 @@ SESSION_GATE_THRESHOLDS = {
     "tier_c_rhr_z_floor":              0.50,
     "tier_c_muscles_over_mrv_count":   1,
     "tier_c_downgrade_volume_pct":     25.0,   # -25% volume on secondaries
+    # Corroboration guard for the SOFT recovery/HRV Tier-C triggers. HRV is
+    # the dominant input to recovery_score, so "moderate recovery" and
+    # "mildly-low HRV" are the SAME signal, not two. A single soft dip
+    # should not cut training volume while the athlete is fresh. So the
+    # soft band only downgrades when recovery is genuinely low (below the
+    # hard floor) OR freshness is actually negative (under real load). This
+    # mirrors the corroboration the HR-creep and stalled-lift triggers
+    # already require. A genuinely low score (< hard floor) still fires alone.
+    "tier_c_recovery_hard_floor":      4.0,    # below this = real, fires alone
+    "tier_c_soft_tsb_floor":          -5.0,    # strength TSB < this = under load (carrying-load band); soft dip then corroborated
 
     # ---- Tier D: green (default — train as planned) ----
     "tier_d_recovery_score_min":       5.5,

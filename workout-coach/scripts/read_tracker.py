@@ -290,10 +290,30 @@ def _round_or_none(v: float | None, digits: int) -> float | None:
     return None if v is None else round(v, digits)
 
 
+def _bucket_recovery_sessions(thermal_sessions: list[dict] | None,
+                              light_sessions: list[dict] | None,
+                              start: date, end: date) -> float:
+    """Count recovery sessions (sauna/cold rows + light-therapy rows) whose
+    date falls in [start, end]. One thermal row = one protocol session
+    (a paired sauna+cold is a single row), matching the activity ring's
+    'sauna + cold + light' session semantics."""
+    n = 0
+    for src in (thermal_sessions or [], light_sessions or []):
+        for s in src:
+            d = _parse_iso_date(s.get("date"))
+            if d is not None and start <= d <= end:
+                n += 1
+    return float(n)
+
+
 def _build_week_over_week(today_d: date,
                           monthly_sessions: list[dict],
                           health_all: list[dict],
-                          bw_all: list[dict]) -> dict:
+                          bw_all: list[dict],
+                          max_hr: float | None = None,
+                          rest_hr: float | None = None,
+                          thermal_sessions: list[dict] | None = None,
+                          light_sessions: list[dict] | None = None) -> dict:
     """Build the dashboard's this-week / last-week / 4-week-avg block.
 
     Buckets are calendar-ish windows anchored on ``today_d``: this-week
@@ -301,11 +321,35 @@ def _build_week_over_week(today_d: date,
     before that, and the 4-week-avg averages the 4 consecutive 7-day
     windows ending today. Bucketing by relative day rather than ISO
     week keeps the report stable when the coach runs mid-week.
+
+    The Zone-2 and recovery-session rows are computed on the SAME 7-day
+    windows as the rest of the block so the dashboard's "This week at a
+    glance" rings are window-consistent. (A prior bug rendered the Z2
+    ring from a 28-day average divided by 4, which read far lower than
+    the user's actual week and silently mixed windows inside one card.)
     """
     this_start = today_d - timedelta(days=6)
     last_end   = this_start - timedelta(days=1)
     last_start = last_end - timedelta(days=6)
     avg_start  = today_d - timedelta(days=27)
+
+    def _z2_min(anchor_end: date) -> float:
+        z = cardio_hr_zones(monthly_sessions, anchor_end, max_hr, rest_hr,
+                            window_days=7)
+        return float(z.get("z2") or 0.0)
+
+    z2_this = _z2_min(today_d)
+    z2_last = _z2_min(last_end)
+    z2_avg  = float(
+        (cardio_hr_zones(monthly_sessions, today_d, max_hr, rest_hr,
+                         window_days=28).get("z2") or 0.0) / 4.0
+    )
+    rec_this = _bucket_recovery_sessions(thermal_sessions, light_sessions,
+                                         this_start, today_d)
+    rec_last = _bucket_recovery_sessions(thermal_sessions, light_sessions,
+                                         last_start, last_end)
+    rec_avg  = _bucket_recovery_sessions(thermal_sessions, light_sessions,
+                                         avg_start, today_d) / 4.0
 
     avg_strength = _bucket_strength_sessions(monthly_sessions, avg_start, today_d) / 4.0
     avg_cardio_sess = _bucket_cardio_sessions(monthly_sessions, avg_start, today_d) / 4.0
@@ -355,6 +399,14 @@ def _build_week_over_week(today_d: date,
                 avg_cardio_min, 0, "min",
             ),
             row(
+                "Zone 2 minutes", "cardio_z2_min",
+                z2_this, z2_last, z2_avg, 0, "min",
+            ),
+            row(
+                "Recovery sessions", "recovery_sessions",
+                rec_this, rec_last, rec_avg, 1, "sess",
+            ),
+            row(
                 "Sleep total", "sleep_total_h",
                 _bucket_health_mean(health_all, "sleep_total_h", this_start, today_d),
                 _bucket_health_mean(health_all, "sleep_total_h", last_start, last_end),
@@ -396,6 +448,11 @@ class _Args:
     include_1rm_history: bool = False
     include_daily_health: bool = False
     pretty: bool = False
+    # Honor an EXPLICIT user override of the recovery gate (SKILL.md's
+    # override protocol). When set, a restrictive Tier A/B/C call is
+    # normalized to a green/full-volume session, keeping the original
+    # rationale visible for transparency. Only the user may request this.
+    override_gate: bool = False
 
 
 def _parse_args(argv: list[str]) -> _Args:
@@ -413,6 +470,7 @@ def _parse_args(argv: list[str]) -> _Args:
         "--include-1rm-history": "include_1rm_history",
         "--include-daily-health": "include_daily_health",
         "--pretty": "pretty",
+        "--override-gate": "override_gate",
     }
     value_aliases = {
         "--person": "person",
@@ -431,7 +489,8 @@ def _parse_args(argv: list[str]) -> _Args:
             print(
                 "usage: read_tracker.py --person NAME [--months N] "
                 "[--today YYYY-MM-DD] [--include-rows] "
-                "[--include-1rm-history] [--include-daily-health] [--pretty]"
+                "[--include-1rm-history] [--include-daily-health] [--pretty] "
+                "[--override-gate]"
             )
             raise SystemExit(0)
         if "=" in tok and tok.startswith("--"):
@@ -656,6 +715,9 @@ def main() -> int:
     # sources. ----
     week_over_week = _build_week_over_week(
         today_d, monthly_sessions, health_all, bw_all,
+        max_hr=max_hr, rest_hr=rest_hr,
+        thermal_sessions=thermal_sessions_all,
+        light_sessions=light_therapy_sessions_all,
     )
 
     # ---- Longevity-trajectory derivations (Trajectory tab) ----
@@ -705,6 +767,36 @@ def main() -> int:
         bodyweight_trend=bw_trend,
     )
 
+    # Explicit user override of the recovery gate (SKILL.md override
+    # protocol). The gate stays the deterministic default; this only fires
+    # when the user, having SEEN the call, asks to train normally. We
+    # normalize a restrictive A/B/C tier to green so the dashboard's
+    # "Today's call" and the per-workout set budget both reflect a full
+    # session, while preserving the original rationale for honesty.
+    if args.override_gate and session_recommendation.get("tier") in ("A", "B", "C"):
+        _orig = session_recommendation
+        _orig_tier = _orig.get("tier")
+        _orig_head = _orig.get("headline") or ""
+        session_recommendation = {
+            "tier": "D",
+            "label": "green",
+            "headline": "Train as planned (you chose to override the recovery downgrade).",
+            "substitute": None,
+            "rationale": ([{
+                "signal": "user_override",
+                "value": None,
+                "threshold": None,
+                "note": (f"You overrode the system's Tier {_orig_tier} call "
+                         f"({_orig_head}) and chose to train normally."),
+            }] + list(_orig.get("rationale") or [])),
+            "override_allowed": True,
+            "override_message": (
+                f"User override in effect. The system's own read was Tier "
+                f"{_orig_tier}: {_orig_head} Training at full volume by request; "
+                f"listen to your body and back off if a lift feels off."),
+            "expected_rebound_by_session": None,
+        }
+
     # 14-day tier history strip (Trajectory tab — spot fatigue spirals).
     tier_history = compute_tier_history(
         days=14,
@@ -731,10 +823,20 @@ def main() -> int:
     # the per-person target instead of counting exercises (the old heuristic
     # was blind to sets-per-exercise and let sessions silently shrink). ----
     SESSION_WARMUP_MIN = 5.0
-    MIN_PER_WORKING_SET = 3.3
     session_target_min = profile.get("session_target_min") or 60
+    # Per-person pace (min per working set incl. rest). Default 3.3 was the
+    # old one-size constant and is too slow for trainees who rest short or
+    # superset accessories, which silently capped their sessions and their
+    # weekly per-muscle volume. Read from profile.csv (key
+    # ``min_per_working_set``); falls back to 3.3.
+    try:
+        min_per_working_set = float(profile.get("min_per_working_set") or 3.3)
+    except (TypeError, ValueError):
+        min_per_working_set = 3.3
+    if not (1.5 <= min_per_working_set <= 6.0):
+        min_per_working_set = 3.3
     target_working_sets = max(
-        8, round((session_target_min - SESSION_WARMUP_MIN) / MIN_PER_WORKING_SET)
+        8, round((session_target_min - SESSION_WARMUP_MIN) / min_per_working_set)
     )
 
     out: TrackerJSON = {

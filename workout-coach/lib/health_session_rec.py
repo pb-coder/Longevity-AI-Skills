@@ -275,6 +275,25 @@ def compute_session_recommendation(*,
         or (hrv_z is not None and hrv_z <= T["tier_b_hrv_z_sustained"])
     )
 
+    # Corroboration for the SOFT recovery/HRV Tier-C triggers and the Tier-D
+    # floor guard. HRV is the dominant input to recovery_score, so a
+    # "moderate" score and a "mildly-low HRV" reading are the SAME signal,
+    # not two independent reasons. A single soft dip must not cut training
+    # volume (or force a no-PR hold) while the athlete is fresh — you cannot
+    # be peaked and fatigued at once. So the soft band only bites when
+    # recovery is genuinely low (below the hard floor) OR freshness is
+    # actually negative (carrying real load, strength TSB below the
+    # carrying-load boundary). A genuinely low score still fires on its own.
+    # This mirrors the corroboration the HR-creep and stalled-lift triggers
+    # already require, applied to the two triggers that lacked it.
+    recovery_genuinely_low = (
+        recovery_score is not None and recovery_score < T["tier_c_recovery_hard_floor"]
+    )
+    under_real_load = (
+        strength_tsb is not None and strength_tsb < T["tier_c_soft_tsb_floor"]
+    )
+    soft_dip_actionable = recovery_genuinely_low or under_real_load
+
     sleep_means = (sleep_summary or {}).get("means_h") or {}
     sleep_7d_mean = sleep_means.get("total")
     sleep_last_night = None
@@ -437,15 +456,19 @@ def compute_session_recommendation(*,
 
     # ---- TIER C: downgrade (modified strength is fine) ----
     tier_c_fired = False
-    if recovery_score is not None and T["tier_c_recovery_score_lo"] <= recovery_score <= T["tier_c_recovery_score_hi"]:
+    if (recovery_score is not None
+            and T["tier_c_recovery_score_lo"] <= recovery_score <= T["tier_c_recovery_score_hi"]
+            and soft_dip_actionable):
         tier_c_fired = True
+        _why = ("genuinely low" if recovery_genuinely_low
+                else "moderate, and freshness is negative (carrying load)")
         add("recovery_score", recovery_score, T["tier_c_recovery_score_hi"],
-            f"Recovery {recovery_score:.1f}/10 — moderate (not critically low)")
+            f"Recovery {recovery_score:.1f}/10 — {_why}")
     if (hrv_z is not None and T["tier_c_hrv_z_lo"] < hrv_z <= T["tier_c_hrv_z_hi"]
-            and not over_recovered):
+            and not over_recovered and soft_dip_actionable):
         tier_c_fired = True
         add("hrv_sdnn_z", round(hrv_z, 2), T["tier_c_hrv_z_hi"],
-            f"HRV z {hrv_z:+.2f} mildly below baseline")
+            f"HRV z {hrv_z:+.2f} below baseline, corroborated by low recovery or negative freshness")
     if sleep_last_night is not None and sleep_last_night < T["tier_c_sleep_total_h_floor"]:
         tier_c_fired = True
         add("sleep_last_night_h", round(sleep_last_night, 2), T["tier_c_sleep_total_h_floor"],
@@ -523,9 +546,10 @@ def compute_session_recommendation(*,
             "expected_rebound_by_session": rebound_by_session,
         }
 
-    if recovery_score is not None and recovery_score < T["tier_d_recovery_score_min"]:
+    if (recovery_score is not None and recovery_score < T["tier_d_recovery_score_min"]
+            and soft_dip_actionable):
         add("recovery_score", recovery_score, T["tier_d_recovery_score_min"],
-            f"Recovery {recovery_score:.1f}/10 below green floor — hold load, no PR attempts")
+            f"Recovery {recovery_score:.1f}/10 below green floor, with genuinely low recovery or negative freshness — hold load, no PR attempts")
         return {
             "tier": "C",
             "label": "hold_load",

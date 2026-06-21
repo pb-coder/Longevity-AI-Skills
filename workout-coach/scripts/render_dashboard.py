@@ -122,15 +122,20 @@ def render(j: TrackerJSON, coach: CoachReads, workout_md: str, person: str) -> s
     else:
         tsb_cls, tsb_label = "warn", "Detrained"
 
-    # rings
+    # rings. Every ring on this "This week at a glance" card reads the
+    # SAME this-week (last 7 days) window from week_over_week, so the card
+    # is window-consistent. (Zone 2 and recovery used to be 28-day
+    # averages here while strength/cardio were this-week, which made the
+    # Z2 figure read far lower than the user's actual week.)
+    def _wow_this_week(key):
+        r = next((r for r in wow.get("rows", []) if r.get("key") == key), {})
+        return r.get("this_week") or 0
+
     strength_wk = next(
         (r for r in wow.get("rows", []) if r.get("key") == "strength_sessions"), {}
     )
-    z2_min = round((cardio_zones.get("z2") or 0) / 4.0)
-    sauna_wk = (thermal.get("heat") or {}).get("n_sessions_per_week") or 0
-    cold_wk = (thermal.get("cold") or {}).get("n_sessions_per_week") or 0
-    light_wk = (light or {}).get("n_sessions_per_week") or 0
-    recovery_sessions = round(sauna_wk + cold_wk + light_wk, 1)
+    z2_min = round(_wow_this_week("cardio_z2_min"))
+    recovery_sessions = round(_wow_this_week("recovery_sessions"), 1)
     sleep_avg = next(
         (w.get("sleep_total_h") for w in reversed(weekly) if w.get("sleep_total_h")),
         None,
@@ -281,18 +286,33 @@ def main():
             print(f"workout_md validation error: {e}", file=sys.stderr)
         return 2
 
-    # Working-set budget check (tier-aware). Session length is set-count
-    # driven; deload/downgrade legitimately trim, so scale the budget by tier
-    # before comparing and emit warnings (non-blocking) when a workout drifts.
+    # Working-set budget check (tier-aware, PER WORKOUT). Session length is
+    # set-count driven; deload/downgrade legitimately trim, so scale the
+    # budget by tier before comparing and emit warnings (non-blocking) when
+    # a workout drifts. A reactive_deload / rest scales the WHOLE plan, but
+    # a Tier C `downgrade` trims ONLY the first `expected_rebound_by_session`
+    # workouts — later ones keep the full budget — so the scale must be
+    # applied per workout index, not globally (a global scale falsely
+    # flagged the full later sessions as "over").
     base_budget = j.get("target_working_sets")
     if base_budget:
         sr = j.get("session_recommendation") or {}
         label = sr.get("label")
-        scale = {"reactive_deload": 0.5, "downgrade": 0.6}.get(label, 1.0)
-        if sr.get("tier") == "A":  # rest day — no strength budget
-            scale = 0.0
-        effective = round(base_budget * scale)
-        for w in workout_set_budget_warnings(workout_md, effective):
+        tier = sr.get("tier")
+        rebound = sr.get("expected_rebound_by_session") or 1
+
+        def _budget_for(idx: int) -> int:
+            if tier == "A":                       # rest day — no strength budget
+                return 0
+            if label == "reactive_deload":        # whole-week deload
+                return round(base_budget * 0.5)
+            if label == "downgrade":              # only first `rebound` workouts trim
+                return round(base_budget * 0.6) if idx < rebound else base_budget
+            return base_budget
+
+        for w in workout_set_budget_warnings(
+            workout_md, base_budget, budget_by_index=_budget_for
+        ):
             print(f"workout_md set-budget warning: {w}", file=sys.stderr)
 
     out = render(j, coach, workout_md, args.person)

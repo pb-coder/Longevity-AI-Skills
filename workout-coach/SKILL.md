@@ -727,7 +727,9 @@ Assessment: ./2026-05-24-assessment.html
 
 **Step 4: only Tier D / E use the existing programming rules below.** For Tier A and B the rest of this Phase 2 spec is not consulted — the substitute IS the plan. For Tier C the rules below apply but with the modifications spelled out above.
 
-**Override protocol.** Overrides are allowed only when the user **explicitly** asks to override after seeing the gate's call (e.g. "ignore the rest call, plan strength anyway"). Default behavior is to honor the recommendation. Never generate strength on a Tier A or B day on assumption.
+**Override protocol.** Overrides are allowed only when the user **explicitly** asks to override after seeing the gate's call (e.g. "ignore the rest call, plan strength anyway", "I want to train normally"). Default behavior is to honor the recommendation. Never generate strength on a Tier A or B day on assumption.
+
+When the user explicitly overrides, regenerate the tracker JSON with `read_tracker.py --override-gate`. That normalizes a restrictive A/B/C tier to green/full-volume so the dashboard's "Today's call" card and the per-workout set budget both reflect a normal session, while keeping the original gate rationale visible in `override_message` for honesty. Then author the plan as a normal Tier D block (full budget every session). Do NOT hand-strip the downgrade from a JSON that still says Tier C — that desyncs the dashboard from the plan; use the flag so both agree.
 
 ### If the gate is D / E (or C with modifications applied)
 
@@ -743,9 +745,11 @@ Generate that many strength workouts. Tier C: apply the −25% volume / hold loa
 
 **Progression data:** The Step 4 summary already gives you weights and reps per exercise. Use that directly. Don't re-derive trends by walking through each exercise's history. Apply the double progression rule from §15: if the user hit the top of the rep range, bump weight. If not, same weight, push reps.
 
-**Session duration (set-budget, NOT exercise-count):** strength-session length is driven by total **working sets**, not by how many exercises you list. Logged history sits at ~3.3 min per working set plus ~5 min warmup, so a 60-minute session is ~17 working sets, not "8-11 exercises." Counting exercises is the trap that let sessions silently shrink: the same 7 exercises is 40 min at 2 sets each or 65 min at 4 sets each.
+**Session duration (set-budget, NOT exercise-count):** strength-session length is driven by total **working sets**, not by how many exercises you list. Session length is `warmup + working_sets × min_per_working_set`, where `min_per_working_set` is per-person (default 3.3, but a dense/short-rest trainee runs faster — lower it via `profile.csv` so a 60-min session budgets MORE sets). Counting exercises is the trap that let sessions silently shrink: the same 7 exercises is 40 min at 2 sets each or 65 min at 4 sets each.
 
-Budget to `target_working_sets` from the tracker JSON (derived from the per-person `session_target_min`, default 60; override via `profile.csv` `session_target_min`). Rules:
+Budget to `target_working_sets` from the tracker JSON (derived from the per-person `session_target_min` and `min_per_working_set`; override both via `profile.csv`). Rules:
+- `target_working_sets` is a **floor to hit, not a ceiling to fear**. Land within ±2 of it. Undershooting is the failure mode that under-serves the user: a person sitting below MEV on many muscles (read `weekly_volume_per_muscle.current` vs `landmarks`) needs the budget filled, not a short session. The render validator now counts bodyweight `///` sets correctly and warns on undershoot. Treat that warning as binding outside an explicit deload/downgrade tier.
+- When many muscles are below MEV, route the budgeted sets to the **lagging** muscles first (per the "Per-muscle volume actions" rule below) rather than piling more onto muscles already at/above MAV. Filling the budget AND fixing the distribution is the same move.
 - Prescribe enough working sets to land within ±2 of `target_working_sets`. If you're under, **add sets to existing main exercises (3-4 sets each) before adding new exercises** — don't pad the list with 2-set accessories.
 - Default main lifts to 3-4 working sets, isolation/accessory to 2-3. Hitting `target_working_sets` with ~6-8 exercises at 3-ish sets each is the normal shape; do not drop main lifts to 2 sets just to fit more movements.
 - Warm-up prep movements and `(warmup)` ramp sets do NOT count toward `target_working_sets`.

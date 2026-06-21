@@ -289,14 +289,26 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
 def count_working_sets_per_workout(text: str) -> "dict[str, int]":
     """Count working sets under each `## Workout` heading.
 
-    A working set is a `///`-separated token on a loaded exercise bullet
-    (body contains `kg` or `x`), excluding any token marked `(warmup)`.
-    Pure prep bullets (`Jumping Jacks: 50`) carry no kg/x and count zero.
-    This mirrors how session duration is actually driven (total working
-    sets ~3.3 min each), so the budget check sees what the user will feel.
+    A working set is a `///`-separated rep/load token on an exercise
+    bullet, excluding any token marked `(warmup)`. A bullet counts as a
+    working exercise when it is loaded (`kg` or a rep-x-load token) OR
+    lists multiple sets (`///`). The `///` clause is what catches
+    bodyweight multi-set work like `Dip: 8-10 /// 8-10 /// 8-10`, which
+    the old `kg`/`x`-substring test scored as zero (silently shrinking
+    the budget). Pure prep bullets (`Jumping Jacks: 50`, a single
+    bodyweight line with no load and no `///`) count zero.
+
+    Any non-Workout markdown heading (`## Cardio`, `### ...`) resets the
+    active title, so cardio bullets, which contain words like `max` /
+    `VO2max`, never leak into a workout's count (they used to, because
+    the bare `"x" in body` test matched those words).
     """
     out: "dict[str, int]" = {}
     title = None
+    has_digit = re.compile(r"\d")
+    # loaded = an explicit kg load, or a digit-x-digit rep/load token
+    # (e.g. "8x3", "40 x 8"). NOT a bare "x" anywhere in the line.
+    loaded = re.compile(r"kg|\d\s*[x×]\s*\d", re.IGNORECASE)
     for raw in text.splitlines():
         line = raw.rstrip()
         m = re.match(r"^##\s+(Workout\b.*)$", line, re.IGNORECASE)
@@ -304,16 +316,24 @@ def count_working_sets_per_workout(text: str) -> "dict[str, int]":
             title = m.group(1).strip()
             out[title] = 0
             continue
+        # any other heading ends the current workout's bullet scope
+        if re.match(r"^#{1,6}\s+", line):
+            title = None
+            continue
         if title and line.startswith("- ") and ":" in line:
             body = line.split(":", 1)[1]
-            if "kg" in body or "x" in body:
-                toks = [t for t in body.split("///") if "warmup" not in t.lower()]
-                out[title] += len(toks)
+            is_working = ("///" in body) or bool(loaded.search(body))
+            if not is_working:
+                continue
+            toks = [t for t in body.split("///")
+                    if "warmup" not in t.lower() and has_digit.search(t)]
+            out[title] += len(toks)
     return out
 
 
 def workout_set_budget_warnings(text: str, target_working_sets,
-                                low_tol: int = 3, high_tol: int = 5) -> "list[str]":
+                                low_tol: int = 3, high_tol: int = 5,
+                                budget_by_index=None) -> "list[str]":
     """Warn when a workout's working-set count drifts from the budget.
 
     `target_working_sets` is the per-person, tier-adjusted set budget. The
@@ -321,20 +341,30 @@ def workout_set_budget_warnings(text: str, target_working_sets,
     sets-per-exercise drifted), so the low tolerance is tighter. Warning,
     not error: an intentional deload/downgrade legitimately undershoots and
     should still render, just visibly flagged.
+
+    `budget_by_index`, when given, is a callable ``idx -> budget`` that
+    returns the budget for the workout at position ``idx`` (0-based, in
+    file order). This is needed for a Tier C downgrade, where only the
+    first ``expected_rebound_by_session`` workouts are trimmed while later
+    ones keep the FULL budget. Without it, a single global scale judged the
+    full-volume later sessions against the shrunken early-session budget
+    and falsely flagged them as "over" (which would tempt a coach to trim a
+    correct, full session back down).
     """
     warnings: "list[str]" = []
-    if not target_working_sets or target_working_sets <= 0:
-        return warnings
-    for title, n in count_working_sets_per_workout(text).items():
-        if n < target_working_sets - low_tol:
+    for idx, (title, n) in enumerate(count_working_sets_per_workout(text).items()):
+        budget = budget_by_index(idx) if budget_by_index else target_working_sets
+        if not budget or budget <= 0:
+            continue
+        if n < budget - low_tol:
             warnings.append(
-                f"{title}: {n} working sets vs budget {target_working_sets} "
-                f"({target_working_sets - n} under) — confirm this is an "
+                f"{title}: {n} working sets vs budget {budget} "
+                f"({budget - n} under) — confirm this is an "
                 f"intentional deload/downgrade, else add sets to the main lifts")
-        elif n > target_working_sets + high_tol:
+        elif n > budget + high_tol:
             warnings.append(
-                f"{title}: {n} working sets vs budget {target_working_sets} "
-                f"({n - target_working_sets} over) — trim a set or two")
+                f"{title}: {n} working sets vs budget {budget} "
+                f"({n - budget} over) — trim a set or two")
     return warnings
 
 

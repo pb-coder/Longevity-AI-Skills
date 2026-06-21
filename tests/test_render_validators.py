@@ -78,6 +78,39 @@ class RenderValidatorTests(unittest.TestCase):
         # warmup ramp tokens and the Jumping Jacks prep line are excluded.
         self.assertEqual(counts["Workout 1: PUSH"], 17)
 
+    def test_working_set_count_includes_bodyweight_multiset(self) -> None:
+        # Bodyweight working exercises carry no `kg`/`x` but ARE working
+        # sets when written as `///`-separated reps. The old counter scored
+        # these zero and silently shrank the budget.
+        plan = """# Workout plan — 2026-06-21
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dip: 8-10 /// 8-10 /// 8-10
+- Captain's Chair Knee Raise: 12 /// 12 /// 12
+- Dumbbell Shoulder Press: 22kgx8 /// 22kgx8 /// 22kgx8
+"""
+        counts = count_working_sets_per_workout(plan)
+        # 3 dips + 3 knee raises + 3 presses = 9; Jumping Jacks prep = 0.
+        self.assertEqual(counts["Workout 1: PUSH"], 9)
+
+    def test_cardio_section_does_not_leak_into_workout_count(self) -> None:
+        # A `## Cardio` heading must reset the active workout title so its
+        # bullets (which contain words like "max"/"VO2max") never add to a
+        # workout's set count.
+        plan = """# Workout plan — 2026-06-21
+
+## Workout 1: PULL
+- Cable Lat Pulldown: 65kgx8 /// 65kgx8 /// 65kgx8
+
+## Cardio 1: Intervals (20 min total)
+- Work: 5 x 3 min @ HR 165-175bpm (Zone 4-5, ~85% max), 2 min easy
+- Notes: builds VO2max, not within 24h of heavy legs
+"""
+        counts = count_working_sets_per_workout(plan)
+        self.assertEqual(counts.get("Workout 1: PULL"), 3)
+        self.assertNotIn("Cardio 1: Intervals (20 min total)", counts)
+
     def test_set_budget_passes_on_target(self) -> None:
         self.assertEqual(workout_set_budget_warnings(_PLAN_17, 17), [])
 
@@ -87,6 +120,26 @@ class RenderValidatorTests(unittest.TestCase):
 
     def test_set_budget_silent_when_no_target(self) -> None:
         self.assertEqual(workout_set_budget_warnings(_PLAN_SHORT, None), [])
+
+    def test_set_budget_per_workout_downgrade_does_not_flag_full_later_sessions(self) -> None:
+        # Tier C downgrade: workouts 1-2 trimmed (budget 13), 3-4 full
+        # (budget 22). A correct plan [13, 12, 22, 20] must produce NO
+        # warnings. The old global-scale-to-13 wrongly flagged W3/W4 as over.
+        def wk(title, n):
+            sets = " /// ".join(["60kgx8"] * n)
+            return f"## Workout {title}\n- Cable Lat Pulldown: {sets}\n"
+
+        plan = "# Workout plan — 2026-06-21\n\n" + wk("1: PULL", 13) + wk(
+            "2: LEGS", 12) + wk("3: PUSH", 22) + wk("4: PULL", 20)
+
+        def budget_for(idx):  # base 22, first 2 downgraded to round(22*0.6)=13
+            return 13 if idx < 2 else 22
+
+        self.assertEqual(
+            workout_set_budget_warnings(plan, 22, budget_by_index=budget_for), [])
+        # The old global scale (everything judged at 13) flags W3/W4 as over.
+        self.assertTrue(
+            any("over" in w for w in workout_set_budget_warnings(plan, 13)))
 
     def test_auto_wrap_terms_wraps_first_occurrence_only(self) -> None:
         wrapped = auto_wrap_terms("CTL is up; CTL matters.")

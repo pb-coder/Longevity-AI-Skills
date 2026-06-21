@@ -82,6 +82,25 @@ class BehaviorCaveatTests(unittest.TestCase):
         self.assertEqual(out["targets"]["protein_tracking_status"], "target_only")
         self.assertIn("do not claim adherence", out["targets"]["protein_caveat"])
 
+    def test_new_phase_with_insufficient_data_says_continue_not_end(self) -> None:
+        # A phase that just started has too little bodyweight history to
+        # judge rate (status "insufficient_data") and no stop signals. The
+        # coach hint must be "continue", never "consider_ending" — telling
+        # someone to quit a 6-day-old cut is the bug this guards.
+        out = nutrition_phase_summary(
+            [{
+                "start_date": "2026-06-15",
+                "end_date": None,
+                "phase_type": "cut",
+                "target_rate_kg_per_wk": -0.3,
+            }],
+            [{"date": "2026-06-17", "kg": 77.0}],  # one reading, not enough
+            date(2026, 6, 21),
+        )
+        self.assertEqual(out["status"], "insufficient_data")
+        self.assertEqual(out["stop_signals_triggered"], [])
+        self.assertEqual(out["coach_action_hint"], "continue")
+
     def test_apple_source_with_start_still_classifies_as_cardio(self) -> None:
         row = {
             "date": "2026-06-01",

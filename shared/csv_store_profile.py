@@ -21,7 +21,7 @@ PROFILE_KEYS = (
     "source", "auto_cardio", "birthday", "sex",
     "swim_css_sec_per_100m", "swim_css_set_at", "swim_pool_length_default",
     "light_therapy_target_per_week", "light_therapy_target_min_per_session",
-    "sauna_target_per_week", "session_target_min",
+    "sauna_target_per_week", "session_target_min", "min_per_working_set",
 )
 PROFILE_DEFAULTS = {
     "source":                              None,
@@ -38,6 +38,13 @@ PROFILE_DEFAULTS = {
     # working-set budget (duration is set-count-driven, not exercise-count
     # driven). Default 60; override per person.
     "session_target_min":                  60,
+    # Average minutes per working set, including inter-set rest, for THIS
+    # person. The working-set budget is (session_target_min - warmup) /
+    # min_per_working_set, so a faster trainee (shorter rests, supersets)
+    # gets MORE sets in the same wall-clock window. Default 3.3 (the old
+    # one-size constant); lower it for people who train dense. Sane band
+    # 1.5-6.0 enforced on read.
+    "min_per_working_set":                 3.3,
 }
 
 
@@ -179,6 +186,10 @@ def _read_profile_cached(person: str) -> dict:
                 i = _coerce_int(v)
                 if i is not None and 20 <= i <= 180:
                     out["session_target_min"] = i
+            elif k == "min_per_working_set":
+                f = _coerce_float(v)
+                if f is not None and 1.5 <= f <= 6.0:
+                    out["min_per_working_set"] = f
             else:
                 out["_unknown_rows"].append([row[0], v])
     return out

@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 from shared import monthly_csv, person_paths
+from tracker.importing import build_auto_cardio_payload
 
 
 class MonthlyCsvTests(unittest.TestCase):
@@ -234,6 +235,60 @@ class MonthlyCsvTests(unittest.TestCase):
         self.assertEqual(len(swims), 2)
         self.assertEqual(len(first), len(second))
         self.assertEqual({r.get("source") for r in swims}, {"apple@14:40:57", "apple@14:56:54"})
+
+    def test_build_auto_cardio_payload_forwards_start_so_near_duration_rides_survive(self) -> None:
+        # Regression: two real same-day, same-exercise cardio workouts with
+        # DISTINCT start times but durations within the +/-1 min collapse
+        # tolerance. build_auto_cardio_payload used to drop each workout's
+        # "start", so upsert_monthly_cardio fell back to duration-only matching
+        # and silently merged the two rides into one (Fabian 2026-06-30: an
+        # 07:05 ride collapsed against a 16:59 ride). Both must survive, and a
+        # re-import must be a no-op. Mirrors the shape both importers feed:
+        # source-parser workout rows keyed by apple_type + "start" (HH:MM:SS).
+        workout_rows = [
+            {
+                "date": "2026-05-25",
+                "start": "07:05:00",
+                "apple_type": "Cycling",
+                "duration_min": 10.3,
+                "distance_km": 2.619,
+            },
+            {
+                "date": "2026-05-25",
+                "start": "16:59:00",
+                "apple_type": "Cycling",
+                "duration_min": 9.4,
+                "distance_km": 2.5,
+            },
+        ]
+
+        payload = build_auto_cardio_payload(
+            workout_rows,
+            eligible_types={"Cycling"},
+            type_to_exercise={"Cycling": "Outdoor Cycling"},
+        )
+        # The payload the upsert receives must carry each workout's start.
+        self.assertEqual(
+            [p.get("start") for p in payload],
+            ["07:05:00", "16:59:00"],
+        )
+
+        monthly_csv.upsert_monthly_cardio("Test", payload, today_d=date(2026, 5, 25))
+        first = monthly_csv.read_monthly("Test", "2026.05")
+        # Idempotency: re-running the identical import must not duplicate rows.
+        monthly_csv.upsert_monthly_cardio("Test", payload, today_d=date(2026, 5, 25))
+        second = monthly_csv.read_monthly("Test", "2026.05")
+
+        rides = [r for r in second if r.get("exercise") == "Outdoor Cycling"]
+        self.assertEqual(
+            len(rides), 2,
+            "both distinct-start rides must be preserved, not collapsed by duration",
+        )
+        self.assertEqual(len(first), len(second), "re-import must be a no-op")
+        self.assertEqual(
+            {r.get("source") for r in rides},
+            {"apple@07:05:00", "apple@16:59:00"},
+        )
 
     def test_date_str_rejects_invalid_dates(self) -> None:
         self.assertIsNone(monthly_csv.date_str("2026-02-31"))

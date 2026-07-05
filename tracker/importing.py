@@ -28,6 +28,12 @@ def build_auto_cardio_payload(
         machine_tag = machine_tag_for(workout) if machine_tag_for else None
         row = {
             "date":         workout.get("date"),
+            # Forward the workout's start clock time (HH:MM:SS from both
+            # importers). ``upsert_monthly_cardio`` uses it as the row
+            # identity for same-day same-exercise cardio so two distinct
+            # sessions whose durations fall within the +/-1 min tolerance
+            # are disambiguated instead of silently collapsed into one row.
+            "start":        workout.get("start"),
             "exercise":     tracker_name,
             "duration_min": workout.get("duration_min"),
             "distance_km":  workout.get("distance_km"),

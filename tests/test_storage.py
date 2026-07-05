@@ -202,6 +202,74 @@ class StorageTests(unittest.TestCase):
                 [{"date": "2026-05-14", "duration_min": 10, "modality": "laser_pointer"}],
             )
 
+    def test_upsert_workout_sessions_reparsed_xml_timestamp_is_idempotent(self) -> None:
+        # Regression guard for a suspected re-import duplication bug: the
+        # Apple XML importer's start key comes from apple_health_core.hhmm(),
+        # re-derived from the XML timestamp on every import run (not cached).
+        # A real re-import re-parses the same underlying HealthKit event and
+        # must produce the identical (date, start) key both times, or the
+        # dense (date, start) dedupe in upsert_workout_sessions would insert
+        # a second row instead of updating the first.
+        from datetime import datetime
+
+        from shared.apple_health_core import hhmm
+
+        def build_entry() -> dict:
+            # Fresh datetime object each call, mirroring how each importer
+            # run re-parses the export from scratch rather than reusing
+            # state from a prior run.
+            dt = datetime(2026, 5, 1, 8, 15, 37)
+            return {
+                "date": "2026-05-01",
+                "start": hhmm(dt),
+                "apple_type": "Running",
+                "duration_min": 30,
+            }
+
+        csv_store.upsert_workout_sessions("Test", [build_entry()])
+        csv_store.upsert_workout_sessions("Test", [build_entry()])  # full re-import
+
+        sessions = csv_store.read_workout_sessions("Test")
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]["start"], "08:15:37")
+
+    def test_hhmm_preserves_seconds_not_just_minute(self) -> None:
+        # Locks in hhmm()'s actual (second-precision) output. A prior audit
+        # mistakenly believed import_apple_health.py wrote minute-only start
+        # keys via hhmm(); this pins the true behavior so a future
+        # regression to minute truncation is caught immediately.
+        from datetime import datetime
+
+        from shared.apple_health_core import hhmm
+
+        self.assertEqual(hhmm(datetime(2026, 5, 1, 8, 15, 37)), "08:15:37")
+
+    def test_upsert_workout_sessions_reparsed_health_auto_export_minute_is_idempotent(self) -> None:
+        # Same guard as above for the HealthAutoExport importer. Its "Start"
+        # source column is itself minute-precision (HealthAutoExport's CSV
+        # never includes seconds), so _parse_workout_minute + _hhmmss always
+        # reproduce the same "HH:MM:00" key for the same raw Start string --
+        # including across HealthAutoExport's overlapping rolling exports,
+        # which re-emit an identical "Start" cell for a workout that falls
+        # in two consecutive export windows.
+        from shared.import_health_auto_export import _hhmmss, _parse_workout_minute
+
+        def build_entry() -> dict:
+            start_dt = _parse_workout_minute("2026-05-01 08:15")
+            return {
+                "date": "2026-05-01",
+                "start": _hhmmss(start_dt),
+                "apple_type": "Running",
+                "duration_min": 30,
+            }
+
+        csv_store.upsert_workout_sessions("Test", [build_entry()])
+        csv_store.upsert_workout_sessions("Test", [build_entry()])  # overlapping-export re-import
+
+        sessions = csv_store.read_workout_sessions("Test")
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]["start"], "08:15:00")
+
     def test_swim_laps_replace_on_match(self) -> None:
         base = {
             "date": "2026-05-04",

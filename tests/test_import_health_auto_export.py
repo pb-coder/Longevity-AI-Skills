@@ -367,6 +367,85 @@ class HealthAutoExportTests(unittest.TestCase):
         self.assertEqual(total["duration"], "40:00")
         self.assertEqual(total["avg_hr"], 120)
 
+    def test_full_reimport_without_replace_range_does_not_duplicate_sessions(self) -> None:
+        # Regression guard for a suspected re-import duplication bug: a
+        # full re-run of the *same* HealthAutoExport ZIP with no
+        # --replace-range (the plain "run the importer again" path a user
+        # actually takes) must be a no-op on workout_sessions.csv, not a
+        # row-doubling one.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_root = person_paths.WORKOUT_TRACKER_ROOT
+            old_importer_root = hae.WORKOUT_TRACKER_ROOT
+            person_paths.WORKOUT_TRACKER_ROOT = root
+            hae.WORKOUT_TRACKER_ROOT = root
+            try:
+                export = root / "HealthAutoExport.zip"
+                build_export_zip(export)
+                kwargs = dict(
+                    person="Test",
+                    zip_path=export,
+                    since=date(2026, 4, 1),
+                    until=date(2026, 4, 1),
+                    allow_past_months=True,
+                    replace_range=False,
+                    dry_run=False,
+                    keep_export=True,
+                )
+                hae.import_archive(**kwargs)
+                hae.import_archive(**kwargs)  # full re-run of the identical export
+
+                sessions = csv_store.read_workout_sessions("Test")
+            finally:
+                person_paths.WORKOUT_TRACKER_ROOT = old_root
+                hae.WORKOUT_TRACKER_ROOT = old_importer_root
+
+        self.assertEqual(len(sessions), 2)  # strength + run seeded by build_export_zip
+        self.assertEqual(
+            sorted(s["start"] for s in sessions),
+            ["16:45:00", "18:00:00"],
+        )
+
+    def test_overlapping_rolling_exports_share_same_start_key_and_do_not_duplicate(self) -> None:
+        # HealthAutoExport's real export mechanism produces overlapping
+        # rolling windows (e.g. "last 8 days", "last 8 days" a week later,
+        # sharing several days). The same underlying workout then arrives
+        # in two separate ZIPs. Because HealthAutoExport's own "Start"
+        # column is minute-precision with no jitter between exports, both
+        # ZIPs re-emit the identical "Start" string for that workout, so the
+        # second import must update/no-op the existing row rather than add
+        # a duplicate.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_root = person_paths.WORKOUT_TRACKER_ROOT
+            old_importer_root = hae.WORKOUT_TRACKER_ROOT
+            person_paths.WORKOUT_TRACKER_ROOT = root
+            hae.WORKOUT_TRACKER_ROOT = root
+            try:
+                export1 = root / "HealthAutoExport_run1.zip"
+                export2 = root / "HealthAutoExport_run2.zip"
+                build_export_zip(export1)
+                build_export_zip(export2)
+
+                for export in (export1, export2):
+                    hae.import_archive(
+                        person="Test",
+                        zip_path=export,
+                        since=date(2026, 4, 1),
+                        until=date(2026, 4, 1),
+                        allow_past_months=True,
+                        replace_range=False,
+                        dry_run=False,
+                        keep_export=True,
+                    )
+
+                sessions = csv_store.read_workout_sessions("Test")
+            finally:
+                person_paths.WORKOUT_TRACKER_ROOT = old_root
+                hae.WORKOUT_TRACKER_ROOT = old_importer_root
+
+        self.assertEqual(len(sessions), 2)
+
     def test_replace_range_past_month_requires_past_month_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

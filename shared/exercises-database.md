@@ -29,6 +29,7 @@ Organized by primary muscle group > movement pattern. Tags:
 ### Lower Body
 - Bodyweight Squat [BW]
 - Glute Bridge [BW]
+- Hip Circle Walk [Band]
 
 ---
 

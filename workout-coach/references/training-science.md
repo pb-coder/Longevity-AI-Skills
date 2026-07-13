@@ -115,7 +115,7 @@ Volume ratio: ≥1:1, ideally 1:1.5-1:2 favoring pulls. Emphasize horizontal pul
 
 RMSSD 7-day rolling average. Morning, supine, before coffee.
 
-User: weekday 30-40ms, weekend 60-70ms = systematic stress depression.
+A recurring weekday-vs-weekend HRV split (weekday RMSSD chronically below the weekend baseline) signals systematic weekday stress depression. Read the pattern from the person's own `health_metrics_weekly`, never a committed number.
 - Shift highest volume/intensity to weekends
 - Or use HRV as go/no-go signal
 - HRV-guided trends toward better outcomes (Flatt 2021: SMD 0.50)

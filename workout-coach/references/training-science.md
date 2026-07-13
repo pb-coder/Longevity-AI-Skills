@@ -262,7 +262,7 @@ Different exercises grow different regions of the same muscle. Running the same 
 
 **Source dependency.** This section's HRV, wrist-temperature, and per-workout-HR levers require a full Apple Health source: native zipped XML or HealthAutoExport. The score's `confidence` field surfaces missing or sparse signals. Standard re-entry / deload heuristics still apply on any source.
 
-Apple Health provides six daily signals that materially change the recovery picture: HRV (SDNN), resting HR, total sleep, wrist temperature, HR Recovery 1-min, and VO2max trend. Single-day values are noisy; the score below uses 7-day means against 60-day baselines (or 28-day for RHR).
+Apple Health provides the daily signals that materially change the recovery picture: HRV (SDNN), resting HR, total sleep, deep and REM sleep, wrist temperature, and HR Recovery 1-min, plus a sleep-consistency penalty. **VO2max trend is deliberately NOT one of them** (see below). Single-day values are noisy; each signal compares a short recent window (3-7 days) against a rolling *personal* baseline (28-60 days), not a population norm or a fixed target.
 
 **`recovery` is the primary read.** `scripts/read_tracker.py` returns:
 
@@ -270,22 +270,28 @@ Apple Health provides six daily signals that materially change the recovery pict
 recovery: {score: 0-10, confidence: low|medium|high, drivers: [...]}
 ```
 
-The score sums clamped contributions from each driver against a baseline of 5. Drivers, weights, and triggers:
+The score is a **renormalized weighted average of per-signal personal z-scores**, mapped to a 0–10 scale where **5 = "average for this person"** (not "5 minus what's missing" — a tracker with fewer signals is not biased downward). For each signal: z = (recent mean − baseline mean) / baseline stdev, clamped to ±2σ; component score = `5 + z × 2.5` (so z = 0 → 5, +2σ → 10, −2σ → 0). The composite is the weight-normalized mean of the component scores over the signals with enough samples; missing or under-sampled signals drop out and the remaining raw weights renormalize to sum to 1.
 
-| Signal | Comparison | Max swing | Reading |
+| Signal | Recent vs baseline | Raw weight | Direction |
 |---|---|---|---|
-| HRV (SDNN) | recent (7d) vs 60d baseline | ±2 | Higher = more parasympathetic / recovered. ±5% baseline = ±1 contribution. |
-| Resting HR | recent (7d) vs 28d typical | ±2 | Lower is better. ±2.5 bpm = ±1 contribution. |
-| Sleep total | recent (7d) vs 7h target | ±2 | ±1h = ±1 contribution. Caps at ±2. |
-| Wrist temp | recent (3d) vs 60d baseline | ±1.5 | Higher = stress / illness signal. ±0.2°C = ±1 contribution. |
-| HR Recovery 1-min | recent (5d) vs 28d typical | ±0.75 | Higher = recovered. ±5 bpm drop = ±0.75. |
-| VO2max trend | per-4w slope | ±0.75 | Positive = building fitness. ±2 ml/kg/min over 4w = ±0.75. |
+| HRV (SDNN) | 7d vs 60d | 0.30 | higher z = more recovered |
+| Resting HR | 7d vs 28d | 0.15 | inverted (lower is better) |
+| Sleep total | 7d vs 28d | 0.20 | higher z = more recovered |
+| Sleep deep (h) | 7d vs 28d | 0.05 | higher z = more recovered |
+| Sleep REM (h) | 7d vs 28d | 0.05 | higher z = more recovered |
+| Wrist temp | 3d vs 60d | 0.10 | inverted (higher = stress / illness) |
+| HR Recovery 1-min | 5d vs 28d | 0.10 | higher z = more recovered |
+| Sleep consistency | 7d stdev | 0.05 | penalty-only (see §21) |
 
-Maximum positive: ~9.0; maximum negative: ~1.0; clamped to [0, 10]. `confidence`: high (≥4 signals available), medium (3), low (≤2).
+`confidence` is by contributor count, ignoring weights: **high** (≥4 contributors), **medium** (2–3), **low** (<2). It also drops one band when a high-weight signal (raw weight ≥0.10) is present but excluded for too few recent readings (e.g. a single HR-Recovery sample), so the score never looks more precise than its inputs.
+
+**VO2max trend is excluded from the score by design.** It's a chronic-fitness signal whose measurement noise exceeds plausible week-to-week change; folding it in would conflate "am I getting fitter" with "should I train hard today". This matches Garmin / WHOOP / Oura / Polar acute-readiness models. The coach reads `vo2max_latest` / `vo2max_trend_per_4w` separately for the fitness check.
+
+**Personal-baseline caveat.** Because every signal is z-scored against the person's *own* recent baseline, a *chronically* under-slept (or under-recovered) trainee scores ~5/10 on that axis by definition — the composite reports "normal for you", not "healthy in absolute terms". Absolute floors live elsewhere: the Tier-C sleep floors (`tier_c_sleep_total_h_floor`, `tier_c_sleep_7d_mean_floor`) and `sleep_summary.absolute_sleep_note`. Don't let coach copy call recovery "fine" on an axis a personal-baseline score can't see as bad.
 
 **Programming consequences** (applied by SKILL.md "Recovery-aware adjustments"):
 - `recovery.score < 4` → next session is re-entry (drop a working set, "leave 3-4 reps in tank"); lead with the dominant negative driver in "Why this plan".
-- `recovery.score 4–5.5` → hold loads, normal volume, no PR attempts.
+- `recovery.score 4–5.5` → moderate. Default to holding loads (normal volume, no PR attempts), but this is **corroboration-gated** by the session gate: a moderate score while the athlete is strength-fresh stays green and progresses normally. Follow `session_recommendation` (see SKILL.md §18).
 - `recovery.score ≥ 5.5` → green light unless another Tier gate binds.
 - A negative driver persisting across multiple `health_metrics_weekly` entries → flag deload as urgent regardless of cadence.
 - Always surface the reason in "Why this plan" — the user should know why the prescription is conservative.
@@ -343,10 +349,10 @@ Total sleep hours is the headline metric, but two users sleeping 7h/night can ha
 
 **Source dependency.** Native Apple XML and HealthAutoExport carry deep / REM / core / awake breakdowns from watch-side sleep staging (calibrated against PSG). The capability gate `sleep_stages` in `read_tracker.py` short-circuits the deep/REM drivers on legacy or partial trackers; sleep_total_h and sleep consistency still apply whenever present.
 
-**Programming consequences** (applied by `recovery_score`):
-- `sleep_deep_pct < 13%` and persisting → -0.4 contribution to recovery score. Combined with low total hours, prefer a deload window.
-- `sleep_rem_pct < 20%` and persisting → -0.4 contribution. Less impact on strength sessions; bigger impact on technical-skill work and complex compounds.
-- `sleep_consistency_7d_stdev_h > 1.5h` → -0.4 contribution. The fix is bedtime regularity, not more total hours.
+**How these feed `recovery_score`:**
+- Deep and REM sleep enter as **low-weight (0.05 each) z-scored drivers** against the person's 28-day *personal* baseline — not fixed −0.4 penalties. A stretch of below-baseline deep/REM pulls that driver's component below 5 in proportion to the z; combined with low total hours, prefer a deload window. Per the §18 personal-baseline caveat, a chronically low-deep sleeper still reads ~5 on this axis, so cross-check the absolute % ranges above.
+- Sleep consistency is a **penalty-only** contributor (weight 0.05): stdev ≤ 1.5h scores a neutral 5, and above 1.5h the component drops toward 0 as stdev rises (`5 − (stdev − 1.5) × 5`, floored at 0). It never rewards consistency, only penalizes irregularity. The fix is bedtime regularity, not more total hours.
+- REM has less impact on strength sessions; bigger impact on technical-skill work and complex compounds.
 
 **What NOT to do:** weight a single night's poor depth heavily (1-2 bad nights are normal); recommend "sleep more" when consistency is the actual issue; ask users to "track sleep stages better" when `capabilities.sleep_stages` is False — that's a source limitation, not a tracking gap.
 

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Exercise catalog integrity
+        run: python3 shared/exercises_database.py validate
+      - name: Committed-text privacy scrub
+        env:
+          PRIVATE_IDENTIFIER_PATTERN: ${{ secrets.PRIVATE_IDENTIFIER_PATTERN }}
+        run: |
+          if [ -z "$PRIVATE_IDENTIFIER_PATTERN" ]; then
+            echo "PRIVATE_IDENTIFIER_PATTERN secret not set; skipping privacy scrub."
+            exit 0
+          fi
+          if grep -rEIn "$PRIVATE_IDENTIFIER_PATTERN" \
+               --exclude='*.pyc' --exclude-dir='.git' .; then
+            echo "::error::Committed text matches the private-identifier pattern. Scrub before merging."
+            exit 1
+          fi
+          echo "Privacy scrub clean."

@@ -252,7 +252,7 @@ The pattern: every claim about training state cites a specific numeric value fro
 - `--include-1rm-history`: per-exercise 3-session e1RM history. Default off — `slope_kg_per_4w` already conveys the trajectory.
 - `--include-daily-health`: 30-day raw daily Health Metrics. Default off — `health_metrics_weekly` is the default lens.
 
-**Critical format notes (for the rare case you need to read the xlsx directly):**
+**Critical format notes (for the rare case you need to read the monthly CSVs directly):**
 - Dates are usually `'YYYY-MM-DD'` strings, occasionally `datetime`. The script normalizes; if you bypass it, normalize yourself.
 - Numeric columns (kg, Reps, Volume) are often stringified.
 - Exercise names have inconsistent casing across sessions. Compare case-insensitively.
@@ -464,11 +464,11 @@ If data is too limited to judge (history < 2 entries), say that in one sentence 
 
 - Trend null (too few entries or span < 7 days): `Bodyweight: 76.1kg (2026-04-21) — not enough data for a trend yet.`
 - Trend between +0.25 and +0.5 kg/week for hypertrophy: `Bodyweight: 76.1kg, +0.3kg/week — on track for hypertrophy surplus.`
-- Flat (±0.1 kg/week): `Bodyweight: 76.1kg, flat — surplus too small for hypertrophy (§5 expects +0.25–0.5 kg/week at this bodyweight).`
+- Flat (±0.1 kg/week): `Bodyweight: 76.1kg, flat — surplus too small for hypertrophy (§6 expects +0.25–0.5 kg/week at this bodyweight).`
 - Dropping (< -0.1 kg/week): `Bodyweight: 76.1kg, -0.2kg/week — losing weight. Either intentional cut or under-eating; flag it.`
 - Gaining fast (> +0.5 kg/week): `Bodyweight: 76.1kg, +0.7kg/week — surplus too aggressive; fat gain is outrunning muscle.`
 
-Cross-reference `references/training-science.md` for the numbers. Don't cite §5 to the user. The entries assume morning/empty-stomach (standing convention); the trend function excludes rows whose Notes flag non-fasted context so intra-day variance doesn't distort the slope.
+Cross-reference `references/training-science.md` for the numbers. Don't cite §6 to the user. The entries assume morning/empty-stomach (standing convention); the trend function excludes rows whose Notes flag non-fasted context so intra-day variance doesn't distort the slope.
 
 When an open `nutrition_phase` exists, treat `bodyweight_trend_kg_per_week` as phase-scoped. Do not compare it to pre-phase weight loss/gain; use `nutrition_phase.actuals.rate_kg_per_wk_14d` as the primary phase-status signal and the trend line as supporting context.
 
@@ -757,7 +757,7 @@ Budget to `target_working_sets` from the tracker JSON (derived from the per-pers
 - Sanity-check the plan before writing: sum the working sets across the session and confirm it is within ±2 of `target_working_sets`. If not, fix it.
 
 **Warm-up (REQUIRED, bounded).** Every strength workout opens with a brief warm-up — never skip it, and never let it balloon past ~5 min. Two parts:
-- **Two prep movements at the very top**, written as plain bullets (they carry no working volume): one general pulse-raiser (`Jumping Jacks`, `Rowing Machine`, or `Arm Circles`) plus one activation matched to the day — push → `Arm Circles` or `Wall Slide`; pull → `Scapular Pull-Up` or `Dead Hang`; legs → `Bodyweight Squat` or `Glute Bridge`. Use canonical catalog names only; do not prescribe equipment the user doesn't own (there are no band movements in the catalog).
+- **Two prep movements at the very top**, written as plain bullets (they carry no working volume): one general pulse-raiser (`Jumping Jacks`, `Rowing Machine`, or `Arm Circles`) plus one activation matched to the day — push → `Arm Circles` or `Wall Slide`; pull → `Scapular Pull-Up` or `Dead Hang`; legs → `Bodyweight Squat` or `Glute Bridge`. Use canonical catalog names only; do not prescribe equipment the user doesn't own (the catalog's only banded entry is the `Hip Circle Walk` warmup — otherwise there are no band movements, so don't invent them).
 - **Ramp sets on the first heavy free-weight compound only.** When the day's first working exercise is a heavy barbell or heavy-dumbbell compound (squat, bench, deadlift, RDL, overhead/DB press), precede its working sets with 1-2 ramp sets marked `(warmup)` at roughly ~50% then ~70% of the working load, low reps (≈5 then ≈3): `Barbell Back Squat: 60kgx5 (warmup) /// 80kgx3 (warmup) /// 95kgx8 /// 95kgx8 /// 95kgx8`. The `(warmup)` marker keeps them out of working-set volume and e1RM. **Skip the ramp sets** when the first lift is a light cable / machine / isolation movement — the two prep movements are enough. Never ramp later compounds; by then the user is warm. Ramp sets and prep movements do not count toward the 8-11 working-exercise target above.
 
 Use Layer 1 analysis plus the training science reference. The reference contains the full rules; apply them:
@@ -806,7 +806,7 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 - **Dumbbells:** 1-2kg pair increments depending on the rack. When in doubt, round to the nearest 2kg.
 - **Plate-loaded machines:** 5kg per plate side. Round prescribed loads to the nearest 5kg unless the gym is known to have half-plates.
 - **Microloading:** for barbells only, and only when the user has explicitly logged microplates before.
-Re-read this block before every load suggestion in the workout tables.
+Re-read this block before every load suggestion in the workout plan.
 
 **Exercise ordering:** Compounds first, then isolation, then accessories.
 
@@ -949,7 +949,7 @@ Source-honesty rules still apply to those coach's-read lines:
 | Over-rotating variants every block | No single exercise repeats often enough to read a progression trend | Keep at least one anchor per muscle stable. Rotate 1-2 secondary variants per mesocycle, not the main lifts. |
 | Ignoring the deload window | 7+ weeks of continuous blocks because no one flagged it | Compute weeks-since-last-deload from `deloads[-1]`. >6 weeks → block IS a deload. 4-6 weeks → flag in report. |
 | Prescribing normal volume after a long break | User took 10 days off, coach plans a full 4-set compound session | Compute days-since-last-session from `monthly_sessions[-1].date`. >5 and no deload → re-entry session with reduced sets and more RIR on the first day back (§7). |
-| Re-reading the xlsx inline | Re-deriving row parsing, empty-row stop, date quirks every run | Call `scripts/read_tracker.py` once. Only touch the xlsx directly if debugging something the script can't see. |
+| Re-reading the monthly CSVs inline | Re-deriving row parsing, empty-row stop, date quirks every run | Call `scripts/read_tracker.py` once. Only touch the monthly CSVs directly if debugging something the script can't see. |
 | Hardcoding "no cardio" in the plan | Strength-only plan even when user is 150+ min behind §10 target | Cardio-in-plan is the default. Read `cardio_last_28d` from the report and append cardio sessions when behind target (cap 4/run). Honor `/coach no-cardio` if passed. |
 | Static plan with no mesocycle context | Weights and reps with no indication of block position | Tell the user where they are in the mesocycle and what this week targets (§15). |
 | Missing data from casing mismatch | Searching for "Leg Extension" misses rows logged as "Leg extension" | Compare case-insensitively. |
@@ -976,7 +976,7 @@ Source-honesty rules still apply to those coach's-read lines:
 | Listing structurally-unsupported metrics in **Missing from your tracking** | User sees a fake to-do list of things to "track" that the data source can't supply | The section is for *fixable* gaps (typos in `unknown_exercises`, dropped exercises, manual notes). Anything False in `capabilities` belongs in source docs, not the user-facing report. |
 | Treating auto-cardio rows as duplicates of manually-logged runs | Both /log and the importer write the same run; coach can't tell them apart | Auto-cardio dedupe runs in the importer by (date, exercise, duration ±1 min). Manual entries always win. If you see two rows for the same run on the same date, flag it — the dedupe missed something. |
 | Treating an annotated outlier as a typo | The user wrote in Notes that the row reflects equipment / gym / context change; coach calls it "almost certainly a typo" anyway | Read `progression_summary[exercise].last_notes` (or full Notes via `--include-rows`). If a note exists, treat the row as user-acknowledged context, not as an error. Acknowledge the context in the bullet rather than calling it a logging error. |
-| Suggesting an off-grid load | "Bump to 67.5kg" on a cable that increments in 5kg | Round to the next legal increment for the equipment (cables 5kg, dumbbells 1-2kg pair, plate machines 5kg). Re-read the equipment block in §3 of training-science before each load suggestion. |
+| Suggesting an off-grid load | "Bump to 67.5kg" on a cable that increments in 5kg | Round to the next legal increment for the equipment (cables 5kg, dumbbells 1-2kg pair, plate machines 5kg). Re-read the Equipment increment grid block in this SKILL.md before each load suggestion. |
 | Bumping non-anchor load in a hold-loads block | Cable Pallof Press 15kg → 20kg in a "hold loads" mesocycle week 1 | The rule applies to every exercise, not just anchor compounds. Copy last session's load forward; only push reps. The only legal increase is when the user hit the top of the rep range cleanly AND the recovery / TSB band still permits it. |
 | Defaulting to `→` on the recovery trend | Recovery row reads `4.2/10 (... trend → vs prior 4w)` even when every metric is moving down | Use the `improving / drifting / mixed` descriptor (deterministic procedure under "Last 28 days at a glance"). The arrow is no longer accepted. |
 | Calling a deload on TSB alone when strength HR is unavailable | TSB -10.7 from two big hikes triggers a "fatigued" prescription even though strength load is invisible to TSB | When `capabilities.per_workout_hr_strength` is False, CTL/ATL/TSB are computed only from cardio TRIMPs — strength load is invisible. Don't treat a negative TSB as a unilateral deload trigger; cross-check with `recovery.score` and prefer recovery_score as the primary fatigue signal on these trackers. |

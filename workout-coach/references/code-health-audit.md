@@ -54,6 +54,7 @@ or product direction.
    `render_validators`, `health.py` scoring, or any `render_*` rendering.
    The Phase 2 mandate added in PR #4 is enforced only by the agent's
    willingness to honor it, with no machine check.
+   *Resolved: the suite now covers `render_validators`, the recovery/session-gate scoring, tier history, and end-to-end render goldens for both persons (200+ tests).*
 3. **Anchor doc overlap with no clear precedence.** `Skills/CLAUDE.md` is
    530 lines and carries CSV layout, conventions, importer semantics, and
    sleep/swim/thermal/light-therapy schemas — much of which a coach-skill

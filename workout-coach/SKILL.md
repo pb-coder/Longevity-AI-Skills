@@ -213,8 +213,8 @@ What the JSON contains:
 **How to read the pre-aggregated signals (no need to dig into `rows`):**
 
 - **Should I train hard today?** → Read `recovery.score` and `training_load.tsb`.
-  - `recovery.score ≥ 6.5` AND `tsb ≥ -5` → green light, normal session.
-  - `recovery.score 4-6.5` OR `tsb -10..-5` → moderate, hold load (no PR attempts).
+  - `recovery.score ≥ 5.5` AND `tsb ≥ -5` → green light, normal session (matches the gate's green floor).
+  - `recovery.score 4–5.5` OR `tsb -10..-5` → moderate: hold load / no PR attempts **only when the gate corroborates it** (recovery < 4 OR negative strength freshness); a soft score while fresh stays green per `session_recommendation`.
   - `recovery.score < 4` OR `tsb ≤ -10` → easy session or active recovery; cite the dominant negative `recovery.drivers` entry by name.
   - Confidence `low` → soften the call and explain the gap only when it is actionable (for example, still building baselines).
 - **Volume analysis** → `weekly_volume_per_muscle.current[muscle]` vs `landmarks[muscle]`. `current` is already sets/week; name the band (MEV/MAV/MRV) explicitly and do not divide again.
@@ -522,9 +522,9 @@ Drivers (sorted by |z| descending; component score is on the same 0–10 scale a
 - (repeat for every driver in recovery.drivers; never drop one)
 ```
 
-Score-band labels (unchanged from before — 5/10 still means "average for this person", 4 / 6.5 still mark the hold-loads window):
+Score-band labels (5/10 = "average for this person"; these are the dashboard **descriptor** bands and match the recovery-card colours in the renderer. The binding load call follows the gate's `session_recommendation` / §18, not these labels):
 - `recovery.score ≥ 6.5` → `green`. Normal session.
-- `recovery.score 4–6.5` → `moderate`. Hold load, no PR attempts.
+- `recovery.score 4–6.5` → `moderate`. Load call per the gate: hold / no-PR only when corroborated (see §18), otherwise proceed.
 - `recovery.score < 4` → `under-recovered`. Cut session intensity. If `monthly_sessions[-1].date` is today or yesterday, prescribe an easy / active-recovery day.
 - `recovery.score == null` → too few signals had baseline coverage to compute. Treat as `low` confidence; rely on TSB and recent session history instead.
 
@@ -772,8 +772,8 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 - **Re-entry after long break:** compute days-since-last-session from `monthly_sessions[-1].date`. If > 5 and no deload on record in that gap, treat the first prescribed session as a re-entry — drop one working set per compound, prescribe "leave 2-3 reps in the tank" instead of 1-2. Tendon adapts slower than muscle (§7), so under-load the first session back.
 - **Recovery-aware adjustments (§18):** **Lead with `recovery.score`** — it already folds HRV, RHR, sleep total, sleep stages, sleep consistency, wrist temp, and HR Recovery into one renormalized weighted average of personal z-scores (5 = personal average; VO2max trend is **not** in the score — it lives separately in `vo2max_latest` / `vo2max_trend_per_4w` for the cardio check). Apply:
   - `recovery.score < 4` → next session is re-entry: drop one working set per compound, prescribe "leave 3-4 reps in the tank" instead of 1-2. Lead with the dominant negative driver in "Why this plan".
-  - `recovery.score 4–6.5` → hold loads, no PR attempts, normal volume. **"Hold loads" is binding on every prescribed working weight — compounds, accessories, isolation, and core alike. Default behavior: copy last session's load forward and let reps drive progression.** The only legal load *increase* is when the user hit the top of the rep range cleanly on the last session AND the recovery / TSB band still permits it (see the TSB-band rule below — bumps are off the table in `balanced` / `carrying load` / `fatigued` / `high fatigue` bands). No exceptions for "small isolation" or "doesn't matter much".
-  - `recovery.score ≥ 6.5` → green light, normal programming.
+  - `recovery.score 4–5.5` (moderate) → a **corroboration-gated** hold, not an automatic one. The deterministic gate is the authority here: it forces hold-loads / no-PR only when the moderate score is corroborated by a genuinely low recovery (< 4) OR negative strength freshness (strength TSB < −5). A moderate score while the athlete is strength-fresh is **not** a hold — the gate returns green (Tier D) and normal programming applies, including a clean top-of-range load bump subject to the TSB-band rule below. Follow `session_recommendation`: Tier C (`hold_load` / `downgrade`) → hold every working weight and copy last session's load forward; Tier D green → progress normally. Do not hold loads off a soft recovery score alone while freshness is positive.
+  - `recovery.score ≥ 5.5` → green light, normal programming.
   - `recovery.confidence == "low"`: the score's available signals are still trustworthy, but soften any rule that would otherwise override the deload window. Don't invent triggers from data the source doesn't provide.
   - When `recovery.score < 4` AND `recovery.drivers` has the negative signal persisting (e.g. wrist temp +0.4°C on a multi-week stretch in `health_metrics_weekly`) → flag deload as urgent regardless of `deloads` cadence. Override the standard 4-6 / 6+ week thresholds.
 - **Per-muscle fatigue from HR creep (§19):** read `hr_at_volume_divergence`. For any muscle whose `hint == "rising HR at constant volume — fatigue or under-recovery"`, hold or cut volume on that group this block — don't add sets. Surface in the table's Notes column: `Holding {muscle} volume — HR rising at constant load.` For muscles with `hint == "improving conditioning"` you can add a working set if it's also under MAV. Skip this rule entirely when per-workout HR is unavailable and `hr_at_volume_divergence` is empty.

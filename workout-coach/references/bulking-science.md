@@ -34,7 +34,7 @@ Default off-ramps (each one strong enough on its own to end the phase):
 1. **Rate exceeds the fat-partitioning threshold.** Bodyweight gain >+0.5 kg/wk over a 14-day rolling window for 3 consecutive weeks. The first week can be water (glycogen + sodium); 3 weeks is the evidence the surplus is producing fat at scale.
 2. **Compound lifts stall 2+ weeks.** If 3+ compound lifts (in the hypertrophy template) show stalled_sessions >= 2 simultaneously, the muscle synthesis ceiling has been hit and additional surplus only feeds fat.
 3. **Subjective bloat / lethargy / sleep debt.** User-reported. Morning bloat, afternoon energy crashes, deteriorating sleep latency. These are early warnings that the surplus is too aggressive and the body is partitioning poorly.
-4. **Time-boxed end.** Default cap is 12 weeks per bulk phase, then a planned mini-cut (2-4 weeks at -0.5 kg/wk) before the next bulk. Longer bulks rarely produce proportionally more muscle and almost always produce disproportionately more fat.
+4. **Time-boxed end.** Default cap is 8 weeks per bulk phase, then a planned mini-cut (2-4 weeks at -0.5 kg/wk) before the next bulk. Longer bulks rarely produce proportionally more muscle and almost always produce disproportionately more fat.
 5. **Goal hit.** Some bulks have a numeric target (e.g. "reach 80 kg by July"). When the target is hit, the phase ends — there is no virtue in continuing past the goal.
 
 The `nutrition_phase_summary` `coach_action_hint` token maps to these signals:
@@ -42,7 +42,7 @@ The `nutrition_phase_summary` `coach_action_hint` token maps to these signals:
 - `add_calories` — rate too slow, increase surplus by 100-200 kcal/day
 - `slow_intake` — rate too fast, dial surplus down by 100-200 kcal/day before signal 1 triggers
 - `consider_ending` — one stop signal triggered; let the user choose whether to push or call it
-- `end_now` — two+ signals triggered OR phase length ≥ 12 weeks with any signal
+- `end_now` — two+ signals triggered OR phase length ≥ 8 weeks with any signal
 
 The coach callout MUST honor this token the same way Phase 2 workouts honor `session_recommendation`.
 

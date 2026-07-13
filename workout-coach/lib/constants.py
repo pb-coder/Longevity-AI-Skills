@@ -137,6 +137,9 @@ VOLUME_LANDMARKS = {
     "triceps":      {"mv": 4,  "mev": 6,  "mav": 12, "mrv": 16},
     "calves":       {"mv": 6,  "mev": 8,  "mav": 14, "mrv": 18},
     "forearms":     {"mv": 2,  "mev": 4,  "mav": 8,  "mrv": 12},
+    # `abs` is folded into `core` via MUSCLE_ALIASES (no catalog entry emits
+    # `abs`); this landmark is retained only so a stray `abs` token can never
+    # fork into a separate, unlanded bucket. `core` is the live key.
     "abs":          {"mv": 0,  "mev": 4,  "mav": 16, "mrv": 25},
     "core":         {"mv": 0,  "mev": 4,  "mav": 16, "mrv": 25},
     "erectors":     {"mv": 2,  "mev": 4,  "mav": 10, "mrv": 16},
@@ -156,7 +159,7 @@ MUSCLE_ALIASES = {
     "quads": "quads", "hamstrings": "hamstrings",
     "glutes": "glutes", "adductors": "adductors",
     "calves": "calves", "forearms": "forearms",
-    "abs": "abs", "core": "core",
+    "abs": "core", "core": "core",
     "erectors": "erectors", "traps": "traps",
     "neck": "neck",
     "front delt": "front_delts", "front delts": "front_delts",

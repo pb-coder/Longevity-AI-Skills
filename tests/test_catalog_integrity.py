@@ -188,5 +188,54 @@ class CatalogIntegrityTests(unittest.TestCase):
         )
 
 
+class ExternalRotatorPrimaryGapTests(unittest.TestCase):
+    """M8: external_rotators has a VOLUME_LANDMARKS entry (MEV 2) but, before
+    this fix, no catalog exercise ever credited it as a primary — only Cable
+    Face Pull granted it a +0.5 synergist credit. Cable External Rotation now
+    closes that gap."""
+
+    def test_cable_external_rotation_primary_is_external_rotators(self) -> None:
+        db = load_exercises_db(_DB_PATH)
+        entry = db.get("cable external rotation")
+        self.assertIsNotNone(entry, "Cable External Rotation not found in parsed DB")
+        self.assertEqual(entry["primary"], "external_rotators")  # type: ignore[index]
+
+    def test_external_rotators_has_at_least_one_primary_exercise(self) -> None:
+        """The gap is closed: at least one catalog entry must credit
+        external_rotators a full 1.0 set as a primary, not just a 0.5
+        synergist credit."""
+        db = load_exercises_db(_DB_PATH)
+        primaries = [name for name, e in db.items() if e.get("primary") == "external_rotators"]
+        self.assertTrue(
+            primaries,
+            "No catalog exercise has external_rotators as primary — MEV 2 landmark is unreachable",
+        )
+
+
+class AbsAliasFoldedIntoCoreTests(unittest.TestCase):
+    """M8: no catalog exercise ever produces the muscle key 'abs' (core work
+    canonicalizes to 'core'), so 'abs' must fold into 'core' rather than
+    exist as a separate self-alias that a future '+abs' tag could silently
+    fork into a second bucket."""
+
+    def test_abs_alias_maps_to_core(self) -> None:
+        self.assertEqual(MUSCLE_ALIASES["abs"], "core")
+
+    def test_canon_muscle_abs_resolves_to_core(self) -> None:
+        self.assertEqual(_canon_muscle("abs"), "core")
+
+
+class WallSlideDeadSynergistTests(unittest.TestCase):
+    """M8: Wall Slide previously listed '+scapular muscles', a token that
+    maps to no canonical muscle and was silently dropped by the parser
+    (dead text). It must now list only the live 'rear_delts' synergist."""
+
+    def test_wall_slide_synergists_has_no_dead_token(self) -> None:
+        db = load_exercises_db(_DB_PATH)
+        entry = db.get("wall slide")
+        self.assertIsNotNone(entry, "Wall Slide not found in parsed DB")
+        self.assertEqual(entry["synergists"], ["rear_delts"])  # type: ignore[index]
+
+
 if __name__ == "__main__":
     unittest.main()

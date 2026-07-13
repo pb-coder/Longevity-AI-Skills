@@ -24,7 +24,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Dead Hang [BW]
 - Scapular Pull-Up [BW]
 - Pull-Up (warmup) [BW]
-- Wall Slide [BW] — +rear delts, +scapular muscles
+- Wall Slide [BW] — +rear delts
 
 ### Lower Body
 - Bodyweight Squat [BW]
@@ -129,6 +129,9 @@ Organized by primary muscle group > movement pattern. Tags:
 - Dumbbell Rear Delt Fly [DB]
 - Cable Face Pull [Cable] — +external rotators
 - Cable Rear Delt Row [Cable]
+
+### Rotator Cuff (External Rotation)
+- Cable External Rotation [Cable] — +rear delts (primary: external rotators)
 
 ### Traps
 - Dumbbell Shrug [DB]

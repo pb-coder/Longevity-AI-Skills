@@ -124,6 +124,18 @@ TOTAL_LABEL = "TOTAL"
 # external_rotators / adductors have no published RP landmark; values
 # are reasonable practitioner extrapolations and should be treated
 # as such.
+#
+# Calibration caveat: RP's landmarks were derived from DIRECT set counting
+# (sets performed for a muscle, with indirect/synergist work acknowledged
+# only qualitatively). This system credits fractional volume — primary 1.0,
+# each synergist 0.5 (see strength.weekly_volume_per_muscle). So a
+# synergist-heavy muscle (rear delts collect 0.5 from every row; triceps
+# from every press) reads systematically HOTTER against these thresholds
+# than a direct count would. "At MEV" here is therefore not identical to
+# "at MEV" in RP's tables for those muscles. This is a defensible modeling
+# choice, but if these numbers are ever re-tuned, tune against the fractional
+# convention, not RP's direct counts. (Front delts are already handled
+# correctly: MEV 0 + pressing synergy is exactly RP's revision.)
 VOLUME_LANDMARKS = {
     "chest":        {"mv": 3,  "mev": 8,  "mav": 16, "mrv": 22},
     "back":         {"mv": 6,  "mev": 10, "mav": 18, "mrv": 25},
@@ -468,6 +480,12 @@ def age_band(norms_table: dict, sex: str, age: int) -> dict | None:
     """Resolve (sex, age) to a norm-band dict from one of the per-sex tables
     above. Returns ``None`` when sex or age is missing/out-of-range — the
     renderer then degrades to "cohort norms unavailable".
+
+    Note: the norm tables (VO2MAX_NORMS / HRV_SDNN_NORMS) stop at the
+    ``(60, 69)`` band, so **any age 70+ resolves to None** and downstream
+    surfaces (e.g. ``vo2_percentile_age_sex``) silently return None. That's
+    fine for the current users but will under-serve a 70+ trainee — extend
+    the last band (or make it open-ended) before onboarding one.
     """
     if not sex or age is None:
         return None

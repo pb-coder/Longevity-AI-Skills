@@ -36,6 +36,7 @@
 | Low Row | Low Row Machine | — |
 | Shoulder Press | Shoulder Press Machine | — |
 | Adductor machine | Hip Adductor Machine | — |
+| Cable bicep | Cable Bicep Curl | — |
 
 ## Modifier Handling
 

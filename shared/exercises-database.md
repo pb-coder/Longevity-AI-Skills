@@ -223,6 +223,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Cable Reverse Lunge [Cable] — +glutes
 - Cable Step-Up [Cable] — +glutes
 - Bulgarian Split Squat Jump [BW] — +glutes
+- Dumbbell Split Squat [DB] — +glutes
 
 ### Quad Isolation
 - Leg Extension [Machine]

@@ -80,7 +80,8 @@ def weekly_volume_per_muscle(
     window_days: int,
     unknown_out: set[str],
 ) -> dict:
-    """Fractional hard-set count per muscle, as sets-per-week.
+    """Fractional hard-set count per muscle, as sets-per-week, plus which
+    trainable landmark muscles got zero credited sets in the window.
 
     Primary muscle = 1.0 set, each synergist = 0.5 set (per training-science
     §1). Warmup exercises (database section) and warmup-marked sets are
@@ -116,11 +117,31 @@ def weekly_volume_per_muscle(
 
     weeks = window_days / 7.0
     current = {m: round(v / weeks, 1) for m, v in sets.items()}
+
+    # Muscles the coach is structurally blind to: a landmark muscle with a
+    # real MEV (mev > 0) that a catalog exercise CAN train, but which got
+    # ZERO credited sets in the window. `current` only holds muscles with
+    # >0 sets, so an abandoned muscle simply vanishes and the
+    # "current < MEV → add a set" rule can never fire for it. Producible-set
+    # filter keeps dead landmark keys (e.g. `abs`, which no catalog entry
+    # emits — `core` is used instead) out of the list.
+    producible: set[str] = set()
+    for entry in db.values():
+        if entry.get("primary"):
+            producible.add(entry["primary"])
+        for syn in entry.get("synergists") or []:
+            producible.add(syn)
+    neglected = sorted(
+        m for m, lm in VOLUME_LANDMARKS.items()
+        if lm.get("mev", 0) > 0 and m in producible and current.get(m, 0.0) == 0.0
+    )
+
     landmarks = {m: VOLUME_LANDMARKS[m] for m in current if m in VOLUME_LANDMARKS}
     return {
         "window_days": window_days,
         "current": current,
         "landmarks": landmarks,
+        "neglected_muscles": neglected,
     }
 
 

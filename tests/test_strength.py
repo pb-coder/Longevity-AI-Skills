@@ -94,5 +94,69 @@ class StaleExerciseTests(unittest.TestCase):
         self.assertIn("Leg Extension", names)
 
 
+class DeadliftFamilyAndCarryTests(unittest.TestCase):
+    def test_conventional_deadlift_dedupes_primary_from_synergists(self) -> None:
+        # Conventional Deadlift lists BOTH "(primary: posterior chain)"
+        # (→ glutes) AND "+glutes" in its synergist list. The parser must
+        # dedupe the primary out of synergists so a single working set
+        # credits glutes exactly 1.0 (not 1.0 + 0.5 = 1.5).
+        entry = _DB["conventional deadlift"]
+        self.assertEqual(entry["primary"], "glutes")
+        self.assertNotIn("glutes", entry["synergists"])
+
+        today_d = date(2026, 6, 5)
+        rows = [
+            {"date": "2026-06-01", "exercise": "Conventional Deadlift",
+             "kg": 120, "reps": 5, "notes": ""},
+        ]
+        unknown: set[str] = set()
+        result = weekly_volume_per_muscle(rows, _DB, today_d, 7, unknown)
+        self.assertEqual(result["current"]["glutes"], 1.0)
+
+    def test_deadlift_family_primaries_are_consistent(self) -> None:
+        # Sumo, Trap Bar, and Machine variants must all resolve to the same
+        # primary as Conventional Deadlift (glutes via the posterior-chain
+        # override), not fall back to the BACK section heading.
+        for name in ("sumo deadlift", "trap bar deadlift", "deadlift machine"):
+            with self.subTest(name=name):
+                self.assertEqual(_DB[name]["primary"], "glutes")
+
+    def test_superman_primary_is_erectors(self) -> None:
+        # Superman is an erector-chain exercise, not a lats/mid-back (BACK
+        # section) movement.
+        self.assertEqual(_DB["superman"]["primary"], "erectors")
+
+    def test_dumbbell_farmer_walk_credits_carry_muscles(self) -> None:
+        # Loaded carries were muscle-invisible (no synergists) despite
+        # counting as working sets; they must now credit the muscles that
+        # actually do the work.
+        entry = _DB["dumbbell farmer walk"]
+        self.assertIn("traps", entry["synergists"])
+        self.assertIn("forearms", entry["synergists"])
+        self.assertIn("core", entry["synergists"])
+
+
+class NeglectedMuscleTests(unittest.TestCase):
+    def test_neglected_muscles_lists_zero_credit_trainable_muscles(self) -> None:
+        # Only "Leg Extension" (primary=quads, no synergists) is logged, so
+        # every other trainable landmark muscle gets zero credited sets in
+        # the window and must surface in neglected_muscles, sorted. "abs"
+        # has mev > 0 but no catalog entry can ever produce it (only "core"
+        # is used), so it must never appear even though it's a landmark key.
+        today_d = date(2026, 6, 5)
+        rows = [
+            {"date": "2026-06-01", "exercise": "Leg Extension",
+             "kg": 60, "reps": 10, "notes": ""},
+        ]
+        unknown: set[str] = set()
+        result = weekly_volume_per_muscle(rows, _DB, today_d, 28, unknown)
+
+        neglected = result["neglected_muscles"]
+        self.assertEqual(neglected, sorted(neglected))
+        self.assertIn("glutes", neglected)
+        self.assertNotIn("quads", neglected)
+        self.assertNotIn("abs", neglected)
+
+
 if __name__ == "__main__":
     unittest.main()

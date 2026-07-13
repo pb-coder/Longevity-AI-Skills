@@ -501,6 +501,13 @@ def _load_exercises_db_cached(path_str: str, _mtime_ns: int, _size: int) -> dict
             or section_primary
         )
 
+        # A muscle named as the primary must not also collect a 0.5 synergist
+        # credit for the same set (e.g. Conventional Deadlift lists both
+        # (primary: posterior chain) → glutes AND +glutes). Dedupe at parse
+        # time so every consumer sees a single 1.0 credit.
+        if primary:
+            synergists = [s for s in synergists if s != primary]
+
         db[name.lower()] = {
             "primary": primary,
             "synergists": synergists,

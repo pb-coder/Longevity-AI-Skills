@@ -96,12 +96,12 @@ Organized by primary muscle group > movement pattern. Tags:
 
 ### Back — Other
 - Conventional Deadlift [BB] — +glutes, +hamstrings, +erectors (primary: posterior chain)
-- Sumo Deadlift [BB] — +glutes, +quads, +erectors
-- Trap Bar Deadlift [BB] — +glutes, +quads
-- Deadlift Machine [Machine] — +glutes, +hamstrings, +quads
+- Sumo Deadlift [BB] — +glutes, +quads, +erectors (primary: posterior chain)
+- Trap Bar Deadlift [BB] — +glutes, +quads (primary: posterior chain)
+- Deadlift Machine [Machine] — +glutes, +hamstrings, +quads (primary: posterior chain)
 - 45 Degree Back Extension [Machine] — +glutes, +hamstrings (primary: erectors/lower back)
 - Back Extension Machine [Machine] — +glutes, +hamstrings (primary: erectors/lower back)
-- Superman [BW]
+- Superman [BW] (primary: erectors/lower back)
 
 ---
 
@@ -336,7 +336,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Dumbbell Thruster [DB]
 - Barbell Clean [BB]
 - Barbell Snatch [BB]
-- Dumbbell Farmer Walk [DB]
+- Dumbbell Farmer Walk [DB] — +traps, +forearms, +core
 - Box Jump [BW]
 - Broad Jump [BW]
 - Tuck Jump [BW]

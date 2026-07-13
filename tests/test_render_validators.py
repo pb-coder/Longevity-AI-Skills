@@ -188,6 +188,48 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertTrue(any("3 sub-bullets" in w for w in warnings))
         self.assertTrue(any("comparative-history" in w for w in warnings))
 
+    def test_workout_md_flags_strength_sets_when_gate_says_zone_2(self) -> None:
+        errors, _ = validate_workout_md(
+            _PLAN_17, {"substitute": {"kind": "zone_2"}})
+        self.assertTrue(
+            any("zone_2" in e and "gate" in e for e in errors))
+
+    def test_workout_md_flags_strength_sets_when_gate_says_rest(self) -> None:
+        errors, _ = validate_workout_md(
+            _PLAN_17, {"substitute": {"kind": "rest"}})
+        self.assertTrue(any("rest" in e and "gate" in e for e in errors))
+
+    def test_workout_md_allows_strength_sets_on_reactive_deload_week(self) -> None:
+        # Tier B reactive_deload_week legitimately prescribes reduced-volume
+        # strength, so it must NOT be flagged even though it is a no-strength
+        # look-alike tier.
+        errors, _ = validate_workout_md(
+            _PLAN_17, {"substitute": {"kind": "reactive_deload_week"}})
+        self.assertFalse(any("gate" in e for e in errors))
+
+    def test_workout_md_allows_strength_sets_on_normal_strength(self) -> None:
+        errors, _ = validate_workout_md(
+            _PLAN_17, {"substitute": {"kind": "normal_strength"}})
+        self.assertFalse(any("gate" in e for e in errors))
+
+    def test_workout_md_zone_2_gate_does_not_flag_cardio_only_plan(self) -> None:
+        # A zone_2 gate paired with a markdown that only has cardio (no
+        # kg/reps load, no ///) must not be flagged; there are no strength
+        # working sets to honor the gate against.
+        plan = """# Workout plan — 2026-06-14
+
+## Workout 1: CARDIO
+- Rowing Machine: 45 min
+"""
+        errors, _ = validate_workout_md(plan, {"substitute": {"kind": "zone_2"}})
+        self.assertFalse(any("gate" in e for e in errors))
+
+    def test_workout_md_backward_compat_no_session_recommendation_arg(self) -> None:
+        # Existing callers that don't pass session_recommendation must see
+        # identical behavior to before this check was added.
+        errors, warnings = validate_workout_md(_PLAN_17)
+        self.assertFalse(any("gate" in e for e in errors))
+
     def test_workout_md_builds_exercise_catalog_once_per_validation(self) -> None:
         text = """# Workout plan — 2026-05-29
 

@@ -278,7 +278,8 @@ def main():
         return 2
 
     workout_md = Path(args.workout_md).read_text(encoding="utf-8")
-    workout_errors, workout_warnings = validate_workout_md(workout_md)
+    workout_errors, workout_warnings = validate_workout_md(
+        workout_md, j.get("session_recommendation"))
     for w in workout_warnings:
         print(f"workout_md warning: {w}", file=sys.stderr)
     if workout_errors:

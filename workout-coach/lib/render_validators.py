@@ -16,8 +16,12 @@ Public surface:
 - ``validate_coach_reads(coach) -> (errors, warnings)`` — hard errors
   vs. soft warnings. Errors fail the render with exit code 2; warnings
   print to stderr but allow the render to proceed.
-- ``validate_workout_md(text) -> (errors, warnings)`` — validates the
-  lean workout markdown before it is embedded in the dashboard.
+- ``validate_workout_md(text, session_recommendation=None) -> (errors,
+  warnings)`` — validates the lean workout markdown before it is
+  embedded in the dashboard. When given the gate's
+  ``session_recommendation``, also enforces that a no-strength gate
+  (substitute kind ``rest`` or ``zone_2``) is not undercut by strength
+  working sets in the markdown.
 - ``auto_wrap_terms(text)`` — wraps each ``KNOWN_TERMS`` key in a
   tooltip span. First-occurrence-only per string by design (avoids
   visual noise on lines that repeat a term).
@@ -207,13 +211,16 @@ def _is_known_exercise_name(name: str, known_names: set[str]) -> bool:
     return is_known_name(name, known_names)
 
 
-def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
+def validate_workout_md(text: str, session_recommendation: dict | None = None) -> tuple[list[str], list[str]]:
     """Validate lean workout markdown before dashboard rendering.
 
     Hard errors block render output when the markdown would create user
     friction later: off-catalog exercise names or em-dashes outside the
     allowed title/sub-bullet positions. Warnings flag coach-writing drift
-    that should be fixed, but can still render.
+    that should be fixed, but can still render. When the optional
+    ``session_recommendation`` (the gate's tracker-JSON block) is given
+    and its substitute kind is ``rest`` or ``zone_2``, this also errors if
+    the markdown prescribes any strength working sets.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -283,6 +290,22 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
             )
 
     flush_workout()
+
+    # Honor the recovery gate: when it returns a no-strength recommendation
+    # (kind `rest` or `zone_2`), the workout markdown must not prescribe any
+    # strength working sets. A Tier-B `reactive_deload_week` is deliberately
+    # excluded — it prescribes reduced-volume strength, which is correct.
+    if session_recommendation:
+        kind = ((session_recommendation.get("substitute") or {}).get("kind"))
+        if kind in {"rest", "zone_2"}:
+            total_working = sum(count_working_sets_per_workout(text).values())
+            if total_working > 0:
+                errors.append(
+                    f"session gate returned '{kind}' (no strength today) but the "
+                    f"workout markdown prescribes {total_working} strength working "
+                    f"set(s); the plan must honor the gate"
+                )
+
     return (errors, warnings)
 
 

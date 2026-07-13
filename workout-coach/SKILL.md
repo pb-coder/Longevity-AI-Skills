@@ -898,7 +898,7 @@ Written as their own sections after the strength workouts, not mixed in. Two sha
 ```
 ### Cardio 1: Zone 2 (30-45 min)
 
-- Treadmill run or outdoor, HR 140-150bpm (65-75% max)
+- Treadmill run or outdoor at Zone 2 = 60-70% HRR (Karvonen). Compute the bpm band per person from `estimated_max_hr` and `estimated_rest_hr` (`rest + 0.60–0.70 × (max − rest)`); do not hardcode a generic bpm.
 - Target duration: 35 min
 - Notes: pair with an off day or separate from leg work by 6-24h (§10 interference)
 ```

@@ -313,7 +313,7 @@ Apple emits per-workout HR statistics (avg / max / min) on every `Workout` recor
 **Trend matters more than absolute.** A user with a low resting HR and good cardiac fitness can run a session at 125-135 bpm and hit failure on every set; another can sit at 145 bpm with the same effort. The cleanest fatigue signal is **per-muscle HR creep at constant volume** — `hr_at_volume_divergence[muscle].slope_bpm_per_4w` controls for volume changes that would otherwise confound the read. `hint == "rising HR at constant volume"` (slope ≥ +5 bpm/4w with ≥6 sessions) means the body is working harder for the same output. Hold load on that muscle group, finish the block, then deload.
 
 **Cardio sessions, avg HR bands** (for Apple workouts of type Running / Cycling / Walking / Outdoor* / Indoor*):
-- Zone 2: 65-75% of max HR. Compute the actual range from the person's estimated max HR; if the average drifts above the upper band, the session was tempo, not Zone 2.
+- Zone 2: 60-70% of heart-rate reserve (HRR / Karvonen — the tracker's canonical zone math, `cardio_hr_zones_28d`). Compute the actual bpm range from the person's estimated max AND resting HR (`rest + 0.60–0.70 × (max − rest)`), not from max HR alone; if the average drifts above the upper band, the session was tempo, not Zone 2.
 - Intervals: avg HR is meaningless for intervals — read max HR (should hit 165+ during work blocks).
 
 **What NOT to do:** match a stretching session's low HR to "low effort" (different stimulus type), compare across activity types, or react to a single high-HR session without a 4-session window. Sleep/caffeine/heat affect HR substantially day-to-day.

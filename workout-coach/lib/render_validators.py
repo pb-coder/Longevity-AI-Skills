@@ -62,7 +62,7 @@ KNOWN_TERMS = {
     "HRV":    ("Heart rate variability",
                "The variation in the time between heartbeats overnight, measured here as SDNN. Higher relative to your baseline is favorable. Lower can mean under-recovery or stress."),
     "Z2":     ("Zone 2",
-               "Aerobic cardio at roughly 60-70 percent of your maximum heart rate. You can hold a conversation. It builds mitochondrial density and the aerobic base."),
+               "Aerobic cardio at roughly 60-70 percent of your heart-rate reserve (the Karvonen method: resting HR plus 60-70 percent of the gap up to your max HR, which is the tracker's canonical zone math). You can hold a conversation. It builds mitochondrial density and the aerobic base."),
     "Z5":     ("Zone 5",
                "Near-maximal intervals at 90 percent or more of your maximum heart rate. The most efficient zone for raising your peak oxygen uptake."),
     "VO2max": ("Peak oxygen uptake",

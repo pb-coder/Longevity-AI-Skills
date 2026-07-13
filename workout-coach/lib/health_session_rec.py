@@ -223,22 +223,6 @@ def _expected_tier_c_rebound_by_session(
     return 1
 
 
-def _tsb_sustained_days(today_tsb: float | None, training_load: dict | None,
-                        threshold: float, direction: str = "above") -> int:
-    """Approximation: returns 1 when the current TSB hits the threshold
-    in the given direction, otherwise 0. We don't have day-by-day TSB
-    history in `training_load` (only today), so over-recovered "sustained"
-    is approximated by current TSB + 7-day trend slope. The render layer
-    computes the proper 14-day strip from `compute_tier_history`."""
-    if today_tsb is None:
-        return 0
-    if direction == "above" and today_tsb >= threshold:
-        return 1
-    if direction == "below" and today_tsb <= threshold:
-        return 1
-    return 0
-
-
 def compute_session_recommendation(*,
                                     recovery: dict | None,
                                     training_load: dict | None,
@@ -434,7 +418,7 @@ def compute_session_recommendation(*,
     # `suppress_slow` so an over-recovered or just-rebounded athlete isn't
     # pinned in deload by a proxy signal).
     tier_b_fired = False
-    tier_b_kind = None  # zone_2 / reactive_deload_week / mobility_sauna
+    tier_b_kind = None  # zone_2 / reactive_deload_week
     # SLOW: high accumulated fatigue. Suppressed only by a served-deload
     # rebound (over-recovery can't coexist with TSB ≤ -15).
     if (tsb is not None and tsb <= T["tier_b_tsb_high_fatigue"]

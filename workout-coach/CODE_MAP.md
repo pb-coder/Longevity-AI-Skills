@@ -93,7 +93,7 @@ Skills/workout-coach/
 │   ├── swim-coaching.md                  CSS-zone interpretation, SWOLF/SPL guardrails
 │   └── code-health-audit.md              snapshot of issues + improvement backlog
 ├── scripts/
-│   ├── read_tracker.py (700 lines)       CLI: reads CSV store, emits compact tracker JSON
+│   ├── read_tracker.py (934 lines)       CLI: reads CSV store, emits compact tracker JSON
 │   └── render_dashboard.py (256 lines)   CLI: composes the final HTML (thin orchestrator)
 └── lib/
     │
@@ -124,10 +124,8 @@ Skills/workout-coach/
     ├── render_components_volume.py (109) per-muscle volume bars
     ├── render_components_domain.py (192) comparison strips, dials, tier history
     ├── render_components_misc.py (40)    rings + workout markdown embed
-    ├── render_assets.py (11)             compatibility facade for dashboard assets
     ├── render_styles.py (731)            STYLESHEET string
     ├── render_scripts.py (256)           INLINE_JS string
-    ├── render_cards.py (76)              compatibility facade for card modules
     ├── render_cards_common.py (39)       shared heading + coach callout helpers
     ├── render_cards_today.py (472)       Today tab card templates
     ├── render_cards_health.py (442)      health / sleep / recovery-practice cards
@@ -230,8 +228,7 @@ real component code is grouped by purpose:
 ### Dashboard assets
 
 Two module-level string constants — pure data, no functions — split by
-asset type. [`lib/render_assets.py`](lib/render_assets.py) remains a
-compatibility facade that re-exports both names.
+asset type, imported directly by `render_dashboard.py`.
 
 **Implements the design system documented in
 [`Skills/DESIGN.md`](../DESIGN.md).** Read that first before touching
@@ -252,8 +249,8 @@ hex literals outside the `:root` block** (lint: `rg
 
 ### Card renderer split
 
-`lib/render_cards.py` is now a compatibility facade. Existing imports
-keep working; new card changes should go to the focused module:
+Card templates are split by domain into focused modules, imported
+directly by `render_dashboard.py`:
 
 - [`lib/render_cards_common.py`](lib/render_cards_common.py) —
   `coach_block`, `_heading`, heading tooltip copy.

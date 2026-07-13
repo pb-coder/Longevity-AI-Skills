@@ -155,7 +155,7 @@ def card_sleep(sleep, coach_text):
     tib = means.get("time_in_bed")
 
     # --- Stage stack chart (proportional bar) ---
-    # Stage colors come from CSS variables in render_assets.py
+    # Stage colors come from CSS variables in render_styles.py
     # (--stage-{core,deep,rem,awake}); the class on each span pulls
     # the right one. Empty-night fallback reuses the awake token.
     stage_segments = []

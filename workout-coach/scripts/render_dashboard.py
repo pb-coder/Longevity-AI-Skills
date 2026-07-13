@@ -41,10 +41,9 @@ from workout_coach.lib.render_validators import (
     validate_workout_md,
     workout_set_budget_warnings,
 )
-# Direct submodule imports bypass the render_assets / render_components /
-# render_cards / render_cards_trajectory compatibility facades. Each
-# facade is a tiny re-export module; loading them just to forward names
-# is wasted parse + exec cost on every cold render subprocess.
+# Direct submodule imports (the split render_cards_* / render_components_*
+# modules) rather than a single facade. A facade re-export module would
+# just be wasted parse + exec cost on every cold render subprocess.
 from workout_coach.lib.render_components_load import build_load_series
 from workout_coach.lib.render_components_misc import embed_workout_markdown, ring
 from workout_coach.lib.render_styles import STYLESHEET

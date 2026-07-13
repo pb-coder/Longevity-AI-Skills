@@ -455,8 +455,6 @@ SESSION_GATE_THRESHOLDS = {
 
     # ---- Tier D: green (default — train as planned) ----
     "tier_d_recovery_score_min":       5.5,
-    "tier_d_tsb_lo":                  -10.0,
-    "tier_d_tsb_hi":                   0.0,
 
     # ---- Tier E: over-recovered / taper warning ----
     "tier_e_tsb_high":                 10.0,

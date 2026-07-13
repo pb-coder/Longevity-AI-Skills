@@ -111,33 +111,6 @@ The user's session count for the week (the `/coach plan N sessions` arg) control
 
 ---
 
-## Tier B — `mobility_sauna` (variant, rare — used when HRV is crashed but TSB / load are fine)
-
-Lower stimulus than Zone 2, focused on parasympathetic recovery.
-
-```markdown
-# Workout plan — <date>
-> Today's call: Mobility + sauna only.
-> Why: <rationale[0].note>
-
-Assessment: ./<date>-assessment.html
-
-## Mobility + sauna
-Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
-
-- Mobility flow: 30 min
-  — hip 90/90, thoracic rotations, shoulder dislocates, ankle rocks, deep squat hold
-  — RPE 2–3, no breath-holds, no force
-- Sauna: 15–20 min at ≥80°C if available (heat-shock-protein band)
-- Sleep priority tonight, hydration through the day
-
-## Re-evaluate tomorrow
-- HRV recovery first, then strength can come back
-```
-
----
-
 ## Tier C — `modified_strength` (downgrade)
 
 Same session pattern as the planned workout, but with the modifications baked in:

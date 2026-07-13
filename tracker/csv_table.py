@@ -53,7 +53,12 @@ def date_str(value) -> str | None:
         return value.isoformat()
     s = str(value).strip()
     if len(s) >= 10 and s[4] == "-" and s[7] == "-":
-        return s[:10]
+        candidate = s[:10]
+        try:
+            date_cls.fromisoformat(candidate)
+        except ValueError:
+            return None
+        return candidate
     return None
 
 

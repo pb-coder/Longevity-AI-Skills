@@ -161,7 +161,7 @@ Normal session, with one-line warning at the top of the markdown:
 
 ```markdown
 # Workout plan — <date>
-> Today's call: Train as planned — but TSB has been over +10 for 5+ days. You've been over-recovered. Fitness is bleeding off if this continues.
+> Today's call: Train as planned — but TSB is over +10 right now. You've been over-recovered. Fitness is bleeding off if this continues.
 
 Assessment: ./<date>-assessment.html
 

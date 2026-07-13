@@ -799,6 +799,14 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 
 **Stale exercise reintroduction.** When choosing 1-2 entries from `stale_exercises`, use the last reliable working load only if the exercise has multi-session history and no context-change note. If the exercise has a single old session, high-rep noisy e1RM, equipment-change context, or 8+ weeks away, prescribe a conservative submaximal load with normal reps and leave 2-3 reps in reserve. Never infer the restart load from a single stale e1RM projection. Keep the reason in the dashboard coach text; the workout markdown may only say a short action cue such as `first time back; ease in`.
 
+**Brand-new / first-exposure compound (motor learning, not detraining).** When the plan introduces a compound the user has *never logged* (no history at all — distinct from `stale_exercises`, which is detraining of a known lift), the stale-reintroduction rule above does NOT apply. First exposures groove the pattern, they don't load it:
+- **Load:** start at the empty bar / machine minimum regardless of strength on related lifts; work up only while bar speed and form stay clean; cap the first session at a load that leaves ≥4 reps in reserve.
+- **Volume / reps:** 2-3 working sets of 5-8 reps — enough to groove the pattern, light enough to avoid form decay. Prescribe a fixed rep count, not a range to chase.
+- **Placement:** the first working lift of the session, right after the warm-up while fresh; never after fatiguing same-pattern work.
+- **Ramp:** the ~50%/~70% ramp scheme is undefined with no known working load — for a first exposure the *ramp is the session's first half* (empty bar, then small jumps up to the capped top load).
+- **Graduation:** treat it as a learning lift for its first 3 sessions (add load only after a clean session, keep ≥3 reps in reserve), then enter normal double progression. No e1RM-based prescriptions until ≥3 sessions exist (consistent with the "<3 weeks of data" rule in §15).
+- **Regression path:** if form doesn't consolidate across those sessions, name and switch to an easier same-pattern regression (e.g. Barbell Back Squat → Goblet Squat) rather than grinding a breaking-down pattern.
+
 **Core training:** Build strong, developed abs. Program 1-2 core exercises per session, aim for 3-4 sessions/week with core. Prefer weighted core (kneeling cable crunch, cable woodchop, captain's chair knee raise) alongside bodyweight (leg raises, dead bugs, hollow body holds). Vary patterns across sessions: flexion, anti-extension, rotation, isometric. Visibility is a body fat question, not a training question.
 
 **Equipment increment grid (REQUIRED).** Loads are prescribed on the equipment's increment grid. Never suggest off-grid weights.

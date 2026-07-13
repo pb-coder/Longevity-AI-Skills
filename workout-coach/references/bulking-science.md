@@ -14,14 +14,14 @@ So: the slower, smaller surplus produces more lean tissue in less total time. Th
 
 - **Calorie surplus:** 200-400 kcal/day above maintenance. Beyond ~400 kcal the marginal muscle synthesis stops (rate-limited by mTOR / muscle protein synthesis ceilings) but the marginal fat partitioning keeps going. The exception is true novices (first 6-12 months of structured lifting) or post-cut rebounds.
 - **Bodyweight rate target:** +0.25-0.5% bodyweight/wk for trained lifters. For a 77 kg person that's +0.19-0.39 kg/wk. The summarizer uses 0.25 kg/wk as the default target; the user can override per phase.
-- **Protein:** 1.6-2.2 g/kg of total bodyweight. The lower end works for trained lifters in a surplus (the surplus is itself protein-sparing); the upper end is a hedge for vegan athletes or athletes in a deficit. **Vegan note**: hit 2.0-2.2 g/kg and diversify across legumes + tofu + tempeh + seitan + supplemental EAAs to clear the leucine threshold (~3 g per meal) in spite of lower leucine fractions in plant proteins.
+- **Protein:** 1.6-2.2 g/kg of total bodyweight. The lower end works for trained lifters in a surplus (the surplus is itself protein-sparing); the upper end is a hedge for vegan athletes or athletes in a deficit. **Vegan note**: hit 2.0-2.2 g/kg and diversify across legumes + tofu + tempeh + seitan to clear the leucine threshold (~3 g per meal) in spite of lower leucine fractions in plant proteins; reach for supplemental EAAs only when whole-food distribution can't hit it (§23: no measurable hypertrophy benefit above a well-distributed diet).
 - **Carbs:** prioritize peri-workout. Trained lifters perform better and recover faster on >3 g/kg carbs/day; the surplus calories most efficiently go through carbs given the training stimulus is glycolytic.
 - **Fats:** ≥0.6 g/kg for hormone production (especially testosterone). Below this and the calorie surplus stops translating to lean tissue at the same efficiency.
 
 ## Training implications during a bulk
 
 - **Strength is the limiter.** If top-set e1RM isn't climbing across the bulk, the surplus is not being captured as muscle. It's going to fat. The coach should track e1RM movement on compound lifts (squat, bench, deadlift, overhead press, row) and flag when 3+ stalled 2+ weeks.
-- **Hypertrophy volume matters.** A bulk is the right time to push volume toward the upper end of the MAV-MRV range, since recovery is supported by the surplus. The minimum effective dose (~10 hard sets/muscle/wk) is not enough to capture the surplus efficiency.
+- **Hypertrophy volume matters.** A bulk is the right time to push volume toward the upper end of the MAV-MRV range, since recovery is supported by the surplus. The minimum effective dose (per-muscle MEV — roughly 8-12 hard sets/wk for the major muscles, per §1) is not enough to capture the surplus efficiency.
 - **Cardio is allowed but capped.** Excess cardio blows the surplus (and adds recovery debt). Cap at 2-3 Zone 2 sessions of 30-45 min + at most 1 interval session. Skip the daily 10k step compulsion if it leaves you eating into the surplus.
 - **Sleep is non-negotiable.** Under-slept bulks partition more to fat (cortisol shifts substrate use). If sleep regularity drops below SRI 70, flag it to the user — the bulk math is degraded.
 
@@ -84,7 +84,7 @@ The plant-protein context tightens the protein target — clear 2.0-2.2 g/kg/day
 
 - Soy proteins (tempeh, tofu, soy milk): the only plant proteins with leucine on par with dairy
 - Legumes + grain combos (rice + beans, lentils + bulgur): meet EAA needs across the day even if individual meals are limiting
-- Supplemental EAAs (5-10 g around training): cheap insurance for leucine ceiling on training days
+- Supplemental EAAs (5-10 g around training): optional fallback for the leucine ceiling ONLY when whole-food meal distribution can't hit ~3 g leucine/meal — per §23 they add no measurable hypertrophy benefit above a well-distributed 2.0-2.2 g/kg vegan diet
 - Creatine 5 g/day: vegans benefit more from supplementation than omnivores (less muscle creatine baseline)
 
 This is not vegan-bashing — it's recognizing that the leucine-fraction maths require slightly more deliberate distribution to achieve the same muscle-protein-synthesis stimulus.

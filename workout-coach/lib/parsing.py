@@ -26,6 +26,7 @@ Functions:
 from __future__ import annotations
 
 from datetime import date, datetime
+from functools import lru_cache
 
 
 def to_float(v) -> float:
@@ -46,6 +47,9 @@ def to_int_or_none(v):
         return None
 
 
+# Memoizes this hot, pure parse keyed on the date string — called 10-20k
+# times per /coach run over only ~300-500 distinct date strings.
+@lru_cache(maxsize=2048)
 def _parse_iso_date(s) -> date | None:
     """Parse a ``YYYY-MM-DD`` string to a date, returning None on failure.
 

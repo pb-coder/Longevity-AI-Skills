@@ -75,7 +75,7 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
     The ``bloodwork_pending`` flag is always True until biomarker
     ingestion lands — the score is honest about what it doesn't see.
     """
-    from .constants import LONGEVITY_SCORE_WEIGHTS
+    from .constants import LONGEVITY_SCORE_WEIGHTS, Z2_TARGETS
     components: dict[str, float] = {}
 
     # 1. VO2 percentile (longevity-most-predictive single signal)
@@ -137,11 +137,13 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
         else:
             components["training_load_in_band"] = max(0.0, 50.0 - 25.0 * abs(r - 1.0))
 
-    # 6. Z2 weekly minutes adherence (target 150)
+    # 6. Z2 weekly minutes adherence (floor / target from Z2_TARGETS)
     if cardio_zones:
         z2 = cardio_zones.get("z2") or 0
         z2_per_wk = z2 / 4.0  # cardio_zones is 28d window
-        components["z2_weekly_adherence"] = _safe_norm(z2_per_wk, 0, 200.0) * 100.0
+        components["z2_weekly_adherence"] = (
+            _safe_norm(z2_per_wk, 0, Z2_TARGETS["min_per_week_target"]) * 100.0
+        )
 
     # 7. Body composition trend — phase-aware.
     # phase_type: "cut" | "bulk" | "maintain" | None (legacy / unknown).

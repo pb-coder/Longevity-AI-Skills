@@ -286,35 +286,56 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
     return (errors, warnings)
 
 
-def count_working_sets_per_workout(text: str) -> "dict[str, int]":
-    """Count working sets under each `## Workout` heading.
+# Shared by `_iter_workout_exercise_bullets` (and therefore by both
+# `count_working_sets_per_workout` and `workout_core_warnings`): a working
+# set is a `///`-separated rep/load token on an exercise bullet, excluding
+# any token marked `(warmup)`. One definition, two consumers.
+_WORKOUT_HAS_DIGIT_RE = re.compile(r"\d")
+# loaded = an explicit kg load, or a digit-x-digit rep/load token
+# (e.g. "8x3", "40 x 8"). NOT a bare "x" anywhere in the line.
+_WORKOUT_LOADED_RE = re.compile(r"kg|\d\s*[x×]\s*\d", re.IGNORECASE)
 
-    A working set is a `///`-separated rep/load token on an exercise
-    bullet, excluding any token marked `(warmup)`. A bullet counts as a
-    working exercise when it is loaded (`kg` or a rep-x-load token) OR
-    lists multiple sets (`///`). The `///` clause is what catches
-    bodyweight multi-set work like `Dip: 8-10 /// 8-10 /// 8-10`, which
-    the old `kg`/`x`-substring test scored as zero (silently shrinking
-    the budget). Pure prep bullets (`Jumping Jacks: 50`, a single
-    bodyweight line with no load and no `///`) count zero.
+
+def _bullet_working_set_tokens(body: str) -> "list[str]":
+    """Return the non-warmup, digit-bearing `///` tokens in a bullet body.
+
+    A bullet counts as a working exercise when it is loaded (`kg` or a
+    rep-x-load token) OR lists multiple sets (`///`). The `///` clause is
+    what catches bodyweight multi-set work like `Dip: 8-10 /// 8-10 ///
+    8-10`, which a bare `kg`/`x`-substring test scores as zero (silently
+    shrinking the budget). Pure prep bullets (`Jumping Jacks: 50`, a
+    single bodyweight line with no load and no `///`) return `[]`.
+    """
+    is_working = ("///" in body) or bool(_WORKOUT_LOADED_RE.search(body))
+    if not is_working:
+        return []
+    return [t for t in body.split("///")
+            if "warmup" not in t.lower() and _WORKOUT_HAS_DIGIT_RE.search(t)]
+
+
+def _iter_workout_exercise_bullets(text: str) -> "dict[str, list[dict]]":
+    """Walk `## Workout` blocks into an ordered list of exercise-bullet
+    records per title: ``{"name": str, "sets": int, "raw": str}``.
+
+    This is the single pass over the markdown that both
+    `count_working_sets_per_workout` (aggregate per-workout set count)
+    and `workout_core_warnings` (per-bullet core checks) build on, so
+    workout-scope handling and the working-set-token rule
+    (`_bullet_working_set_tokens`) live in exactly one place.
 
     A non-Workout `##` heading (e.g. `## Cardio`) resets the active title so
-    cardio bullets never leak into a workout's count.  Deeper headings
+    cardio bullets never leak into a workout's bullets. Deeper headings
     (`###`, `####`, ...) are treated as sub-sections within the current
     workout block and do NOT reset the scope.
     """
-    out: "dict[str, int]" = {}
+    out: "dict[str, list[dict]]" = {}
     title = None
-    has_digit = re.compile(r"\d")
-    # loaded = an explicit kg load, or a digit-x-digit rep/load token
-    # (e.g. "8x3", "40 x 8"). NOT a bare "x" anywhere in the line.
-    loaded = re.compile(r"kg|\d\s*[x×]\s*\d", re.IGNORECASE)
     for raw in text.splitlines():
         line = raw.rstrip()
         m = re.match(r"^##\s+(Workout\b.*)$", line, re.IGNORECASE)
         if m:
             title = m.group(1).strip()
-            out[title] = 0
+            out[title] = []
             continue
         # only a ## heading (not a ## Workout, which is handled above) ends
         # the current workout's bullet scope.  ### and deeper headings
@@ -324,14 +345,26 @@ def count_working_sets_per_workout(text: str) -> "dict[str, int]":
             title = None
             continue
         if title and line.startswith("- ") and ":" in line:
-            body = line.split(":", 1)[1]
-            is_working = ("///" in body) or bool(loaded.search(body))
-            if not is_working:
-                continue
-            toks = [t for t in body.split("///")
-                    if "warmup" not in t.lower() and has_digit.search(t)]
-            out[title] += len(toks)
+            head, body = line.split(":", 1)
+            out[title].append({
+                "name": head[2:].strip(),
+                "sets": len(_bullet_working_set_tokens(body)),
+                "raw": line,
+            })
     return out
+
+
+def count_working_sets_per_workout(text: str) -> "dict[str, int]":
+    """Count working sets under each `## Workout` heading.
+
+    See `_iter_workout_exercise_bullets` and `_bullet_working_set_tokens`
+    for what counts as a working set and where a workout's bullet scope
+    starts/ends.
+    """
+    return {
+        title: sum(b["sets"] for b in bullets)
+        for title, bullets in _iter_workout_exercise_bullets(text).items()
+    }
 
 
 def workout_set_budget_warnings(text: str, target_working_sets,
@@ -368,6 +401,137 @@ def workout_set_budget_warnings(text: str, target_working_sets,
             warnings.append(
                 f"{title}: {n} working sets vs budget {budget} "
                 f"({n - budget} over) — trim a set or two")
+    return warnings
+
+
+# A core bullet may not carry the "optional last set" qualifier that
+# `SKILL.md`'s per-set-qualifier convention sanctions elsewhere. §24:
+# "Never mark a core set optional."
+CORE_OPTIONAL_QUALIFIER_RE = re.compile(
+    r"\b(if you can make it|optional)\b", re.IGNORECASE
+)
+
+
+@lru_cache(maxsize=1)
+def _core_and_flexion_exercise_names() -> "tuple[set[str], set[str]]":
+    """Return ``(core exercise names, flexion-subset exercise names)``,
+    both lowercased canonical names read from the exercise catalog.
+
+    Neither set is a hardcoded list (`Skills/CLAUDE.md`: *"Do not copy
+    ... exercise catalog parsing into another module."*):
+
+    - **Core membership** comes from `load_exercises_db` — the coach's
+      own catalog parser (`workout_coach.lib.extract`) — filtered to
+      entries whose resolved ``primary`` muscle is ``"core"``.
+    - **Flexion membership** comes from a *different* existing parser:
+      `shared.exercises_database.parse_database()`. This is deliberate,
+      not redundant. `load_exercises_db` resolves every CORE subsection
+      (Flexion, Anti-Extension, Anti-Rotation, Anti-Lateral-Flexion,
+      Rotation) to the same ``primary: "core"`` — `SUBSECTION_PRIMARY_HINTS`
+      has no core-specific entries, so once ``primary`` is resolved the
+      subsection identity is discarded. It cannot answer "is this a
+      flexion movement." That information only survives in
+      `parse_database()`, which preserves the catalog's full
+      ``{muscle: {section: [entries]}}`` structure — the same parser
+      `/log`'s proposal flow and the catalog CLI already read. Reading
+      its ``muscles["CORE"]["sections"]["Flexion"]`` is reuse of an
+      existing parser, not a second literal list or a parallel one.
+    """
+    from .extract import load_exercises_db
+    from shared.exercises_database import (
+        DATABASE_PATH, entry_canonical_name, parse_database,
+    )
+
+    db = load_exercises_db(DATABASE_PATH)
+    core_names = {name for name, meta in db.items()
+                  if meta.get("primary") == "core"}
+
+    parsed = parse_database()
+    flexion_entries = (
+        parsed.get("muscles", {}).get("CORE", {})
+        .get("sections", {}).get("Flexion", [])
+    )
+    flexion_names = {entry_canonical_name(e).strip().lower()
+                      for e in flexion_entries}
+
+    return core_names, flexion_names
+
+
+def workout_core_warnings(text: str, min_sets: int = 1,
+                          max_sets: int = 3) -> "list[str]":
+    """Warn when a workout's core prescription drifts from §24
+    (`training-science.md`). Mirrors `workout_set_budget_warnings` in
+    shape: a single pass over `_iter_workout_exercise_bullets(text)`
+    turning a lean parse into short, addressed warning strings.
+
+    Warning, not error: a legitimate deload still renders. The
+    2026-07-13 plan cuts core to bodyweight-only and still trips warning
+    (2) below (core-last survives a deload) — that is intended; nothing
+    here blocks the render.
+
+    Per `## Workout` block, warns when:
+      1. there is no core bullet at all;
+      2. the LAST bullet in the workout is a core bullet (§24.2: core
+         belongs inside the isolation block, never the terminal slot);
+      3. total core working sets fall outside ``[min_sets, max_sets]``
+         (§24's dose is 2 sets/session, hard ceiling 3, so a workout
+         with 0 core sets already warned via (1); this catches a core
+         bullet present but under- or over-loaded);
+      4. a core bullet carries an "(if you can make it)" / "optional"
+         qualifier (§24: never mark a core set optional);
+      5. none of the workout's core bullets is a spinal-flexion movement
+         (§24: at least one flexion pattern per session — rectus
+         abdominis is the hypertrophy target).
+
+    If the catalog can't resolve any core movement (an empty
+    `core_names`, e.g. the CORE section was renamed out from under
+    `SECTION_PRIMARY`), this fails open and returns no warnings rather
+    than flagging every workout as missing core — a validator that
+    cannot identify core exercises must not pretend every session lacks
+    one. The flexion check fails open the same way if `flexion_names`
+    comes back empty.
+    """
+    warnings: "list[str]" = []
+    core_names, flexion_names = _core_and_flexion_exercise_names()
+    if not core_names:
+        return warnings
+
+    for title, bullets in _iter_workout_exercise_bullets(text).items():
+        if not bullets:
+            continue
+        core_bullets = [b for b in bullets if b["name"].lower() in core_names]
+        if not core_bullets:
+            warnings.append(
+                f"{title}: no core exercise — §24 budgets 2 sets every session")
+            continue
+
+        if bullets[-1]["name"].lower() in core_names:
+            warnings.append(
+                f"{title}: core is the last bullet — §24 requires it "
+                f"inside the isolation block")
+
+        total_core_sets = sum(b["sets"] for b in core_bullets)
+        if total_core_sets < min_sets:
+            warnings.append(
+                f"{title}: {total_core_sets} core sets — §24 budgets "
+                f"{min_sets}-{max_sets}, under-allocated")
+        elif total_core_sets > max_sets:
+            warnings.append(
+                f"{title}: {total_core_sets} core sets — §24 budgets "
+                f"{min_sets}-{max_sets}, over-allocated")
+
+        for b in core_bullets:
+            if CORE_OPTIONAL_QUALIFIER_RE.search(b["raw"]):
+                warnings.append(
+                    f"{title}: {b['name']} is marked optional — §24 says "
+                    f"never mark a core set optional")
+
+        if flexion_names and not any(
+                b["name"].lower() in flexion_names for b in core_bullets):
+            warnings.append(
+                f"{title}: no spinal-flexion core movement — §24 requires "
+                f"at least one flexion pattern per session")
+
     return warnings
 
 

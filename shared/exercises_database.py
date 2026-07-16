@@ -111,7 +111,7 @@ def parse_database() -> dict:
     return out
 
 
-def _entry_canonical_name(entry_line: str) -> str:
+def entry_canonical_name(entry_line: str) -> str:
     """Extract the canonical exercise name from an entry line.
 
     Entry shape examples:
@@ -121,6 +121,12 @@ def _entry_canonical_name(entry_line: str) -> str:
 
     The name is everything before the first ``[`` (which opens the
     equipment tag block).
+
+    Public because it is the only place this parse lives, and callers
+    outside this module need it to read a ``parse_database()`` section
+    without re-implementing the split (`CLAUDE.md`: one concept, one
+    source of truth). ``workout-coach/lib/render_validators.py`` reads
+    the CORE ``Flexion`` subsection through it.
     """
     bracket_idx = entry_line.find("[")
     if bracket_idx == -1:
@@ -135,7 +141,7 @@ def _all_canonical_names() -> list[str]:
     for muscle in db["__muscle_order__"]:
         for section in db["muscles"][muscle]["__section_order__"]:
             for entry in db["muscles"][muscle]["sections"][section]:
-                out.append(_entry_canonical_name(entry))
+                out.append(entry_canonical_name(entry))
     return out
 
 

@@ -204,8 +204,8 @@ Organized by primary muscle group > movement pattern. Tags:
 
 ### Squat Pattern (Compound)
 - Barbell Back Squat [BB] — +glutes, +erectors ◆ (deep)
-- Barbell Front Squat [BB] — +core ◆ (deep)
-- Dumbbell Goblet Squat [DB] — +core ◆
+- Barbell Front Squat [BB] ◆ (deep)
+- Dumbbell Goblet Squat [DB] ◆
 - Dumbbell Bulgarian Split Squat [DB] — +glutes ◆
 - Hack Squat [Machine] — +glutes ◆ (deep)
 - Belt Squat Machine [Machine] — +glutes ◆
@@ -287,27 +287,39 @@ Organized by primary muscle group > movement pattern. Tags:
 
 ## CORE
 
+(Core = the abdominal wall: rectus abdominis + obliques. The spinal erectors are tracked
+separately as `erectors` and are fed by hinges and back extensions — see §24. No entry here
+carries ◆: the lengthened-position principle (§5) has never been tested on any abdominal
+muscle, and its absence is deliberate, not an oversight.)
+
+### Flexion
+- Ab Crunch Machine [Machine]
+- Stomach Press Machine [Machine]
+- Kneeling Cable Crunch [Cable]
+- Standing Cable Crunch [Cable]
+- Cable Reverse Crunch [Cable]
+- Hanging Leg Raise [BW]
+- Leg Raise [BW]
+- Captain's Chair Knee Raise [Machine]
+- Roman Chair Sit-Up [BW]
+- Crunch [BW]
+- Bicycle Crunch [BW]
+- V-Up [BW]
+- Flutter Kick [BW]
+- Mountain Climber [BW]
+
 ### Anti-Extension
 - Plank [BW]
 - Dead Bug [BW]
 - Hollow Body Hold [BW]
-- Ab Crunch Machine [Machine]
+- L-Sit [BW]
 
 ### Anti-Rotation
 - Cable Pallof Press [Cable]
 - Bird Dog [BW]
 
-### Flexion
-- Leg Raise [BW]
-- Captain's Chair Knee Raise [Machine]
-- Kneeling Cable Crunch [Cable]
-- Standing Cable Crunch [Cable]
-- Cable Reverse Crunch [Cable]
-- Bicycle Crunch [BW]
-- V-Up [BW]
-- Flutter Kick [BW]
-- Mountain Climber [BW]
-- Roman Chair Sit-Up [BW]
+### Anti-Lateral-Flexion
+- Side Plank [BW]
 
 ### Rotation
 - Cable Woodchop (High to Low) [Cable]
@@ -317,10 +329,6 @@ Organized by primary muscle group > movement pattern. Tags:
 - Rotary Torso Machine [Machine]
 - Landmine Rotation [LM]
 - Roman Chair Side Bend [Machine]
-
-### Isometric
-- L-Sit [BW]
-- Side Plank [BW]
 
 ---
 
@@ -336,7 +344,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Dumbbell Thruster [DB]
 - Barbell Clean [BB]
 - Barbell Snatch [BB]
-- Dumbbell Farmer Walk [DB]
+- Dumbbell Farmer Walk [DB] — +traps, +forearms
 - Box Jump [BW]
 - Broad Jump [BW]
 - Tuck Jump [BW]

@@ -72,21 +72,26 @@ RENAMES: dict[str, str] = {
     "tricep pushdown": "Cable Tricep Pushdown",
     "scapular pull ups": "Scapular Pull-Up",
     "scapular pullups": "Scapular Pull-Up",
-    "hanging leg raise": "Leg Raise",
     "lying leg curl": "Leg Curl (Lying)",
     "stomach crunch": "Ab Crunch Machine",
     "stomach crunches": "Ab Crunch Machine",
-    "crunch": "Ab Crunch Machine",
-    "stomach press": "Ab Crunch Machine",
-    "stomach press vertical": "Ab Crunch Machine",
-    "stomach press vertical machine": "Ab Crunch Machine",
+    # "Stomach Press" is a DISTINCT machine from the ab-crunch machine, not a
+    # synonym for it. Collapsing the two merged one 65-85kg series with a
+    # 25-35kg one into a single exercise, producing a phantom e1RM (105 kg)
+    # and an uninterpretable slope. They are separate canonicals now.
+    "stomach press": "Stomach Press Machine",
+    "stomach press vertical": "Stomach Press Machine",
+    "stomach press vertical machine": "Stomach Press Machine",
 }
 
+# Names that cannot be resolved to a canonical from the row alone. Reported,
+# never guessed. A bare "crunch" is NOT listed here: it resolves to the
+# `Crunch` canonical (the bodyweight movement). Deciding whether a user who
+# typed "crunch" meant the machine is a LOG-time question, and it belongs to
+# workout-logger/references/aliases.md, which flags it. It used to rename to
+# `Ab Crunch Machine` unconditionally — that is what filed unloaded bodyweight
+# sets as 0 kg machine rows and corrupted the machine's progression series.
 AMBIGUOUS = {"leg curl"}
-
-RENAME_NOTE: dict[str, str] = {
-    "hanging leg raise": "hanging",
-}
 
 NOT_IN_DB_RE = re.compile(r"\s*\(\s*not in database\s*\)\s*", re.IGNORECASE)
 
@@ -126,19 +131,21 @@ def canonicalize_csv(path: Path, canonical: set[str]) -> tuple[int, int, list[tu
             continue
         key = ex_val.strip().lower()
 
-        if key in AMBIGUOUS:
+        # Only report when the name isn't already a resolved canonical —
+        # otherwise an AMBIGUOUS entry that later becomes a catalog name
+        # would be re-reported on every run and the script would never
+        # converge to a clean no-op.
+        if key in AMBIGUOUS and key not in canonical:
             ambiguous.append((i + 2, ex_val))  # +2 for 1-indexed + header
 
-        if key in RENAMES:
+        # Only count a rename that actually changes the cell. Several RENAMES
+        # entries exist to fix *casing* ("dead hang" -> "Dead Hang"); once a
+        # row is already canonical the lookup still hits, and counting it
+        # rewrote the file and reported ~20 phantom renames on every run, so
+        # the script never converged to a clean no-op.
+        if key in RENAMES and RENAMES[key] != ex_val:
             row[EXERCISE_IDX] = RENAMES[key]
             renamed += 1
-            note_addition = RENAME_NOTE.get(key)
-            if note_addition:
-                cur = (row[NOTES_IDX] or "").strip()
-                if note_addition not in cur.lower():
-                    row[NOTES_IDX] = (
-                        note_addition if not cur else f"{cur}; {note_addition}"
-                    )
 
         post_name = (row[EXERCISE_IDX] or "").strip().lower()
         if post_name in canonical:

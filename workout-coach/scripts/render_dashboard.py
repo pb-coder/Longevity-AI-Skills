@@ -39,6 +39,7 @@ from workout_coach.lib.render_helpers import esc
 from workout_coach.lib.render_validators import (
     validate_coach_reads,
     validate_workout_md,
+    workout_core_warnings,
     workout_set_budget_warnings,
 )
 # Direct submodule imports bypass the render_assets / render_components /
@@ -314,6 +315,9 @@ def main():
             workout_md, base_budget, budget_by_index=_budget_for
         ):
             print(f"workout_md set-budget warning: {w}", file=sys.stderr)
+
+        for w in workout_core_warnings(workout_md):
+            print(f"workout_md core warning: {w}", file=sys.stderr)
 
     out = render(j, coach, workout_md, args.person)
     out_path = Path(args.out)

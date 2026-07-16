@@ -749,6 +749,13 @@ Generate that many strength workouts. Tier C: apply the −25% volume / hold loa
 
 Budget to `target_working_sets` from the tracker JSON (derived from the per-person `session_target_min` and `min_per_working_set`; override both via `profile.csv`). Rules:
 - `target_working_sets` is a **floor to hit, not a ceiling to fear**. Land within ±2 of it. Undershooting is the failure mode that under-serves the user: a person sitting below MEV on many muscles (read `weekly_volume_per_muscle.current` vs `landmarks`) needs the budget filled, not a short session. The render validator now counts bodyweight `///` sets correctly and warns on undershoot. Treat that warning as binding outside an explicit deload/downgrade tier.
+- **Reserve 2 sets of the budget for core in every strength session** (§24). Budget core
+  first, not last — it is the allocation most likely to be silently dropped when the list is
+  assembled. 2 of 22 sets is 9% of the budget; it is not the reason a session runs long.
+- **The undershoot warning is binding.** If `workout_set_budget_warnings` reports a workout
+  under budget outside an explicit deload/downgrade tier, add sets to the main lifts before
+  writing the file. A chronically under-filled session is the same failure as a dropped core
+  exercise: the tail of the plan silently disappears.
 - When many muscles are below MEV, route the budgeted sets to the **lagging** muscles first (per the "Per-muscle volume actions" rule below) rather than piling more onto muscles already at/above MAV. Filling the budget AND fixing the distribution is the same move.
 - Prescribe enough working sets to land within ±2 of `target_working_sets`. If you're under, **add sets to existing main exercises (3-4 sets each) before adding new exercises** — don't pad the list with 2-set accessories.
 - Default main lifts to 3-4 working sets, isolation/accessory to 2-3. Hitting `target_working_sets` with ~6-8 exercises at 3-ish sets each is the normal shape; do not drop main lifts to 2 sets just to fit more movements.
@@ -791,14 +798,51 @@ Use Layer 1 analysis plus the training science reference. The reference contains
   **Partial-source caveat:** When `capabilities.per_workout_hr_strength` is False, CTL/ATL/TSB are computed only from cardio TRIMPs — strength load is invisible to this metric. Do **not** apply the TSB-band prescription unilaterally on these trackers; cross-check with `recovery.score` and prefer `recovery.score` as the primary fatigue signal. A negative TSB driven by hike load alone is not a deload trigger — a 200-min hike will always look like fatigue to TSB even if the user is well-rested otherwise. Cite the cross-check in "Why this plan" when overriding the band.
 - **Per-muscle volume actions (REQUIRED).** Read `weekly_volume_per_muscle.current` and `.landmarks` together and act on each muscle whose current weekly hard-set count sits outside the productive range. These rules bridge what the dashboard surfaces (the per-muscle bars) to what the workout markdown actually prescribes — the dashboard names the imbalance, the plan corrects it.
   - **Status "too much, cut back" (current > MRV, dashboard band red):** the next block MUST cut at least one working set from that muscle's primary movement. If `recovery.score < 6.5` additionally, replace the next scheduled session targeting that group with a Z2 cardio block or a full rest day. Name the affected muscle by name in "Why this plan" and in the relevant card's coach text. This rule overrides any default "add a set when in productive range" reflex the rest of the planning logic might prefer.
-  - **Status "not enough" (current < MEV, dashboard band orange):** add one working set to that muscle's primary movement next block, *unless* the TSB band is `fatigued` or `high fatigue` (in which case hold this block and revisit next block — adding volume into accumulating fatigue is the wrong move). Name the muscle in the relevant card's coach text and in "Why this plan".
+  - **Status "not enough" (current < MEV, dashboard band orange):** add one working set to
+    that muscle's primary movement next block, *unless* the TSB band is `fatigued` or
+    `high fatigue`. **If the muscle has no movement in the session at all, add the movement —
+    "add one set to its primary movement" is a no-op when there is no primary movement.**
+    Name the muscle in the relevant card's coach text and in "Why this plan".
+  - **When more than three muscles are below MEV, rank them** before spending the budget:
+    (1) muscles with **no movement anywhere in the week** — they gain the most per set and are
+    the ones the split does not naturally serve; (2) muscles furthest below MEV **as a
+    fraction of MEV**, not in absolute sets; (3) everything else. Filling the budget and
+    fixing the distribution is the same move; a flat "route to the laggards" with ten
+    claimants and no ranking routes to none of them.
+  - **Core is exempt from this rule.** Its dose is fixed at 2 sets/session by §24 and the Core
+    training rule above. Do not add a third core set because core reads below MEV; the fixed
+    allocation already clears MEV at 3-4 sessions/week.
   - The two intermediate bands (`productive` green, `pushing limit` yellow) carry no automatic action — let the TSB-band, recovery-score, and HR-creep rules above govern.
   - When a single muscle triggers both this rule and the per-muscle HR-creep rule (`hint == "rising HR at constant volume — fatigue or under-recovery"`), the HR-creep rule's "hold or cut" takes precedence over an "add a set" — i.e. when in doubt, prefer reducing load over adding it.
 - **Cardio (§10):** read the Cardio check numbers from the Report. If behind target, add cardio sessions to the plan after the strength sessions. Default weekly target: 3× Zone 2 @ 30-45min + 1× intervals @ 20min. Cap total cardio additions at 4 sessions per `/coach` run — if the user is very behind, note the shortfall and prescribe the max. User can override with `/coach no-cardio` to skip this entirely.
 
 **Stale exercise reintroduction.** When choosing 1-2 entries from `stale_exercises`, use the last reliable working load only if the exercise has multi-session history and no context-change note. If the exercise has a single old session, high-rep noisy e1RM, equipment-change context, or 8+ weeks away, prescribe a conservative submaximal load with normal reps and leave 2-3 reps in reserve. Never infer the restart load from a single stale e1RM projection. Keep the reason in the dashboard coach text; the workout markdown may only say a short action cue such as `first time back; ease in`.
 
-**Core training:** Build strong, developed abs. Program 1-2 core exercises per session, aim for 3-4 sessions/week with core. Prefer weighted core (kneeling cable crunch, cable woodchop, captain's chair knee raise) alongside bodyweight (leg raises, dead bugs, hollow body holds). Vary patterns across sessions: flexion, anti-extension, rotation, isometric. Visibility is a body fat question, not a training question.
+**Core training (§24):** Core is a hypertrophy target and is budgeted in **working sets**, not
+exercises. Read §24 before prescribing it.
+- **Dose: exactly 2 core working sets in every strength session** (6-8/week across 3-4
+  sessions) — **9% of a 22-set budget, ~5 min of a 60-min session**. Hard ceiling 3 sets.
+  This is core's whole allocation; it does not take sets from chest, back or legs, and the
+  per-muscle volume rule below does not add to it.
+- **Placement: core goes INSIDE the isolation/accessory block, supersetted with an unrelated
+  isolation movement** (curls, lateral raises, calves, triceps). **Core must never be the
+  final bullet of a workout, and must never precede a compound.** Order does not affect
+  hypertrophy (§24.2) — but the last slot is where prescriptions go unperformed, and moving
+  core ahead of the compounds costs the compounds for no gain.
+- **Selection: prescribe core that takes external load** — Kneeling Cable Crunch, Ab Crunch
+  Machine, Hanging Leg Raise (dumbbell between the feet), Captain's Chair Knee Raise, Cable
+  Reverse Crunch, weighted Roman Chair Sit-Up. A loaded movement is visible to double
+  progression (§15) and to `progression_summary`; an unloaded hold is invisible to both.
+- **Selection outranks theory when the log disagrees.** Before prescribing a core movement,
+  check `progression_summary` and the logs: if a movement has been prescribed before and
+  never performed, **do not prescribe it again in the same slot** — change the movement or
+  change its position. A prescription with a 0% completion rate delivers 0 sets.
+- **Pattern: at least one spinal-flexion movement per session.** Rectus abdominis is the
+  hypertrophy target and flexion is how it is loaded through a range of motion. Anti-extension
+  and anti-rotation are optional and never substitute for the flexion set.
+- **Progression: double progression on load**, exactly as for any isolation lift.
+- **Never mark a core set optional.** No "(if you can make it)" on a core bullet.
+- Body-fat and visibility framing lives in §24.6 — do not put it in a programming rule.
 
 **Equipment increment grid (REQUIRED).** Loads are prescribed on the equipment's increment grid. Never suggest off-grid weights.
 - **Cables:** 5kg steps (5, 10, 15, 20, 25, …). Round to the nearest available plate.
@@ -807,7 +851,11 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 - **Microloading:** for barbells only, and only when the user has explicitly logged microplates before.
 Re-read this block before every load suggestion in the workout tables.
 
-**Exercise ordering:** Compounds first, then isolation, then accessories.
+**Exercise ordering:** Compounds first, then isolation, then accessories. **Core belongs
+inside the isolation block, supersetted with an unrelated isolation movement — never before a
+compound, and never the final bullet of the workout** (§24.2). When the core movement shares
+equipment with the isolation block (a cable crunch in a session that already has cable work),
+place it *within* that equipment group per the grouping rule below.
 
 **Equipment grouping:** Applies within the isolation/accessory block only. Batch cable work together, bench work together, etc. Never reorder compounds or move an isolation before a compound for equipment convenience.
 
@@ -875,16 +923,18 @@ Recovery: sauna ___ / cold ___ / rlt ___
 - Jumping Jacks: 50
 - Arm Circles: 20
 - Dumbbell Flat Bench Press: 28kgx5 (warmup) /// 40kgx3 (warmup) /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10
-- Shoulder Press Machine: 45kgx8-10 /// 45kgx8-10 /// 45kgx8-10
+- Shoulder Press Machine: 45kgx8-10 /// 45kgx8-10 /// 45kgx8-10 /// 45kgx8-10
   — leave 1-2 in tank
-- Dumbbell Fly: 18kgx10 /// 18kgx10 /// 18kgx10
-- Cable Lateral Raise: 15kgx10 /// 15kgx10 /// 15kgx10
-- Cable Overhead Tricep Extension: 35kgx8-10 /// 35kgx8-10 /// 35kgx8-10
-- Kneeling Cable Crunch: 20kgx15 /// 20kgx15 /// 20kgx15 (if you can make it)
-- Dead Bug: 12 per side /// 12 per side
+- Dumbbell Fly: 18kgx10 /// 18kgx10 /// 18kgx10 /// 18kgx10
+- Kneeling Cable Crunch: 20kgx12-15 /// 20kgx12-15
+- Cable Lateral Raise: 15kgx10 /// 15kgx10 /// 15kgx10 /// 15kgx10
+  — superset with the cable crunch above
+- Cable Overhead Tricep Extension: 35kgx8-10 /// 35kgx8-10 /// 35kgx8-10 /// 35kgx8-10
 ```
 
-Two warm-up prep movements + two ramp sets on the first heavy compound, one sub-bullet, sparse per-set parentheticals, the rest clean lines. That's the target density.
+Two warm-up prep movements + two ramp sets on the first heavy compound, two sub-bullets (the soft cap), sparse per-set parentheticals, the rest clean lines. That's the target density.
+
+**Count the sets in that example: 22 working sets** (4 bench + 4 shoulder press + 4 fly + 2 core + 4 lateral raise + 4 triceps; the two ramp sets and the two prep movements don't count). That is not decoration — it lands exactly on a 22-set budget, and the example is written to be copied. An example that models 18 sets teaches an 18-set session. Two of those 22 sets are core, and note where they sit: inside the cable block, supersetted with an unrelated isolation movement, never the last line.
 
 **Ordering & equipment** (unchanged from before): compounds → isolation → accessories; warmup at the top; group cable/bench/machine work within the isolation/accessory block. The increment grid still applies (cables 5kg, dumbbells 1-2kg pair, plate machines 5kg).
 
@@ -943,7 +993,7 @@ Source-honesty rules still apply to those coach's-read lines:
 | Ignoring sheet structure | Reading template sheets or non-`YYYY.MM` sheets | Only read sheets matching the regex. Ignore `Exercises Database` and any `New Month` / `How To Use` templates. |
 | Impossible cable weights | Suggesting 12kg or 17kg | Cable increments in 5kg steps. Round to the nearest plate. |
 | Scattering equipment | Cable exercises in positions 2, 5, 9 of the session | Batch by equipment within the isolation/accessory block. Never break compound order. |
-| Neglecting core | Zero or one core exercise across a full planned week | 1-2 per session, 3-4 sessions/week. Vary patterns. |
+| Neglecting core | Core absent, or present only as the last bullet, or prescribed as a movement the log shows is never performed | 2 working sets every strength session, inside the isolation block, supersetted, loaded. Never last. Never optional. See §24. |
 | Running the same exercises every session | Weekly volume looks fine but regions of each muscle go chronically under-stimulated (§17) | The week's selection must cover different regions per target muscle. Use the `exercises-database.md` tags to pick the second variant. |
 | Over-rotating variants every block | No single exercise repeats often enough to read a progression trend | Keep at least one anchor per muscle stable. Rotate 1-2 secondary variants per mesocycle, not the main lifts. |
 | Ignoring the deload window | 7+ weeks of continuous blocks because no one flagged it | Compute weeks-since-last-deload from `deloads[-1]`. >6 weeks → block IS a deload. 4-6 weeks → flag in report. |

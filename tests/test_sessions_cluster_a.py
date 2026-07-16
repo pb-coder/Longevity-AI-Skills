@@ -199,7 +199,7 @@ class LoadedCarryClassificationTests(unittest.TestCase):
 
     def test_farmer_walk_loaded_carry_counts_as_working_set(self) -> None:
         # A5 x A18 interaction: a loaded carry (reps 0, duration>0, kg>0)
-        # is a working set (it's load-bearing core/grip work), NOT cardio.
+        # is a working set (it's load-bearing grip/trap work), NOT cardio.
         farmer = {"exercise": "Farmer Walk", "kg": 40, "reps": 0,
                   "duration_min": 1.0, "distance_km": 0.04,
                   "avg_hr": None, "notes": None, "source": "manual"}

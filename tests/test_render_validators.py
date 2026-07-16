@@ -11,6 +11,7 @@ from workout_coach.lib.render_validators import (
     count_working_sets_per_workout,
     validate_coach_reads,
     validate_workout_md,
+    workout_core_warnings,
     workout_set_budget_warnings,
 )
 
@@ -33,6 +34,65 @@ _PLAN_SHORT = """# Workout plan — 2026-06-14
 - Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
 - Shoulder Press Machine: 60kgx8 /// 60kgx8
 - Cable Overhead Tricep Extension: 19kgx8 /// 19kgx8
+"""
+
+_PLAN_CORE_COMPLIANT = """# Workout plan — 2026-06-14
+
+## Workout 1: UPPER PUSH + CORE
+- Jumping Jacks: 50
+- Arm Circles: 20
+- Dumbbell Flat Bench Press: 28kgx5 (warmup) /// 40kgx3 (warmup) /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10
+- Shoulder Press Machine: 45kgx8-10 /// 45kgx8-10 /// 45kgx8-10
+  — leave 1-2 in tank
+- Dumbbell Fly: 18kgx10 /// 18kgx10 /// 18kgx10
+- Kneeling Cable Crunch: 20kgx12-15 /// 20kgx12-15
+- Cable Lateral Raise: 15kgx10 /// 15kgx10 /// 15kgx10
+  — superset with the cable crunch above
+- Cable Overhead Tricep Extension: 35kgx8-10 /// 35kgx8-10 /// 35kgx8-10
+"""
+
+_PLAN_NO_CORE = """# Workout plan — 2026-06-14
+
+## Workout 1: LEGS
+- Jumping Jacks: 50
+- Barbell Back Squat: 90kgx8 /// 90kgx8 /// 90kgx8
+- Leg Press: 120kgx10 /// 120kgx10
+"""
+
+_PLAN_CORE_LAST = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Cable Lateral Raise: 14kgx10 /// 14kgx10
+- Kneeling Cable Crunch: 20kgx12 /// 20kgx12
+"""
+
+_PLAN_CORE_OVER_ALLOCATED = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Kneeling Cable Crunch: 20kgx12 /// 20kgx12 /// 20kgx12 /// 20kgx12
+- Cable Lateral Raise: 14kgx10 /// 14kgx10
+"""
+
+_PLAN_CORE_OPTIONAL_QUALIFIER = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Kneeling Cable Crunch: 20kgx12 /// 20kgx12 (if you can make it)
+- Cable Lateral Raise: 14kgx10 /// 14kgx10
+"""
+
+_PLAN_CORE_NO_FLEXION = """# Workout plan — 2026-06-14
+
+## Workout 1: PULL
+- Jumping Jacks: 50
+- Cable Lat Pulldown: 65kgx8 /// 65kgx8 /// 65kgx8
+- Cable Pallof Press: 15kgx10 /// 15kgx10
+- Cable Face Pull: 20kgx15 /// 20kgx15
 """
 
 
@@ -187,6 +247,52 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertTrue(any("3 sub-bullets" in w for w in warnings))
         self.assertTrue(any("comparative-history" in w for w in warnings))
+
+    def test_core_warnings_silent_on_compliant_workout(self) -> None:
+        # The SKILL.md worked example (fixed by Task D): core is
+        # supersetted inside the isolation block, 2 sets, a flexion
+        # movement, not the final bullet, no optional qualifier.
+        self.assertEqual(workout_core_warnings(_PLAN_CORE_COMPLIANT), [])
+
+    def test_core_warnings_flags_zero_core_bullets(self) -> None:
+        warns = workout_core_warnings(_PLAN_NO_CORE)
+        self.assertTrue(any(
+            "Workout 1: LEGS" in w and "no core exercise" in w for w in warns))
+
+    def test_core_warnings_flags_core_as_last_bullet(self) -> None:
+        # The known-bad shape: C-04 measured this in 24/24 real plans.
+        warns = workout_core_warnings(_PLAN_CORE_LAST)
+        self.assertTrue(any(
+            "core is the last bullet" in w and "isolation block" in w
+            for w in warns))
+
+    def test_core_warnings_flags_over_allocated_sets(self) -> None:
+        warns = workout_core_warnings(_PLAN_CORE_OVER_ALLOCATED)
+        self.assertTrue(any(
+            "4 core sets" in w and "over-allocated" in w for w in warns))
+        # Core isn't the last bullet here, so warning (2) must not fire.
+        self.assertFalse(any("last bullet" in w for w in warns))
+
+    def test_core_warnings_flags_optional_qualifier(self) -> None:
+        warns = workout_core_warnings(_PLAN_CORE_OPTIONAL_QUALIFIER)
+        self.assertTrue(any(
+            "Kneeling Cable Crunch" in w and "optional" in w for w in warns))
+
+    def test_core_warnings_flags_zero_flexion_movement(self) -> None:
+        # Cable Pallof Press is CORE > Anti-Rotation, not Flexion.
+        warns = workout_core_warnings(_PLAN_CORE_NO_FLEXION)
+        self.assertTrue(any(
+            "no spinal-flexion core movement" in w for w in warns))
+
+    def test_core_warnings_does_not_hardcode_exercise_names(self) -> None:
+        # Regression guard for the audit's hard constraint: the core
+        # movement set and the flexion subset must come from the catalog
+        # parser, never a literal list living in this module.
+        import inspect
+        src = inspect.getsource(render_validators)
+        for catalog_name in ("Kneeling Cable Crunch", "Leg Raise",
+                              "Cable Pallof Press", "Plank", "Dead Bug"):
+            self.assertNotIn(catalog_name, src)
 
     def test_workout_md_builds_exercise_catalog_once_per_validation(self) -> None:
         text = """# Workout plan — 2026-05-29

@@ -8,18 +8,15 @@ Three groups:
 - **Source capabilities**: per-data-source feature map
   (``SOURCE_CAPABILITIES``) plus the ``DEFAULT_DATA_SOURCE`` fallback for
   legacy trackers without a Profile sheet.
-- **Sheet conventions**: ``MONTHLY_RE`` (the YYYY.MM sheet-name regex),
-  ``DELOAD_MARKER`` (case-insensitive substring on TOTAL-row Notes),
-  ``EMPTY_STREAK_STOP`` (max consecutive blank rows scanned), and
-  ``TOTAL_LABEL`` (the canonical TOTAL-row exercise sentinel).
+- **Sheet conventions**: ``DELOAD_MARKER`` (case-insensitive substring on
+  TOTAL-row Notes) and ``TOTAL_LABEL`` (the canonical TOTAL-row exercise
+  sentinel).
 - **Volume + muscle taxonomy**: ``VOLUME_LANDMARKS`` (per-muscle MV/MEV/
   MAV/MRV bands), ``MUSCLE_ALIASES`` (database-token → snake_case key),
   ``SECTION_PRIMARY`` (## SECTION header → primary muscle), and
   ``SUBSECTION_PRIMARY_HINTS`` (subsection-substring overrides).
 """
 from __future__ import annotations
-
-import re
 
 # Per-source capability map. The coach reads this to decide which sections of
 # the report to write. ``xml`` is Apple's native zipped export; HealthAutoExport
@@ -89,19 +86,20 @@ SOURCE_CAPABILITIES = {
 # ``import_health_auto_export.py``.
 DEFAULT_DATA_SOURCE = "xml"
 
-MONTHLY_RE = re.compile(r"^\d{4}\.\d{2}$")
 # Deload marker now lives on the TOTAL row's Notes column (col 9). The
 # marker text is canonical "Deload Workout"; matching is case-insensitive.
 DELOAD_MARKER = "deload workout"
-EMPTY_STREAK_STOP = 10
 TOTAL_LABEL = "TOTAL"
 
 # Per-muscle weekly volume landmarks (hard sets). Source: current
 # (2024-26) Renaissance Periodization muscle-by-muscle guides + Mike
-# Israetel's published per-muscle videos, cross-referenced against
-# Schoenfeld 2017 (J Sports Sci, dose-response meta-analysis),
-# Baz-Valle 2022 (J Human Kinetics systematic review), and
-# Pelland/Helms/Schoenfeld 2025 meta-regression (Sports Medicine).
+# Israetel's published per-muscle videos, cross-referenced — where the
+# source muscle was actually measured — against Schoenfeld 2017 (J Sports
+# Sci, dose-response meta-analysis), Baz-Valle 2022 (J Human Kinetics
+# systematic review), and Pelland/Helms/Schoenfeld 2025 meta-regression
+# (Sports Medicine). Verified by full-text grep: none of the three
+# contains a single abdominal outcome, so this cross-reference does NOT
+# cover `core` — see the `core`-specific provenance comment below.
 #
 # Treat these as **practitioner heuristics**, not RCT-validated
 # thresholds. The shape of the volume-response curve is well supported
@@ -121,9 +119,10 @@ TOTAL_LABEL = "TOTAL"
 # guidance: chest MV, quads MRV (non-priority), hamstrings/glutes
 # MV+MEV, front delts (RP now recommends ~no direct work for most
 # lifters — pressing covers it), calves MRV; traps MAV/MRV revised up.
-# external_rotators / adductors have no published RP landmark; values
-# are reasonable practitioner extrapolations and should be treated
-# as such.
+# external_rotators / adductors / neck have no published RP landmark; values
+# are reasonable practitioner extrapolations and should be treated as such.
+# core has a published RP landmark but NO intervention evidence of any kind —
+# the meta-analyses cited above contain no abdominal outcomes. See §24.1.
 VOLUME_LANDMARKS = {
     "chest":        {"mv": 3,  "mev": 8,  "mav": 16, "mrv": 22},
     "back":         {"mv": 6,  "mev": 10, "mav": 18, "mrv": 25},
@@ -137,8 +136,31 @@ VOLUME_LANDMARKS = {
     "triceps":      {"mv": 4,  "mev": 6,  "mav": 12, "mrv": 16},
     "calves":       {"mv": 6,  "mev": 8,  "mav": 14, "mrv": 18},
     "forearms":     {"mv": 2,  "mev": 4,  "mav": 8,  "mrv": 12},
-    "abs":          {"mv": 0,  "mev": 4,  "mav": 16, "mrv": 25},
-    "core":         {"mv": 0,  "mev": 4,  "mav": 16, "mrv": 25},
+    # Core = the abdominal wall (rectus abdominis + obliques). NOT the spinal
+    # erectors, which have their own landmark below and carry the compound
+    # contribution (squat/deadlift abdominal EMG is null — see §24.5).
+    # Values are RP's PUBLISHED STANDARD abs table (rpstrength.com, 2024-01-03):
+    # MV 0-4, MEV 0-4, MAV 4-12, MRV 12-20. Prior values (mav 16, mrv 25) were
+    # taken from RP's "Primary Priority" SPECIALIZATION columns (MAV*P 16-24,
+    # MRV*P 24-32+) — i.e. volumes that assume every other muscle is being
+    # de-prioritised. That is wrong as a default.
+    # HONESTY: no published core landmark is derived from intervention data. No
+    # study has manipulated weekly set volume for abdominal hypertrophy, and
+    # Schoenfeld 2017 / Baz-Valle 2022 / Pelland 2025 contain ZERO abdominal
+    # outcomes (verified by full-text grep) — they do NOT source this row.
+    # RP self-describes its landmarks as "averages based on our experience...
+    # not dogmatic scriptures". Treat as practitioner heuristic; see §24.1.
+    #   MV  = 0  — RP standard 0-4, bottom. Supported indirectly by Belavý
+    #              2017 + PMID 21472438. Evidence tier: Moderate, conditional
+    #              on doing compound work.
+    #   MEV = 4  — RP standard 0-4; 4 is the top — conservative, won't
+    #              under-prescribe. Evidence tier: Thin — no ab RCT supports
+    #              any set count.
+    #   MAV = 12 — RP standard MAV is 4-12; also the floor of Baz-Valle's
+    #              12-20 limb optimum — the most defensible convergence
+    #              point. Evidence tier: Thin.
+    #   MRV = 20 — RP standard MRV is 12-20. Evidence tier: Thin.
+    "core":         {"mv": 0,  "mev": 4,  "mav": 12, "mrv": 20},
     "erectors":     {"mv": 2,  "mev": 4,  "mav": 10, "mrv": 16},
     "traps":        {"mv": 2,  "mev": 4,  "mav": 15, "mrv": 22},
     # No published RP landmark — practitioner extrapolation:
@@ -156,7 +178,7 @@ MUSCLE_ALIASES = {
     "quads": "quads", "hamstrings": "hamstrings",
     "glutes": "glutes", "adductors": "adductors",
     "calves": "calves", "forearms": "forearms",
-    "abs": "abs", "core": "core",
+    "abs": "core", "core": "core",   # abs folded into core (no separate landmark)
     "erectors": "erectors", "traps": "traps",
     "neck": "neck",
     "front delt": "front_delts", "front delts": "front_delts",

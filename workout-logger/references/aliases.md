@@ -9,11 +9,13 @@
 | Lying Leg Curl | Leg Curl (Lying) | — |
 | Scapular Pull ups, Scapular Pullups | Scapular Pull-Up | — |
 | Triceps Pushdown, Tricep Pushdown | Cable Tricep Pushdown | — |
-| Hanging Leg Raise | Leg Raise | `hanging` |
+| Hanging Leg Raise, Hanging leg raises, Hanging knee raise | Hanging Leg Raise | — |
 | Outdoor Run | Outdoor Run | — |
 | Incline Chest Press Machine | Chest Press Machine | `incline` |
 | Leg Curl (no modifier) | Leg Curl (Seated) | — (ask if ambiguous; default seated) |
-| Crunch (alone), Stomach crunches, Stomach Crunch, Stomach Press, Stomach Press Vertical, Stomach Press Vertical Machine | Ab Crunch Machine | flag if user clearly meant a different machine |
+| Stomach crunches, Stomach Crunch | Ab Crunch Machine | the selectorized seated crunch machine |
+| Stomach Press, Stomach Press Vertical, Stomach Press Vertical Machine | Stomach Press Machine | a DIFFERENT machine from Ab Crunch Machine — do not merge the two; their load scales differ by ~3x and merging them destroys both progression series |
+| Crunch (alone) | Crunch | AMBIGUOUS — default shown is the bodyweight movement. Resolve to `Ab Crunch Machine` ONLY when a load is given; a load-free "crunch" is bodyweight. Ask if unclear. Renaming every bare "crunch" to the machine is what filed 0 kg bodyweight sets as machine rows |
 | Hike, Hiking | Hike | — |
 | Swim, Swimming | Swim | — |
 | Walk, Walking | Walk | — |
@@ -28,7 +30,6 @@
 | row machine without chest support | Seated Row Machine | — |
 | Pulley | Cable Seated Row | — |
 | Rear delt fly dumbbell | Dumbbell Rear Delt Fly | — |
-| Hanging leg raises | Leg Raise | — |
 | Leg raises | Leg Raise | — |
 | Jumping Jack | Jumping Jacks | — |
 | Prone Leg Curl | Leg Curl (Lying) | — |

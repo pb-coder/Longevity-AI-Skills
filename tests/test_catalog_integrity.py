@@ -136,7 +136,7 @@ class CatalogIntegrityTests(unittest.TestCase):
         today = date(2026, 1, 7)  # Wednesday of a clean week
         rows = [
             {
-                "date": date(2026, 1, 6),
+                "date": "2026-01-06",
                 "exercise": "Dumbbell Pullover",
                 "sets": 3,
                 "reps": 10,
@@ -148,11 +148,73 @@ class CatalogIntegrityTests(unittest.TestCase):
         db = load_exercises_db(_DB_PATH)
         unknown_out: set[str] = set()
         result = weekly_volume_per_muscle(rows, db, today, window_days=28, unknown_out=unknown_out)
+        current = result["current"]
         self.assertNotIn(
             "lats",
-            result,
+            current,
             "weekly_volume_per_muscle returned a 'lats' key — phantom landmark not removed",
         )
+        self.assertIn(
+            "back",
+            current,
+            "Dumbbell Pullover's '+lats' must land on 'back' — an empty result "
+            "means the fixture row was dropped and this test proves nothing",
+        )
+
+    # ── C-17: abs folded into core ──────────────────────────────────────────
+
+    def test_abs_is_not_a_volume_landmark(self) -> None:
+        """C-17: 'abs' must not be a standalone VOLUME_LANDMARKS key (folded into core)."""
+        self.assertNotIn(
+            "abs",
+            VOLUME_LANDMARKS,
+            "'abs' is a phantom landmark — it should be folded into 'core'",
+        )
+
+    def test_abs_token_canonicalizes_to_core(self) -> None:
+        """C-17: a future '+abs' tag must route to 'core', never split volume."""
+        self.assertEqual(_canon_muscle("abs"), "core")
+
+    def test_weekly_volume_has_no_abs_key(self) -> None:
+        """C-17: weekly_volume_per_muscle output must never contain 'abs' as a key."""
+        # Import here to avoid pulling all of strength module at module level
+        from workout_coach.lib.strength import weekly_volume_per_muscle
+        from datetime import date
+
+        # Build a synthetic set of rows that exercises the former 'abs' token
+        # via an Ab Crunch Machine entry. NOTE: "date" must be an ISO string
+        # ("YYYY-MM-DD"), not a `date` object — `_parse_iso_date` calls
+        # `datetime.strptime(s, "%Y-%m-%d")`, which raises TypeError (caught,
+        # returns None) on a `date` object, silently dropping the row and
+        # making every assertion here vacuously true. (mirrors the row shape
+        # used by the real assertions in test_strength.py, not the `date()`
+        # object shape used by the older `test_weekly_volume_has_no_lats_key`
+        # above, which has this same latent bug — out of scope to fix here.)
+        today = date(2026, 1, 7)  # Wednesday of a clean week
+        rows = [
+            {
+                "date": "2026-01-06",
+                "exercise": "Ab Crunch Machine",
+                "sets": 3,
+                "reps": 10,
+                "weight": 30.0,
+                "rpe": 7,
+                "notes": "",
+            },
+        ]
+        db = load_exercises_db(_DB_PATH)
+        unknown_out: set[str] = set()
+        result = weekly_volume_per_muscle(rows, db, today, window_days=28, unknown_out=unknown_out)
+        # weekly_volume_per_muscle returns {"window_days", "current", "landmarks"},
+        # not a flat {muscle: count} dict — the per-muscle counts live under
+        # "current" (and any tracked landmark under "landmarks"). Assert
+        # against those, not against the wrapper dict itself.
+        self.assertNotIn(
+            "abs",
+            result["current"],
+            "weekly_volume_per_muscle returned an 'abs' key — phantom landmark not removed",
+        )
+        self.assertIn("core", result["current"])
 
     # ── D8 specific ─────────────────────────────────────────────────────────
 
@@ -186,6 +248,17 @@ class CatalogIntegrityTests(unittest.TestCase):
             "glutes",
             f"_primary_from_note('primary: posterior chain') returned {result!r}, expected 'glutes'",
         )
+
+    def test_farmer_walk_does_not_grant_core(self) -> None:
+        """C-22: a two-handed carry is not an ab exercise — RA sits at 3.9% MVC
+        (McGill, Marshall & Andersen 2013, Ergonomics 56(2):293-302). Guard against
+        a well-meaning '+core' being added back."""
+        db = load_exercises_db(_DB_PATH)
+        entry = db.get("dumbbell farmer walk")
+        self.assertIsNotNone(entry)
+        self.assertNotIn("core", entry["synergists"])
+        self.assertIsNone(entry["primary"])
+        self.assertIn("traps", entry["synergists"])
 
 
 if __name__ == "__main__":

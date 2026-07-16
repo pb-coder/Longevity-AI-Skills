@@ -38,6 +38,8 @@
 | Shoulder Press | Shoulder Press Machine | — |
 | Adductor machine | Hip Adductor Machine | — |
 | Cable bicep | Cable Bicep Curl | — |
+| romanian deadlifts | Romanian Deadlift | — |
+| seated leg curls | Leg Curl (Seated) | — |
 
 ## Modifier Handling
 

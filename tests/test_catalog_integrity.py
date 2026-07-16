@@ -175,46 +175,33 @@ class CatalogIntegrityTests(unittest.TestCase):
         """C-17: a future '+abs' tag must route to 'core', never split volume."""
         self.assertEqual(_canon_muscle("abs"), "core")
 
-    def test_weekly_volume_has_no_abs_key(self) -> None:
-        """C-17: weekly_volume_per_muscle output must never contain 'abs' as a key."""
-        # Import here to avoid pulling all of strength module at module level
-        from workout_coach.lib.strength import weekly_volume_per_muscle
-        from datetime import date
+    def test_no_catalog_entry_resolves_to_abs(self) -> None:
+        """C-17: the loaded catalog must emit zero 'abs' muscle tokens — every
+        abdominal movement resolves to 'core'.
 
-        # Build a synthetic set of rows that exercises the former 'abs' token
-        # via an Ab Crunch Machine entry. NOTE: "date" must be an ISO string
-        # ("YYYY-MM-DD"), not a `date` object — `_parse_iso_date` calls
-        # `datetime.strptime(s, "%Y-%m-%d")`, which raises TypeError (caught,
-        # returns None) on a `date` object, silently dropping the row and
-        # making every assertion here vacuously true. (mirrors the row shape
-        # used by the real assertions in test_strength.py, not the `date()`
-        # object shape used by the older `test_weekly_volume_has_no_lats_key`
-        # above, which has this same latent bug — out of scope to fix here.)
-        today = date(2026, 1, 7)  # Wednesday of a clean week
-        rows = [
-            {
-                "date": "2026-01-06",
-                "exercise": "Ab Crunch Machine",
-                "sets": 3,
-                "reps": 10,
-                "weight": 30.0,
-                "rpe": 7,
-                "notes": "",
-            },
-        ]
+        Why this is the right layer, not weekly_volume_per_muscle: today no
+        catalog entry carries a raw ``+abs`` tag, and ``Ab Crunch Machine``
+        reaches ``core`` via ``SECTION_PRIMARY['CORE']``, NOT via the
+        ``abs``→``core`` alias. So an end-to-end volume fixture can never
+        exercise the alias — it would pass no matter what the alias said,
+        which is exactly the vacuity this test was rewritten to avoid. The
+        alias is forward-defensive (it only bites the day someone adds a
+        ``+abs`` tag). So we assert the invariant directly on the loaded
+        catalog, and separately prove the defensive path resolves.
+        """
         db = load_exercises_db(_DB_PATH)
-        unknown_out: set[str] = set()
-        result = weekly_volume_per_muscle(rows, db, today, window_days=28, unknown_out=unknown_out)
-        # weekly_volume_per_muscle returns {"window_days", "current", "landmarks"},
-        # not a flat {muscle: count} dict — the per-muscle counts live under
-        # "current" (and any tracked landmark under "landmarks"). Assert
-        # against those, not against the wrapper dict itself.
-        self.assertNotIn(
-            "abs",
-            result["current"],
-            "weekly_volume_per_muscle returned an 'abs' key — phantom landmark not removed",
-        )
-        self.assertIn("core", result["current"])
+        self.assertTrue(db, "catalog failed to load")
+        for name, meta in db.items():
+            self.assertNotEqual(
+                meta.get("primary"), "abs",
+                f"{name!r} resolves to a phantom 'abs' primary — must be 'core'",
+            )
+            self.assertNotIn(
+                "abs", meta.get("synergists", []),
+                f"{name!r} carries a phantom '+abs' synergist — must resolve to 'core'",
+            )
+        # The forward-defensive alias itself (`+abs` tag → 'core') is proven
+        # directly by test_abs_token_canonicalizes_to_core above; not repeated.
 
     # ── D8 specific ─────────────────────────────────────────────────────────
 

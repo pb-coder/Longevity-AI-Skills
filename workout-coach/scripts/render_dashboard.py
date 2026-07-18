@@ -39,6 +39,7 @@ from workout_coach.lib.render_helpers import esc
 from workout_coach.lib.render_validators import (
     validate_coach_reads,
     validate_workout_md,
+    workout_arm_dose_warnings,
     workout_core_warnings,
     workout_set_budget_warnings,
 )
@@ -318,6 +319,9 @@ def main():
 
         for w in workout_core_warnings(workout_md):
             print(f"workout_md core warning: {w}", file=sys.stderr)
+
+        for w in workout_arm_dose_warnings(workout_md):
+            print(f"workout_md arm dose warning: {w}", file=sys.stderr)
 
     out = render(j, coach, workout_md, args.person)
     out_path = Path(args.out)

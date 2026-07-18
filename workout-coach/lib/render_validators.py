@@ -535,6 +535,132 @@ def workout_core_warnings(text: str, min_sets: int = 1,
     return warnings
 
 
+# Direct-arm dose floor. Biceps and triceps were chronically landing
+# below MEV in generated plans because the volume model credits
+# ~0.5 sets per pull/press compound as synergist work (see the
+# database's BICEPS/TRICEPS "Compound Contribution" notes), and that
+# synergist credit alone satisfied the plan's reported weekly volume
+# without a single isolation curl or extension ever appearing. Direct
+# (primary-muscle) isolation sets are the only thing that counts
+# against this floor — require >=6 direct sets/week each.
+DIRECT_ARM_MIN_SETS_PER_WEEK = 6
+
+
+@lru_cache(maxsize=1)
+def _biceps_triceps_exercise_names() -> "tuple[set[str], set[str]]":
+    """Return ``(biceps exercise names, triceps exercise names)``, both
+    lowercased canonical names read from the exercise catalog.
+
+    Sourced the same way `_core_and_flexion_exercise_names` sources core
+    membership: `load_exercises_db` — the coach's own catalog parser
+    (`workout_coach.lib.extract`) — filtered to entries whose resolved
+    ``primary`` muscle is ``"biceps"`` / ``"triceps"``.
+
+    Deliberately primary-only: a pull compound's ~0.5 biceps synergist
+    credit (and a press compound's ~0.5 triceps synergist credit — see
+    the database's BICEPS/TRICEPS "Compound Contribution" notes) never
+    sets ``primary``, so those compounds never enter these sets. That
+    exclusion is the whole point of `workout_arm_dose_warnings`: it
+    exists to catch weeks where synergist-only credit satisfied the
+    volume model, so it must not count the very credit it is checking
+    against.
+    """
+    from .extract import load_exercises_db
+    from shared.exercises_database import DATABASE_PATH
+
+    db = load_exercises_db(DATABASE_PATH)
+    biceps_names = {name for name, meta in db.items()
+                     if meta.get("primary") == "biceps"}
+    triceps_names = {name for name, meta in db.items()
+                      if meta.get("primary") == "triceps"}
+    return biceps_names, triceps_names
+
+
+def workout_arm_dose_warnings(text: str, min_biceps: int | None = None,
+                              min_triceps: int | None = None) -> "list[str]":
+    """Warn when weekly direct-arm volume drifts from the MEV floor, or
+    when a workout's terminal bullet is a direct-arm exercise. Mirrors
+    `workout_core_warnings` in shape: a single pass over
+    `_iter_workout_exercise_bullets(text)` turning a lean parse into
+    short, addressed warning strings — with one key difference: the
+    dose check sums working sets across the WHOLE plan (every
+    `## Workout` block combined = the week), not per workout, because
+    the floor is a weekly MEV target, not a per-session one.
+
+    `min_biceps` / `min_triceps` default to
+    `DIRECT_ARM_MIN_SETS_PER_WEEK` when None.
+
+    Warns:
+      1. weekly direct biceps working sets (summed across every
+         workout) fall below `min_biceps`;
+      2. weekly direct triceps working sets fall below `min_triceps`;
+      3. per `## Workout` block, the LAST bullet is a biceps or triceps
+         bullet (same rationale as core's last-bullet rule: arms belong
+         inside the isolation block, never the terminal slot).
+
+    Only PRIMARY-muscle bullets count toward (1)/(2) — synergist credit
+    (the ~0.5 sets a pull/press compound contributes to biceps/triceps)
+    is intentionally excluded; see `_biceps_triceps_exercise_names`.
+    Pressing/pulling synergy must not substitute for direct arm work.
+
+    If the catalog resolves no biceps AND no triceps names (e.g. the
+    BICEPS/TRICEPS sections were renamed out from under
+    `SECTION_PRIMARY`), this fails open and returns no warnings rather
+    than flagging every workout as arm-deficient — a validator that
+    cannot identify arm exercises must not pretend no arm work exists.
+    Each check additionally fails open on its own muscle: the biceps
+    dose check never fires when `biceps_names` is empty, independent of
+    whether `triceps_names` resolved, and likewise for triceps and the
+    per-workout last-bullet checks.
+    """
+    warnings: "list[str]" = []
+    biceps_names, triceps_names = _biceps_triceps_exercise_names()
+    if not biceps_names and not triceps_names:
+        return warnings
+
+    if min_biceps is None:
+        min_biceps = DIRECT_ARM_MIN_SETS_PER_WEEK
+    if min_triceps is None:
+        min_triceps = DIRECT_ARM_MIN_SETS_PER_WEEK
+
+    total_biceps_sets = 0
+    total_triceps_sets = 0
+
+    for title, bullets in _iter_workout_exercise_bullets(text).items():
+        if not bullets:
+            continue
+
+        for b in bullets:
+            name = b["name"].lower()
+            if name in biceps_names:
+                total_biceps_sets += b["sets"]
+            elif name in triceps_names:
+                total_triceps_sets += b["sets"]
+
+        last_name = bullets[-1]["name"].lower()
+        if last_name in biceps_names:
+            warnings.append(
+                f"{title}: biceps is the last bullet — arms must sit "
+                f"inside the isolation block, not the terminal slot")
+        elif last_name in triceps_names:
+            warnings.append(
+                f"{title}: triceps is the last bullet — arms must sit "
+                f"inside the isolation block, not the terminal slot")
+
+    if biceps_names and total_biceps_sets < min_biceps:
+        warnings.append(
+            f"Week: {total_biceps_sets} direct biceps sets across the "
+            f"plan — floor is {min_biceps} (synergist credit does not "
+            f"count; add direct curl volume)")
+    if triceps_names and total_triceps_sets < min_triceps:
+        warnings.append(
+            f"Week: {total_triceps_sets} direct triceps sets across the "
+            f"plan — floor is {min_triceps} (synergist credit does not "
+            f"count; add direct extension volume)")
+
+    return warnings
+
+
 # Wrap KNOWN_TERMS with a tooltip span when they appear in any coach
 # string. Whole-word, case-sensitive (so "Cold" doesn't match "CTL").
 # Each term wraps at most once per string so we don't double-wrap when

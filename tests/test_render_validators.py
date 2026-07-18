@@ -11,6 +11,7 @@ from workout_coach.lib.render_validators import (
     count_working_sets_per_workout,
     validate_coach_reads,
     validate_workout_md,
+    workout_arm_dose_warnings,
     workout_core_warnings,
     workout_set_budget_warnings,
 )
@@ -93,6 +94,39 @@ _PLAN_CORE_NO_FLEXION = """# Workout plan — 2026-06-14
 - Cable Lat Pulldown: 65kgx8 /// 65kgx8 /// 65kgx8
 - Cable Pallof Press: 15kgx10 /// 15kgx10
 - Cable Face Pull: 20kgx15 /// 20kgx15
+"""
+
+_PLAN_ARM_NONE = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Shoulder Press Machine: 60kgx8 /// 60kgx8
+"""
+
+_PLAN_ARM_DOSE_MET = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Cable Overhead Tricep Extension: 20kgx10 /// 20kgx10 /// 20kgx10
+- Cable Tricep Pushdown: 25kgx10 /// 25kgx10 /// 25kgx10
+- Shoulder Press Machine: 60kgx8 /// 60kgx8
+
+## Workout 2: PULL
+- Cable Lat Pulldown: 65kgx8 /// 65kgx8 /// 65kgx8
+- Incline Dumbbell Curl: 14kgx10 /// 14kgx10 /// 14kgx10
+- Bayesian Cable Curl: 12kgx10 /// 12kgx10 /// 12kgx10
+- Cable Face Pull: 20kgx15 /// 20kgx15
+"""
+
+_PLAN_ARM_CURL_LAST = """# Workout plan — 2026-06-14
+
+## Workout 1: PULL
+- Jumping Jacks: 50
+- Cable Lat Pulldown: 65kgx8 /// 65kgx8 /// 65kgx8
+- Cable Face Pull: 20kgx15 /// 20kgx15
+- Incline Dumbbell Curl: 14kgx10 /// 14kgx10 /// 14kgx10
 """
 
 
@@ -292,6 +326,47 @@ class RenderValidatorTests(unittest.TestCase):
         src = inspect.getsource(render_validators)
         for catalog_name in ("Kneeling Cable Crunch", "Leg Raise",
                               "Cable Pallof Press", "Plank", "Dead Bug"):
+            self.assertNotIn(catalog_name, src)
+
+    def test_arm_dose_warnings_flags_zero_direct_sets_for_both_muscles(self) -> None:
+        warns = workout_arm_dose_warnings(_PLAN_ARM_NONE)
+        self.assertTrue(any(
+            "0 direct biceps sets" in w and "floor is 6" in w for w in warns))
+        self.assertTrue(any(
+            "0 direct triceps sets" in w and "floor is 6" in w for w in warns))
+
+    def test_arm_dose_warnings_silent_when_weekly_floor_met(self) -> None:
+        # 6 direct biceps sets (Incline Dumbbell Curl + Bayesian Cable
+        # Curl) and 6 direct triceps sets (Cable Overhead Tricep
+        # Extension + Cable Tricep Pushdown) summed ACROSS both
+        # workouts meets the floor exactly; no dose warning fires. The
+        # compounds (bench, lat pulldown) contribute synergist credit
+        # only and must not be counted.
+        self.assertEqual(workout_arm_dose_warnings(_PLAN_ARM_DOSE_MET), [])
+
+    def test_arm_dose_warnings_flags_curl_as_last_bullet(self) -> None:
+        warns = workout_arm_dose_warnings(_PLAN_ARM_CURL_LAST)
+        self.assertTrue(any(
+            "biceps is the last bullet" in w and "isolation block" in w
+            for w in warns))
+
+    def test_arm_dose_warnings_fail_open_when_catalog_unresolved(self) -> None:
+        # A validator that cannot identify any biceps/triceps exercise
+        # must not flag every workout as arm-deficient.
+        with patch.object(
+            render_validators, "_biceps_triceps_exercise_names",
+            return_value=(set(), set()),
+        ):
+            self.assertEqual(workout_arm_dose_warnings(_PLAN_ARM_NONE), [])
+
+    def test_arm_dose_warnings_does_not_hardcode_exercise_names(self) -> None:
+        # Same regression guard as core: the biceps/triceps name sets must
+        # come from the catalog parser, never a literal list in this module.
+        import inspect
+        src = inspect.getsource(render_validators)
+        for catalog_name in ("Incline Dumbbell Curl", "Bayesian Cable Curl",
+                              "Cable Overhead Tricep Extension",
+                              "Cable Tricep Pushdown"):
             self.assertNotIn(catalog_name, src)
 
     def test_workout_md_builds_exercise_catalog_once_per_validation(self) -> None:

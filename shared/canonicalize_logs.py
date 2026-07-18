@@ -82,6 +82,14 @@ RENAMES: dict[str, str] = {
     "stomach press": "Stomach Press Machine",
     "stomach press vertical": "Stomach Press Machine",
     "stomach press vertical machine": "Stomach Press Machine",
+    # Casing fixes: a lowercase second word split the same lift across two
+    # keys downstream (e.g. estimated_1rm kept the raw "Leg extension" while
+    # progression_summary title-cased to "Leg Extension"), so the two signals
+    # no longer joined. Normalize the stored name to the canonical casing.
+    "leg extension": "Leg Extension",
+    "arm circles": "Arm Circles",
+    "high knees": "High Knees",
+    "jumping jacks": "Jumping Jacks",
 }
 
 # Names that cannot be resolved to a canonical from the row alone. Reported,

@@ -51,6 +51,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Decline Chest Press Machine [Machine] — +triceps
 - Push-Up [BW] — +front delt, +triceps
 - Dip [BW] — +front delt, +triceps ◆
+- Wide Chest Press Machine [Machine] — +front delt, +triceps
 
 ### Chest Isolation
 - Pec Deck [Machine]

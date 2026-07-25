@@ -40,6 +40,10 @@
 | Cable bicep | Cable Bicep Curl | — |
 | romanian deadlifts | Romanian Deadlift | — |
 | seated leg curls | Leg Curl (Seated) | — |
+| Dumbbell schrägbank Brust | Dumbbell Incline Bench Press | — |
+| Dumbbell lat raises | Dumbbell Lateral Raise | — |
+| Dumbbell chest press | Dumbbell Flat Bench Press | — |
+| Dumbbell flat bicep curl arm resting on thingie | Preacher Curl (Dumbbell) | — |
 
 ## Modifier Handling
 

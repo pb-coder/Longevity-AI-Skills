@@ -492,6 +492,15 @@ going unperformed while everything above it is completed, that is the strongest 
 available on this question, and it outranks a null that assumes compliance. Evidence tier:
 **Thin** in the literature; **treat position as a real variable anyway.**
 
+**The same argument binds direct arm work**, which is the other allocation the logs show
+being truncated: nothing here is specific to the trunk, only to the slot. Both are enforced
+— core or a biceps/triceps exercise as a workout's last bullet is a blocking render error.
+Close the session on something that is neither: rear delts, calves, a face pull. **Not "a
+carry"** — `Suitcase Carry` is core (anti-lateral-flexion; see the slot-B table in §24.3
+and the D4 note in §24.8), so closing on it trips the core placement error rather than
+avoiding it. The only non-core carry is `Dumbbell Farmer Walk`, which is a finisher
+budgeted outside the core allocation and earns no core credit wherever it sits.
+
 **Why supersetting is the answer.** Zhang et al. 2025 (Sports Med, 19 studies, 313
 participants): supersets produce **equivalent hypertrophy** (CSA SMD −0.05, 95% CI −0.63 to
 0.54, p=0.87) and **equivalent 1RM strength** (SMD 0.10, p=0.36) while cutting session
@@ -808,6 +817,8 @@ otherwise-equal movements — not a reason to prescribe.
 
 - **Do not put core last.** The terminal slot is where prescriptions go unperformed. Order
   does not affect hypertrophy (Nunes 2021, ES 0.03) — but that null assumes the sets happen.
+- **Do not put direct arm work last either.** Same reasoning, same enforcement: biceps or
+  triceps as a workout's final bullet is a blocking error, not a stylistic preference.
 - **Do not put core before the compounds either.** No hypertrophy upside (same null), a real
   primacy cost to the lifts (Simão 2012), and an unquantified trunk-fatigue risk.
 - **Do not prescribe a movement <Person> has never performed and place it in the last slot.**

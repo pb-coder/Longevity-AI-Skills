@@ -13,9 +13,29 @@ Public surface:
 - ``COACH_CARD_KEYS`` — the card-key tuple the validator uses to warn
   on missing optional callouts.
 - ``EM_DASH``, ``COACH_STRING_MAX`` — constants for the validator.
-- ``validate_coach_reads(coach) -> (errors, warnings)`` — hard errors
-  vs. soft warnings. Errors fail the render with exit code 2; warnings
-  print to stderr but allow the render to proceed.
+- ``validate_coach_reads(coach, payload=None) -> (errors, warnings)`` —
+  hard errors vs. soft warnings. Errors fail the render with exit code 2;
+  warnings print to stderr but allow the render to proceed. Pass the
+  tracker payload to also cross-check the numbers the coach WROTE against
+  the numbers the payload HOLDS — see `coach_number_findings`. Optional,
+  and a caller that has the payload and omits it silently keeps the old
+  behaviour, which is that a fabricated recovery score renders.
+- ``coach_number_findings(payload, texts) -> (errors, warnings)`` — the
+  cross-check itself, over any labelled coach-authored strings. The only
+  rule in this file that reads coach text for TRUTH rather than for form.
+  A mismatch is an ERROR when the two numbers fall on opposite sides of a
+  documented decision threshold (`recovery_decision_boundaries`) and a
+  warning otherwise; magnitude is a noise floor, not the instrument.
+- ``recovery_decision_boundaries()`` — those thresholds, derived from
+  ``constants.SESSION_GATE_THRESHOLDS`` plus SKILL.md's plan-action band
+  edges (`SKILL_RECOVERY_BAND_EDGES`).
+- ``dose_progression_findings(text, prev_block, plan_date)`` — the
+  across-generations counterpart to the weekly specs: a carried-forward
+  exercise whose dose did not move, a stalled lift whose required
+  response never arrived, and a load that oscillates between two values.
+  Reads the previous generation's prescription off the block artifact and
+  defers to `adherence.dose_staleness` for what "carried" and "moved"
+  mean. ADVISORY this release — see ``DOSE_PROGRESSION_ENFORCED``.
 - ``validate_workout_md(text) -> (errors, warnings)`` — validates the
   lean workout markdown's COPY (em-dashes, off-catalog names) before it
   is embedded in the dashboard.
@@ -28,6 +48,10 @@ Public surface:
   One name, one read site (`validate_workout_plan`).
 - ``ROTATION_ADVISORY_TAG`` — the suffix stamped on a rotation finding
   while the switch is off.
+- ``DOSE_PROGRESSION_ENFORCED`` / ``DOSE_ADVISORY_TAG`` — the same pair
+  for the dose-progression findings, demoted on 2026-08-02 after a review
+  found both a false positive on a SKILL.md-compliant cadence deload and
+  a mechanical bypass. Same discipline: one name, one read site.
 - ``payload_spec_errors(tracker_json) -> [str]`` — the tracker payload's
   ``core_week_spec`` / ``arm_week_spec`` are REPORTS of the constants,
   never gate inputs. This checks they are well formed so a corrupt one
@@ -222,6 +246,42 @@ COACH_STRING_MAX = 280
 
 WORKOUT_SUB_BULLET_LIMIT = 2
 WORKOUT_SUB_BULLET_RE = re.compile(r"^\s{2,}" + re.escape(EM_DASH) + r"\s+")
+
+# Sub-bullets that are STRUCTURE, not commentary, and therefore do not
+# count against `WORKOUT_SUB_BULLET_LIMIT`.
+#
+# The limit exists to stop rationale creep — "last time you did X",
+# "we're holding here because…" — in a file the user reads mid-workout.
+# It was counting every sub-bullet, including the superset routing hints
+# the block rules REQUIRE, so a compliant plan warned on every workout and
+# the prompt had to tell the coach to ignore the warning. A warning that
+# is always wrong trains a reader to skip the ones that are right, and it
+# collided head-on with the rotation rules: satisfying rule 6 on two slots
+# spent the whole annotation budget.
+#
+# Verified against the shipped 2026-08-02 plans: <Person>'s Workout 1 has
+# four sub-bullets, two of them superset routing, so the real annotation
+# count is 2 — exactly at the limit and not a defect.
+#
+# Anchor-change declarations are here for the same reason: they are the
+# plan's only channel for a required field, not prose the coach chose to
+# add.
+#
+# ANCHORED AT THE START OF THE SUB-BULLET, and that is not cosmetic. This
+# was a `.search()` over the whole line, so any sub-bullet CONTAINING the
+# phrase "superset with" anywhere in it became uncountable — the exemption
+# for a structural routing line was also an exemption for ~900 characters
+# of rationale with the token buried in the middle. Measured on the
+# 2026-08-02 corpus under the old `.search()`: 24 of 28 sub-bullets were
+# invisible to the counter and three of eight workouts counted zero. The
+# structural line the exemption exists for is written as `— superset with
+# the back squat above`, so requiring the token to LEAD costs a compliant
+# plan nothing and closes the channel. Matched against the sub-bullet's
+# body — the text after the `  — ` marker — not the raw line.
+WORKOUT_STRUCTURAL_SUB_BULLET_RE = re.compile(
+    r"^\s*(?:superset(?:ted)?\s+(?:with|onto|into)\b|anchor\s+change\s*:)",
+    re.IGNORECASE,
+)
 # NOTE: the plan's workout-heading grammar lives in `adherence` and is
 # reached through `_plan_workout_heading_re()`. This name is retained only
 # for callers outside this module; do not use it for new checks. Matching
@@ -289,18 +349,380 @@ GATED_COACH_CARD_KEYS = frozenset({
 })
 
 
-def validate_coach_reads(coach: dict) -> tuple[list[str], list[str]]:
+# ------------------------------------ coach numbers against the payload
+#
+# THE EXPLOIT THIS CLOSES, reproduced end to end before the fix: a
+# ``coach_reads.json`` of
+#
+#     {"headline": "Everything is fine. Recovery is 10 out of 10. Train
+#      hard.", "cards": {}}
+#
+# rendered at exit 0 against a payload whose ``recovery.score`` was 5.6,
+# and the fabricated "10 out of 10" appeared TWICE in the finished page,
+# directly beside the real 5.6. Forty-four soft warnings fired, every one
+# of them "card missing or empty", none about the contradiction. Every
+# copy rule in this module — em-dashes, length caps, missing callouts —
+# polices the FORM of coach text and nothing polices its truth, so the
+# single most dangerous artifact the pipeline can produce is a
+# confidently wrong dashboard.
+#
+# WHY THIS ONE NUMBER AND NOT A GENERAL FACT-CHECKER. The check has to be
+# high-precision: a false positive here refuses a legitimate plan, and a
+# gate that cries wolf gets routed around. ``recovery.score`` is the
+# number the whole dashboard is framed around, so getting it wrong is the
+# failure with the most downstream consequence. A rule per payload scalar
+# was considered and deliberately not written: the rule below is one rule
+# because one rule is what the evidence supports.
+#
+# THE PREMISE THAT WAS FALSE, and the false positive it caused. The first
+# version claimed ``recovery.score`` "has a shape nothing else in the
+# vocabulary shares" and anchored on the word "recovery" within 40
+# characters of any ``N/10``. Both halves were wrong. The payload carries
+# five more 0-10 scalars — ``recovery.drivers[].component_score`` — and
+# SKILL.md REQUIRES the drivers card (§ Recovery state) to print them in
+# exactly that shape, one per driver, ending ``component {n}/10``. Its own
+# worked example is ``component 1.6/10``. So the prompt-faithful card
+#
+#     "Recovery 5.4 out of 10. HR recovery is the drag at 1.6 out of 10."
+#
+# was refused with exit 2, because "recovery" sits four characters from
+# the 1.6. The shipped plans survived only by accident: their drivers
+# cards happen to quote bpm and hours instead of the documented ``/10``
+# form. One prompt-compliant rewrite would have refused the render.
+#
+# THE ANCHOR THAT REPLACED PROXIMITY. Two rules, both narrow on purpose.
+#
+#   Rule A, the metric noun. "recovery" (optionally "recovery score") has
+#   to be the noun GOVERNING the number, joined to it by a short closed
+#   set of connectives and no sentence break: "Recovery 5.4/10",
+#   "recovery is 5.4 out of 10", "Recovery: 5.4/10". A component score
+#   reads "HR recovery is the drag at 1.6 out of 10" or "(z -1.35, weight
+#   0.10, component 1.6/10)" — in the first the noun is "HR recovery",
+#   which is a DIFFERENT metric (`hr_recovery_1min`) and is excluded by
+#   lookbehind; in the second "recovery" is not adjacent at all.
+#
+#   Rule B, the card label. The validator already holds the label and
+#   never read it. On the surfaces whose entire subject is the composite
+#   — the headline, the session-gate callout, the plan opener — the FIRST
+#   ``N/10`` is the composite whether or not the coach names it, which
+#   catches "Readiness is 10 out of 10". Rule B deliberately does NOT
+#   cover ``cards.recovery_drivers`` / ``cards.trajectory_recovery``: a
+#   bare ``N/10`` on those two is legitimately a component score, and
+#   claiming otherwise is the F1 false positive again.
+#
+# WHAT REMAINS UNCOVERED, stated plainly rather than chased, and probed
+# adversarially rather than assumed. A coach that writes any of these is
+# not checked at all:
+#
+#   * every non-``/10`` rendering of the number — "a 10 today", "ten out
+#     of ten", "96 out of 100", "98% of your baseline". The regex cannot
+#     see them and no amount of widening it stays precise;
+#   * a bare ``N/10`` on any card outside `RECOVERY_SCORE_SURFACES`,
+#     including the two recovery cards (see above for why). On the drivers
+#     cards this is the deliberate price of not repeating F1;
+#   * ``recovery is 10 out of 10 sets`` — the counted-ratio tail
+#     (`_COUNTED_RATIO_TAIL_RE`) silences BOTH rules, because "N out of 10
+#     sets" is a completion ratio and reading it as a score is the false
+#     positive that broke the pinned tests. Appending a counting noun to a
+#     score claim is therefore a way past the check, at the cost of
+#     writing a sentence that no longer claims the score;
+#   * under Rule B only, a decoy: "Your sleep scored 5.4 out of 10.
+#     Readiness is a 10 out of 10." spends the first match on a number
+#     that happens to agree with the payload, and Rule B looks no
+#     further. Checking every match instead would flag the sleep and HRV
+#     component scores a headline may legitimately quote, which is F1
+#     again on a different card.
+#
+# Narrow and honest beats broad and false-positive. A check that refuses
+# the card SKILL.md mandates gets switched off, and then none of the
+# above is covered either.
+
+# Labels whose whole subject is the COMPOSITE score, where a bare
+# ``N/10`` needs no metric noun to be read as a claim about it. Matches
+# the labels `_coach_strings` and `_plan_texts` emit, exactly.
+RECOVERY_SCORE_SURFACES = frozenset({
+    "`headline`",
+    "cards.session_recommendation_callout",
+    "plan opener",
+})
+
+# "8/10", "8.5 / 10", "8 out of 10". The denominator is pinned to 10 so a
+# rep scheme ("3/10 RPE" aside, the plan writes reps as "8-10") and a date
+# cannot match, and the numerator is capped at two digits for the same
+# reason.
+_SCORE_OUT_OF_TEN_RE = re.compile(
+    r"(\d{1,2}(?:\.\d{1,2})?)\s*(?:/|\s+out\s+of\s+)\s*10\b", re.IGNORECASE)
+
+# Rule A. "recovery" as the governing noun, NOT preceded by a qualifier
+# that names a different metric (`hr recovery` is `hr_recovery_1min`, a
+# driver), joined to the number by a closed connective set.
+_RECOVERY_SCORE_RE = re.compile(
+    r"(?<!\bhr )(?<!\bh\.r\. )(?<!\bheart rate )"
+    r"\brecovery(?:\s+score)?\b"
+    r"\s*(?:is|was|sits\s+at|sits|reads|scored|came\s+in\s+at|at|of|:|,|-)?\s*"
+    r"((\d{1,2}(?:\.\d{1,2})?)\s*(?:/|\s+out\s+of\s+)\s*10)\b",
+    re.IGNORECASE)
+
+# Float determinism. ``abs(4.9 - 3.9)`` is 1.0000000000000004 and
+# ``abs(6.4 - 5.4)`` is exactly 1.0, so an un-rounded magnitude compare
+# gave two different verdicts for the same one-point disagreement. Every
+# comparison below rounds to this many places first.
+_SCORE_ROUND_PLACES = 3
+
+# The re-derivation noise floor, MEASURED, not chosen. `recovery.score` is
+# a rolling composite over a live window, so the same plan re-rendered
+# hours later is scored against a payload that has moved. Observed on this
+# tracker pair: three mismatches of 0.1 across eight historical
+# generations, 0.2 on both people when a 2026-08-02 plan was re-rendered
+# against a payload rebuilt after that afternoon's health import (the
+# shipped plan's opener says 5.6; the payload now says 5.4). None of those
+# is a false statement by the coach.
+#
+# It is a FLOOR, not the instrument. The instrument is decision
+# equivalence (below); this only keeps a disagreement that is entirely
+# inside the pipeline's own noise from being called a lie. The most a
+# coach can buy with it is 0.2 of a point, which changes no prescription
+# it could not already have justified.
+COACH_SCORE_REDERIVE_NOISE = 0.2
+
+# SKILL.md's plan-action bands, the only decision points with no constant
+# behind them: `< 4` re-entry, `4-6.5` hold loads, `>= 6.5` green.
+# `constants.py` is not this module's to edit, so the band edge lives
+# here, beside the function that unions it in, rather than as a second
+# copy of a number that already exists somewhere else. 4.0 arrives from
+# the gate thresholds anyway; 6.5 exists nowhere in `constants`.
+SKILL_RECOVERY_BAND_EDGES = (4.0, 6.5)
+
+
+@lru_cache(maxsize=1)
+def recovery_decision_boundaries() -> "tuple[float, ...]":
+    """Every ``recovery.score`` value at which a documented decision flips.
+
+    DERIVED, not restated. The old instrument was a magnitude —
+    ``COACH_SCORE_MAX_DRIFT = 1.0`` — justified by a comment claiming a
+    full point "spans two of SKILL.md's recovery tiers (5.0 / 5.5
+    boundaries)" and that "anything under it changes no decision". Both
+    claims were false. 5.0 is not a decision point anywhere, and at 1.0 a
+    coach could write 6.4 against a real 5.4, crossing
+    ``tier_d_recovery_score_min``, and only warn. Magnitude was never the
+    question: 0.2 across 5.5 changes a prescription and 1.4 inside one
+    band changes nothing.
+
+    The set comes from `constants.SESSION_GATE_THRESHOLDS` — every
+    threshold whose key names ``recovery`` and whose value is on the 0-10
+    scale — so adding or moving a gate threshold moves this set with it
+    and no copy can drift. Today that yields 3.0
+    (``tier_a_recovery_score_crash`` / ``tier_c_recovery_score_lo``), 4.0
+    (``tier_c_recovery_hard_floor``) and 5.5
+    (``tier_d_recovery_score_min``), plus 5.0
+    (``tier_c_recovery_score_hi``).
+
+    ``SKILL_RECOVERY_BAND_EDGES`` is unioned in because SKILL.md's own
+    plan-action bands (``< 4`` re-entry, ``4-6.5`` hold loads, ``>= 6.5``
+    green) are prompt text with no constant behind them: 4.0 already
+    arrives from the gate, 6.5 does not exist anywhere in ``constants``.
+    It is stated once, here, next to the derivation that consumes it —
+    not copied from constants, which is the thing the rule forbids.
+    """
+    from .constants import SESSION_GATE_THRESHOLDS
+
+    out = set(SKILL_RECOVERY_BAND_EDGES)
+    for key, value in SESSION_GATE_THRESHOLDS.items():
+        if "recovery" not in key:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if 0.0 <= float(value) <= 10.0:
+            out.add(round(float(value), _SCORE_ROUND_PLACES))
+    return tuple(sorted(out))
+
+
+def _payload_recovery_score(payload: "dict | None") -> "float | None":
+    rec = (payload or {}).get("recovery")
+    score = rec.get("score") if isinstance(rec, dict) else None
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return None
+    return float(score)
+
+
+def _boundaries_between(a: float, b: float) -> "list[float]":
+    """The decision boundaries that ``a`` and ``b`` sit on opposite sides of.
+
+    A boundary ``t`` is used the way the code that owns it uses it —
+    ``score >= t`` is one decision, ``score < t`` is another — so two
+    values straddle it when exactly one of them clears it. Rounded first;
+    see `_SCORE_ROUND_PLACES`.
+    """
+    lo = round(min(a, b), _SCORE_ROUND_PLACES)
+    hi = round(max(a, b), _SCORE_ROUND_PLACES)
+    return [t for t in recovery_decision_boundaries() if lo < t <= hi]
+
+
+# A ``N/10`` followed by one of these is a RATIO, not the score: "8 out
+# of 10 prescribed sets", "8 out of 10 sessions". Both rules skip it.
+# Without this, Rule B read the completion ratios the headline routinely
+# quotes as claims about recovery — the same class of false positive that
+# broke the drivers card, found by the tests that pinned the old anchor.
+_COUNTED_RATIO_TAIL_RE = re.compile(
+    r"^\s*(?:prescribed|planned|scheduled|working|hard|logged)?\s*"
+    r"(?:sets?|sessions?|workouts?|reps?|days?|nights?|weeks?|exercises?"
+    r"|movements?|lifts?)\b",
+    re.IGNORECASE)
+
+
+def _recovery_score_claims(label: str, text: str) -> "list[tuple[str, str]]":
+    """``[(quoted_fragment, written_value)]`` the string claims about the score.
+
+    Rule A over the whole string, plus Rule B's first bare ``N/10`` on the
+    composite surfaces. See the section comment above for both rules and
+    for what neither covers.
+    """
+    claims = [(m.group(1), m.group(2)) for m in _RECOVERY_SCORE_RE.finditer(text)
+              if not _COUNTED_RATIO_TAIL_RE.match(text[m.end():])]
+    if claims or label not in RECOVERY_SCORE_SURFACES:
+        return claims
+    for m in _SCORE_OUT_OF_TEN_RE.finditer(text):
+        if _COUNTED_RATIO_TAIL_RE.match(text[m.end():]):
+            continue
+        return [(m.group(0), m.group(1))]
+    return []
+
+
+def coach_number_findings(payload: "dict | None",
+                          texts: "list[tuple[str, str]]"
+                          ) -> "tuple[list[str], list[str]]":
+    """``(errors, warnings)`` for coach-authored scores vs the payload.
+
+    ``texts`` is ``[(label, text), ...]`` — the label names the string for
+    the message (``` `headline` ```, ``cards.recovery_drivers``, ``plan
+    opener``) and, for the labels in `RECOVERY_SCORE_SURFACES`, also
+    anchors the check. See the section comment above for the anchor rules
+    and for what they do not cover.
+
+    ROUNDING IS ACCEPTED, contradiction is not. The written value is
+    compared at ITS OWN precision first, so "6/10" is a legal rendering of
+    5.6 and "5.6/10" is exact, while "10/10" is neither.
+
+    WHEN A MISMATCH IS AN ERROR: when the two numbers imply DIFFERENT
+    DECISIONS. `_boundaries_between` asks whether any documented threshold
+    separates them; if one does, the coach has told the user a different
+    thing about their training than the payload says, whatever the
+    arithmetic gap. A 1.4-point disagreement inside one band warns; a
+    0.3-point disagreement across ``tier_d_recovery_score_min`` errors.
+
+    The one exception is `COACH_SCORE_REDERIVE_NOISE`: a straddle whose
+    whole magnitude is inside the measured re-derivation band is reported
+    as a warning that NAMES the boundary, because the alternative is
+    refusing to re-render an honest page whose payload moved under it —
+    which is what the shipped 2026-08-02 plan does (opener 5.6, payload
+    re-derived at 5.4 after that afternoon's import, straddling 5.5).
+
+    WHAT THIS DELIBERATELY LETS THROUGH. A disagreement INSIDE one band is
+    a warning however large it is, and the top band is wide: the highest
+    boundary is 6.5, so "9.9 out of 10" against a real 6.6 warns. That is
+    what decision equivalence means — both numbers prescribe green-light
+    programming — but it is a factual overstatement on the page, and the
+    warning is the only thing that says so. If a rule against overstating
+    the score itself is wanted, it is a separate rule with a separate
+    justification, not a magnitude smuggled back into this one.
+
+    Silent when the payload carries no ``recovery.score``: there is then
+    nothing to contradict, and inventing a finding from a missing input
+    is how a gate starts blocking on unrelated payload gaps.
+    """
+    score = _payload_recovery_score(payload)
+    errors: "list[str]" = []
+    warnings: "list[str]" = []
+    if score is None:
+        return (errors, warnings)
+    # One message per distinct claim. A plan opener states the day's call
+    # and then repeats the number in its `> Why:` line, which is two
+    # matches of the same claim and would otherwise print the identical
+    # line twice; a claim of a DIFFERENT number produces a different
+    # message and still prints.
+    seen: "set[str]" = set()
+
+    def _add(bucket: "list[str]", message: str) -> None:
+        if message not in seen:
+            seen.add(message)
+            bucket.append(message)
+
+    for label, text in texts:
+        if not isinstance(text, str) or not text:
+            continue
+        for matched, written in _recovery_score_claims(label, text):
+            places = len(written.split(".")[1]) if "." in written else 0
+            if round(float(written), places) == round(score, places):
+                continue
+            value = float(written)
+            straddled = _boundaries_between(value, score)
+            gap = round(abs(value - score), _SCORE_ROUND_PLACES)
+            if not straddled:
+                _add(warnings,
+                     f"{label}: says recovery is {matched}; the payload's "
+                     f"`recovery.score` is {score:g}. No decision threshold "
+                     f"separates them, so this reads as a re-derived payload "
+                     f"rather than a wrong number.")
+                continue
+            crossed = ", ".join(f"{t:g}" for t in straddled)
+            if gap <= COACH_SCORE_REDERIVE_NOISE:
+                _add(warnings,
+                     f"{label}: says recovery is {matched}; the payload's "
+                     f"`recovery.score` is {score:g}. That straddles {crossed}, "
+                     f"but the whole gap is {gap:g}, inside the measured "
+                     f"re-derivation band of {COACH_SCORE_REDERIVE_NOISE:g}, so "
+                     f"it reads as a payload that moved rather than a wrong "
+                     f"number. Re-generate the page against the current "
+                     f"payload.")
+                continue
+            _add(errors,
+                 f"{label}: says recovery is {matched}, but the payload's "
+                 f"`recovery.score` is {score:g}. Those fall on opposite sides "
+                 f"of {crossed}, so they prescribe different training. Coach "
+                 f"text may round the score, not contradict it.")
+    return (errors, warnings)
+
+
+def _coach_strings(coach: dict) -> "list[tuple[str, str]]":
+    """Every coach-authored string in ``coach``, labelled for messages."""
+    out: "list[tuple[str, str]]" = []
+    headline = coach.get("headline")
+    if isinstance(headline, str):
+        out.append(("`headline`", headline))
+    cards = coach.get("cards")
+    if isinstance(cards, dict):
+        out += [(f"cards.{k}", v) for k, v in sorted(cards.items())
+                if isinstance(v, str)]
+    return out
+
+
+def validate_coach_reads(coach: dict,
+                         payload: "dict | None" = None
+                         ) -> tuple[list[str], list[str]]:
     """Return ``(errors, warnings)``.
 
     Errors are hard failures (the renderer refuses to write the HTML).
     Warnings are surfaced to stderr but don't block the render. A
     missing ``cards.<key>`` for a documented card is a warning, not an
     error, because the card itself still renders cleanly without a
-    callout."""
+    callout.
+
+    ``payload`` is the tracker JSON. When given, coach-authored scores are
+    cross-checked against it (`coach_number_findings`) and a contradiction
+    is an ERROR — a dashboard that states a recovery score the payload
+    disagrees with is worse than no dashboard. It is optional so that
+    every existing caller and every unit test that only has coach text
+    keeps working; a caller that HAS the payload and does not pass it gets
+    the pre-2026-08 behaviour, which is that the exploit above renders.
+    """
     errors: list[str] = []
     warnings: list[str] = []
     if not isinstance(coach, dict):
         return (["coach reads must be a JSON object"], warnings)
+    num_errors, num_warnings = coach_number_findings(payload,
+                                                     _coach_strings(coach))
+    errors += num_errors
+    warnings += num_warnings
 
     headline = coach.get("headline")
     if not isinstance(headline, str) or not headline.strip():
@@ -377,8 +799,9 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
     def flush_workout() -> None:
         if workout_title and sub_bullet_count > WORKOUT_SUB_BULLET_LIMIT:
             warnings.append(
-                f"{workout_title}: {sub_bullet_count} sub-bullets; "
-                f"recommended max is {WORKOUT_SUB_BULLET_LIMIT}"
+                f"{workout_title}: {sub_bullet_count} rationale sub-bullets; "
+                f"recommended max is {WORKOUT_SUB_BULLET_LIMIT} "
+                f"(superset and anchor-change routing lines do not count)"
             )
 
     for lineno, raw_line in enumerate(text.splitlines(), start=1):
@@ -407,8 +830,18 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
         if not in_workout:
             continue
 
-        if WORKOUT_SUB_BULLET_RE.match(line):
-            sub_bullet_count += 1
+        marker = WORKOUT_SUB_BULLET_RE.match(line)
+        if marker:
+            # Structural routing lines are not rationale; see
+            # WORKOUT_STRUCTURAL_SUB_BULLET_RE. The exemption is decided on
+            # the sub-bullet's BODY and must match at its start, so a line
+            # that merely mentions "superset with" halfway through a
+            # paragraph of rationale is counted like any other. They are
+            # still scanned for banned rationale phrasing below, so
+            # appending a "because …" to a superset hint does not buy an
+            # exemption either.
+            if not WORKOUT_STRUCTURAL_SUB_BULLET_RE.match(line[marker.end():]):
+                sub_bullet_count += 1
             if WORKOUT_BANNED_SUB_BULLET_RE.search(line):
                 warnings.append(
                     f"{workout_title} line {lineno}: sub-bullet contains "
@@ -658,16 +1091,51 @@ def count_working_sets_per_workout(text: str) -> "dict[str, int]":
     }
 
 
+# The session working-set band, both sides, in sets.
+#
+# SKILL.md: "`target_working_sets` is a floor to hit, not a ceiling to
+# fear. Land within ±2 of it." The gate allowed 21-29 on a 24 budget while
+# the prompt asked for 22-26, and targets are floors, so the coach
+# maximises above them until a band stops it. Measured on the shipped
+# 2026-08-02 plans: four of eight sessions across two people landed
+# EXACTLY on the old +5 ceiling, which is the signature of a tolerance
+# being used as the target. One plan ran 29/28/27/29 against a 24 budget
+# and warned on nothing, on a green tier with no carve-out, while clearing
+# every emphasis floor with room — so the overshoot was not forced by the
+# volume floors either. That budget was cut to 24 in the first place
+# BECAUSE the user truncates long sessions at ~64% completion; a 29-set
+# session re-creates the problem the cut addressed.
+#
+# Symmetric at 2, not tighter on the short side. SKILL.md calls
+# undershooting "the failure mode that under-serves the user", so the low
+# side must be at least as tight as the high side; ±2 is what the prompt
+# says, and there is no evidence for going narrower than the instruction
+# the plan was written against.
+#
+# THIS STAYS A WARNING. `validate_workout_plan` routes it into
+# ``warnings``, never ``errors``, and tightening a band that cannot block
+# a render cannot break a plan — it can only make an existing silence
+# audible. Both directions need to stay renderable: a deload legitimately
+# undershoots, and SKILL.md's own conflict rule ("when the budget and the
+# volume floors cannot both be met, the budget loses") requires a legal
+# way to go over.
+SET_BUDGET_UNDER_TOL = 2
+SET_BUDGET_OVER_TOL = 2
+
+
 def workout_set_budget_warnings(text: str, target_working_sets,
-                                low_tol: int = 3, high_tol: int = 5,
+                                low_tol: int = SET_BUDGET_UNDER_TOL,
+                                high_tol: int = SET_BUDGET_OVER_TOL,
                                 budget_by_index=None) -> "list[str]":
     """Warn when a workout's working-set count drifts from the budget.
 
-    `target_working_sets` is the per-person, tier-adjusted set budget. The
-    short side is the one that bit us (sessions silently shrank as
-    sets-per-exercise drifted), so the low tolerance is tighter. Warning,
-    not error: an intentional deload/downgrade legitimately undershoots and
-    should still render, just visibly flagged.
+    `target_working_sets` is the per-person, tier-adjusted set budget.
+    Both tolerances default to `SET_BUDGET_UNDER_TOL` /
+    `SET_BUDGET_OVER_TOL` — see those for why the band is SKILL.md's ±2
+    rather than the old asymmetric 3/5. Warning, not error: an intentional
+    deload/downgrade legitimately undershoots and an emphasis-heavy
+    downgraded week legitimately overshoots, and both should still render,
+    just visibly flagged.
 
     `budget_by_index`, when given, is a callable ``idx -> budget`` that
     returns the budget for the workout at position ``idx`` (0-based, in
@@ -1563,7 +2031,8 @@ def _artifact_from_payload_block(block: "dict | None") -> "dict | None":
                  "tag": s.get("tag") or "rotating",
                  "position": s.get("position") or len(rebuilt.get(stype, [])) + 1}
         for opt in ("pattern", "blocks_held", "history", "superset_with",
-                    "at_risk"):
+                    "superset_hint_unresolved", "dose", "stalled_sessions",
+                    "performed_instead", "at_risk"):
             if s.get(opt) is not None:
                 entry[opt] = s[opt]
         rebuilt.setdefault(stype, []).append(entry)
@@ -1662,6 +2131,321 @@ def block_rotation_errors(text: str, prev_block: "dict | None",
     return rotation_diff_errors(prev, proposed, catalog)
 
 
+# ------------------------------------------------- dose progression (G-06)
+#
+# "Every plan is the same plan" is the complaint this workstream started
+# from, and until now the gate could not detect the same plan. Both
+# `dose_staleness` and `stalled_sessions` were computed INTO the payload
+# for the coach to read and nothing checked either, so re-prescribing
+# every load and rep target identically rendered clean.
+#
+# WHERE THE PREVIOUS DOSE COMES FROM. Not from re-reading a plan file —
+# `validate_workout_plan` has no person and no paths, and a second plan
+# reader is what `Skills/CLAUDE.md` forbids. It comes off the block
+# artifact, which `blocks.block_from_plan` now stamps with each slot's
+# prescription (`dose`) and which `block_payload` already resolves to the
+# PREVIOUS generation for exactly this kind of diff. The plan under
+# validation is parsed by `adherence.parse_plan`, the same reader
+# `block_rotation_errors` uses.
+#
+# WHAT COUNTS AS A CHANGE is not decided here either. The block side is
+# reshaped into the plan shape `adherence.dose_staleness` consumes and
+# that function is called, so the gate and the payload's own report agree
+# by construction: same carried-forward rule, same materiality floors
+# (`adherence.DOSE_LOAD_MIN_PCT`, `DOSE_REP_MIN_MIDPOINT`), same
+# threshold. Two definitions of "the dose moved" would drift, and the
+# report would then absolve a plan the gate refuses.
+
+
+# ------------------------------------------------- the dose-gate switch
+#
+# THE ONE SWITCH, and the same shape as `BLOCK_ROTATION_ENFORCED` for the
+# same reason. Set to ``True`` to make dose-progression findings refuse a
+# render again; that is the entire change on this side.
+#
+# WHY IT IS ADVISORY. The check shipped blocking on 2026-08-02 and an
+# adversarial review found it had both halves of the worst possible
+# combination: false positives on compliant plans AND a mechanical bypass.
+#
+#   THE FALSE POSITIVE. SKILL.md §"Deload handling" requires a CADENCE
+#   deload to be ONE session — "halve that single session's working sets
+#   and hold its loads" — rather than a whole-week cut, and makes "hold
+#   loads" binding on every prescribed weight. Build exactly that and the
+#   rate finding fires at "dose staleness: 24 of 34 (71%)", because
+#   holding loads is what the prompt just ordered. ``deload_week=True``
+#   gives no relief either: these are `AXIS_STRUCTURE` findings and the
+#   deload relief is `AXIS_VOLUME` only. Worse, the same SKILL.md
+#   paragraph explicitly sanctions the outcome — "If a lift genuinely has
+#   nowhere to go on either axis, leave it and let it read as stale" —
+#   so prompt and gate gave opposite instructions and the gate won with
+#   exit 2.
+#
+#   THE BYPASS. `adherence._dose_delta` accepts a rep-midpoint move of
+#   exactly ``DOSE_REP_MIN_MIDPOINT``, so shifting `x8-10` to `x9-11` on
+#   enough carried exercises turns exit 2 into exit 0 with every load
+#   byte-identical. Then revert next generation and repeat: generation 3
+#   equals generation 1, generation 4 equals generation 2, and a coach
+#   that never touches a weight again passes every week.
+#
+# THE REAL FIX IS NOT THIS. Both halves come from the same root: the gate
+# compares two COACH-AUTHORED plans, so it can only ask "is this
+# prescription different from the last one", never "is this the
+# prescription the ledger implies". The fix is to derive the expected
+# increment from the LOG — completed reps at the top of the range, the
+# e1RM slope, the stall counter — and check the written dose against
+# that. Then holding a load under a deload is legal because the ledger
+# says hold, and a rep-range shuffle is illegal because the ledger did
+# not earn one. That is a bigger change than this one and it is the next
+# piece of work on this gate; do not re-arm the switch by flipping it
+# without doing it, because the false positive above comes straight back.
+#
+# Demoted, not disabled. `dose_progression_findings` still runs on every
+# render, the payload still carries `dose_staleness`, and the findings
+# still reach stderr tagged with `DOSE_ADVISORY_TAG`.
+DOSE_PROGRESSION_ENFORCED = False
+
+# Same shape as `ROTATION_ADVISORY_TAG` and the ``[advisory: deload
+# week]`` tag: a demoted finding must still read as demoted, not vanish
+# and not masquerade as a rule that was never checked.
+DOSE_ADVISORY_TAG = "[advisory: dose progression, not enforced this release]"
+
+
+def _block_as_plan(block: "dict | None") -> "dict | None":
+    """The previous block's slots, in the plan shape `dose_staleness` reads.
+
+    ``blocks.block_from_plan`` built these slots FROM a plan and kept each
+    one's prescription under ``dose`` with `adherence`'s own field names,
+    so this is an unpacking rather than a translation. Returns ``None``
+    when no slot carries a dose — a block persisted before that field
+    existed, or one with no prescription in it. ``None`` means "no
+    comparison is possible", which must read differently from "compared
+    and clean": every caller below skips silently on it.
+
+    ``prescribed_sets`` is COERCED, not trusted. The artifact is JSON on
+    disk and this is the one field `dose_staleness` indexes rather than
+    ``.get``s, so a dose dict written before the field existed raised
+    ``KeyError`` and one carrying ``null`` raised ``TypeError``, both of
+    which exit 1. Exit 1 says "this program broke"; a validator that
+    cannot read its input has to say "cannot compare", which is what a
+    zero here produces (`dose_staleness` skips non-positive slots).
+    """
+    if not isinstance(block, dict):
+        return None
+    slots = []
+    for stype, entries in sorted((block.get("sessions") or {}).items()):
+        for s in entries or []:
+            dose = s.get("dose")
+            exercise = (s.get("exercise") or "").strip()
+            if not isinstance(dose, dict) or not exercise:
+                continue
+            sets = dose.get("prescribed_sets")
+            if isinstance(sets, bool) or not isinstance(sets, (int, float)):
+                sets = 0
+            slots.append({"exercise": exercise, **dose,
+                          "prescribed_sets": int(sets)})
+    if not any(s["prescribed_sets"] > 0 for s in slots):
+        return None
+    return {"plan_date": block.get("started") or "", "workouts": [
+        {"title": "block", "index": 1, "slots": slots}]}
+
+
+def _oscillation_findings(payload: "dict | None") -> "list[tuple]":
+    """The load-alternation findings, read off the PAYLOAD's own report.
+
+    WHY NOT FROM THE COMPARISON ABOVE. `dose_progression_findings` holds
+    exactly two generations — the block artifact and the plan being
+    validated — and `adherence.dose_staleness` needs FOUR loads before it
+    can call an alternation. Computing this from the local pair would be
+    dead code that always answers "no": the first draft of it was, and it
+    passed its own test because the test asserted on the report instead of
+    on the finding. The history exists on the payload, where
+    `read_tracker` runs the same function over the last eight plans, so
+    that is where this reads it.
+
+    That makes it a finding about the plans ALREADY ON DISK rather than
+    about the one under validation, which is exactly right for this
+    signal: an alternating load is only visible across generations, and by
+    the time it is visible the coach needs to be told before it writes the
+    next one. Silent when the payload carries no report.
+
+    It reads LOADS ONLY, so the rep-range version of the same trick
+    (`x8-10` -> `x9-11` -> `x8-10`, the bypass recorded on
+    `DOSE_PROGRESSION_ENFORCED`) is NOT covered by it.
+    """
+    carried = ((payload or {}).get("dose_staleness") or {}).get("carried")
+    out: "list[tuple]" = []
+    for c in carried or []:
+        if not isinstance(c, dict) or not c.get("oscillating"):
+            continue
+        out.append((AXIS_STRUCTURE, (
+            f"{c.get('exercise')}: the load has alternated between two values "
+            f"across the last four generations ({c.get('prev_load_kg')}kg -> "
+            f"{c.get('load_kg')}kg). Every generation counts as a dose change "
+            f"and none of them is progress. Pick a direction or rotate the "
+            f"movement out.")))
+    return out
+
+
+def dose_progression_findings(text: str, prev_block: "dict | None",
+                              plan_date: "str | None" = None,
+                              payload: "dict | None" = None) -> "list[tuple]":
+    """``[(axis, message)]`` for carried-forward dose that did not move.
+
+    Two findings, and they are deliberately different shapes.
+
+    **The stall response, per exercise.** SKILL.md marks it REQUIRED: a
+    lift with ``stalled_sessions >= 3`` and no deload MUST have one
+    variable changed. The trigger is the strongest input this file has —
+    ``estimated_1rm.stalled_sessions`` counts SESSIONS THE USER ACTUALLY
+    LOGGED at the same e1RM, so "they never performed it, of course it did
+    not move" cannot apply, and the coach cannot author it. Dropping the
+    movement from the plan counts as the response; so does any material
+    change to load, reps or set count. What does NOT count is a sub-bullet
+    saying a change was made, which is why the check reads the numbers and
+    not the prose.
+
+    **The staleness rate, per plan.** SKILL.md's stated target is under
+    40% of carried-forward exercises returning with an unchanged dose,
+    against a measured 70% baseline. Read straight off
+    `adherence.dose_staleness` so the gate cannot disagree with the
+    payload block the coach was handed while authoring.
+
+    SILENT, NOT CLEAN, when there is nothing to compare against: no
+    previous block, a block with no doses on it (persisted before the
+    field existed), the self-diff case `block_rotation_errors` documents,
+    or fewer than ``min_carried_for_share`` carried exercises. Returning
+    ``[]`` for "did not run" is a compromise every gate in this file
+    makes; the payload's own ``dose_staleness`` block is where a reader
+    checks whether the measurement exists at all.
+
+    **The oscillation, per exercise.** `adherence.dose_staleness` has
+    computed an ``oscillating`` flag since it was written and no gate read
+    it, which made it a report of a bypass rather than a check on one: a
+    coach that alternates 90 / 92.5 / 90 / 92.5 changes the dose on every
+    generation, satisfies both findings above forever, and progresses
+    nothing. Read off ``payload.dose_staleness`` — see
+    `_oscillation_findings` for why it cannot come from the two-generation
+    comparison this function otherwise makes — and therefore only when a
+    caller passes the payload.
+
+    NONE OF THESE BLOCK THIS RELEASE. `validate_workout_plan` routes them
+    by `DOSE_PROGRESSION_ENFORCED`; see that constant for the confirmed
+    false positive and the confirmed bypass that demoted them, and for
+    what re-arming them requires first.
+
+    THE KNOWN WEAKNESS, stated plainly: every finding here compares two
+    coach-authored plans, so the cheapest way past them is to write an
+    unjustified number — bump every carried lift by one material
+    increment every week regardless of what the logs say. That is
+    strictly harder than re-copying (it takes a different prescription,
+    not a different sentence) and strictly weaker than a check against
+    performance. Closing it means deciding the increment from the ledger,
+    which is a bigger change than this one.
+    """
+    from .adherence import dose_staleness, parse_plan
+    from .blocks import ANCHOR_STALL_SESSIONS
+    from .constants import DOSE_PROGRESSION_SPEC
+
+    out: "list[tuple]" = _oscillation_findings(payload)
+
+    prev = _artifact_from_payload_block(prev_block)
+    if prev is None:
+        return out
+    if plan_date and prev.get("started") == plan_date:
+        # Same guard, same reason, as `block_rotation_errors`: this block
+        # was derived from the plan being validated, so every dose would
+        # compare equal to itself and the whole plan would read stale.
+        return out
+    prev_plan = _block_as_plan(prev)
+    if prev_plan is None:
+        return out
+    if prev_plan["plan_date"] == (plan_date or ""):
+        # Belt and braces for the guard above, and not only that.
+        # `dose_staleness` keys its per-exercise series BY PLAN DATE, so
+        # two plans sharing one date collapse into a single-entry series
+        # and its ``slots[-2]`` reads past the front of a one-item list.
+        # Reachable whenever a caller passes no ``plan_date`` against a
+        # block with no ``started`` — both become "". A crash is not a
+        # validation verdict; exit 1 means "this program broke".
+        return out
+
+    plan = parse_plan(text, plan_date or "")
+    if not any(w.get("slots") for w in plan.get("workouts") or []):
+        return out
+
+    from .extract import load_exercises_db
+    from shared.exercises_database import DATABASE_PATH
+    db = load_exercises_db(DATABASE_PATH)
+
+    report = dose_staleness([prev_plan, plan], db)
+    if report is None:
+        return out
+
+    # --- the stall response, per exercise -------------------------------
+    stalled = {}
+    for entries in (prev.get("sessions") or {}).values():
+        for s in entries or []:
+            n = int(s.get("stalled_sessions") or 0)
+            key = (s.get("exercise") or "").strip().lower()
+            if key and n >= ANCHOR_STALL_SESSIONS:
+                stalled[key] = max(stalled.get(key, 0), n)
+    by_key = {c["exercise"].strip().lower(): c for c in report["carried"]}
+    for key in sorted(stalled):
+        carried = by_key.get(key)
+        if carried is None:
+            continue                # dropped or swapped out — that IS the change
+        if carried["dose_changed"]:
+            continue
+        out.append((AXIS_STRUCTURE, (
+            f"{carried['exercise']}: {stalled[key]} sessions stalled and the "
+            f"dose is unchanged ({carried['prev_load_kg']}kg x "
+            f"{carried['prev_rep_target']} -> {carried['load_kg']}kg x "
+            f"{carried['rep_target']}). SKILL.md's stall response is "
+            f"REQUIRED at {ANCHOR_STALL_SESSIONS}+ sessions: change the "
+            f"load, change the rep range, or swap the movement. Saying so "
+            f"in a sub-bullet is not the change.")))
+
+    # --- the staleness rate, per plan -----------------------------------
+    spec = DOSE_PROGRESSION_SPEC
+    if report["carried_count"] >= spec["min_carried_for_share"] and (
+            report["unchanged_pct"] >= spec["max_unchanged_share"]):
+        worst = ", ".join(c["exercise"] for c in report["carried"]
+                          if not c["dose_changed"])
+        out.append((AXIS_STRUCTURE, (
+            f"dose staleness: {report['unchanged_count']} of "
+            f"{report['carried_count']} carried-forward exercises "
+            f"({report['unchanged_pct']:.0%}) come back with an unchanged "
+            f"dose, against a target of under "
+            f"{spec['max_unchanged_share']:.0%}. Unchanged: {worst}. "
+            f"Move the load or the rep target on enough of them, or rotate "
+            f"them out.")))
+
+    return out
+
+
+# The plan markdown's own opener, split out so the coach-number
+# cross-check can reach it. See `validate_workout_plan`.
+_PLAN_OPENER_END_RE = re.compile(r"^##\s", re.MULTILINE)
+
+
+def _plan_texts(text: str) -> "list[tuple[str, str]]":
+    """The plan markdown as labelled strings, for `coach_number_findings`.
+
+    Two entries, because the two halves earn different anchors. The
+    OPENER — everything above the first ``##`` heading, which is the title,
+    the ``> Today's call`` / ``> Why`` lines and the framing paragraph — is
+    a `RECOVERY_SCORE_SURFACES` label: its whole subject is the day's
+    call, so a bare ``N/10`` there is a claim about the composite. The
+    BODY is exercise bullets, where a bare ``N/10`` is far more likely a
+    rep or RIR note, so only the metric-noun anchor applies.
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    m = _PLAN_OPENER_END_RE.search(text)
+    cut = m.start() if m else len(text)
+    return [("plan opener", text[:cut]), ("plan body", text[cut:])]
+
+
 def tier_budget_by_index(session_recommendation: "dict | None",
                          base_budget) -> "callable | None":
     """``idx -> working-set budget`` for the workout at position ``idx``.
@@ -1709,6 +2493,7 @@ def validate_workout_plan(
     prev_block: "dict | None" = None,
     plan_date: "str | None" = None,
     deload_week: bool = False,
+    payload: "dict | None" = None,
 ) -> "tuple[list[str], list[str]]":
     """Return ``(errors, warnings)`` for a whole workout-plan markdown.
 
@@ -1724,6 +2509,14 @@ def validate_workout_plan(
       * weekly core distribution (`core_week_errors`)
       * direct-arm dose, diversity and placement
         (`workout_arm_dose_warnings`)
+      * a recovery score in the plan's own opener that contradicts the
+        payload (`coach_number_findings`), evaluated only when
+        ``payload`` is given. The plan opener is the string the user
+        reads mid-workout and it shipped unchecked while the dashboard's
+        coach text did not: the same page could state one score in the
+        opener, another in a card callout and a third in the payload. An
+        error here means the two numbers fall on opposite sides of a
+        documented decision threshold; a re-derived payload warns.
 
     Warnings (render proceeds, finding is surfaced):
       * working-set budget drift (`workout_set_budget_warnings`), which
@@ -1738,6 +2531,15 @@ def validate_workout_plan(
         constant `BLOCK_ROTATION_ENFORCED`; flip that to ``True`` and
         these become errors again with no other edit. Tagged with
         `ROTATION_ADVISORY_TAG` on the way out.
+      * carried-forward dose that did not move, an unanswered stall and
+        an oscillating load (`dose_progression_findings`), evaluated only
+        when ``prev_block`` carries per-slot doses. Advisory THIS RELEASE
+        ONLY, routed by `DOSE_PROGRESSION_ENFORCED` and tagged with
+        `DOSE_ADVISORY_TAG`. These shipped blocking on 2026-08-02 and were
+        demoted the same day: see that constant for the SKILL.md-compliant
+        cadence deload they refuse and the rep-range shuffle that walks
+        past them, and for why re-arming the switch needs the ledger-side
+        rewrite first rather than a one-line flip.
 
     ``deload_week`` demotes the VOLUME axis and nothing else. Without it
     the new specs punished a legitimate deload for being one. Measured on
@@ -1800,6 +2602,15 @@ def validate_workout_plan(
     _route(_core_week_findings(text, spec=core_spec))
     _route(_arm_findings(text, spec=arm_spec))
 
+    # The numbers the plan itself states, against the payload it was
+    # written from. Same function, same severities and the same
+    # decision-equivalence rule the dashboard's coach text gets.
+    if payload is not None:
+        num_errors, num_warnings = coach_number_findings(payload,
+                                                         _plan_texts(text))
+        errors += num_errors
+        warnings += num_warnings
+
     # The ONLY read of `BLOCK_ROTATION_ENFORCED`. Keep it that way: the
     # switch is worth having only while it is a single branch.
     rotation = block_rotation_errors(text, prev_block, plan_date=plan_date)
@@ -1807,6 +2618,17 @@ def validate_workout_plan(
         errors += rotation
     else:
         warnings += [f"{m} {ROTATION_ADVISORY_TAG}" for m in rotation]
+
+    # The ONLY read of `DOSE_PROGRESSION_ENFORCED`, same discipline. The
+    # findings still carry an axis so re-arming routes them through
+    # `_route` unchanged; while the switch is off the axis is moot,
+    # because a warning cannot be demoted any further.
+    dose = dose_progression_findings(text, prev_block, plan_date=plan_date,
+                                     payload=payload)
+    if DOSE_PROGRESSION_ENFORCED:
+        _route(dose)
+    else:
+        warnings += [f"{m} {DOSE_ADVISORY_TAG}" for _axis, m in dose]
 
     if target_working_sets:
         warnings += workout_set_budget_warnings(

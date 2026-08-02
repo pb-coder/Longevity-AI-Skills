@@ -77,7 +77,32 @@ ANCHOR_MAX_BLOCKS = 3
 DELOAD_CADENCE_WEEKS = 6
 
 SLOT_TAGS = ("anchor", "rotating")
-ANCHOR_CHANGE_REASONS = ("stall_3_sessions", "injury", "age_3_blocks")
+ANCHOR_CHANGE_REASONS = ("stall_3_sessions", "injury", "age_3_blocks",
+                         "user_substitution")
+
+# Which of those a COACH may assert, and which the system must derive.
+#
+# ``user_substitution`` exists because the ledger records real gym-floor
+# swaps — a movement replaced by hand, logged repeatedly — and prescribing
+# what the user demonstrably performs is what the prompt asks for. Before
+# this token the only honest options were to take a spurious warning or to
+# write one of the other three as a lie, and both were observed.
+#
+# It is DERIVED ONLY, and that is the whole point of separating the two
+# tuples. The other three are either facts the payload holds
+# (``stall_3_sessions``, ``age_3_blocks``) or a fact only the user knows
+# and states once (``injury``). ``user_substitution`` is a claim ABOUT THE
+# LEDGER, so the ledger has to be the one making it: it is granted by
+# ``_anchor_change_excuse`` when ``reconcile_block_with_logs`` stamped
+# ``performed_instead`` on the dropped anchor AND the replacement is that
+# performed movement. A coach cannot reach it by writing anything —
+# ``adherence._ANCHOR_CHANGE_RE`` does not accept the token, and rule 5
+# only honours declarations drawn from the tuple below. That keeps the
+# deciding input in the user-log provenance class rather than in
+# coach-authored free text, which is where every exploit in this system
+# has lived.
+COACH_DECLARABLE_ANCHOR_CHANGE_REASONS = ("stall_3_sessions", "injury",
+                                          "age_3_blocks")
 
 # How many previous occupants of a rotating slot are remembered. A slot
 # that alternates Plank / Dead Bug / Bird Dog forever changes its
@@ -262,7 +287,8 @@ def new_block(start_date: str, sessions: dict[str, list[dict]] | None = None,
                 "blocks_held": held + 1,
                 "history":     history,
             }
-            for opt in ("pattern", "superset_with", "anchor_change_reason",
+            for opt in ("pattern", "superset_with", "superset_hint_unresolved",
+                        "anchor_change_reason", "dose",
                         "substituted_from", "at_risk", "stalled_sessions",
                         "performed_instead"):
                 if s.get(opt) is not None:
@@ -283,20 +309,93 @@ def new_block(start_date: str, sessions: dict[str, list[dict]] | None = None,
     }
 
 
-def _match_superset_host(hint: str, slots: list[dict]) -> str | None:
+def _catalog_identity_vocabulary(catalog: dict | None) -> frozenset[str]:
+    """Every identity word that appears in any canonical exercise name.
+
+    The discriminator `_match_superset_host` uses to tell a truncated
+    exercise name from trailing prose. ``press`` and ``calf`` are in here;
+    ``above``, ``leave`` and ``tank`` are not.
+    """
+    out: set[str] = set()
+    for name in (catalog or {}):
+        out |= _identity_words(name)
+    return frozenset(out)
+
+
+def _match_superset_host(hint: str, slots: list[dict],
+                         vocabulary: frozenset[str] | None = None) -> str | None:
     """Resolve a prose superset hint to a slot name in the same session.
 
     The plan writes "superset with the calf raise above"; the slot is
     called "Dumbbell Standing Calf Raise". Match on word containment,
     which is exact enough for the plan's own vocabulary and refuses to
     guess when two slots would both match.
+
+    TRAILING PROSE IS TOLERATED. ``adherence._SUPERSET_RE`` strips a bare
+    trailing direction word because it anchors on end-of-line, so
+    ``— superset with the cable lat pulldown above`` arrives as
+    ``cable lat pulldown`` and resolved, while
+    ``— superset with the cable lat pulldown above, leave 2-3 in the
+    tank`` arrived whole and resolved to nothing. The pairing WAS written;
+    only the parse failed, and the resulting error then told the coach the
+    slot had been "left standalone", which was false. Splitting the note
+    in two was the documented remedy and it inflated the sub-bullet count,
+    so one warning manufactured another.
+
+    The fix is a prefix backoff: try the longest run of leading identity
+    words that resolves to exactly one slot, shortening one word at a
+    time.
+
+    THE GUARD, and the wrong question the first version answered. Its
+    docstring argued the backoff "cannot resolve an ambiguity either —
+    dropping a word can only ever ADD candidates", which is true and
+    beside the point. The failure is not an ambiguity resolved wrongly;
+    it is a hint whose intended host is ABSENT, where a generic leading
+    word then manufactures a unique hit. Three confirmed on real
+    vocabulary: ``the leg press above`` resolved to ``Leg Extension``
+    (dropping ``press`` and matching on ``leg``), ``the seated calf raise
+    above`` to ``Seated Cable Row``, ``the chest press above`` to ``Chest
+    Supported Row Machine``. All three answered ``None`` before the
+    backoff was added, so the backoff made them worse than the bug it
+    fixed: a wrong pairing is asserted onto the block artifact and travels
+    into the next generation's rotation diff.
+
+    So the winning prefix may only have dropped PROSE. The word
+    immediately after it is checked against the catalog's identity
+    vocabulary: ``above`` / ``leave`` / ``tank`` are not exercise words
+    and the match stands; ``press`` / ``calf`` / ``raise`` are, which
+    means the referent's own name was truncated to force the hit, and the
+    answer is ``None``. Under-specified references still resolve —
+    ``the squat above`` finds ``Barbell Back Squat``, ``the bench press
+    above`` finds ``Dumbbell Flat Bench Press`` — because what follows
+    them is prose, not a dropped name word.
+
+    ``vocabulary`` falls back to the session's own slot words when no
+    catalog is supplied. That is weaker (it cannot see that ``press`` is
+    an exercise word when no press is in this session) and it is the
+    caller's job to pass the catalog it already has.
     """
-    want = _identity_words(hint)
-    if not want:
+    words = [w for w in _WORD_RE.findall((hint or "").lower())
+             if w not in _EQUIP_WORDS]
+    if not words:
         return None
-    hits = [s["exercise"] for s in slots
-            if want and want <= _identity_words(s.get("exercise") or "")]
-    return hits[0] if len(hits) == 1 else None
+    names = [(s.get("exercise") or "", _identity_words(s.get("exercise") or ""))
+             for s in slots]
+    if vocabulary is None:
+        vocabulary = frozenset().union(*(have for _n, have in names)) \
+            if names else frozenset()
+    for n in range(len(words), 0, -1):
+        want = frozenset(words[:n])
+        hits = [name for name, have in names if want <= have]
+        if len(hits) != 1:
+            continue
+        if n < len(words) and words[n] in vocabulary:
+            # The prefix won by truncating the exercise name it was
+            # referring to, not by shedding prose. The referent is not in
+            # this session; say so instead of guessing a neighbour.
+            return None
+        return hits[0]
+    return None
 
 
 def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
@@ -314,6 +413,9 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
     inference only has to be a defensible starting point.
     """
     plan_date = start_date or plan.get("plan_date")
+    # Once per plan, not once per workout: `_match_superset_host` needs it
+    # for every hint and it is a full pass over the catalog.
+    vocabulary = _catalog_identity_vocabulary(catalog)
     sessions: dict[str, list[dict]] = {}
     for w in plan.get("workouts") or []:
         key = session_key(w.get("title") or "", w.get("index") or 0)
@@ -330,6 +432,24 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
                 "pattern":  meta.get("pattern"),
                 "position": len(slots) + 1,
                 "superset_hint": s.get("superset_hint"),
+                # WHAT THIS SLOT WAS PRESCRIBED, carried on the artifact so
+                # generation N+1 can tell "carried forward and progressed"
+                # from "carried forward and re-copied". The block already
+                # records WHICH movements a session held; without the dose
+                # it cannot answer the complaint the whole workstream
+                # started from ("every plan is the same plan"), because an
+                # identical prescription and a progressed one look the
+                # same. Field names match `adherence._slot_from_bullet`
+                # exactly so `adherence._dose_delta` — the one definition
+                # of "did the dose materially move" — reads this dict
+                # directly instead of a translated copy.
+                "dose": {
+                    "load_kg":         s.get("load_kg"),
+                    "rep_lo":          s.get("rep_lo"),
+                    "rep_hi":          s.get("rep_hi"),
+                    "rep_target":      s.get("rep_target"),
+                    "prescribed_sets": s.get("prescribed_sets"),
+                },
             }
             # The plan's own sub-bullet is the only channel a human has
             # for the one anchor-change reason nothing can derive.
@@ -338,15 +458,31 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
             # only the user knows, and until this grammar existed the
             # validator demanded a field the plan format could not
             # express. See ``adherence._ANCHOR_CHANGE_RE``.
-            if s.get("anchor_change_hint") in ANCHOR_CHANGE_REASONS:
+            #
+            # Filtered against the DECLARABLE tuple, not the full enum.
+            # This side reads a coach-authored hint, and
+            # ``user_substitution`` is a claim about the LEDGER that only
+            # `_anchor_change_excuse` may grant — the whole reason the two
+            # tuples exist. Reading the full enum here made the separation
+            # depend on `adherence._ANCHOR_CHANGE_RE` refusing the token,
+            # which is one parser edit away from being untrue, and left a
+            # programmatically built plan dict able to assert it directly.
+            if s.get("anchor_change_hint") in COACH_DECLARABLE_ANCHOR_CHANGE_REASONS:
                 entry["anchor_change_reason"] = s["anchor_change_hint"]
             slots.append(entry)
         for s in slots:
             hint = s.pop("superset_hint", None)
             if hint:
-                host = _match_superset_host(hint, slots)
+                host = _match_superset_host(hint, slots, vocabulary)
                 if host and host != s["exercise"]:
                     s["superset_with"] = host
+                else:
+                    # The pairing WAS written and could not be resolved to
+                    # a slot in this session. Kept so rule 6 can say that
+                    # instead of "left standalone", which is a different
+                    # defect with a different remedy — see
+                    # `_superset_errors`.
+                    s["superset_hint_unresolved"] = hint
         if slots:
             sessions[key] = slots
 
@@ -708,13 +844,14 @@ def _is_self_diff(prev_block: dict | None, new_block: dict | None) -> str | None
     return None
 
 
-def _anchor_change_excuse(prev_slot: dict) -> str | None:
+def _anchor_change_excuse(prev_slot: dict,
+                          new_names: "set[str] | None" = None) -> str | None:
     """A qualifying reason to drop this anchor, derived where it can be.
 
     ``anchor_change_reason`` used to be settable only by hand-editing an
     artifact, which nothing in the pipeline does — so a lift with
     ``stalled_sessions: 4``, whose stall response SKILL.md marks
-    REQUIRED, could not legally be swapped. Two of the three reasons are
+    REQUIRED, could not legally be swapped. Three of the four reasons are
     facts the payload already holds, so they are read rather than asked
     for:
 
@@ -722,15 +859,31 @@ def _anchor_change_excuse(prev_slot: dict) -> str | None:
       ``stall_3_sessions`` — ``stalled_sessions`` reached
                              ``ANCHOR_STALL_SESSIONS``, threaded from
                              ``estimated_1rm`` by ``block_payload``.
+      ``user_substitution`` — ``reconcile_block_with_logs`` found that the
+                             prescribed movement was never logged in this
+                             block's window while a same-pattern movement
+                             WAS, and stamped that movement on the slot as
+                             ``performed_instead``.
 
     ``injury`` stays human-supplied: nothing in the tracker knows it.
     It comes in through the plan's own sub-bullet grammar
     (``— anchor change: injury``) and lands on the new slot.
+
+    ``new_names`` is the lowercased exercise-name set of the session that
+    replaces this one, and it is what keeps ``user_substitution`` honest.
+    The ledger's claim is narrow — "the user did X instead of Y" — so it
+    excuses exactly one edit: prescribing X. Dropping Y for something the
+    user never performed is a different decision and needs a different
+    reason. Passing ``None`` (no session to check against) falls back to
+    the unqualified read, which is only reachable from a direct call.
     """
     if int(prev_slot.get("blocks_held") or 0) >= ANCHOR_MAX_BLOCKS:
         return "age_3_blocks"
     if int(prev_slot.get("stalled_sessions") or 0) >= ANCHOR_STALL_SESSIONS:
         return "stall_3_sessions"
+    performed = (prev_slot.get("performed_instead") or "").strip().lower()
+    if performed and (new_names is None or performed in new_names):
+        return "user_substitution"
     return None
 
 
@@ -974,16 +1127,25 @@ def rotation_diff_report(prev_block: dict | None, new_block: dict | None,
         # used to sit at is not a fact about the program.
         new_anchors = {(s.get("exercise") or "").strip().lower(): s
                        for s in new_slots if (s.get("tag") or "") == "anchor"}
+        # Only the coach-declarable subset counts as a DECLARATION.
+        # ``user_substitution`` is deliberately absent: it is a claim about
+        # what the ledger recorded, so it is granted below by
+        # `_anchor_change_excuse` reading the ledger, never by a slot
+        # asserting it. See COACH_DECLARABLE_ANCHOR_CHANGE_REASONS.
         declared = [s for k, s in sorted(new_anchors.items())
                     if k not in prev_anchors
-                    and s.get("anchor_change_reason") in ANCHOR_CHANGE_REASONS]
+                    and s.get("anchor_change_reason")
+                    in COACH_DECLARABLE_ANCHOR_CHANGE_REASONS]
+        new_names_here = _slot_names(new_slots)
         for gone in sorted(k for k in prev_anchors if k not in new_anchors):
-            derived = _anchor_change_excuse(prev_anchors[gone])
+            derived = _anchor_change_excuse(prev_anchors[gone], new_names_here)
             prev_name = (catalog.get(gone) or {}).get("name", gone)
             if derived:
+                basis = ("the ledger" if derived == "user_substitution"
+                         else "the block artifact")
                 notes.append(
                     f"block {stype}: anchor changed — {prev_name} dropped on "
-                    f"{derived}, derived from the block artifact.")
+                    f"{derived}, derived from {basis}.")
                 continue
             if declared:
                 declared.pop(0)
@@ -992,8 +1154,10 @@ def rotation_diff_report(prev_block: dict | None, new_block: dict | None,
                 f"block {stype}: anchor changed — {prev_name} is no longer in "
                 f"this session and nothing qualifies the change. Set "
                 f"anchor_change_reason on its replacement (one of "
-                f"{', '.join(ANCHOR_CHANGE_REASONS)}), or add "
-                f"'— anchor change: injury' under the bullet that replaces it.")
+                f"{', '.join(COACH_DECLARABLE_ANCHOR_CHANGE_REASONS)}), or add "
+                f"'— anchor change: injury' under the bullet that replaces it. "
+                f"(user_substitution is not declarable: it is granted only "
+                f"when the ledger recorded the swap.)")
 
         # Rule 4 — the session as a whole must gain a pattern.
         if boundary and rotating_seen and not pattern_gained:
@@ -1095,6 +1259,16 @@ def _superset_errors(stype, slot, pos, name, new_slots, catalog, label,
     """
     host_name = (slot.get("superset_with") or "").strip()
     if not host_name:
+        # An unresolved hint is NOT a missing pairing. Saying "left
+        # standalone" when the plan wrote the pairing sends the coach to
+        # add a note that is already there; the actionable fact is that
+        # the words did not name a slot in this session.
+        unresolved = (slot.get("superset_hint_unresolved") or "").strip()
+        if unresolved:
+            return [f"{label}: a superset host was written ({unresolved!r}) "
+                    f"but it does not resolve to any exercise in this "
+                    f"session. Name the host's catalog exercise, e.g. "
+                    f"'superset with the barbell back squat above'."]
         why = ("rotated in this block but left standalone"
                if rotated_in else
                "keeps going unperformed and is still standalone")
@@ -1868,6 +2042,10 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
                 "blocks_held":  s.get("blocks_held"),
                 "history":      s.get("history") or None,
                 "superset_with": s.get("superset_with"),
+                # The prescription this slot carried, so the next
+                # generation's validator can tell a progressed carry-over
+                # from a re-copied one. See `block_from_plan`.
+                "dose":         s.get("dose"),
                 "at_risk":      s.get("at_risk") or None,
                 "stalled_sessions": s.get("stalled_sessions"),
                 "performed_instead": s.get("performed_instead"),

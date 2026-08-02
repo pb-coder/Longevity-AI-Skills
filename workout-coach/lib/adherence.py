@@ -1369,7 +1369,30 @@ def _rep_midpoint(slot: dict) -> float | None:
 
 
 def _dose_delta(prev: dict, cur: dict) -> tuple[str, bool]:
-    """Classify the change between two prescriptions of one exercise."""
+    """Classify the change between two prescriptions of one exercise.
+
+    THE SET COUNT IS NOT AN AXIS OF PROGRESSION HERE, and that is the
+    prompt's rule, not an implementation preference. SKILL.md's
+    hold-loads paragraph says it in as many words: the rep target is the
+    intended lever under a hold and "that is a real dose change and it
+    counts as one. Churning set counts to move the metric does not:
+    adding or dropping a set purely to make the prescription differ
+    changes weekly volume for no training reason and breaks the tier
+    targets." This function used to treat ANY set-count change as
+    material, with no magnitude floor at all — the cheapest bypass in the
+    module, and one the prompt explicitly told the coach was illegitimate
+    while the code rewarded it. A set-count-only change is now classified
+    (``sets_up`` / ``sets_down`` are kept as change KINDS so the payload
+    still reports what moved) and counted as UNCHANGED, the same
+    arrangement ``cosmetic`` already had.
+
+    The cost is stated: a real volume cut — a deload halving a session's
+    sets while holding its loads, which is exactly what SKILL.md's
+    cadence deload prescribes — reads as an unchanged dose. That is the
+    honest reading of the prompt's own rule, and it is one of the reasons
+    the staleness gate is advisory rather than blocking; see
+    `render_validators.DOSE_PROGRESSION_ENFORCED`.
+    """
     pl, cl = prev.get("load_kg"), cur.get("load_kg")
     if pl is not None and cl is not None and pl > 0:
         rel = (cl - pl) / pl
@@ -1383,7 +1406,7 @@ def _dose_delta(prev: dict, cur: dict) -> tuple[str, bool]:
             return ("reps_up" if cm > pm else "reps_down", True)
     ps, cs = prev.get("prescribed_sets"), cur.get("prescribed_sets")
     if ps != cs:
-        return ("sets_up" if (cs or 0) > (ps or 0) else "sets_down", True)
+        return ("sets_up" if (cs or 0) > (ps or 0) else "sets_down", False)
     if (pl, pm) != (cl, cm):
         return ("cosmetic", False)
     return ("none", False)
@@ -1401,18 +1424,37 @@ def dose_staleness(plans: list[dict], db: dict | None = None) -> dict | None:
     ``oscillating`` is the second-order guard: a coach that satisfies
     "the dose must change" by alternating 90 / 92.5 / 90 / 92.5 has
     changed the dose on every generation and progressed nothing.
+
+    ONE DOSE PER EXERCISE PER PLAN, chosen by SET COUNT and only then by
+    load. A movement prescribed in two workouts of one plan has to
+    collapse to a single prescription or the comparison is between
+    arbitrary halves; the question is which one. Picking the HEAVIEST was
+    a laundering channel: a stalled lift kept identical in Workout 1 —
+    three sets at the same weight, the session the user actually
+    performs — plus a single token set five kilos heavier bolted onto
+    Workout 3 made the whole stall finding disappear, while the training
+    that was prescribed did not change at all. The prescription that
+    carries the most working sets is the one that defines the stimulus,
+    so it is the one that has to move; a heavier second exposure only
+    wins the tie-break when it carries as many sets, at which point it is
+    a real second exposure rather than a token.
     """
     if len(plans) < 2:
         return None
-    # Per plan, the best (heaviest / most-set) prescription of each
-    # exercise. A movement prescribed in two workouts of the same plan
-    # gets one dose, otherwise the comparison is between arbitrary halves.
     series: dict[str, list[tuple[str, dict]]] = {}
     for plan in plans:
         best: dict[str, dict] = {}
         for w in plan.get("workouts") or []:
             for s in w["slots"]:
-                if s["prescribed_sets"] <= 0:
+                sets = s.get("prescribed_sets")
+                if not isinstance(sets, (int, float)) or isinstance(sets, bool):
+                    # The block artifact is JSON on disk and reaches this
+                    # through `render_validators._block_as_plan`; a dose
+                    # written before the field existed, or carrying null,
+                    # used to raise KeyError / TypeError here. Exit 1 says
+                    # "the program broke" where "cannot compare" was meant.
+                    continue
+                if sets <= 0:
                     continue
                 key = s["exercise"].strip().lower()
                 # Warmups carry no dose to progress. "Jumping Jacks: 50"
@@ -1423,7 +1465,10 @@ def dose_staleness(plans: list[dict], db: dict | None = None) -> dict | None:
                 if cat.get("is_warmup") or cat.get("is_cardio"):
                     continue
                 cur = best.get(key)
-                if cur is None or (s.get("load_kg") or 0) > (cur.get("load_kg") or 0):
+                if cur is None or (
+                        (sets, s.get("load_kg") or 0)
+                        > (cur.get("prescribed_sets") or 0,
+                           cur.get("load_kg") or 0)):
                     best[key] = s
         for key, slot in best.items():
             series.setdefault(key, []).append((plan["plan_date"], slot))

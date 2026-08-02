@@ -53,6 +53,14 @@ Emits one JSON blob on stdout organised around session-level signals
     Read ``reason`` / ``note`` before saying anything about gaining or
     losing.
 
+  Waist circumference (source-agnostic; both importers write the column):
+  - waist_latest: ``{value_cm, date}`` for the newest measurement at or
+    before ``--today``; absent when never measured.
+  - waist_trend_cm_per_4w: the same block SHAPE as bodyweight_trend, rate
+    in cm per 4 weeks, over a minimum 56-day window. ``cm_per_4w`` is
+    populated only when ``state == "resolved"``. A single measurement
+    returns ``unresolved`` / ``too_few_readings``, never 0.0.
+
   Apple Health:
   - health_metrics_weekly (4-week aggregates; raw daily behind
     --include-daily-health)
@@ -153,6 +161,7 @@ from workout_coach.lib.sessions import (  # noqa: E402
     bodyweight_trend,
     build_monthly_sessions,
     progression_summary,
+    waist_trend,
 )
 from workout_coach.lib.strength import (  # noqa: E402
     estimated_1rm,
@@ -380,6 +389,65 @@ def _bodyweight_weekly_kg(bw_all: list[dict], today_d: date,
         vals = by_week[wk]
         out.append(round(sum(vals) / len(vals), 2) if vals else None)
     return out
+
+
+def _waist_readings(health_all: list[dict]) -> list[dict]:
+    """Waist measurements off the health-metrics rows, ASC by date.
+
+    ``Waist (cm)`` is written by BOTH importers (the native-XML path via
+    ``apple_health_daily``, the HealthAutoExport path via its own field
+    map), so this reader is source-agnostic on purpose: it takes the
+    column, not the exporter. ``health_all`` has already been through
+    ``_clip_series``, so the ``--today`` horizon is applied before
+    anything here sees a row.
+
+    Blank cells are skipped rather than yielded as ``0`` — a person who
+    has never measured returns ``[]``, which reads downstream as "no
+    data" instead of "flat at zero".
+    """
+    out: list[dict] = []
+    for entry in health_all:
+        cm = entry.get("waist_cm")
+        if cm is None:
+            continue
+        out.append({"date": entry["date"], "cm": cm})
+    out.sort(key=lambda e: e["date"])
+    return out
+
+
+def _attach_waist_weekly(weekly: list[dict], waist_readings: list[dict],
+                         today_d: date, weeks: int = 4) -> list[dict]:
+    """Fold a per-ISO-week waist mean onto each ``health_metrics_weekly``
+    entry, keyed by ``week_start``.
+
+    ``waist_cm`` is not part of ``health_metrics_weekly``'s own key list
+    and is added here instead so the vitals table can draw the waist
+    sparkline from the same series every other vitals row uses. Weeks
+    with no measurement are left with ``waist_cm = None``, which
+    ``_compact`` strips — the sparkline then sees a gap rather than an
+    invented value, and a series with fewer than two real points renders
+    as an empty box rather than a flat line.
+    """
+    if not weekly or not waist_readings:
+        return weekly
+    cutoff = today_d - timedelta(days=max(weeks * 7 - 1, 0))
+    by_week: dict[str, list[float]] = {}
+    for row in waist_readings:
+        d = _parse_iso_date(row.get("date"))
+        if d is None or d < cutoff or d > today_d:
+            continue
+        try:
+            value = float(row["cm"])
+        except (TypeError, ValueError):
+            continue
+        iso = d.isocalendar()
+        monday = date.fromisocalendar(iso.year, iso.week, 1).isoformat()
+        by_week.setdefault(monday, []).append(value)
+    for entry in weekly:
+        vals = by_week.get(entry.get("week_start"))
+        entry["waist_cm"] = (round(sum(vals) / len(vals), 2) if vals
+                             else None)
+    return weekly
 
 
 def _round_or_none(v: float | None, digits: int) -> float | None:
@@ -885,6 +953,32 @@ def main() -> int:
     )
     bw_trend = bw_trend_block["kg_per_week"]
 
+    # ---- Waist circumference. Imported by both sources into
+    # ``health_metrics.csv``'s ``Waist (cm)`` column and, until now, never
+    # surfaced: the number was saved and invisible.
+    #
+    # It earns its place next to bodyweight because the two answer
+    # different questions. Scale weight during a lifting block moves on
+    # water, glycogen and lean tissue at once; waist is the cheap proxy
+    # for where the mass went, and a bulk that adds 2 kg with a flat waist
+    # is a different event from one that adds 2 kg with a 3 cm waist.
+    #
+    # The trend goes through the SAME estimator as bodyweight
+    # (``_trend_verdict``), so a single measurement returns an explicit
+    # ``too_few_readings`` rather than a slope. ``today_d`` anchors the
+    # window, which is the second horizon guard behind ``_clip_series``.
+    waist_readings = _waist_readings(health_all)
+    waist_latest = (
+        {"value_cm": waist_readings[-1]["cm"],
+         "date":     waist_readings[-1]["date"]}
+        if waist_readings else None
+    )
+    waist_trend_block = waist_trend(waist_readings, today_d=today_d)
+    # The vitals table draws its waist sparkline off the weekly series,
+    # the same way HRV / RHR / VO2max do.
+    weekly_health = _attach_waist_weekly(weekly_health, waist_readings,
+                                         today_d, weeks=4)
+
     # ---- Week-over-week comparison block (used by the assessment HTML
     # dashboard's bottom card). Composes existing extracts; no new data
     # sources. ----
@@ -1125,6 +1219,18 @@ def main() -> int:
         "bodyweight_trend_kg_per_week": bw_trend,
         "bodyweight_trend": bw_trend_block,
         "bodyweight_weekly": _bodyweight_weekly_kg(bw_all, today_d, weeks=4),
+        # ---- Waist circumference ----
+        # ``waist_latest`` is ``{value_cm, date}`` for the newest
+        # measurement at or before ``today``, and None (dropped by
+        # ``_compact``, same as ``bodyweight_latest`` / ``vo2max_latest``)
+        # when the column has never been filled in.
+        "waist_latest": waist_latest,
+        # Same block shape as ``bodyweight_trend``, rate in cm per 4
+        # weeks: ``state`` / ``reason`` / ``note`` plus ``cm_per_4w``,
+        # which is populated ONLY when the 95% interval excludes zero.
+        # There is no bare-scalar twin on purpose — a caller that wants
+        # the number has to pass through ``state`` to reach it.
+        "waist_trend_cm_per_4w": waist_trend_block,
         # ---- Apple Health weekly aggregates (raw daily behind a flag) ----
         "health_metrics_weekly": weekly_health,
         "health_metrics_recent": health_recent if args.include_daily_health else None,

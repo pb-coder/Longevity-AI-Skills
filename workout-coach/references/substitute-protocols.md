@@ -4,6 +4,8 @@ When `session_recommendation.tier` is **A**, **B**, or **C**, the coach does NOT
 
 Reasoning behind the gate is in the Phase 2 preamble of `SKILL.md`. The thresholds and per-tier triggers are in `lib/constants.py:SESSION_GATE_THRESHOLDS`. The decision lives in `lib/health.py:compute_session_recommendation`.
 
+**The templates below are copy-me markdown and `validate_workout_md` runs over the result.** Its em-dash rule allows one only on the `# Workout plan — <date>` title line and on an indented `  — cue` sub-bullet. A `> Today's call:` or `> Why:` line is neither, so an em-dash there is a blocking error and the render exits 2. Use a period, comma, semicolon or colon when you fill these in.
+
 ---
 
 ## Tier A — `rest` (illness / acute under-recovery)
@@ -153,7 +155,7 @@ The workout markdown looks like a normal session but with the held loads explici
 
 ```markdown
 # Workout plan — <date>
-> Today's call: Modified strength — hold loads, cut accessories.
+> Today's call: Modified strength. Hold loads, cut accessories.
 > Why: <rationale[0].note>
 >      <rationale[1].note>
 
@@ -192,7 +194,7 @@ Normal session, with one-line warning at the top of the markdown:
 
 ```markdown
 # Workout plan — <date>
-> Today's call: Train as planned — but TSB has been over +10 for 5+ days. You've been over-recovered. Fitness is bleeding off if this continues.
+> Today's call: Train as planned, but TSB has been over +10 for 5+ days. You've been over-recovered. Fitness is bleeding off if this continues.
 
 Assessment: ./<date>-assessment.html
 

@@ -280,7 +280,12 @@ class RenderValidatorTests(unittest.TestCase):
   — brace before the first rep
 """)
         self.assertEqual(errors, [])
-        self.assertTrue(any("3 sub-bullets" in w for w in warnings))
+        # Pinned string updated 2026-08-02: the counter now says
+        # "rationale sub-bullets", because it counts only those. All three
+        # sub-bullets here ARE rationale (none is a superset or
+        # anchor-change routing line), so the COUNT is unchanged at 3 and
+        # this test still measures what it always measured.
+        self.assertTrue(any("3 rationale sub-bullets" in w for w in warnings))
         self.assertTrue(any("comparative-history" in w for w in warnings))
 
     def test_core_warnings_silent_on_compliant_workout(self) -> None:

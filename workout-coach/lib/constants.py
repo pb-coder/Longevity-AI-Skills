@@ -26,7 +26,9 @@ Five groups:
   plus ``muscle_priority_tiers`` and ``muscle_volume_targets`` — the
   emphasis / grow / maintain model (mid-MAV / MEV / MV).
 - **Prescription specs**: ``CORE_WEEK_SPEC`` and ``ARM_WEEK_SPEC``, the
-  distribution-shaped weekly targets the render validators enforce.
+  distribution-shaped weekly targets the render validators enforce, and
+  ``DOSE_PROGRESSION_SPEC``, the across-generations counterpart that
+  stops the same plan shipping twice.
 """
 from __future__ import annotations
 
@@ -507,6 +509,42 @@ CORE_WEEK_SPEC = {
 ARM_WEEK_SPEC = {
     "min_direct_sets_per_week": 6,
     "min_distinct_exercises_per_week": 2,
+}
+
+
+# =============================================================================
+# Dose progression — the spec for "is this the same plan again?"
+# =============================================================================
+#
+# The complaint the whole workstream started from was "every plan is the
+# same plan", and until 2026-08 nothing checked it: `dose_staleness` was
+# computed into the payload for the coach to READ and no validator looked
+# at it, so a coach could re-prescribe every load and rep target
+# identically and render clean. The three axes above stop a plan being
+# degenerate WITHIN one week; this one stops it being degenerate ACROSS
+# weeks, which is a different failure and was the one the user actually
+# reported.
+#
+# What "carried forward" and "moved" mean is NOT defined here. Both live
+# in `adherence` — `dose_staleness` decides which exercises count as
+# carried, and `_dose_delta` decides whether a change is material (2% of
+# load, one whole rep of range midpoint, or a set count). Restating either
+# would give the payload's report and the gate two different definitions
+# of the same word, and they would drift.
+DOSE_PROGRESSION_SPEC = {
+    # SKILL.md's own stated target, and the same number
+    # `adherence.dose_staleness` reports as ``target_max_pct``. The
+    # measured baseline was 70% of carried exercises returning with an
+    # unchanged dose. A test pins these two equal; they are one number
+    # seen from the report side and the gate side.
+    "max_unchanged_share": 0.40,
+    # Below this many carried exercises the share is noise, not a
+    # measurement: at 3 carried lifts one re-copy is already 33% and two
+    # is 67%, so the check would fire on the arithmetic rather than on the
+    # behaviour. Deload and comeback weeks are exactly where the carried
+    # count collapses, and they are the weeks least deserving of a
+    # spurious block. The real corpus runs 11-22 carried in a normal week.
+    "min_carried_for_share": 5,
 }
 
 # Canonicalise the muscle tokens that appear in exercises-database.md to the

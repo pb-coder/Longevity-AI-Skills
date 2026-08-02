@@ -237,7 +237,7 @@ def render(j: TrackerJSON, coach: CoachReads, workout_md: str, person: str) -> s
     {card_nutrition_phase(j.get("nutrition_phase"), coach_cards.get("nutrition_phase_callout"))}
     {card_metabolic_domain(longevity_state, coach_cards.get("trajectory_metabolic"))}
     {card_behavioral_domain(movement_consistency, sleep_regularity, acwr, j.get("cardio_hr_zones_28d") or {}, coach_cards.get("trajectory_behavioral"))}
-    {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"), bw_trend_block)}
+    {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"), bw_trend_block, j.get("waist_latest"), j.get("waist_trend_cm_per_4w"))}
     {card_sleep(j.get("sleep_summary"), coach_cards.get("sleep"))}
     {card_recovery_practices(thermal, light, coach_cards.get("recovery_practices"))}
     {card_risk_flags(longevity_state, coach_cards.get("trajectory_risk_flags"))}
@@ -285,7 +285,11 @@ def main():
         return 2
 
     coach: CoachReads = json.loads(Path(args.coach).read_text(encoding="utf-8"))
-    errors, warnings = validate_coach_reads(coach)
+    # Pass the payload so coach-authored scores are checked against the
+    # numbers they claim to report. Without it the cross-check is inert:
+    # a card may state a recovery score the tracker contradicts, and the
+    # dashboard renders both, side by side, at exit 0.
+    errors, warnings = validate_coach_reads(coach, j)
     for w in warnings:
         print(f"coach_reads warning: {w}", file=sys.stderr)
     if errors:
@@ -352,6 +356,12 @@ def main():
         prev_block=block,
         plan_date=j.get("today"),
         deload_week=is_deload_week(session_rec, block),
+        # The plan's own opener states the recovery score to the user
+        # mid-workout and shipped unchecked while `coach_reads` did not,
+        # so one page could carry three different numbers for it: 5.6 in
+        # the opener, 5.2 in a card callout, 5.4 in the payload. Same
+        # payload, same cross-check, same severities.
+        payload=j,
     )
     for w in plan_warnings:
         print(f"workout_md plan warning: {w}", file=sys.stderr)

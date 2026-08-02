@@ -29,7 +29,7 @@ _CONTRACT_DECLARED_KEYS: "dict[str, frozenset[str]]" = {
         "hr_at_volume_divergence", "age_years", "estimated_max_hr",
         "estimated_rest_hr", "bodyweight_latest",
         "bodyweight_trend_kg_per_week", "bodyweight_trend",
-        "bodyweight_weekly",
+        "bodyweight_weekly", "waist_latest", "waist_trend_cm_per_4w",
         "health_metrics_weekly", "health_metrics_recent",
         "vo2max_latest", "vo2max_trend_per_4w", "week_over_week",
         "session_recommendation", "tier_history",

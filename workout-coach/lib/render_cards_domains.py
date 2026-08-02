@@ -422,6 +422,11 @@ _BW_UNRESOLVED_SUB = {
     "window_shorter_than_min":  "window shorter than the 28-day minimum",
     "no_time_variance":         "all weigh-ins fall on one day",
     "ci_straddles_zero":        "direction not resolved — 95% interval spans zero",
+    # Added 2026-08-02 with the span/recency gates. Without entries here
+    # these two fall through to the block's `note`, which is a full
+    # sentence where every other reason renders a phrase.
+    "span_shorter_than_min":    "weigh-ins too bunched together to fit a rate",
+    "readings_stale":           "newest weigh-in is too old to describe now",
 }
 
 

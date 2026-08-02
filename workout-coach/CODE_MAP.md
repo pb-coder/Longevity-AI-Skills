@@ -53,7 +53,7 @@ For known issues / planned cleanup, see
 | Per-muscle volume bars | [`lib/render_components_volume.py`](lib/render_components_volume.py) |
 | Trajectory-domain gauges and strips | [`lib/render_components_domain.py`](lib/render_components_domain.py) |
 | Coach/workout validation rules / em-dash check / length cap / catalog names | [`lib/render_validators.py`](lib/render_validators.py)::`validate_coach_reads` + `validate_workout_md` |
-| **Whether a plan is allowed to render** (core dose, weekly core distribution, direct-arm floor; block rotation warns only, see `BLOCK_ROTATION_ENFORCED`) | [`lib/render_validators.py`](lib/render_validators.py)::`validate_workout_plan` |
+| **Whether a plan is allowed to render** (core dose, weekly core distribution, direct-arm floor; block rotation and dose progression warn only, see `BLOCK_ROTATION_ENFORCED` / `DOSE_PROGRESSION_ENFORCED`) | [`lib/render_validators.py`](lib/render_validators.py)::`validate_workout_plan` |
 | Where this plan sits in its block, and what the dose actually did | [`lib/render_cards_today.py`](lib/render_cards_today.py)::`card_block_position` |
 | Planned-vs-performed ledger, the D5 bench list, dose staleness | [`lib/adherence.py`](lib/adherence.py) |
 | Block artifact, boundary rule, rotation diff, cold-start loads | [`lib/blocks.py`](lib/blocks.py) |
@@ -317,7 +317,15 @@ and the one `render_dashboard.main` calls. It unions:
 | Direct-arm ≥6 sets/week floor | `arm_week_errors` | `AXIS_VOLUME` | error, **warning on a deload** |
 | Direct-arm distinct exercises, terminal-slot placement | `workout_arm_dose_warnings` | `AXIS_STRUCTURE` | error |
 | Block rotation against the previous block | `block_rotation_errors` → `blocks.rotation_diff_errors` | — | **warning this release**, see `BLOCK_ROTATION_ENFORCED` |
+| Dose progression vs the previous block | `dose_progression_findings` → `adherence.dose_staleness` | — | **warning this release**, see `DOSE_PROGRESSION_ENFORCED` |
 | Working-set budget drift | `workout_set_budget_warnings` | — | always **warning** |
+
+**Dose progression is advisory this release.** `DOSE_PROGRESSION_ENFORCED`
+in `render_validators.py` is `False`. It was demoted the day it landed: it
+refused a compliant one-session cadence deload, and it was satisfied by
+shifting every rep window up one without touching a weight. Re-arming it
+needs the expected increment derived from the ledger, not from two
+coach-authored plans.
 
 **Rotation is advisory this release.** `BLOCK_ROTATION_ENFORCED` in
 [`lib/render_validators.py`](lib/render_validators.py) is the one switch;

@@ -150,6 +150,14 @@ class TrackerJSON(TypedDict, total=False):
     # read this instead of inventing an explanation for a missing number.
     bodyweight_trend: dict[str, JsonValue]
     bodyweight_weekly: list[float | None]
+    # The leanness channel. Bodyweight alone cannot separate recomposition
+    # from gain, so waist is carried as a second, independent series.
+    # ``waist_trend_cm_per_4w`` mirrors ``bodyweight_trend``'s block shape
+    # — ``state`` / ``reason`` / ``note`` — and is emitted even when
+    # unresolved, because "not enough readings to say" is an answer and a
+    # renderer must not invent one.
+    waist_latest: dict[str, JsonValue] | None
+    waist_trend_cm_per_4w: dict[str, JsonValue]
     health_metrics_weekly: list[dict[str, JsonValue]]
     health_metrics_recent: list[dict[str, JsonValue]] | None
     vo2max_latest: dict[str, JsonValue] | None

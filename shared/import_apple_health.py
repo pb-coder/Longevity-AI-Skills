@@ -62,7 +62,13 @@ from .apple_workout_types import (  # noqa: E402
     APPLE_TO_TRACKER_EXERCISE,
     CARDIO_AUTOLOG_TYPES,
 )
-from .apple_health_core import hhmm, parse_apple_dt, to_float  # noqa: E402
+from .apple_health_core import (  # noqa: E402
+    TEMP_UNIT_TO_C,
+    convert_unit as _convert_unit,
+    hhmm,
+    parse_apple_dt,
+    to_float,
+)
 from .apple_health_daily import DayAggregator, WANTED_RECORD_TYPES  # noqa: E402
 from .apple_health_strength import (  # noqa: E402
     STRENGTH_APPLE_TYPES,
@@ -110,12 +116,9 @@ ENERGY_UNIT_TO_KCAL = {
     "kj": 0.239005736,
     "j": 0.000239005736,
 }
-TEMP_UNIT_TO_C = {
-    "degc": lambda v: v,
-    "c": lambda v: v,
-    "degf": lambda v: (v - 32.0) * 5.0 / 9.0,
-    "f": lambda v: (v - 32.0) * 5.0 / 9.0,
-}
+# TEMP_UNIT_TO_C and the unit-conversion helper now live in
+# apple_health_core so both importers share one table (one concept, one
+# source of truth). Imported above as TEMP_UNIT_TO_C / _convert_unit.
 
 
 def _clean_apple_text(value: str | None) -> str | None:
@@ -124,16 +127,6 @@ def _clean_apple_text(value: str | None) -> str | None:
     cleaned = value.replace("\xa0", " ").strip()
     return cleaned or None
 
-
-def _convert_unit(value: float | None, unit: str | None, converters: dict, label: str) -> float | None:
-    if value is None:
-        return None
-    key = (unit or "").strip().lower()
-    conv = converters.get(key)
-    if conv is None:
-        print(f"WARN: unknown {label} unit {key!r}; value skipped", file=sys.stderr)
-        return None
-    return conv(value) if callable(conv) else value * conv
 
 # Marker that the device attribute came from a fitness machine via GymKit
 # (Matrix treadmill, Technogym bike, etc.). Apple wraps these in a
@@ -590,6 +583,34 @@ def default_since():
     return today - timedelta(days=183)
 
 
+def body_composition_lines(metric_entries: list[dict]) -> list[str]:
+    """Report per-field body-composition coverage in the parsed window.
+
+    Leanness is the one signal the tracker was blind to, and the exports
+    seen so far carry Body Mass only. Printing an explicit ``0 dates`` for
+    the fields that never appear keeps that gap visible as a
+    data-collection problem instead of letting it read as a clean import.
+    """
+    lines = []
+    for field, label in (
+        ("bodyweight_kg", "Bodyweight"),
+        ("waist_cm", "Waist"),
+        ("body_fat_pct", "Body Fat"),
+        ("lean_body_mass_kg", "Lean Mass"),
+    ):
+        dates = [e["date"] for e in metric_entries if e.get(field) is not None]
+        if dates:
+            lines.append(
+                f"Body composition / {label}: {len(dates)} dates "
+                f"(latest {max(dates)})"
+            )
+        else:
+            lines.append(
+                f"Body composition / {label}: 0 dates — not recorded in this export"
+            )
+    return lines
+
+
 def _resolve_export_zip(person: str) -> Path | None:
     """Find the Apple Health export zip in the workout-tracker root.
 
@@ -665,6 +686,8 @@ def main():
               f"{sleep_night_entries[-1]['date'] if sleep_night_entries else '-'})")
         print(f"Workout Sessions: {len(workout_rows)} sessions would be written "
               f"({sum(1 for r in workout_rows if r.get('incidental'))} walks flagged incidental)")
+        for line in body_composition_lines(metric_entries):
+            print(line)
         for note in negligible_swim_notes:
             print(note)
         for note in nearby_swim_notes:
@@ -684,6 +707,7 @@ def main():
         out_lines.append("Profile: created (source=xml, auto_cardio=true)")
 
     out_lines.extend(upsert_health_metrics(person, metric_entries))
+    out_lines.extend(body_composition_lines(metric_entries))
     out_lines.extend(upsert_workout_sessions(person, workout_rows))
     out_lines.extend(negligible_swim_notes)
     out_lines.extend(nearby_swim_notes)

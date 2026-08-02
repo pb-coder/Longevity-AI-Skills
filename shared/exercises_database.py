@@ -44,27 +44,68 @@ ALIASES_PATH = _REPO / "workout-logger" / "references" / "aliases.md"
 
 
 # ============================================================ Parser
-_MUSCLE_HEADING_RE = re.compile(r"^##\s+([A-Z][A-Z /]+)\s*$")
+# A muscle heading is an all-caps token run, optionally followed by a
+# mixed-case parenthetical qualifier: ``## FULL BODY (Compound)``. The
+# qualifier is documentation, not identity — see ``_heading_base``.
+#
+# The qualifier clause is not cosmetic. Without it this pattern rejected
+# ``## FULL BODY (Compound)`` outright, and because the walk in
+# ``parse_database`` only switches ``current_muscle`` on a *match*, the
+# eight entries below that heading (Barbell Thruster … Dumbbell Farmer
+# Walk … Tuck Jump) were silently filed under the preceding ``## NECK``.
+# ``validate_database`` reported clean throughout. The heading-coverage
+# check added there is the guard against the next one.
+_MUSCLE_HEADING_RE = re.compile(
+    r"^##\s+([A-Z][A-Z /]*(?:\([A-Za-z][A-Za-z /-]*\))?)\s*$"
+)
+# Any level-2 heading at all, parseable or not. Used only by
+# ``validate_database`` to prove the two sets are the same size.
+_ANY_H2_RE = re.compile(r"^##\s+\S")
 _SECTION_HEADING_RE = re.compile(r"^###\s+(.+)$")
 _ENTRY_RE = re.compile(r"^-\s+(.+)$")
+_HEADING_QUALIFIER_RE = re.compile(r"\s*\([^)]*\)\s*$")
+
+# Sentinel for entries that appear directly under ``## MUSCLE`` with no
+# ``### Section`` heading (CARDIO, NECK, ADDUCTORS, CALVES, WELLNESS,
+# FULL BODY (Compound) at time of writing).
+DEFAULT_SECTION = "_default"
 
 
-def parse_database() -> dict:
+def _heading_base(heading: str) -> str:
+    """Uppercased heading text with any trailing ``(qualifier)`` removed.
+
+    ``"FULL BODY (Compound)"`` → ``"FULL BODY"``. Callers name muscles,
+    not headings, so the qualifier must not be part of the key they have
+    to guess.
+    """
+    return _HEADING_QUALIFIER_RE.sub("", heading).strip().upper()
+
+
+def _read_database_text() -> str:
+    """Read the catalog markdown. The single I/O door onto that file.
+
+    One function so a caller that needs the raw text AND the parse can do
+    both from one read — see ``validate_database``, which used to read the
+    file three times per invocation.
+    """
+    return DATABASE_PATH.read_text(encoding="utf-8")
+
+
+def parse_database(text: str | None = None) -> dict:
     """Walk the catalog markdown into ``{muscle: {section: [entries]}}``.
 
     Each entry is the raw line content (after the leading ``- ``), so
     callers can preserve the original formatting on rewrite. Section
     headings are kept in document order via ``__order__`` lists.
+
+    ``text`` lets a caller that already holds the file contents skip the
+    re-read; omitted, the file is read.
     """
-    text = DATABASE_PATH.read_text(encoding="utf-8")
+    if text is None:
+        text = _read_database_text()
     out: dict = {"__muscle_order__": [], "muscles": {}}
     current_muscle: str | None = None
     current_section: str | None = None
-
-    # Sentinel for entries that appear directly under ``## MUSCLE`` with
-    # no ``### Section`` heading (CARDIO, NECK, ADDUCTORS, CALVES,
-    # WELLNESS at time of writing).
-    DEFAULT_SECTION = "_default"
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
@@ -134,9 +175,14 @@ def entry_canonical_name(entry_line: str) -> str:
     return entry_line[:bracket_idx].strip()
 
 
-def _all_canonical_names() -> list[str]:
-    """Flat list of every canonical exercise name from the database."""
-    db = parse_database()
+def _all_canonical_names(db: dict | None = None) -> list[str]:
+    """Flat list of every canonical exercise name from the database.
+
+    ``db`` lets a caller that already parsed reuse that parse instead of
+    triggering another one.
+    """
+    if db is None:
+        db = parse_database()
     out: list[str] = []
     for muscle in db["__muscle_order__"]:
         for section in db["muscles"][muscle]["__section_order__"]:
@@ -293,16 +339,54 @@ def fuzzy_match(name: str, k: int = 3) -> list[tuple[str, float]]:
 def validate_database() -> list[str]:
     """Return a list of issues with the database + aliases markdown.
 
-    Empty list means clean. Catches: missing muscle headings, sections
-    without parent muscle, duplicate canonical names (case-insensitive),
-    alias rows pointing to a non-existent canonical name, and parse-time
-    crashes.
+    Empty list means clean. Catches: level-2 headings the parser cannot
+    read, sections without parent muscle, duplicate canonical names
+    (case-insensitive), alias rows pointing to a non-existent canonical
+    name, and parse-time crashes.
     """
     issues: list[str] = []
+    # ONE read, ONE parse, then everything below works off those. This used
+    # to read + parse three separate times per invocation (once inside
+    # ``_all_canonical_names``, once for the raw lines, once more for the
+    # heading count). `Skills/CLAUDE.md` names reparsing static markdown
+    # inside one command as the first waste to remove.
     try:
-        names = _all_canonical_names()
+        text = _read_database_text()
+    except OSError as exc:  # pragma: no cover — defensive
+        return [f"database read failure: {exc!r}"]
+    try:
+        db = parse_database(text)
+        names = _all_canonical_names(db)
     except Exception as exc:  # pragma: no cover — defensive
         return [f"database parse failure: {exc!r}"]
+
+    # Heading coverage. An unparsed ``## HEADING`` is the one failure
+    # mode this module cannot detect from its own output: the walk keeps
+    # the previous ``current_muscle``, so the entries below it still show
+    # up in ``_all_canonical_names()`` and every other check here passes.
+    # ``## FULL BODY (Compound)`` was mis-filed under ``## NECK`` for the
+    # lifetime of this file and ``validate`` printed "clean" every time.
+    raw_lines = text.splitlines()
+    parsed_headings = 0
+    for lineno, raw in enumerate(raw_lines, start=1):
+        line = raw.rstrip()
+        if not _ANY_H2_RE.match(line):
+            continue
+        if _MUSCLE_HEADING_RE.match(line):
+            parsed_headings += 1
+            continue
+        issues.append(
+            f"unparsed muscle heading at line {lineno}: {line!r} — every "
+            f"entry below it is silently filed under the previous heading"
+        )
+    if parsed_headings and not issues:
+        parsed_muscles = len(db["__muscle_order__"])
+        if parsed_muscles != parsed_headings:
+            issues.append(
+                f"heading count mismatch: {parsed_headings} level-2 headings "
+                f"in the file, {parsed_muscles} muscles in the parse "
+                f"(duplicate heading text?)"
+            )
 
     # Duplicate canonicals.
     seen: dict[str, int] = {}
@@ -365,6 +449,24 @@ def _format_entry_line(name: str, tags: list[str]) -> str:
     return f"- {line}"
 
 
+def _resolve_muscle_heading(db: dict, requested: str) -> str | None:
+    """Map a caller-supplied muscle name onto an actual catalog heading.
+
+    Exact (case-insensitive) match wins. Failing that, the qualifier is
+    dropped from both sides, so ``"FULL BODY"`` resolves to the heading
+    ``"FULL BODY (Compound)"``. An ambiguous base name (two headings
+    sharing one base) resolves to nothing rather than to a guess.
+    """
+    want = requested.strip().upper()
+    for heading in db["__muscle_order__"]:
+        if heading.upper() == want:
+            return heading
+    want_base = _heading_base(want)
+    matches = [h for h in db["__muscle_order__"]
+               if _heading_base(h) == want_base]
+    return matches[0] if len(matches) == 1 else None
+
+
 def propose_exercise(name: str, primary_muscle: str, section: str,
                      tags: list[str]) -> dict:
     """Add a new exercise entry to the catalog. Idempotent.
@@ -389,18 +491,19 @@ def propose_exercise(name: str, primary_muscle: str, section: str,
     prior = DATABASE_PATH.read_text(encoding="utf-8")
     db = parse_database()
 
-    if primary_muscle not in db["muscles"]:
+    heading = _resolve_muscle_heading(db, primary_muscle)
+    if heading is None:
         return {
             "action": "error",
             "details": f"unknown primary muscle heading: {primary_muscle!r}. "
                        f"Known: {db['__muscle_order__']!r}",
         }
 
-    muscle_block = db["muscles"][primary_muscle]
+    muscle_block = db["muscles"][heading]
     if section not in muscle_block["sections"]:
         return {
             "action": "error",
-            "details": f"unknown section under {primary_muscle}: "
+            "details": f"unknown section under {heading}: "
                        f"{section!r}. Known: {muscle_block['__section_order__']!r}",
         }
 
@@ -413,21 +516,33 @@ def propose_exercise(name: str, primary_muscle: str, section: str,
     in_section = False
     insert_at: int | None = None
     for i, raw in enumerate(lines):
-        if _MUSCLE_HEADING_RE.match(raw):
-            muscle_match = _MUSCLE_HEADING_RE.match(raw).group(1).strip()
-            in_muscle = muscle_match == primary_muscle
-            in_section = False
+        m_head = _MUSCLE_HEADING_RE.match(raw)
+        if m_head:
+            if in_muscle:
+                # Walked off the end of the target muscle.
+                if insert_at is None and in_section:
+                    insert_at = i
+                if insert_at is not None:
+                    break
+            in_muscle = m_head.group(1).strip() == heading
+            # Entries written directly under the muscle heading, before
+            # any ``### Section``, live in the sentinel default section —
+            # the only section CARDIO / NECK / ADDUCTORS / CALVES /
+            # WELLNESS / FULL BODY have. Without this they were
+            # unreachable and every propose into them errored.
+            in_section = in_muscle and section == DEFAULT_SECTION
             continue
         if not in_muscle:
             continue
-        if _SECTION_HEADING_RE.match(raw):
-            sec_match = _SECTION_HEADING_RE.match(raw).group(1).strip()
-            if in_section and insert_at is None:
-                # We just left the target section without finding a slot;
-                # insert at the section's last entry before this heading.
-                insert_at = i
+        m_sec = _SECTION_HEADING_RE.match(raw)
+        if m_sec:
+            if in_section:
+                # We just left the target section; the slot is either the
+                # last entry we saw or the line this heading sits on.
+                if insert_at is None:
+                    insert_at = i
                 break
-            in_section = sec_match == section
+            in_section = m_sec.group(1).strip() == section
             continue
         if in_section and _ENTRY_RE.match(raw):
             insert_at = i + 1  # keep walking — we want the LAST entry slot
@@ -436,7 +551,7 @@ def propose_exercise(name: str, primary_muscle: str, section: str,
         return {
             "action": "error",
             "details": f"could not locate section {section!r} under "
-                       f"{primary_muscle!r}",
+                       f"{heading!r}",
         }
 
     new_lines = lines[:insert_at] + [new_line] + lines[insert_at:]
@@ -453,7 +568,7 @@ def propose_exercise(name: str, primary_muscle: str, section: str,
         "action": "added",
         "details": {
             "canonical_name": canonical,
-            "muscle": primary_muscle,
+            "muscle": heading,
             "section": section,
             "line": new_line,
         },

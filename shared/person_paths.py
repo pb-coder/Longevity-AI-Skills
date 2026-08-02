@@ -28,7 +28,9 @@ Layout (post-PR3a — pure CSV, no xlsx):
     ├── plans/                             # /coach output — dated per generation
     │   ├── <Person>/
     │   │   ├── YYYY-MM-DD-assessment.html
-    │   │   └── YYYY-MM-DD-workout.md
+    │   │   ├── YYYY-MM-DD-workout.md      # also the prescription record
+    │   │   ├── block-YYYY-MM-DD.json      # training block: slots + anchor/rotating tags
+    │   │   └── bench-log.json             # D5: why a prescribed exercise never happens
     │   └── <OtherPerson>/
     │       └── …
     ├── Skills/
@@ -304,6 +306,80 @@ def assessment_html(person: str, date: str) -> Path:
     ``-workout.md``.
     """
     return plans_dir(person) / f"{date}-assessment.html"
+
+
+def list_workout_plans(person: str) -> list[tuple[str, Path]]:
+    """Every generated plan for ``person`` as ``(YYYY-MM-DD, path)``, ASC.
+
+    The plan markdowns are the ONLY record of what the coach actually
+    prescribed — the payload records what was logged, never what was
+    asked for. Reconciling the two is what
+    ``workout_coach.lib.adherence`` does, so it needs the dated series,
+    not just the newest file. Sorting is lexicographic, which is
+    chronological for ISO dates.
+    """
+    import re as _re
+    d = plans_dir(person)
+    if not d.exists():
+        return []
+    pat = _re.compile(r"^(\d{4}-\d{2}-\d{2})-workout\.md$")
+    out: list[tuple[str, Path]] = []
+    for p in d.glob("*-workout.md"):
+        m = pat.match(p.name)
+        if m:
+            out.append((m.group(1), p))
+    out.sort(key=lambda t: t[0])
+    return out
+
+
+def block_json(person: str, start_date: str) -> Path:
+    """Path to a training-block artifact, ``plans/<Person>/block-<start>.json``.
+
+    ``start_date`` is the ISO date the block opened and is the block's
+    identity: one file per block, never rewritten in place once the next
+    block opens, so the rotation history stays auditable.
+    """
+    return plans_dir(person) / f"block-{start_date}.json"
+
+
+def list_blocks(person: str) -> list[tuple[str, Path]]:
+    """Every persisted block for ``person`` as ``(start_date, path)``, ASC."""
+    import re as _re
+    d = plans_dir(person)
+    if not d.exists():
+        return []
+    pat = _re.compile(r"^block-(\d{4}-\d{2}-\d{2})\.json$")
+    out: list[tuple[str, Path]] = []
+    for p in d.glob("block-*.json"):
+        m = pat.match(p.name)
+        if m:
+            out.append((m.group(1), p))
+    out.sort(key=lambda t: t[0])
+    return out
+
+
+def latest_block_json(person: str) -> Path | None:
+    """Newest persisted block artifact, or ``None`` before the first one."""
+    blocks = list_blocks(person)
+    return blocks[-1][1] if blocks else None
+
+
+def bench_log_json(person: str) -> Path:
+    """Path to the benched-exercise response log, ``plans/<Person>/bench-log.json``.
+
+    D5 store. When an exercise has been prescribed twice and performed
+    zero times, the coach benches it and asks WHY exactly once. The
+    answer has to outlive the conversation or the next run asks again
+    (and the run after that), which is how "ask once" becomes "nag
+    forever". This file is that memory: one entry per benched exercise
+    with the question date, the user's answer, and the disposition it
+    routed to (``retired`` / ``retry``).
+
+    It lives beside the plans rather than in ``<person>/data/`` because
+    it is coach state, not tracker data — no importer writes it and no
+    CSV consumer reads it.
+    """
+    return plans_dir(person) / "bench-log.json"
 
 
 def archive_processed_export(path: Path) -> Path:

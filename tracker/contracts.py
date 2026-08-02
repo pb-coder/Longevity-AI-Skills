@@ -110,6 +110,22 @@ class TrackerJSON(TypedDict, total=False):
     progression_summary: list[dict[str, JsonValue]]
     stale_exercises: list[dict[str, JsonValue]]
     unknown_exercises: list[str]
+    # Prescription memory (W2 + W5). Every one of these is absent on a
+    # first run — no plans on disk means no prescription to reconcile —
+    # and ``_compact`` drops the key rather than emitting zeroes that
+    # would read as 0% adherence.
+    adherence: dict[str, JsonValue] | None
+    dose_staleness: dict[str, JsonValue] | None
+    block: dict[str, JsonValue] | None
+    rotation_candidates: dict[str, JsonValue] | None
+    # Distribution-shaped weekly specs + priority tiers (W4's model,
+    # emitted here).
+    core_week_spec: dict[str, JsonValue]
+    arm_week_spec: dict[str, JsonValue]
+    muscle_priority_tiers: dict[str, str]
+    muscle_volume_targets: dict[str, JsonValue]
+    volume_landmark_unit: str
+    synergist_credit_offset: dict[str, int]
     deloads: list[dict[str, JsonValue]]
     auto_deload_candidates: list[dict[str, JsonValue]]
     cardio_last_28d: dict[str, JsonValue]
@@ -129,6 +145,10 @@ class TrackerJSON(TypedDict, total=False):
     estimated_rest_hr: float | None
     bodyweight_latest: dict[str, JsonValue] | None
     bodyweight_trend_kg_per_week: float | None
+    # The scalar above with its state: ``resolved`` / ``unresolved`` plus
+    # the ``reason`` and ``note`` that say WHY it is null. Renderers must
+    # read this instead of inventing an explanation for a missing number.
+    bodyweight_trend: dict[str, JsonValue]
     bodyweight_weekly: list[float | None]
     health_metrics_weekly: list[dict[str, JsonValue]]
     health_metrics_recent: list[dict[str, JsonValue]] | None

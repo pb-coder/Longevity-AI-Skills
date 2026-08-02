@@ -12,9 +12,12 @@ __all__ = [
     "HEALTH_METRICS_FIELDS_BY_SOURCE",
     "WORKOUT_SESSIONS_HEADERS_BY_SOURCE",
     "WORKOUT_SESSIONS_FIELDS_BY_SOURCE",
+    "BODY_COMPOSITION_FIELDS",
     "STRENGTH_METADATA_DRIFT_THRESHOLD",
     "read_health_metrics",
+    "read_body_composition",
     "upsert_health_metrics",
+    "migrate_health_metrics_header",
     "read_workout_sessions",
     "upsert_workout_sessions",
 ]
@@ -27,13 +30,25 @@ __all__ = [
 # is the retired HLExport text dump — kept only so old CSVs can still be read
 # during migration.
 
+# Schema migration 2026-08: ``Waist (cm)`` / ``Body Fat %`` /
+# ``Lean Mass (kg)`` were appended immediately before ``Notes``, matching
+# the ``Source``-column precedent on the monthly CSV. Older 16-column rows
+# pad the three new cells to blank and self-migrate on the next write:
+# ``read_health_metrics`` resolves every column by header *name*, so a file
+# still carrying the old header keeps parsing and the missing fields read
+# as None. Nothing reads this CSV positionally outside this module.
+
 HEALTH_METRICS_HEADERS_BY_SOURCE = {
     "xml": [
         "Date", "Bodyweight (kg)", "VO2max", "Resting HR", "HRV SDNN",
         "Walking HR", "HR Recovery 1min", "Sleep Total", "Sleep Deep",
         "Sleep REM", "Time in Bed", "Resp Rate", "Wrist Temp",
-        "Sleep Breath Dist", "Exercise Min", "Notes",
+        "Sleep Breath Dist", "Exercise Min",
+        "Waist (cm)", "Body Fat %", "Lean Mass (kg)", "Notes",
     ],
+    # Retired HLExport text dump — read-only, kept so old CSVs still parse.
+    # Deliberately not extended: no HLExport tracker is active and that
+    # source never carried body-composition fields.
     "hl_export": [
         "Date", "Bodyweight (kg)", "VO2max", "HR Recovery 1min",
         "Sleep Total", "Resp Rate", "Notes",
@@ -50,12 +65,34 @@ HEALTH_METRICS_FIELDS_BY_SOURCE = {
         "walking_hr", "hr_recovery_1min", "sleep_total_h", "sleep_deep_h",
         "sleep_rem_h", "time_in_bed_h", "resp_rate", "wrist_temp_c",
         "sleep_breath_dist", "exercise_min",
+        "waist_cm", "body_fat_pct", "lean_body_mass_kg",
     ],
     "hl_export": [
         "bodyweight_kg", "vo2max", "hr_recovery_1min",
         "sleep_total_h", "resp_rate",
     ],
 }
+
+# Body-composition fields on health_metrics.csv, in schema order.
+# ``bodyweight_kg`` is included: it is the same kind of measurement, and
+# ``read_body_composition`` is the one read path for all four.
+#
+# Units: waist in centimetres, body fat in **percentage points** (18.0,
+# not 0.18 — see apple_health_core.normalize_body_fat_pct), lean mass and
+# bodyweight in kilograms.
+#
+# All four accept manual entry, but not through ``/log``:
+# ``append_workout.py`` takes ``bodyweight`` and nothing else, so waist,
+# body fat and lean mass are typed into Apple's Health app (Browse ›
+# Body Measurements) and reach this CSV on the next import. A ``/log``
+# path for them is Wave-2 work and is not wired yet.
+#
+# Both importers write all four sparse-merged, so a hand-typed waist
+# reading and a scale-sourced one land in the same column without either
+# clobbering the other.
+BODY_COMPOSITION_FIELDS = (
+    "bodyweight_kg", "waist_cm", "body_fat_pct", "lean_body_mass_kg",
+)
 
 WORKOUT_SESSIONS_HEADERS_BY_SOURCE = {
     "xml": [
@@ -154,6 +191,82 @@ def read_health_metrics(person: str) -> list[dict]:
         rec["notes"] = notes if notes else None
         out.append(rec)
     return out
+
+
+def read_body_composition(person: str, field: str = "waist_cm") -> list[dict]:
+    """Return the populated readings for one body-composition field, ASC by date.
+
+    ``field`` is one of ``BODY_COMPOSITION_FIELDS`` — ``waist_cm``,
+    ``body_fat_pct``, ``lean_body_mass_kg`` or ``bodyweight_kg``. Each
+    entry is ``{"date": "YYYY-MM-DD", "value": <float>}``, the same shape
+    and ascending-date contract the coach's ``extract.read_bodyweight``
+    already returns for ``bodyweight_kg`` off this very CSV — so a trend
+    helper written against one works against all four.
+
+    Blank cells are skipped rather than yielded as ``0``: a column nobody
+    has measured yet returns ``[]``, which reads as "no data" downstream
+    instead of "flat at zero". Unknown field names raise ``ValueError``
+    rather than silently returning ``[]``.
+    """
+    if field not in BODY_COMPOSITION_FIELDS:
+        raise ValueError(
+            f"unknown body-composition field {field!r}; "
+            f"expected one of {', '.join(BODY_COMPOSITION_FIELDS)}"
+        )
+    out: list[dict] = []
+    for entry in read_health_metrics(person):
+        value = entry.get(field)
+        if value is None:
+            continue
+        out.append({"date": entry["date"], "value": value})
+    out.sort(key=lambda e: e["date"])
+    return out
+
+
+def migrate_health_metrics_header(person: str, dry_run: bool = False) -> str:
+    """Rewrite health_metrics.csv under the current schema header.
+
+    Reads are header-name-matched, so a file still on an older, narrower
+    header parses correctly and the newer fields come back as None — the
+    migration is not required for correctness. It matters only because
+    ``maintain.py``'s validator compares the on-disk header to the schema
+    by strict equality, and because the file self-migrates on the next
+    importer or ``/log`` write anyway. This performs that same rewrite on
+    demand: existing cells are re-serialised untouched and new columns pad
+    to blank. Idempotent; a file already on the current header is left
+    alone (no write, no mtime churn).
+
+    Mutating, so it is never called from ``maintain.validate_csvs`` — the
+    validator is diagnostics and stays read-only. ``maintain.py
+    --fix-header`` is the opt-in entry point, matching the
+    ``--fix-distance-units`` precedent. ``dry_run`` reports the rewrite
+    it would perform and writes nothing.
+    """
+    source = _resolve_source(person)
+    headers = HEALTH_METRICS_HEADERS_BY_SOURCE[source]
+    fields = HEALTH_METRICS_FIELDS_BY_SOURCE[source]
+    path = health_metrics_csv(person)
+    on_disk, _rows = _read_csv_rows(path)
+    if not on_disk:
+        return "Health Metrics: no file to migrate"
+    if on_disk == headers:
+        return "Health Metrics: header already current"
+    records = read_health_metrics(person)
+    if dry_run:
+        return (
+            f"Health Metrics: header would migrate "
+            f"({len(on_disk)} -> {len(headers)} columns, "
+            f"{len(records)} rows preserved) — dry run, nothing written"
+        )
+    rows = [
+        [rec["date"]] + [rec.get(k) for k in fields] + [rec.get("notes")]
+        for rec in sorted(records, key=lambda r: r["date"], reverse=True)
+    ]
+    _write_csv(path, headers, rows)
+    return (
+        f"Health Metrics: header migrated "
+        f"({len(on_disk)} -> {len(headers)} columns, {len(rows)} rows preserved)"
+    )
 
 
 def upsert_health_metrics(person: str, entries: Iterable[dict]) -> list[str]:

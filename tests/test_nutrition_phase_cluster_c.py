@@ -4,6 +4,9 @@
       action hint (add_calories for bulk, slow_intake for cut).
 [C13] _coach_action_hint triggers end_now at >= 12 weeks, contradicting the
       docstring which documents the off-ramp at >= 8 weeks.
+[W1.5] recent_phase_rate_kg_per_wk was a second copy of the smoothing
+      arithmetic that divided by the outer span instead of the centroid
+      span, shrinking every rate toward zero.
 
 All data is synthetic — no real personal data.
 """
@@ -12,9 +15,12 @@ from __future__ import annotations
 import unittest
 from datetime import date, timedelta
 
+from workout_coach.lib import nutrition_phase as np_mod
+from workout_coach.lib import sessions
 from workout_coach.lib.nutrition_phase import (
     _coach_action_hint,
     nutrition_phase_summary,
+    recent_phase_rate_kg_per_wk,
 )
 
 
@@ -189,6 +195,96 @@ class TestC13OffRampWeekBoundary(unittest.TestCase):
             phase_type="bulk",
         )
         self.assertEqual(hint, "end_now")
+
+
+# ---------------------------------------------------------------------------
+# [W1.5] one rate helper, and it divides by the centroid span
+# ---------------------------------------------------------------------------
+
+class TestW15SingleRateImplementation(unittest.TestCase):
+    """``recent_phase_rate_kg_per_wk`` must BE ``smoothed_rate_per_week``.
+
+    Three readings at each end of a 14-day window: the group centroids sit
+    12 days apart, the outermost readings 14. Dividing the
+    centroid-to-centroid change by the outer span shrinks the rate by
+    12/14 — here from -1.05 to -0.90 kg/wk, which is the difference between
+    tripping the -1.0 kg/wk lean-tissue-loss threshold and reading as
+    on-track.
+    """
+
+    TODAY = date(2026, 3, 30)
+    START = TODAY - timedelta(days=30)     # phase older than the 14d window
+
+    def _series(self) -> list[dict]:
+        cutoff = self.TODAY - timedelta(days=14)
+        head = [(0, 80.6), (1, 80.5), (2, 80.4)]     # mean 80.5, centroid d1
+        tail = [(12, 78.8), (13, 78.7), (14, 78.6)]  # mean 78.7, centroid d13
+        return [
+            {"date": (cutoff + timedelta(days=off)).isoformat(), "kg": kg}
+            for off, kg in head + tail
+        ]
+
+    def test_rate_uses_the_centroid_span_not_the_outer_span(self) -> None:
+        observed = recent_phase_rate_kg_per_wk(
+            self._series(), self.START, self.TODAY, window_days=14,
+        )
+        centroid_answer = (78.7 - 80.5) / 12 * 7      # -1.05
+        outer_answer = (78.7 - 80.5) / 14 * 7         # -0.90
+        self.assertAlmostEqual(observed, centroid_answer, places=3)
+        self.assertAlmostEqual(observed, -1.05, places=3)
+        self.assertNotAlmostEqual(observed, outer_answer, places=3)
+        # The shrink is 14%, and it always points the same way: toward zero.
+        self.assertGreater(abs(observed), abs(round(outer_answer, 3)))
+
+    def test_the_shrink_made_a_stop_condition_read_as_on_track(self) -> None:
+        phases = [_open_phase("cut", self.START, target_rate=-0.5)]
+        result = nutrition_phase_summary(phases, self._series(), self.TODAY)
+        self.assertEqual(result["actuals"]["rate_kg_per_wk_14d"], -1.05)
+        self.assertEqual(result["status"], "too_fast")
+        self.assertEqual(result["coach_action_hint"], "slow_intake")
+        # With the outer-span rate (-0.90) the same data classified as
+        # on_track / continue, i.e. the pre-committed "loss faster than
+        # 0.5 kg/wk" off-ramp fired late.
+        from workout_coach.lib.nutrition_phase import _classify_status
+        self.assertEqual(_classify_status("cut", -0.90, -0.5), "on_track")
+
+    def test_it_is_not_a_second_copy_of_the_arithmetic(self) -> None:
+        # Structural: swap the shared helper for a sentinel. A private
+        # reimplementation cannot notice, which is precisely what a
+        # value-only test on a linear series fails to detect.
+        original = np_mod.smoothed_rate_per_week
+        np_mod.smoothed_rate_per_week = lambda pts: 42.0
+        try:
+            self.assertEqual(
+                recent_phase_rate_kg_per_wk(
+                    self._series(), self.START, self.TODAY, window_days=14,
+                ),
+                42.0,
+            )
+        finally:
+            np_mod.smoothed_rate_per_week = original
+        self.assertIs(np_mod.smoothed_rate_per_week,
+                      sessions.smoothed_rate_per_week)
+
+    def test_guards_are_unchanged(self) -> None:
+        # Fewer than 4 readings, or a span under a week, still declines.
+        cutoff = self.TODAY - timedelta(days=14)
+        three = [
+            {"date": (cutoff + timedelta(days=o)).isoformat(), "kg": kg}
+            for o, kg in ((0, 80.0), (7, 79.0), (14, 78.0))
+        ]
+        self.assertIsNone(recent_phase_rate_kg_per_wk(
+            three, self.START, self.TODAY, window_days=14))
+        bunched = [
+            {"date": (self.TODAY - timedelta(days=o)).isoformat(), "kg": kg}
+            for o, kg in ((0, 78.0), (1, 78.2), (2, 78.4), (3, 78.6))
+        ]
+        self.assertIsNone(recent_phase_rate_kg_per_wk(
+            bunched, self.START, self.TODAY, window_days=14))
+        # A phase younger than a week has no rate at all.
+        self.assertIsNone(recent_phase_rate_kg_per_wk(
+            self._series(), self.TODAY - timedelta(days=5), self.TODAY,
+            window_days=14))
 
 
 if __name__ == "__main__":

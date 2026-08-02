@@ -43,6 +43,31 @@ class TrackerJsonValidatorTests(unittest.TestCase):
         self.assertIn("tracker.today must be a YYYY-MM-DD string", errors)
         self.assertEqual(warnings, [])
 
+    def test_every_key_read_tracker_emits_is_declared(self) -> None:
+        """An undeclared key prints ``not declared in TrackerJSON`` on every
+        single run. ``bodyweight_trend`` shipped that way; the point of
+        this test is that the next one cannot."""
+        payload = self.valid_tracker()
+        payload.update({
+            "bodyweight_trend": {"state": "unresolved",
+                                 "reason": "ci_straddles_zero"},
+            "adherence": {"completion_rate": 0.37},
+            "dose_staleness": {"unchanged_pct": 0.3},
+            "block": {"boundary_due": False},
+            "rotation_candidates": [{"exercise": "Barbell Row"}],
+            "core_week_spec": {"min_distinct_exercises_per_week": 3},
+            "arm_week_spec": {"min_direct_sets_per_week": 6},
+            "muscle_priority_tiers": {"core": "emphasis"},
+            "muscle_volume_targets": {"core": {"tier": "emphasis"}},
+            "volume_landmark_unit": "fractional",
+            "synergist_credit_offset": {"biceps": 3},
+        })
+        errors, warnings = validate_tracker_json(payload)
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            [w for w in warnings if "not declared" in w], [],
+            "read_tracker emits these; the contract must declare them")
+
     def test_training_load_by_modality_is_declared(self) -> None:
         # read_tracker emits this and the gate consumes it; it must not warn.
         payload = self.valid_tracker()

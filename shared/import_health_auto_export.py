@@ -31,6 +31,13 @@ if __package__ in (None, ""):
 
 from tracker import TrackerContext  # noqa: E402
 from tracker.importing import build_auto_cardio_payload  # noqa: E402
+from .apple_health_core import (  # noqa: E402
+    LENGTH_UNIT_TO_CM,
+    MASS_UNIT_TO_KG,
+    convert_unit,
+    normalize_body_fat_pct,
+    plausible_or_none,
+)
 from .apple_workout_types import (  # noqa: E402
     APPLE_TO_TRACKER_EXERCISE,
     CARDIO_AUTOLOG_TYPES,
@@ -50,7 +57,10 @@ from .csv_store import (  # noqa: E402
     write_profile,
     _write_csv as _write_store_csv,
 )
-from .import_apple_health import cluster_strength_sessions  # noqa: E402
+from .import_apple_health import (  # noqa: E402
+    body_composition_lines,
+    cluster_strength_sessions,
+)
 from .monthly_csv import (  # noqa: E402
     TOTAL_LABEL,
     _dict_to_row,
@@ -114,6 +124,25 @@ DAILY_COLUMNS = {
     "exercise_min": "Apple Exercise Time (min)",
 }
 
+# Body-composition columns. HealthAutoExport exposes all three metrics the
+# native XML path reads — verified against a real export's header:
+# ``Waist Circumference (cm)``, ``Body Fat Percentage (%)``,
+# ``Lean Body Mass (kg)`` — so the two sources stay symmetric.
+#
+# These are resolved by header *prefix* rather than by fixed name because
+# HealthAutoExport bakes the user's in-app unit preference into the header
+# ("Waist Circumference (in)" on an imperial export). A fixed metric-only
+# lookup would silently miss those rows. ``converters=None`` means the
+# value is not a unit conversion but an encoding normalisation — see
+# ``normalize_body_fat_pct``.
+BODY_COMPOSITION_COLUMNS = {
+    "waist_cm": ("Waist Circumference", LENGTH_UNIT_TO_CM, 1),
+    "body_fat_pct": ("Body Fat Percentage", None, 2),
+    "lean_body_mass_kg": ("Lean Body Mass", MASS_UNIT_TO_KG, 2),
+}
+
+_UNIT_SUFFIX_RE = re.compile(r"^(?P<name>.+?)\s*\((?P<unit>[^()]*)\)\s*$")
+
 WORKOUT_REQUIRED_COLUMNS = [
     "Workout Type",
     "Start",
@@ -122,6 +151,19 @@ WORKOUT_REQUIRED_COLUMNS = [
     "Resting Energy (kJ)",
 ]
 
+# Fields ``--replace-range`` wipes before re-importing a window. Body
+# composition is deliberately absent, for the same reason ``bodyweight_kg``
+# always has been: those cells hold user-entered readings, and a range
+# clear would destroy data the export cannot regenerate.
+#
+# The manual route today is Apple's own Health app — Browse › Body
+# Measurements › Waist Circumference / Body Fat Percentage / Lean Body
+# Mass — which the next export then carries into this importer. A
+# tape-measure reading typed there is indistinguishable from a
+# scale-sourced one in the export, so ``--replace-range`` cannot tell
+# them apart and must not clear either. ``/log`` has no waist / body-fat
+# / lean-mass path: ``append_workout.py`` accepts ``bodyweight`` only.
+# Wiring one is Wave-2 work; when it lands, this list stays as it is.
 RANGE_FIELDS_TO_CLEAR = [
     "vo2max", "resting_hr", "hrv_sdnn", "walking_hr",
     "hr_recovery_1min", "sleep_total_h", "sleep_deep_h", "sleep_rem_h",
@@ -200,11 +242,79 @@ def _parse_daily_date(value: str | None) -> str | None:
         return None
 
 
+def _resolve_unit_column(columns, prefix: str) -> tuple[str | None, str | None]:
+    """Locate a ``<prefix> (<unit>)`` column in a HealthAutoExport header.
+
+    Returns ``(column_name, unit)``, or ``(None, None)`` when the export
+    does not carry the metric. HealthAutoExport writes the unit the user
+    picked in the app, so the unit token cannot be assumed.
+    """
+    for name in columns:
+        if not name or not name.startswith(prefix):
+            continue
+        m = _UNIT_SUFFIX_RE.match(name)
+        if m and m.group("name").strip() == prefix:
+            return name, m.group("unit").strip()
+    return None, None
+
+
+def _resolve_body_composition_columns(header_row: dict) -> dict[str, tuple]:
+    """Map each body-composition field to its ``(column, unit)`` in this export."""
+    return {
+        key: _resolve_unit_column(header_row.keys(), prefix)
+        for key, (prefix, _conv, _digits) in BODY_COMPOSITION_COLUMNS.items()
+    }
+
+
+def _body_composition_values(row: dict, resolved: dict[str, tuple]) -> dict:
+    """Read + convert the body-composition cells of one daily row.
+
+    An absent column, a blank cell, or a non-positive reading all yield
+    None so the sparse-merge upsert leaves the stored cell untouched
+    instead of stamping a zero over it.
+
+    Converted values pass a plausibility gate before they are returned —
+    the header unit is the user's in-app preference, so an export can
+    hand over a perfectly well-formed ``Waist Circumference (m)`` column
+    whose values are three orders of magnitude off. See
+    ``apple_health_core.PLAUSIBLE_RANGES``.
+    """
+    out: dict = {}
+    for key, (prefix, converters, digits) in BODY_COMPOSITION_COLUMNS.items():
+        column, unit = resolved.get(key, (None, None))
+        raw = to_float(row.get(column)) if column else None
+        if raw is None or raw <= 0:
+            out[key] = None
+            continue
+        if converters is None:
+            # Body fat: an encoding normalisation, not a unit conversion.
+            # The header unit still has to be read and gated, or a
+            # "Body Fat Percentage (cubits)" column would be accepted as
+            # percent while the waist column beside it drops loudly.
+            out[key] = normalize_body_fat_pct(raw, unit)
+            continue
+        converted = convert_unit(raw, unit, converters, prefix.lower())
+        if converted is None:
+            out[key] = None
+            continue
+        out[key] = plausible_or_none(
+            round(converted, digits), key, prefix.lower(), unit
+        )
+    return out
+
+
 def parse_daily_rows(rows: list[dict], since: date | None, until: date | None) -> tuple[list[dict], list[dict]]:
     metric_entries: list[dict] = []
     sleep_entries: list[dict] = []
+    body_comp_columns: dict[str, tuple] = {k: (None, None) for k in BODY_COMPOSITION_COLUMNS}
     if rows:
         missing = [col for col in DAILY_COLUMNS.values() if col not in rows[0]]
+        body_comp_columns = _resolve_body_composition_columns(rows[0])
+        missing.extend(
+            f"{prefix} (<unit>)"
+            for key, (prefix, _conv, _digits) in BODY_COMPOSITION_COLUMNS.items()
+            if body_comp_columns[key][0] is None
+        )
         for col in missing:
             print(f"WARN: HealthAutoExport daily column missing: {col}", file=sys.stderr)
     for row in rows:
@@ -214,6 +324,7 @@ def parse_daily_rows(rows: list[dict], since: date | None, until: date | None) -
 
         time_in_bed = positive_or_none(row.get(DAILY_COLUMNS["time_in_bed_h"]), 2)
         metric_entries.append({
+            **_body_composition_values(row, body_comp_columns),
             "date": d,
             "bodyweight_kg": round_or_none(row.get(DAILY_COLUMNS["bodyweight_kg"]), 2),
             "vo2max": round_or_none(row.get(DAILY_COLUMNS["vo2max"]), 2),
@@ -561,6 +672,7 @@ def dry_run_lines(zip_path: Path, metrics: list[dict], sleep: list[dict], workou
     return [
         f"HealthAutoExport file: {zip_path.name}",
         f"Health Metrics: {len(metrics)} dates would be written (range {_range_text(metrics)})",
+        *body_composition_lines(metrics),
         f"Sleep Nights: {len(sleep)} nights would be written (range {_range_text(sleep)})",
         f"Workout Sessions: {len(workouts)} sessions would be written ({incidental} walks flagged incidental)",
         f"HealthAutoExport: {ambiguous_stamps} workout minute(s) had ambiguous per-workout stamp matches",
@@ -609,6 +721,7 @@ def import_archive(
         out_lines.extend(clear_monthly_machine_range(person, since, until))
 
     out_lines.extend(upsert_health_metrics(person, metrics))
+    out_lines.extend(body_composition_lines(metrics))
     out_lines.extend(upsert_sleep_nights(person, sleep))
     out_lines.extend(upsert_workout_sessions(person, workouts))
 

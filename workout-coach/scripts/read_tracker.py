@@ -16,8 +16,24 @@ Emits one JSON blob on stdout organised around session-level signals
     volume / is_deload, sourced from the TOTAL row's metadata + Apple
     per-workout max_hr. Replaces session_totals + workout_sessions_last_28d.
   - weekly_volume_per_muscle, estimated_1rm, progression_summary
-  - stale_exercises (top 5), unknown_exercises
+  - stale_exercises (top 5 by reintroduction value), unknown_exercises
   - deloads (user-marked), auto_deload_candidates (Python-detected)
+
+  Prescription memory (what was ASKED for, versus what happened):
+  - adherence: the previous plan reconciled against the logs — sets
+    prescribed vs performed, split isolation / compound, the per-exercise
+    ledger, substitutions, and the D5 bench list with its one question.
+  - dose_staleness: per carried-forward exercise, whether the dose
+    actually moved and for how many generations it has not.
+  - block: the current training block, its slots tagged anchor /
+    rotating, and whether the boundary has fired (deload or 6 weeks,
+    whichever first).
+  - rotation_candidates: derived starting loads for movements with no
+    logged history, so a rotated-in exercise can be prescribed at all.
+
+  Prescription specs + priority tiers:
+  - core_week_spec / arm_week_spec, muscle_priority_tiers,
+    muscle_volume_targets, volume_landmark_unit, synergist_credit_offset
 
   Cardio rollup:
   - cardio_last_28d (sessions, minutes, distance, kcal)
@@ -31,6 +47,19 @@ Emits one JSON blob on stdout organised around session-level signals
 
   Bodyweight:
   - bodyweight_latest, bodyweight_trend_kg_per_week
+  - bodyweight_trend: the same rate with its state. OLS over a minimum
+    28-day window; ``state`` is ``resolved`` only when the 95% interval
+    excludes zero, and ``bodyweight_trend_kg_per_week`` is null otherwise.
+    Read ``reason`` / ``note`` before saying anything about gaining or
+    losing.
+
+  Waist circumference (source-agnostic; both importers write the column):
+  - waist_latest: ``{value_cm, date}`` for the newest measurement at or
+    before ``--today``; absent when never measured.
+  - waist_trend_cm_per_4w: the same block SHAPE as bodyweight_trend, rate
+    in cm per 4 weeks, over a minimum 56-day window. ``cm_per_4w`` is
+    populated only when ``state == "resolved"``. A single measurement
+    returns ``unresolved`` / ``too_few_readings``, never 0.0.
 
   Apple Health:
   - health_metrics_weekly (4-week aggregates; raw daily behind
@@ -80,7 +109,15 @@ if TYPE_CHECKING:
 # itself is the only thing skipped.
 from shared.csv_store_profile import read_profile  # noqa: E402
 from shared.person_paths import monthly_dir  # noqa: E402
-from workout_coach.lib.constants import DEFAULT_DATA_SOURCE, SOURCE_CAPABILITIES  # noqa: E402
+from workout_coach.lib.constants import (  # noqa: E402
+    ARM_WEEK_SPEC,
+    CORE_WEEK_SPEC,
+    DEFAULT_DATA_SOURCE,
+    SOURCE_CAPABILITIES,
+    SYNERGIST_CREDIT_OFFSET,
+    muscle_priority_tiers,
+    muscle_volume_targets,
+)
 from workout_coach.lib.parsing import _compact, _parse_iso_date  # noqa: E402
 from workout_coach.lib.extract import (  # noqa: E402
     _age_from_birthday,
@@ -121,15 +158,27 @@ from workout_coach.lib.health_session_rec import (  # noqa: E402
 )
 from workout_coach.lib.sessions import (  # noqa: E402
     _is_working_set,
-    bodyweight_trend_kg_per_week,
+    bodyweight_trend,
     build_monthly_sessions,
     progression_summary,
+    waist_trend,
 )
 from workout_coach.lib.strength import (  # noqa: E402
     estimated_1rm,
     hr_at_volume_divergence,
+    reintroduction_pool,
     stale_exercises,
     weekly_volume_per_muscle,
+)
+from workout_coach.lib.adherence import (  # noqa: E402
+    build_adherence,
+    dose_staleness,
+    load_plans,
+)
+from workout_coach.lib.blocks import (  # noqa: E402
+    block_payload,
+    load_pattern_catalog,
+    rotation_candidates,
 )
 from workout_coach.lib.cardio import (  # noqa: E402
     auto_deload_candidates,
@@ -151,6 +200,63 @@ from workout_coach.lib.swim import swim_summary  # noqa: E402
 from workout_coach.lib.thermal import thermal_summary  # noqa: E402
 from workout_coach.lib.light_therapy import light_therapy_summary  # noqa: E402
 from workout_coach.lib.nutrition_phase import nutrition_phase_summary  # noqa: E402
+
+
+def _clip_series(entries: list[dict] | None, today_d: date,
+                 key: str = "date",
+                 open_ended_keys: tuple[str, ...] = ()) -> list[dict]:
+    """Drop rows dated after ``today_d``.
+
+    ``--today`` is the as-of date for the whole payload, and the CSV store
+    is not guaranteed to end there: a backtest at an earlier date, or a
+    weigh-in / Apple import that lands ahead of the requested anchor, both
+    put future rows in front of the analytics layer. Every reader in
+    ``extract`` returns its full file, so the horizon is enforced HERE,
+    once, on the way in — rather than re-derived inside each of the twenty
+    downstream series builders, where one missed spot silently leaks the
+    future into an otherwise honest backtest.
+
+    ``open_ended_keys`` handles the second, subtler shape of the same leak:
+    a row that legitimately EXISTS as of ``today_d`` but carries a CLOSING
+    boundary filled in after the fact. Dropping the row would be wrong;
+    keeping the closing date is what leaks. Each named key is nulled out on
+    a COPY of the row when its boundary lands on or after ``today_d``, so
+    the row survives in the state it was actually in at the anchor.
+
+    The comparison is ``>=``, not ``>``, and the asymmetry with the row test
+    above is deliberate — the two columns mean different things. ``key`` is
+    an event date: a row dated today happened, and stays. An open-ended key
+    is an INCLUSIVE last day: this store writes back-to-back periods (one
+    ends the 14th, the next starts the 15th), so a period whose last day is
+    today has not ended yet as of today. Using ``>`` there punches a
+    one-day hole into the final day of every period, during which the
+    payload reports no period at all.
+
+    Rows whose date will not parse are kept; downstream helpers already
+    skip them, and dropping them here would change unrelated behaviour.
+    """
+    out: list[dict] = []
+    for e in entries or []:
+        d = _parse_iso_date(e.get(key))
+        if d is not None and d > today_d:
+            continue
+        for ok in open_ended_keys:
+            od = _parse_iso_date(e.get(ok))
+            if od is not None and od >= today_d:
+                e = {**e, ok: None}
+        out.append(e)
+    return out
+
+
+def _clip_date_map(m: dict, today_d: date) -> dict:
+    """Same horizon as ``_clip_series`` for a ``YYYY-MM-DD`` → value dict."""
+    out = {}
+    for k, v in (m or {}).items():
+        d = _parse_iso_date(k)
+        if d is not None and d > today_d:
+            continue
+        out[k] = v
+    return out
 
 
 def _wow_trend(this_v: float | None, last_v: float | None,
@@ -283,6 +389,65 @@ def _bodyweight_weekly_kg(bw_all: list[dict], today_d: date,
         vals = by_week[wk]
         out.append(round(sum(vals) / len(vals), 2) if vals else None)
     return out
+
+
+def _waist_readings(health_all: list[dict]) -> list[dict]:
+    """Waist measurements off the health-metrics rows, ASC by date.
+
+    ``Waist (cm)`` is written by BOTH importers (the native-XML path via
+    ``apple_health_daily``, the HealthAutoExport path via its own field
+    map), so this reader is source-agnostic on purpose: it takes the
+    column, not the exporter. ``health_all`` has already been through
+    ``_clip_series``, so the ``--today`` horizon is applied before
+    anything here sees a row.
+
+    Blank cells are skipped rather than yielded as ``0`` — a person who
+    has never measured returns ``[]``, which reads downstream as "no
+    data" instead of "flat at zero".
+    """
+    out: list[dict] = []
+    for entry in health_all:
+        cm = entry.get("waist_cm")
+        if cm is None:
+            continue
+        out.append({"date": entry["date"], "cm": cm})
+    out.sort(key=lambda e: e["date"])
+    return out
+
+
+def _attach_waist_weekly(weekly: list[dict], waist_readings: list[dict],
+                         today_d: date, weeks: int = 4) -> list[dict]:
+    """Fold a per-ISO-week waist mean onto each ``health_metrics_weekly``
+    entry, keyed by ``week_start``.
+
+    ``waist_cm`` is not part of ``health_metrics_weekly``'s own key list
+    and is added here instead so the vitals table can draw the waist
+    sparkline from the same series every other vitals row uses. Weeks
+    with no measurement are left with ``waist_cm = None``, which
+    ``_compact`` strips — the sparkline then sees a gap rather than an
+    invented value, and a series with fewer than two real points renders
+    as an empty box rather than a flat line.
+    """
+    if not weekly or not waist_readings:
+        return weekly
+    cutoff = today_d - timedelta(days=max(weeks * 7 - 1, 0))
+    by_week: dict[str, list[float]] = {}
+    for row in waist_readings:
+        d = _parse_iso_date(row.get("date"))
+        if d is None or d < cutoff or d > today_d:
+            continue
+        try:
+            value = float(row["cm"])
+        except (TypeError, ValueError):
+            continue
+        iso = d.isocalendar()
+        monday = date.fromisocalendar(iso.year, iso.week, 1).isoformat()
+        by_week.setdefault(monday, []).append(value)
+    for entry in weekly:
+        vals = by_week.get(entry.get("week_start"))
+        entry["waist_cm"] = (round(sum(vals) / len(vals), 2) if vals
+                             else None)
+    return weekly
 
 
 def _round_or_none(v: float | None, digits: int) -> float | None:
@@ -539,7 +704,16 @@ def main() -> int:
         return 1
 
     rows, session_totals, session_summaries = extract_rows(person, args.months, today_d)
-    deloads = find_deloads(person)
+    # Enforce the ``--today`` horizon on every series before any analytics
+    # run. See ``_clip_series``: the readers hand back whole files, so
+    # without this a run dated 2026-06-01 reported a 2026-07-29 top set and
+    # an August weigh-in, and ten payload blocks were byte-identical across
+    # a seven-week ``--today`` gap.
+    rows = _clip_series(rows, today_d)
+    session_totals = _clip_date_map(session_totals, today_d)
+    session_summaries = _clip_date_map(session_summaries, today_d)
+    deloads = [d for d in find_deloads(person)
+               if (_parse_iso_date(d) or today_d) <= today_d]
 
     profile = read_profile(person)
     data_source = profile.get("source") or DEFAULT_DATA_SOURCE
@@ -547,7 +721,7 @@ def main() -> int:
 
     # Every dataset lives in a CSV under <person>/data/. The lib readers
     # below all take the person string and resolve the matching file.
-    health_all = read_health_metrics(person)
+    health_all = _clip_series(read_health_metrics(person), today_d)
     # Per-day rows go into health_metrics_recent. ``bodyweight_kg`` is dropped
     # because it duplicates the dedicated ``bodyweight_recent`` series — the
     # coach reads daily metrics for HRV / VO2max / sleep / wrist temp, not
@@ -557,15 +731,28 @@ def main() -> int:
         for entry in health_all[-30:]
     ]
 
-    workout_sessions_all = read_workout_sessions(person)
-    swim_workouts_all = read_swim_workouts(person)
-    swim_laps_all = read_swim_laps(person)
-    sleep_nights_all = read_sleep_nights(person)
-    thermal_sessions_all = read_thermal_sessions(person)
-    light_therapy_sessions_all = read_light_therapy_sessions(person)
-    nutrition_phases_all = read_nutrition_phases(person)
+    workout_sessions_all = _clip_series(read_workout_sessions(person), today_d)
+    swim_workouts_all = _clip_series(read_swim_workouts(person), today_d)
+    swim_laps_all = _clip_series(read_swim_laps(person), today_d)
+    sleep_nights_all = _clip_series(read_sleep_nights(person), today_d)
+    thermal_sessions_all = _clip_series(read_thermal_sessions(person), today_d)
+    light_therapy_sessions_all = _clip_series(
+        read_light_therapy_sessions(person), today_d)
+    # Phases are keyed by ``start_date``; one that opens after ``today_d``
+    # has not happened yet from this run's point of view. ``end_date`` needs
+    # the same horizon and is the reason this reader is not a plain
+    # ``_clip_series`` call: an end date is written AFTER the fact, so a
+    # phase that was live at the anchor carries a closing date the anchor
+    # could not have known. Leaving it in makes ``_current_open_phase``
+    # skip the phase entirely — a backtest at 2026-06-01 reported no
+    # nutrition phase at all for a block that was three weeks live, which
+    # also unbinds the bodyweight-trend window (``nutrition_phase_start``)
+    # and flips ``compute_longevity_score`` onto its no-phase branch.
+    nutrition_phases_all = _clip_series(
+        read_nutrition_phases(person), today_d, key="start_date",
+        open_ended_keys=("end_date",))
 
-    bw_all = read_bodyweight(person)
+    bw_all = _clip_series(read_bodyweight(person), today_d)
     bw_latest = (
         {"date": bw_all[-1]["date"], "kg": bw_all[-1]["kg"]}
         if bw_all else None
@@ -580,9 +767,12 @@ def main() -> int:
     e1rm = estimated_1rm(rows, deloads,
                          include_history=args.include_1rm_history)
     stale_full = stale_exercises(rows, db, today_d, 28)
-    # Cap stale_exercises to top 5 by weeks_since (already DESC-sorted by
-    # the helper). Beyond 5 the coach rarely uses them in plan generation.
-    stale = stale_full[:5]
+    # Cap stale_exercises to 5 — beyond that the coach rarely uses them in
+    # plan generation. WHICH five is the whole value of the field: a plain
+    # prefix of the lapsed list is a retirement pile at one end and a
+    # coin-flip at the other, so the pick goes through
+    # ``reintroduction_pool``.
+    stale = reintroduction_pool(stale_full, limit=5)
 
     # Surface any logged exercise across the full loaded window that doesn't
     # match an entry in the database — not just the 28-day volume window.
@@ -593,6 +783,53 @@ def main() -> int:
             continue
         if r["exercise"].lower() not in db:
             unknown_set.add(r["exercise"])
+
+    # ---- Prescription memory (W2 + W5). Everything above this line reads
+    # what was PERFORMED. These four blocks read what was PRESCRIBED —
+    # ``plans/<Person>/<date>-workout.md`` — and reconcile the two. Without
+    # them the coach cannot tell a movement it prescribes six times and the
+    # user performs zero times from one that works, and generation N cannot
+    # differ from N-1 because it never sees it. ----
+    #
+    # ``catalog`` carries movement-pattern identity (the ## MUSCLE heading
+    # plus ### Subsection), which ``db`` structurally cannot: it resolves
+    # every subsection to one ``primary`` muscle and discards which pattern
+    # the movement was. Rotation is defined on the pattern, so the pattern
+    # has to survive.
+    catalog = load_pattern_catalog(db)
+    # Priority tiers are resolved here rather than below because the bench
+    # rule needs them: retiring every route into an emphasis muscle while
+    # the same payload demands mid-MAV volume on it hands the coach two
+    # instructions it cannot both obey.
+    priority_tiers, priority_unknown = muscle_priority_tiers(profile)
+    adherence = build_adherence(person, rows, db, today_d, catalog,
+                                priority_tiers=priority_tiers)
+    plans_parsed = load_plans(person, today_d, limit=8)
+    dose_stale = dose_staleness(plans_parsed, db)
+    # ``adherence`` feeds the block so each slot can be marked ``at_risk``:
+    # the rotation validator is a pure function of two blocks and cannot
+    # know which movements the user demonstrably does not do. ``e1rm``
+    # feeds it ``stalled_sessions``, which is what lets the same validator
+    # DERIVE ``stall_3_sessions`` instead of demanding a field the plan
+    # markdown cannot express.
+    block = block_payload(person, rows, db, catalog, today_d, deloads,
+                          adherence=adherence, e1rm=e1rm)
+    # Starting loads for movements with no history. Until this existed the
+    # payload named only the ~46 exercises already logged, and the active
+    # load rule is "copy last session's load forward" — so there was no
+    # legal way to write a weight for anything else and rotation could not
+    # actually be prescribed.
+    #
+    # Benched movements are excluded: the payload used to name
+    # `Leg Curl (Lying)` under `adherence.benched` ("must not
+    # re-prescribe") and offer it here with a derived load in the same
+    # breath. The tiers go in so the 56-day pattern gate cannot hide the
+    # emphasis categories the weekly spec forces the coach to add — they
+    # sit at zero precisely because they are the gap.
+    rot_candidates = rotation_candidates(
+        rows, db, catalog, e1rm, today_d,
+        exclude={b["exercise"] for b in (adherence or {}).get("benched") or []},
+        priority_tiers=priority_tiers)
 
     # ---- Derived metrics ----
     monthly_sessions = build_monthly_sessions(
@@ -706,9 +943,41 @@ def main() -> int:
     nutrition_phase_start = (
         ((nutrition_phase or {}).get("current") or {}).get("start_date")
     )
-    bw_trend = bodyweight_trend_kg_per_week(
-        bw_all, start_date=nutrition_phase_start,
+    # Weekly bodyweight rate, OLS over a minimum-28-day window. The block
+    # carries an explicit resolved / unresolved state; ``bw_trend`` is the
+    # scalar and is None whenever the 95% interval spans zero. Every
+    # consumer below already treats None as "no trend known" — that is the
+    # point: a wrong sign is worse than a missing number here.
+    bw_trend_block = bodyweight_trend(
+        bw_all, today_d=today_d, start_date=nutrition_phase_start,
     )
+    bw_trend = bw_trend_block["kg_per_week"]
+
+    # ---- Waist circumference. Imported by both sources into
+    # ``health_metrics.csv``'s ``Waist (cm)`` column and, until now, never
+    # surfaced: the number was saved and invisible.
+    #
+    # It earns its place next to bodyweight because the two answer
+    # different questions. Scale weight during a lifting block moves on
+    # water, glycogen and lean tissue at once; waist is the cheap proxy
+    # for where the mass went, and a bulk that adds 2 kg with a flat waist
+    # is a different event from one that adds 2 kg with a 3 cm waist.
+    #
+    # The trend goes through the SAME estimator as bodyweight
+    # (``_trend_verdict``), so a single measurement returns an explicit
+    # ``too_few_readings`` rather than a slope. ``today_d`` anchors the
+    # window, which is the second horizon guard behind ``_clip_series``.
+    waist_readings = _waist_readings(health_all)
+    waist_latest = (
+        {"value_cm": waist_readings[-1]["cm"],
+         "date":     waist_readings[-1]["date"]}
+        if waist_readings else None
+    )
+    waist_trend_block = waist_trend(waist_readings, today_d=today_d)
+    # The vitals table draws its waist sparkline off the weekly series,
+    # the same way HRV / RHR / VO2max do.
+    weekly_health = _attach_waist_weekly(weekly_health, waist_readings,
+                                         today_d, weeks=4)
 
     # ---- Week-over-week comparison block (used by the assessment HTML
     # dashboard's bottom card). Composes existing extracts; no new data
@@ -819,11 +1088,34 @@ def main() -> int:
     )
 
     # ---- Session-length budget. Strength-session duration is driven by total
-    # WORKING SETS (rest dominates), not exercise count: logged history sits at
-    # ~3.3 min per working set plus ~5 min warmup. So the coach budgets sets to
-    # the per-person target instead of counting exercises (the old heuristic
-    # was blind to sets-per-exercise and let sessions silently shrink). ----
-    SESSION_WARMUP_MIN = 5.0
+    # WORKING SETS (rest dominates), not exercise count. So the coach budgets
+    # sets to the per-person target instead of counting exercises (the old
+    # heuristic was blind to sets-per-exercise and let sessions silently
+    # shrink).
+    #
+    # The budget line is ``minutes = warmup + sets × min_per_working_set``,
+    # which is a linear regression of measured session duration on working
+    # sets: ``warmup`` is its intercept, ``min_per_working_set`` its slope.
+    # The old 5.0 intercept was not measured and was too low — it billed a
+    # 28-set session at 75 minutes when the fitted line puts it past 80.
+    #
+    # Fixed overhead is PER PERSON, not universal: it is the intercept of
+    # that person's own duration-vs-sets line. It is read from profile.csv
+    # under ``session_warmup_min`` — a registered key in
+    # ``shared.csv_store_profile.PROFILE_KEYS`` with float coercion, which
+    # is what makes the read below reach a real value instead of always
+    # falling through. The constant here is only the fallback for a profile
+    # that has not been fitted yet; same arrangement for the slope,
+    # ``min_per_working_set``. ----
+    SESSION_WARMUP_MIN_DEFAULT = 20.0
+    try:
+        session_warmup_min = float(
+            profile.get("session_warmup_min") or SESSION_WARMUP_MIN_DEFAULT
+        )
+    except (TypeError, ValueError):
+        session_warmup_min = SESSION_WARMUP_MIN_DEFAULT
+    if not (0.0 <= session_warmup_min <= 45.0):
+        session_warmup_min = SESSION_WARMUP_MIN_DEFAULT
     session_target_min = profile.get("session_target_min") or 60
     # Per-person pace (min per working set incl. rest). Default 3.3 was the
     # old one-size constant and is too slow for trainees who rest short or
@@ -837,8 +1129,23 @@ def main() -> int:
     if not (1.5 <= min_per_working_set <= 6.0):
         min_per_working_set = 3.3
     target_working_sets = max(
-        8, round((session_target_min - SESSION_WARMUP_MIN) / min_per_working_set)
+        8, round((session_target_min - session_warmup_min) / min_per_working_set)
     )
+
+    # ---- Priority tiers (D8) and the distribution-shaped weekly specs the
+    # render validators enforce. The tier map (resolved above, where the
+    # bench rule consumes it) turns into a set target per muscle in the
+    # same FRACTIONAL unit as ``weekly_volume_per_muscle``. ----
+    volume_targets = muscle_volume_targets(priority_tiers)
+    if priority_unknown:
+        # A typo in the profile override must not resolve silently to
+        # ``maintain``: that drops a muscle out of the emphasis set, which
+        # is the exact class of quiet failure this build exists to remove.
+        print(
+            "WARNING: profile muscle_priority_tiers has unrecognised "
+            f"entries, ignored: {', '.join(priority_unknown)}",
+            file=sys.stderr,
+        )
 
     out: TrackerJSON = {
         "today": today_d.strftime("%Y-%m-%d"),
@@ -852,6 +1159,21 @@ def main() -> int:
         "progression_summary": progression_summary(rows),
         "stale_exercises": stale,
         "unknown_exercises": sorted(unknown_set),
+        # ---- Prescription memory: what was asked for, versus what happened.
+        # ``adherence`` is None on a first run (no plans on disk) and
+        # ``_compact`` drops it, which reads correctly as "unknown" rather
+        # than as 0% adherence. ----
+        "adherence":            adherence,
+        "dose_staleness":       dose_stale,
+        "block":                block,
+        "rotation_candidates":  rot_candidates or None,
+        # ---- Distribution-shaped weekly specs + priority tiers (D8). ----
+        "core_week_spec":         CORE_WEEK_SPEC,
+        "arm_week_spec":          ARM_WEEK_SPEC,
+        "muscle_priority_tiers":  priority_tiers,
+        "muscle_volume_targets":  volume_targets,
+        "volume_landmark_unit":   "fractional",
+        "synergist_credit_offset": SYNERGIST_CREDIT_OFFSET,
         "deloads": deloads,
         "auto_deload_candidates": auto_deloads,
         # ---- Cardio rollup ----
@@ -889,8 +1211,26 @@ def main() -> int:
         "estimated_rest_hr": round(rest_hr, 1) if rest_hr else None,
         # ---- Bodyweight ----
         "bodyweight_latest": bw_latest,
+        # Scalar stays ``float | None`` for every existing consumer. The
+        # block beside it says WHY it is None — absent that, a renderer
+        # cannot tell "no weigh-ins" from "the rate is not resolvable",
+        # and the second of those is a sentence the coach must say out
+        # loud rather than silently omit.
         "bodyweight_trend_kg_per_week": bw_trend,
+        "bodyweight_trend": bw_trend_block,
         "bodyweight_weekly": _bodyweight_weekly_kg(bw_all, today_d, weeks=4),
+        # ---- Waist circumference ----
+        # ``waist_latest`` is ``{value_cm, date}`` for the newest
+        # measurement at or before ``today``, and None (dropped by
+        # ``_compact``, same as ``bodyweight_latest`` / ``vo2max_latest``)
+        # when the column has never been filled in.
+        "waist_latest": waist_latest,
+        # Same block shape as ``bodyweight_trend``, rate in cm per 4
+        # weeks: ``state`` / ``reason`` / ``note`` plus ``cm_per_4w``,
+        # which is populated ONLY when the 95% interval excludes zero.
+        # There is no bare-scalar twin on purpose — a caller that wants
+        # the number has to pass through ``state`` to reach it.
+        "waist_trend_cm_per_4w": waist_trend_block,
         # ---- Apple Health weekly aggregates (raw daily behind a flag) ----
         "health_metrics_weekly": weekly_health,
         "health_metrics_recent": health_recent if args.include_daily_health else None,

@@ -73,6 +73,51 @@ class WeeklyVolumeTests(unittest.TestCase):
         self.assertEqual(result["window_days"], 28)
         self.assertEqual(unknown, set())
 
+    def test_median_separates_one_big_week_from_a_steady_habit(self) -> None:
+        # The observed failure: back read 8.2 sets/wk on a 21 / 4 / 4 / 4
+        # series. The mean says "comfortably above MEV"; the typical week
+        # is 4. Both shapes below share a mean and differ in median, which
+        # is exactly the discrimination `current` alone cannot make.
+        today_d = date(2026, 6, 5)
+
+        def volume(dates: list[str]) -> dict:
+            unknown: set[str] = set()
+            return weekly_volume_per_muscle(
+                [{"date": d, "exercise": "Leg Extension",
+                  "kg": 60, "reps": 10, "notes": ""} for d in dates],
+                _DB, today_d, 28, unknown,
+            )
+
+        spiky = volume(["2026-06-02"] * 12 + ["2026-05-26", "2026-05-19",
+                                              "2026-05-12"])
+        steady = volume(["2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05",
+                         "2026-05-26", "2026-05-27", "2026-05-28", "2026-05-29",
+                         "2026-05-19", "2026-05-20", "2026-05-21", "2026-05-22",
+                         "2026-05-12", "2026-05-13", "2026-05-14"])
+
+        self.assertEqual(spiky["current"]["quads"], 3.8)
+        self.assertEqual(steady["current"]["quads"], 3.8)
+        self.assertEqual(spiky["per_week"]["quads"], [1.0, 1.0, 1.0, 12.0])
+        self.assertEqual(steady["per_week"]["quads"], [3.0, 4.0, 4.0, 4.0])
+        self.assertEqual(spiky["median"]["quads"], 1.0)
+        self.assertEqual(steady["median"]["quads"], 4.0)
+
+    def test_current_and_landmarks_keep_their_prior_shape(self) -> None:
+        # Backward compatibility: render_components_volume.muscle_bars and
+        # health_session_rec._muscles_over_mrv both read `current` and
+        # `landmarks` and must not see a changed contract.
+        today_d = date(2026, 6, 5)
+        unknown: set[str] = set()
+        result = weekly_volume_per_muscle(
+            [{"date": "2026-06-02", "exercise": "Leg Extension",
+              "kg": 60, "reps": 10, "notes": ""}],
+            _DB, today_d, 28, unknown,
+        )
+        self.assertIsInstance(result["current"]["quads"], float)
+        self.assertIn("mev", result["landmarks"]["quads"])
+        self.assertEqual(set(result["per_week"]), set(result["current"]))
+        self.assertEqual(set(result["median"]), set(result["current"]))
+
 
 class StaleExerciseTests(unittest.TestCase):
     def test_off_catalog_exercise_excluded_known_stale_kept(self) -> None:
@@ -92,6 +137,37 @@ class StaleExerciseTests(unittest.TestCase):
 
         self.assertNotIn("Band Pull-Apart", names)
         self.assertIn("Leg Extension", names)
+
+    def test_newest_stale_leads_so_the_slice_is_a_comeback_pool(self) -> None:
+        """``read_tracker`` keeps the head of this list. Sorted oldest-first
+        that head is the retirement pile — measured over four run dates six
+        weeks apart it was byte-identical every time."""
+        today_d = date(2026, 8, 2)
+        rows = [
+            {"date": "2026-02-13", "exercise": "Leg Extension",
+             "kg": 60, "reps": 12, "notes": ""},
+            {"date": "2026-06-19", "exercise": "Chest Press Machine",
+             "kg": 60, "reps": 10, "notes": ""},
+        ]
+        out = stale_exercises(rows, _DB, today_d, threshold_days=28)
+        self.assertEqual([e["exercise"] for e in out],
+                         ["Chest Press Machine", "Leg Extension"])
+
+    def test_ties_break_on_more_sessions_then_name(self) -> None:
+        # A total order keeps a run reproducible; two movements last seen
+        # on the same day must not swap places between runs.
+        today_d = date(2026, 8, 2)
+        rows = [
+            {"date": "2026-06-01", "exercise": "Leg Extension",
+             "kg": 60, "reps": 12, "notes": ""},
+            {"date": "2026-05-20", "exercise": "Pec Deck",
+             "kg": 40, "reps": 12, "notes": ""},
+            {"date": "2026-06-01", "exercise": "Pec Deck",
+             "kg": 40, "reps": 12, "notes": ""},
+        ]
+        out = stale_exercises(rows, _DB, today_d, threshold_days=28)
+        self.assertEqual([e["exercise"] for e in out],
+                         ["Pec Deck", "Leg Extension"])
 
 
 if __name__ == "__main__":

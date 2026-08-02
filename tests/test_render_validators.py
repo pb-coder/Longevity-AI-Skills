@@ -8,6 +8,7 @@ from workout_coach.lib import render_validators
 from workout_coach.lib.render_validators import (
     COACH_STRING_MAX,
     auto_wrap_terms,
+    core_week_errors,
     count_working_sets_per_workout,
     validate_coach_reads,
     validate_workout_md,
@@ -279,7 +280,12 @@ class RenderValidatorTests(unittest.TestCase):
   — brace before the first rep
 """)
         self.assertEqual(errors, [])
-        self.assertTrue(any("3 sub-bullets" in w for w in warnings))
+        # Pinned string updated 2026-08-02: the counter now says
+        # "rationale sub-bullets", because it counts only those. All three
+        # sub-bullets here ARE rationale (none is a superset or
+        # anchor-change routing line), so the COUNT is unchanged at 3 and
+        # this test still measures what it always measured.
+        self.assertTrue(any("3 rationale sub-bullets" in w for w in warnings))
         self.assertTrue(any("comparative-history" in w for w in warnings))
 
     def test_core_warnings_silent_on_compliant_workout(self) -> None:
@@ -312,11 +318,28 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertTrue(any(
             "Kneeling Cable Crunch" in w and "optional" in w for w in warns))
 
-    def test_core_warnings_flags_zero_flexion_movement(self) -> None:
-        # Cable Pallof Press is CORE > Anti-Rotation, not Flexion.
-        warns = workout_core_warnings(_PLAN_CORE_NO_FLEXION)
-        self.assertTrue(any(
-            "no spinal-flexion core movement" in w for w in warns))
+    def test_flexion_is_a_weekly_requirement_not_a_per_session_one(self) -> None:
+        # REPLACES test_core_warnings_flags_zero_flexion_movement.
+        #
+        # A session whose only core movement is anti-rotation (Cable
+        # Pallof Press is CORE > Anti-Rotation) used to be flagged. It is
+        # not any more, and that is the point of W4: requiring flexion in
+        # EVERY session is the rule that produced 94% flexion over six
+        # months. See `workout_core_warnings`' docstring for the
+        # arithmetic. Flexion is now required once per WEEK, and more
+        # strictly — it must carry an external load.
+        self.assertEqual(
+            [w for w in workout_core_warnings(_PLAN_CORE_NO_FLEXION)
+             if "flexion" in w],
+            [])
+        week = _PLAN_CORE_NO_FLEXION + """
+## Workout 2: LOWER
+- Barbell Back Squat: 90kgx8 /// 90kgx8
+- Cable Pallof Press: 15kgx10 /// 15kgx10 /// 15kgx10 /// 15kgx10
+- Leg Press: 120kgx10 /// 120kgx10
+"""
+        self.assertTrue(any("loaded flexion" in e
+                            for e in core_week_errors(week)))
 
     def test_core_warnings_does_not_hardcode_exercise_names(self) -> None:
         # Regression guard for the audit's hard constraint: the core
@@ -387,6 +410,63 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(warnings, [])
         names.assert_called_once_with()
+
+
+class ExternalLoadFlagTests(unittest.TestCase):
+    """``bullet["loaded"]`` means an EXTERNAL kg load and nothing else.
+
+    `_WORKOUT_EXTERNAL_LOAD_RE` is deliberately narrower than
+    `_WORKOUT_LOADED_RE`: the wider pattern also accepts a bare
+    digit-x-digit rep token, which says nothing about load. That one
+    regex is the only thing keeping a bodyweight crunch out of the core
+    spec's loaded-flexion axis, and until now nothing tested it —
+    widening it to the rep-x-load form left the whole suite green while
+    letting `Crunch: 3x15` count as progressively loadable work.
+    """
+
+    def _loaded(self, bullet: str) -> bool:
+        text = f"## Workout 1: PUSH\n- {bullet}\n"
+        bullets = render_validators._iter_workout_exercise_bullets(text)
+        return bullets["Workout 1: PUSH"][0]["loaded"]
+
+    def test_a_kg_load_is_loaded(self) -> None:
+        for body in ("Ab Crunch Machine: 30kgx12 /// 30kgx12",
+                     "Kneeling Cable Crunch: 20 kg x 12",
+                     "Suitcase Carry: 24kgx30m"):
+            with self.subTest(body=body):
+                self.assertTrue(self._loaded(body))
+
+    def test_a_rep_by_rep_token_is_not_a_load(self) -> None:
+        # THE case. `3x15` is sets-by-reps, not kilograms. If this ever
+        # reads as loaded, a bodyweight crunch satisfies the core spec's
+        # loaded-flexion requirement and the only progressively-loadable
+        # pattern quietly leaves the week.
+        for body in ("Crunch: 3x15 /// 3x15",
+                     "Hanging Leg Raise: 3 x 12",
+                     "Plank: 45s /// 45s",
+                     "Bird Dog: 12 /// 12"):
+            with self.subTest(body=body):
+                self.assertFalse(self._loaded(body))
+
+    def test_a_bodyweight_flexion_week_written_in_reps_still_fails(self) -> None:
+        # The same defect at the axis it protects, so this survives a
+        # refactor that moves the regex.
+        plan = """# Workout plan — 2026-08-02
+
+## Workout 1: LOWER A + CORE
+- Barbell Back Squat: 90kgx8 /// 90kgx8
+- Crunch: 3x15 /// 3x15
+- Plank: 45s /// 45s
+- Calf Raise Machine: 55kgx12 /// 55kgx12
+
+## Workout 2: UPPER A + CORE
+- Dumbbell Flat Bench Press: 50kgx8 /// 50kgx8
+- Crunch: 3x15 /// 3x15
+- Cable Lateral Raise: 14kgx10 /// 14kgx10
+"""
+        self.assertTrue(any("loaded flexion" in e
+                            for e in core_week_errors(plan)),
+                        core_week_errors(plan))
 
 
 if __name__ == "__main__":

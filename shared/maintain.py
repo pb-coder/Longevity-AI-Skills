@@ -4,10 +4,15 @@ Idempotent. Safe to re-run. Performs:
   1. Canonicalize every per-month workout CSV (sort, recompute Volume/
      Pace/SESSION, rebuild TOTAL rows, hoist deload markers).
   2. Validate all CSVs (header schema match, monotonic date order,
-     row counts).
+     row counts). A header mismatch is reported and the remaining
+     checks still run.
   3. Optional ``--fix-distance-units`` swim sweep (legacy meter-as-km
      bug across monthly CSVs + workout_sessions.csv +
      swimming/YYYY.MM.workouts.csv).
+  4. Optional ``--fix-header`` health_metrics.csv schema-header rewrite.
+
+Steps 1 and 2 are the default run; steps 3 and 4 mutate and only happen
+when asked for by name. Validation itself never writes.
 
 Post-PR3a: there is no xlsx anywhere. Per-month workout data lives in
 ``<Person>/data/monthly/YYYY.MM.csv``. Health Metrics, Workout Sessions,
@@ -19,6 +24,7 @@ Usage (from the workout-tracker root):
     python3 Skills/shared/maintain.py --person <Person>
     python3 Skills/shared/maintain.py --person <Person> --dry-run
     python3 Skills/shared/maintain.py --person <Person> --fix-distance-units
+    python3 Skills/shared/maintain.py --person <Person> --fix-header
 """
 from __future__ import annotations
 
@@ -49,6 +55,7 @@ from .csv_store import (  # noqa: E402
     SWIM_WORKOUTS_HEADERS,
     THERMAL_SESSIONS_HEADERS,
     WORKOUT_SESSIONS_HEADERS_BY_SOURCE,
+    migrate_health_metrics_header,
     read_profile,
 )
 from .person_paths import (  # noqa: E402
@@ -111,12 +118,27 @@ def _row_count(path: Path) -> int:
 
 
 # ------------------------------------------------------------------ validate
+# Files whose header drift has a wired migration. The hint is appended to
+# the mismatch line so the validator names the remedy instead of leaving
+# the reader to find it. Nothing here runs automatically — see
+# ``validate_csvs``.
+HEADER_FIX_HINTS = {
+    "health_metrics.csv": " — run with --fix-header to migrate",
+}
+
+
 def validate_csvs(person: str) -> list[str]:
     """Sanity-check the per-person CSV store.
 
     Reports header schema match, monotonic date order, and row counts.
     Read-only — never rewrites the CSVs; the importers' upsert helpers
-    own the rewrite path.
+    own the rewrite path, and ``--fix-header`` is the opt-in migration.
+
+    A header mismatch is reported and validation continues. Aborting the
+    file on mismatch (the old behaviour) meant both real trackers, sitting
+    on a 16-column health_metrics.csv against a 19-column schema, got the
+    mismatch line and nothing else — no sort-order check, no row count —
+    for as long as the migration went unrun.
     """
     out: list[str] = []
     profile = read_profile(person)
@@ -184,11 +206,17 @@ def validate_csvs(person: str) -> list[str]:
                 continue
             rows = list(reader)
         if header != expected_header:
+            # Report and keep going. A header mismatch used to abort this
+            # file's checks entirely, which silenced the sort-order and
+            # row-count lines during a schema migration — precisely the
+            # window in which they are most worth reading. Date is column
+            # 0 in every schema in ``targets``, so the order check below
+            # stays meaningful under a mismatch.
             out.append(
-                f"{label}: header mismatch — got {header}, "
-                f"expected {expected_header}"
+                f"{label}: WARN header mismatch — got {len(header)} cols "
+                f"{header}, expected {len(expected_header)} cols "
+                f"{expected_header}{HEADER_FIX_HINTS.get(label, '')}"
             )
-            continue
         if order in ("desc", "asc"):
             dates = [row[0] for row in rows if row and row[0]]
             if dates:
@@ -411,6 +439,23 @@ def fix_distance_units(person: str, dry_run: bool = False) -> int:
     return 0
 
 
+def fix_health_metrics_header(person: str, dry_run: bool = False) -> int:
+    """Opt-in: rewrite health_metrics.csv under the current schema header.
+
+    Deliberately a flag rather than something ``run()`` does on its own.
+    ``maintain.py`` is documented as diagnostics and ``validate_csvs`` is
+    read-only; silently rewriting the user's real CSV as a side effect of
+    asking "is anything wrong?" would violate both, and would do it at the
+    one moment — mid-schema-change — when an unreviewed rewrite is most
+    likely to be the wrong move. ``--fix-distance-units`` set the
+    precedent: detect and report by default, mutate only when asked.
+
+    Idempotent. Honours ``--dry-run``.
+    """
+    print(migrate_health_metrics_header(person, dry_run))
+    return 0
+
+
 def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
     """One-shot 2026-05 migration: move the ``"incidental walk"`` Notes
     string to the new ``Incidental`` boolean column on workout_sessions.csv.
@@ -512,6 +557,10 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--fix-distance-units", action="store_true",
                     help="Run the meter-as-km historical sweep across all CSVs")
+    ap.add_argument("--fix-header", action="store_true",
+                    help="Rewrite health_metrics.csv under the current schema "
+                         "header. Opt-in: a plain validate run only reports "
+                         "the mismatch. Idempotent.")
     ap.add_argument("--migrate-incidental-flag", action="store_true",
                     help="One-shot 2026-05 migration: move 'incidental walk' "
                          "from Notes to the new Incidental column on "
@@ -520,6 +569,8 @@ def main() -> int:
     ctx = TrackerContext(args.person)
     if args.fix_distance_units:
         return fix_distance_units(ctx.person, args.dry_run)
+    if args.fix_header:
+        return fix_health_metrics_header(ctx.person, args.dry_run)
     if args.migrate_incidental_flag:
         return migrate_incidental_flag(ctx.person, args.dry_run)
     return run(ctx.person, args.dry_run)

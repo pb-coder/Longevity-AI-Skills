@@ -247,6 +247,30 @@ class CatalogIntegrityTests(unittest.TestCase):
         self.assertIsNone(entry["primary"])
         self.assertIn("traps", entry["synergists"])
 
+    # ── W6a: the one-handed carve-out ───────────────────────────────────────
+
+    def test_suitcase_carry_is_core_and_farmer_walk_is_not(self) -> None:
+        """W6a / D4: the asymmetry IS the mechanism. Ellestad et al.,
+        Int J Exerc Sci 2024;17(1):480-490 measure contralateral external
+        oblique at 33.0% MVIC for the one-handed carry against 34.5% for a
+        plank, while the bilateral carry reaches only 11-14% because the
+        two loads cancel. So exactly one of these two entries may carry
+        core credit, and it is not the one above."""
+        db = load_exercises_db(_DB_PATH)
+        suitcase = db.get("suitcase carry")
+        self.assertIsNotNone(suitcase, "Suitcase Carry missing from the DB")
+        self.assertEqual(suitcase["primary"], "core")
+        self.assertIsNone(db["dumbbell farmer walk"]["primary"])
+
+    def test_no_core_entry_carries_the_lengthened_flag(self) -> None:
+        """The CORE preamble states this as a deliberate rule: the
+        lengthened-position principle has never been tested on any
+        abdominal muscle. Four entries were just added — assert it."""
+        db = load_exercises_db(_DB_PATH)
+        flagged = [n for n, m in db.items()
+                   if m.get("primary") == "core" and m.get("lengthened")]
+        self.assertEqual(flagged, [])
+
 
 if __name__ == "__main__":
     unittest.main()

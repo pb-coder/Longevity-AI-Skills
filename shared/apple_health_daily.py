@@ -3,9 +3,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import timedelta
-import sys
 
-from .apple_health_core import parse_apple_dt, to_float
+from .apple_health_core import (
+    LENGTH_UNIT_TO_CM,
+    MASS_UNIT_TO_KG,
+    TEMP_UNIT_TO_C,
+    convert_unit as _convert_unit,
+    normalize_body_fat_pct,
+    parse_apple_dt,
+    plausible_or_none,
+    to_float,
+)
 
 # Tier 1 and Tier 2 record types consumed from Export.xml. Everything
 # else is skipped by the streaming importer.
@@ -20,6 +28,13 @@ WANTED_RECORD_TYPES = {
     "HKQuantityTypeIdentifierAppleSleepingBreathingDisturbances",
     "HKQuantityTypeIdentifierAppleExerciseTime",
     "HKQuantityTypeIdentifierBodyMass",
+    # Body composition. Absent from the exports seen so far — leanness is
+    # a data-collection gap, not only a code gap — so every handler below
+    # must leave the day blank rather than write a zero when its record
+    # type never appears.
+    "HKQuantityTypeIdentifierWaistCircumference",
+    "HKQuantityTypeIdentifierBodyFatPercentage",
+    "HKQuantityTypeIdentifierLeanBodyMass",
     "HKCategoryTypeIdentifierSleepAnalysis",
 }
 
@@ -36,42 +51,14 @@ SLEEP_UNSPEC_VALUE = "HKCategoryValueSleepAnalysisAsleepUnspecified"
 SLEEP_AWAKE_VALUE = "HKCategoryValueSleepAnalysisAwake"
 SLEEP_IN_BED_VALUE = "HKCategoryValueSleepAnalysisInBed"
 
-MASS_UNIT_TO_KG = {
-    "kg": lambda v: v,
-    "lb": lambda v: v * 0.45359237,
-    "lbs": lambda v: v * 0.45359237,
-    "st": lambda v: v * 6.35029318,
-}
-TEMP_UNIT_TO_C = {
-    "degc": lambda v: v,
-    "c": lambda v: v,
-    "degf": lambda v: (v - 32.0) * 5.0 / 9.0,
-    "f": lambda v: (v - 32.0) * 5.0 / 9.0,
-}
-
-
-_WARNED_UNKNOWN_UNITS: set[tuple[str, str]] = set()
-
-
-def _convert_unit(value: float | None, unit: str | None, converters: dict, label: str) -> float | None:
-    if value is None:
-        return None
-    key = (unit or "").strip().lower()
-    conv = converters.get(key)
-    if conv is None:
-        warn_key = (label, key)
-        if warn_key not in _WARNED_UNKNOWN_UNITS:
-            print(f"WARN: unknown {label} unit {key!r}; value skipped", file=sys.stderr)
-            _WARNED_UNKNOWN_UNITS.add(warn_key)
-        return None
-    return conv(value)
-
-
 class DayAggregator:
     """Collect per-day metric values during the streaming XML pass."""
 
     def __init__(self):
         self.bodyweight_kg = {}
+        self.waist_cm = {}
+        self.body_fat_pct = {}
+        self.lean_body_mass_kg = {}
         self.vo2max = {}
         self.resting_hr = {}
         self.walking_hr = {}
@@ -94,6 +81,9 @@ class DayAggregator:
 
         self._handlers = {
             "HKQuantityTypeIdentifierBodyMass": self._h_bodyweight,
+            "HKQuantityTypeIdentifierWaistCircumference": self._h_waist,
+            "HKQuantityTypeIdentifierBodyFatPercentage": self._h_body_fat,
+            "HKQuantityTypeIdentifierLeanBodyMass": self._h_lean_body_mass,
             "HKQuantityTypeIdentifierVO2Max": self._h_vo2max,
             "HKQuantityTypeIdentifierRestingHeartRate": self._h_resting_hr,
             "HKQuantityTypeIdentifierWalkingHeartRateAverage": self._h_walking_hr,
@@ -127,6 +117,42 @@ class DayAggregator:
         )
         if v is not None:
             self._set_latest(self.bodyweight_kg, d, dt, v)
+
+    def _h_waist(self, attrib, d, dt):
+        # Apple emits cm or in depending on the user's Health app locale;
+        # the tracker column is cm. The plausibility gate runs after the
+        # conversion, because that is where the damage shows up: "84.5 m"
+        # is a clean conversion to an impossible 8450 cm.
+        unit = attrib.get("unit") or "cm"
+        v = plausible_or_none(
+            _convert_unit(
+                to_float(attrib.get("value")), unit,
+                LENGTH_UNIT_TO_CM, "waist circumference",
+            ),
+            "waist_cm", "waist circumference", unit,
+        )
+        if v is not None:
+            self._set_latest(self.waist_cm, d, dt, v)
+
+    def _h_body_fat(self, attrib, d, dt):
+        # Apple's ``unit="%"`` is HealthKit's fraction encoding (0.18 for
+        # 18%); normalize_body_fat_pct owns that conversion, the unit
+        # gate, and the plausibility bound.
+        v = normalize_body_fat_pct(attrib.get("value"), attrib.get("unit") or "%")
+        if v is not None:
+            self._set_latest(self.body_fat_pct, d, dt, v)
+
+    def _h_lean_body_mass(self, attrib, d, dt):
+        unit = attrib.get("unit") or "kg"
+        v = plausible_or_none(
+            _convert_unit(
+                to_float(attrib.get("value")), unit,
+                MASS_UNIT_TO_KG, "lean body mass",
+            ),
+            "lean_body_mass_kg", "lean body mass", unit,
+        )
+        if v is not None:
+            self._set_latest(self.lean_body_mass_kg, d, dt, v)
 
     def _h_vo2max(self, attrib, d, dt):
         v = to_float(attrib.get("value"))
@@ -226,7 +252,8 @@ class DayAggregator:
 
     def emit(self, since_date):
         all_dates = set()
-        for store in (self.bodyweight_kg, self.vo2max, self.resting_hr,
+        for store in (self.bodyweight_kg, self.waist_cm, self.body_fat_pct,
+                      self.lean_body_mass_kg, self.vo2max, self.resting_hr,
                       self.walking_hr, self.wrist_temp_c, self.sleep_breath):
             all_dates.update(store.keys())
         all_dates.update(self.hr_recovery_1min.keys())
@@ -268,6 +295,12 @@ class DayAggregator:
                 "wrist_temp_c": round(lat(self.wrist_temp_c), 3) if lat(self.wrist_temp_c) is not None else None,
                 "sleep_breath_dist": round(lat(self.sleep_breath), 4) if lat(self.sleep_breath) is not None else None,
                 "exercise_min": round(self.exercise_min[d], 1) if d in self.exercise_min else None,
+                # Body composition. A day with no such record yields None,
+                # never 0.0 — the sparse-merge upsert then leaves the cell
+                # alone instead of stamping a fake reading over it.
+                "waist_cm": round(lat(self.waist_cm), 1) if lat(self.waist_cm) is not None else None,
+                "body_fat_pct": round(lat(self.body_fat_pct), 2) if lat(self.body_fat_pct) is not None else None,
+                "lean_body_mass_kg": round(lat(self.lean_body_mass_kg), 2) if lat(self.lean_body_mass_kg) is not None else None,
             }
 
     def emit_sleep_nights(self, since_date):

@@ -132,14 +132,14 @@ class AppleHealthImportTests(unittest.TestCase):
             'duration="30" durationUnit="min" '
             'startDate="2026-05-01 08:00:00 +0200" '
             'endDate="2026-05-01 08:30:00 +0200" '
-            'sourceName="Apple&#160;Watch von Nihad" '
+            'sourceName="Apple&#160;Watch von Owner" '
             'device="&lt;&lt;HKDevice: 0x1&gt;, name:Matrix&#160;T7xi, '
             'model:com.apple.health.fitnessmachinemodel.treadmill&gt;"/>'
         )
 
         row = iah.extract_workout(elem, None)
 
-        self.assertEqual(row["source"], "Apple Watch von Nihad")
+        self.assertEqual(row["source"], "Apple Watch von Owner")
         self.assertIn("Matrix T7xi", row["device"])
 
     def test_daily_unknown_unit_warns_and_skips_value(self) -> None:

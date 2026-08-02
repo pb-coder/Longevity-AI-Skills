@@ -22,6 +22,7 @@ PROFILE_KEYS = (
     "swim_css_sec_per_100m", "swim_css_set_at", "swim_pool_length_default",
     "light_therapy_target_per_week", "light_therapy_target_min_per_session",
     "sauna_target_per_week", "session_target_min", "min_per_working_set",
+    "session_warmup_min", "strength_sessions_per_week",
 )
 PROFILE_DEFAULTS = {
     "source":                              None,
@@ -45,6 +46,21 @@ PROFILE_DEFAULTS = {
     # one-size constant); lower it for people who train dense. Sane band
     # 1.5-6.0 enforced on read.
     "min_per_working_set":                 3.3,
+    # Fixed per-session overhead in minutes — everything that is not a
+    # working set: arriving, warming up, changing stations. Together with
+    # min_per_working_set this is the intercept and slope of a per-person
+    # duration model, so both should be fitted from that person's own
+    # logged sessions rather than assumed. Regressing Apple-measured
+    # duration on working sets gives ~20 + 2.3*sets for one tracker and
+    # ~7 + 2.4*sets for another — the slopes agree, the intercepts do not,
+    # so a single global constant mis-budgets somebody. Default 20.0.
+    "session_warmup_min":                  20.0,
+    # Target strength sessions per week. Drives split selection (2-3/wk ->
+    # Full Body, 4/wk -> Upper/Lower) and the weekly volume budget. Set it
+    # from what the person RELIABLY completes, not their intention: a
+    # target above real attendance silently under-delivers weekly volume
+    # and reads as under-training rather than as absence.
+    "strength_sessions_per_week":          None,
 }
 
 
@@ -190,6 +206,14 @@ def _read_profile_cached(person: str) -> dict:
                 f = _coerce_float(v)
                 if f is not None and 1.5 <= f <= 6.0:
                     out["min_per_working_set"] = f
+            elif k == "session_warmup_min":
+                f = _coerce_float(v)
+                if f is not None and 0.0 <= f <= 45.0:
+                    out["session_warmup_min"] = f
+            elif k == "strength_sessions_per_week":
+                i = _coerce_int(v)
+                if i is not None and 1 <= i <= 14:
+                    out["strength_sessions_per_week"] = i
             else:
                 out["_unknown_rows"].append([row[0], v])
     return out

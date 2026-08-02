@@ -16,8 +16,49 @@ applies to a pasted `Recovery:` line.
 - **Set**: 1, 2, 3... per exercise
 - **kg**: 0 if no weight. `k` = `kg`. `lbs` or `lb` → divide by 2.205, round to nearest 0.5.
 - **Volume**: Reps × kg
-- **Reps**: 0 for carries, walks, holds, isometric positions. Put the duration in the `duration_min` field (accepts `MM:SS` or decimal minutes) so the coach can read it structurally. Put distance in `distance_km` when the exercise tracks distance (farmer walks, loaded carries). Use Notes only for qualitative detail like "per hand" or "beltless".
-- **Notes**: Only from parenthetical input like `(felt heavy)`. Never invent notes. Exception: `Deload Workout` on any row of the session when the header line contains the `deload` keyword — the styler hoists it to the session's TOTAL row (see "Session-level flags" below).
+- **Reps**: 0 for carries, walks, holds, isometric positions. The duration MUST go in `duration_min` — see "Holds and carries" below. Put distance in `distance_km` when the exercise tracks distance (farmer walks, loaded carries). Use Notes only for qualitative detail like "per hand" or "beltless".
+- **Notes**: Only from parenthetical input like `(felt heavy)`. Never invent notes. **Never put a duration, a hold time, or a carry distance in Notes** — those are typed columns (see "Holds and carries"). Exception: `Deload Workout` on any row of the session when the header line contains the `deload` keyword — the styler hoists it to the session's TOTAL row (see "Session-level flags" below).
+
+## Holds and carries
+
+**A hold time or a carry time is data, not an annotation. It MUST be written to
+`duration_min`. Writing it to Notes instead is a bug, not a style choice.**
+
+This applies to every timed, rep-less movement: Dead Hang, Plank, Side Plank,
+Hollow Body Hold, L-Sit, Wall Sit, Suitcase Carry, Dumbbell Farmer Walk.
+
+| User input | `reps` | `duration_min` | `distance_km` | Notes |
+|---|---|---|---|---|
+| `Dead Hang 30s` | 0 | `0:30` | — | (blank) |
+| `Plank 45s hold` | 0 | `0:45` | — | (blank) |
+| `Side Plank 40s per side` | 0 | `0:40` | — | `per side` |
+| `Hollow Body 3x20sec` | 0 | `0:20` × 3 rows | — | (blank) |
+| `Suitcase Carry 2x30m @ 24kg` | 0 | — | `0.03` × 2 rows | (blank) |
+| `Farmer Walk 40s @ 48kg` | 0 | `0:40` | — | (blank) |
+
+- `duration_min` accepts `MM:SS`, `H:MM:SS`, or decimal minutes. `30s` → `0:30`,
+  `1min` → `1:00`, `90 sec` → `1:30`. **Never write `30s` as the literal string
+  `30`** — that reads as 30 minutes.
+- **Per-set, not per-exercise.** Three 30-second planks are three rows each
+  carrying `0:30`, not one row carrying `1:30`.
+- **"per side" is qualitative, the number is not.** `40sec per side` → the
+  duration goes in `duration_min` and only the words `per side` stay in Notes.
+  A side-count is not encodable in the schema, so it belongs in Notes; the time
+  never does.
+- **No number means no duration.** If the user writes `max hold` or `to
+  failure`, leave `duration_min` blank and put the phrase in Notes. Do not
+  invent a number, and do not silently drop the row.
+- **Carry distance goes in `distance_km`**, converted from metres
+  (`30m` → `0.03`). Do not put metres in `duration_min`.
+
+Why this is a hard rule and not a preference: `sessions.py::_is_working_set`
+counts a `reps == 0` row as a hard set **only** when `duration_min > 0`. A hold
+whose time sits in Notes scores zero sets and zero volume — the work is invisible
+to every downstream number. It also breaks the Notes-hygiene convention in
+`Skills/CLAUDE.md`: `"30s hold"` repeated across 19 rows is a category, not an
+annotation. `shared/canonicalize_logs.py` backfills historical violations and
+reports the ones it cannot parse; it is a cleanup path, not a licence to keep
+writing them.
 
 ## Multi-Set Separator
 

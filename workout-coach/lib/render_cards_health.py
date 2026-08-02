@@ -21,7 +21,118 @@ from .render_components import (
 )
 from .render_cards_common import _heading, coach_block
 
-def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
+# One-cell State labels for an unresolved bodyweight trend, keyed off the
+# reason CODE ``sessions.bodyweight_trend`` emits. The distinction the
+# old bare "no trend" erased: "no data" and "the data does not resolve a
+# direction" are different answers, and only one of them is the user's
+# fault to fix.
+_BW_STATE_LABEL = {
+    "no_readings":             "no weigh-ins",
+    "too_few_readings":        "too few weigh-ins",
+    "window_shorter_than_min": "window under 28d",
+    "readings_stale":          "last weigh-in over 7d ago",
+    "span_shorter_than_min":   "weigh-ins span under 7d",
+    "no_time_variance":        "one day only",
+    "ci_straddles_zero":       "direction unresolved",
+}
+
+
+def _bw_state_label(block):
+    if not isinstance(block, dict):
+        return "trend unresolved"
+    return _BW_STATE_LABEL.get(block.get("reason"), "trend unresolved")
+
+
+# Same idea for waist, against the reason codes ``sessions.waist_trend``
+# emits. The window floor differs (56 days, not 28) so the label does
+# too; everything else reads the same way on purpose.
+#
+# ``span_shorter_than_min`` and ``readings_stale`` name the SPREAD of the
+# measurements and the age of the newest one — neither is the window, and
+# a label that said "window" for either would repeat the confusion the
+# gate was built to end.
+_WAIST_STATE_LABEL = {
+    "no_readings":             "not measured",
+    "too_few_readings":        "too few measurements",
+    "window_shorter_than_min": "window under 56d",
+    "readings_stale":          "last measured over 4w ago",
+    "span_shorter_than_min":   "measurements span under 39d",
+    "no_time_variance":        "one day only",
+    "ci_straddles_zero":       "direction unresolved",
+}
+
+
+def _waist_cells(weekly, waist_latest, waist_trend_block):
+    """Value / series / State / status-class for the waist vitals row.
+
+    Three inputs, in descending order of how much they let the row say:
+
+    1. ``waist_trend_block`` (``tracker.waist_trend_cm_per_4w``) is the
+       only thing that can put a RATE in the State cell, and only when
+       its ``state`` is ``resolved``. Otherwise the cell names the reason
+       the fit did not resolve.
+    2. ``waist_latest`` supplies the headline measurement.
+    3. ``weekly`` — the ``health_metrics_weekly`` series carrying
+       ``waist_cm`` per ISO week — always supplies the sparkline, and
+       backstops the other two.
+
+    With none of the optional inputs the cell falls back to a CENSUS of
+    the series: how many weeks carry a measurement. A census is a fact
+    about the data rather than a claim about the body, so the row degrades
+    to saying less rather than to saying something unearned. It never
+    prints "flat", "stable", or a zero, and a series with fewer than two
+    real points draws an empty sparkline box rather than a flat line.
+    """
+    series = [w.get("waist_cm") for w in (weekly or [])]
+    present = [v for v in series if v is not None]
+
+    value = None
+    if isinstance(waist_latest, dict):
+        value = waist_latest.get("value_cm")
+    if value is None and present:
+        value = present[-1]
+
+    cls = "muted"
+    if isinstance(waist_trend_block, dict):
+        rate = waist_trend_block.get("cm_per_4w")
+        # ``resolved`` with no rate is a malformed block, not a rate of
+        # zero. Fall through to the reason label rather than printing a
+        # bare unit with nothing in front of it.
+        if waist_trend_block.get("state") == "resolved" and rate is not None:
+            state_text = f"{signed(rate, 2)} cm/4w"
+            # A narrowing waist during a lifting block is the favorable
+            # direction; a widening one is worth a look, not an alarm.
+            cls = "good" if rate < 0 else "amber"
+        else:
+            state_text = _WAIST_STATE_LABEL.get(
+                waist_trend_block.get("reason"), "trend unresolved")
+    elif not present:
+        state_text = "not measured"
+    elif len(present) == 1:
+        state_text = "1 week logged, no trend"
+    else:
+        state_text = f"{len(present)} weeks logged"
+
+    return value, series, state_text, cls
+
+
+def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text,
+                bw_trend_block=None, waist_latest=None, waist_trend_block=None):
+    """Vitals table.
+
+    ``bw_trend_block`` is ``tracker.bodyweight_trend``. The bodyweight
+    State cell used to read a bare "no trend" whenever the scalar was
+    null, which conflates "no weigh-ins" with "the direction is not
+    resolved by four weeks of data" — the second is a real finding and
+    the estimator supplies the reason for it. Read the block; do not
+    summarise a null as an absence.
+
+    ``waist_latest`` / ``waist_trend_block`` are
+    ``tracker.waist_latest`` and ``tracker.waist_trend_cm_per_4w``. Both
+    are optional: the waist row renders from the ``waist_cm`` series on
+    ``weekly`` alone, and states a census of that series instead of a
+    rate when the trend block is not supplied. See ``_waist_cells``.
+    """
     hrv_series = [w.get("hrv_sdnn") for w in weekly]
     rhr_series = [w.get("resting_hr") for w in weekly]
     wt_series  = [w.get("wrist_temp_c") for w in weekly]
@@ -81,6 +192,9 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
         if t >= -1.0: return "amber"
         return "warn"
 
+    waist_value, waist_series, waist_state, waist_cls = _waist_cells(
+        weekly, waist_latest, waist_trend_block)
+
     rows = [
         ("HRV", f'{fmt(latest_hrv, 1)} <span class="muted">ms</span>',
          sparkline(hrv_series, hrv_status(latest_hrv)),
@@ -104,9 +218,27 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
          "Peak rate of oxygen uptake. A standard fitness ceiling indicator."),
         ("Bodyweight", f'{fmt(bw.get("kg"), 2)} <span class="muted">kg</span>',
          sparkline(bw_weekly or [], "amber" if (bw_trend or 0) < -0.1 else "muted"),
-         signed(bw_trend, 2) + " kg/wk" if bw_trend is not None else "no trend",
+         (signed(bw_trend, 2) + " kg/wk" if bw_trend is not None
+          else _bw_state_label(bw_trend_block)),
          "amber" if (bw_trend or 0) < -0.1 else "muted",
          "Morning bodyweight, sparse-merge by date."),
+        ("Waist",
+         f'{fmt(waist_value, 1)} <span class="muted">cm</span>',
+         sparkline(waist_series, waist_cls),
+         waist_state,
+         waist_cls,
+         # The old wording here — "the rate needs at least 56 days of
+         # measurements" — described a requirement the estimator did not
+         # have, and the one it did have let four readings taken over
+         # three days resolve. This states the gate as it is enforced.
+         "Waist circumference, entered in Apple Health under Body "
+         "Measurements and imported from either export. It separates "
+         "where the weight went from how much of it there is. Slow "
+         "moving: to resolve a direction it needs at least 4 "
+         "measurements taken within the last 8 weeks, spread over at "
+         "least 39 days, with the newest no more than 4 weeks old. The "
+         "sparkline shows the last 4 weeks; the rate is fitted over up "
+         "to 8, so the line can be shorter than the fit behind it."),
     ]
 
     body = []

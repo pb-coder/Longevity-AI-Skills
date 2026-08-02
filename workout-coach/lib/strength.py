@@ -9,19 +9,25 @@ Functions:
 - ``weekly_volume_per_muscle(rows, db, today_d, window_days, unknown_out)``
   — fractional hard-set count per muscle (primary 1.0, synergist 0.5),
   normalized to sets-per-week over the window so it is apples-to-apples
-  with the weekly landmarks. Reports muscle landmarks alongside.
+  with the weekly landmarks. Emits the window mean (``current``), the
+  per-week series (``per_week``) and its ``median`` so a single spiky
+  week cannot masquerade as a steady weekly dose. Reports muscle
+  landmarks alongside.
 - ``estimated_1rm(rows, deload_dates, include_history)`` — Epley
   projection per exercise with current/prev/best, slope, confidence,
   and stalled-session count.
 - ``stale_exercises(rows, db, today_d, threshold_days)`` — exercises
   whose last appearance is ≥ ``threshold_days`` ago, sorted newest-
-  stale first (cardio + warmup excluded).
+  stale first (cardio + warmup excluded). The caller slices the head,
+  so newest-stale-first is what makes it a reintroduction pool rather
+  than a retirement pile.
 - ``hr_at_volume_divergence(rows, monthly_sessions, db, today_d,
   window_weeks)`` — per-muscle volume-weighted slope of strength-session
   avg HR. Flags fatigue or improving conditioning by group.
 """
 from __future__ import annotations
 
+import statistics
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -92,16 +98,52 @@ def weekly_volume_per_muscle(
     isn't a noisy single-week snapshot), then divided by ``window_days / 7``
     so the number is apples-to-apples with the WEEKLY ``VOLUME_LANDMARKS``
     (MEV/MAV/MRV). ``window_days`` is returned for transparency.
+
+    The window is ``window_days`` CALENDAR days inclusive of ``today_d`` —
+    i.e. ``[today_d - (window_days - 1), today_d]``, the same convention
+    every other windowed helper uses. Rows dated after ``today_d`` are
+    rejected so a backtest at an earlier ``--today`` cannot see the future.
+
+    A window mean alone hides dispersion: a muscle trained once, hard, in
+    week 1 and barely since reads the same as one trained steadily. So the
+    per-week series (``per_week``, oldest week first) and its ``median``
+    are emitted alongside. ``current`` keeps its exact prior semantics for
+    existing consumers; read ``median`` when you need the typical week.
+
+    ``window_days`` MUST be a whole number of weeks. The per-week buckets
+    are 7 days wide, so a window that is not divisible by 7 leaves a short
+    oldest bucket that is not comparable with the others: it drags
+    ``median`` down and breaks the invariant that ``sum(per_week) /
+    n_weeks == current``. Rather than silently emit a biased median for a
+    window nobody currently passes, reject it.
     """
-    cutoff = today_d - timedelta(days=window_days)
+    if window_days <= 0 or window_days % 7 != 0:
+        raise ValueError(
+            "weekly_volume_per_muscle: window_days must be a positive whole "
+            f"number of weeks (got {window_days}); the per_week buckets are "
+            "7 days wide and a partial bucket biases median low"
+        )
+    cutoff = today_d - timedelta(days=max(window_days - 1, 0))
+    # Week 0 is the most recent 7 days; the list is reversed to oldest-first
+    # on emit. Exact division is safe now that the guard above rejects any
+    # window_days that is not a whole number of weeks.
+    n_weeks = window_days // 7
     sets: dict[str, float] = defaultdict(float)
+    per_week_counts: dict[str, list[float]] = defaultdict(
+        lambda: [0.0] * n_weeks
+    )
+
+    def _credit(muscle: str, amount: float, bucket: int) -> None:
+        sets[muscle] += amount
+        per_week_counts[muscle][bucket] += amount
+
     for r in rows:
         if not _is_working_set(r):
             continue
         d = _parse_iso_date(r.get("date"))
         if d is None:
             continue
-        if d < cutoff:
+        if d < cutoff or d > today_d:
             continue
         entry = db.get(r["exercise"].lower())
         if entry is None:
@@ -109,17 +151,27 @@ def weekly_volume_per_muscle(
             continue
         if entry.get("is_warmup"):
             continue
+        bucket = min((today_d - d).days // 7, n_weeks - 1)
         if entry["primary"]:
-            sets[entry["primary"]] += 1.0
+            _credit(entry["primary"], 1.0, bucket)
         for syn in entry["synergists"]:
-            sets[syn] += 0.5
+            _credit(syn, 0.5, bucket)
 
     weeks = window_days / 7.0
     current = {m: round(v / weeks, 1) for m, v in sets.items()}
+    per_week = {
+        m: [round(v, 1) for v in reversed(per_week_counts[m])]
+        for m in current
+    }
+    median = {
+        m: round(statistics.median(per_week_counts[m]), 1) for m in current
+    }
     landmarks = {m: VOLUME_LANDMARKS[m] for m in current if m in VOLUME_LANDMARKS}
     return {
         "window_days": window_days,
         "current": current,
+        "per_week": per_week,
+        "median": median,
         "landmarks": landmarks,
     }
 
@@ -345,12 +397,27 @@ def stale_exercises(
     shows up in ``unknown_exercises``. Useful for spotting movements that
     were tried once or twice and dropped; the coach can decide whether to
     retire or reintroduce them.
+
+    Sorted **newest-stale first** — the movement that lapsed most
+    recently leads. The caller slices the head of this list, so the sort
+    direction decides what the reintroduction pool actually contains.
+    Oldest-first sorted the RETIREMENT pile to the top: measured over
+    four run dates six weeks apart the emitted head was byte-identical
+    every time — five February one-offs with ``sessions_logged`` 1-2 —
+    while 22 candidates with real multi-session history sat below the
+    slice and could never surface. A movement dropped 30 weeks ago after
+    one session is not a comeback candidate; one dropped 5 weeks ago
+    after eleven sessions is. Ties break on more sessions logged, then
+    on name, so the order is total and a run is reproducible.
     """
     last_seen: dict[str, str] = {}
     sessions_count: dict[str, set[str]] = defaultdict(set)
     canonical: dict[str, str] = {}
     for r in rows:
         if not _is_working_set(r):
+            continue
+        rd = _parse_iso_date(r.get("date"))
+        if rd is None or rd > today_d:
             continue
         key = r["exercise"].lower()
         entry = db.get(key)
@@ -377,8 +444,65 @@ def stale_exercises(
             "weeks_since":     round(days / 7.0, 1),
             "sessions_logged": len(sessions_count[key]),
         })
-    out.sort(key=lambda e: e["weeks_since"], reverse=True)
+    out.sort(key=lambda e: (e["weeks_since"], -e["sessions_logged"], e["exercise"]))
     return out
+
+
+# A working load older than roughly four months is a guess, not a memory:
+# the e1RM projection behind it has no support and the coach is told
+# (SKILL.md, stale reintroduction) to restart such a movement
+# submaximally anyway. Candidates past this line are therefore ranked
+# last, not scored — they only fill the pool when nothing fresher exists.
+REINTRODUCTION_MAX_WEEKS = 16.0
+
+
+def reintroduction_pool(stale: list[dict], limit: int = 5,
+                        max_weeks: float = REINTRODUCTION_MAX_WEEKS) -> list[dict]:
+    """Pick the ``limit`` best comeback candidates out of ``stale``.
+
+    ``stale_exercises`` answers "what has lapsed"; this answers "what is
+    worth bringing back", which is a different question and the one the
+    payload's capped list is actually used for.
+
+    A naive prefix of the lapsed list answers neither well. Oldest-first
+    handed the coach five ancient one-offs; newest-first hands it
+    whatever happened to lapse most recently, which on real data is a
+    single Plank session ahead of a movement with eleven.
+
+    The ranking key is **evidence density** — ``sessions_logged /
+    weeks_since``. It trades the two things that make a lapsed movement
+    a good candidate against each other: how much history there is to
+    restart from, and how stale the load that history implies has gone.
+    Eleven sessions ten weeks ago outranks one session eight weeks ago;
+    five sessions six weeks ago outranks five sessions twelve weeks ago.
+
+    Candidates past ``max_weeks`` are excluded from the scored ranking
+    and only used to top the pool up, so a long tail of one-offs cannot
+    crowd out a live comeback on density alone.
+
+    The returned list is re-sorted newest-stale first, which is the order
+    the payload documents and the order a reader expects.
+    """
+    if limit <= 0 or not stale:
+        return []
+    scored = []
+    tail = []
+    for e in stale:
+        weeks = float(e.get("weeks_since") or 0.0)
+        entry = dict(e)
+        entry["evidence_density"] = (
+            round(float(e.get("sessions_logged") or 0) / weeks, 3)
+            if weeks > 0 else None
+        )
+        (scored if weeks <= max_weeks else tail).append(entry)
+    scored.sort(key=lambda e: (-(e["evidence_density"] or 0.0),
+                               e["weeks_since"], e["exercise"]))
+    picked = scored[:limit]
+    if len(picked) < limit:
+        picked += tail[:limit - len(picked)]
+    picked.sort(key=lambda e: (e["weeks_since"], -e["sessions_logged"],
+                               e["exercise"]))
+    return picked
 
 
 def hr_at_volume_divergence(rows: list[dict],
@@ -392,10 +516,17 @@ def hr_at_volume_divergence(rows: list[dict],
     that session's volume into the muscle. Positive slope (HR rising at
     same volume) suggests fatigue; negative slope is improving
     conditioning. Returns ``{muscle: {slope_bpm_per_4w, n_sessions, hint}}``.
+
+    The window is ``window_weeks * 7`` CALENDAR days inclusive of
+    ``today_d`` — ``[today_d - (weeks*7 - 1), today_d]`` — the same
+    convention ``weekly_volume_per_muscle`` and the ``recent_*`` helpers
+    use. It previously ran one day long (57 inclusive days for an 8-week
+    window), which let a session on the 57th day back into an 8-week
+    regression.
     """
     if not monthly_sessions:
         return {}
-    cutoff = today_d - timedelta(days=window_weeks * 7)
+    cutoff = today_d - timedelta(days=max(window_weeks * 7 - 1, 0))
     # Build date → strength session avg_hr lookup.
     strength_hr: dict[str, float] = {}
     for s in monthly_sessions:
@@ -406,7 +537,7 @@ def hr_at_volume_divergence(rows: list[dict],
         d = _parse_iso_date(s.get("date"))
         if d is None:
             continue
-        if d < cutoff:
+        if d < cutoff or d > today_d:
             continue
         strength_hr[s["date"]] = float(s["avg_hr"])
     if len(strength_hr) < 4:

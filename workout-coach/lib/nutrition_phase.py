@@ -32,6 +32,7 @@ from datetime import date, timedelta
 
 
 from .parsing import _parse_iso_date
+from .sessions import smoothed_rate_per_week
 
 
 # Default rate-band classifiers (kg/wk). Anchored on the lean-bulk
@@ -68,11 +69,19 @@ def recent_phase_rate_kg_per_wk(bodyweight_series: list[dict],
     """Slope of bodyweight (kg) over the trailing ``window_days``.
 
     Falls back to phase-elapsed-days when the phase is shorter than the
-    window. Uses simple endpoint slope (last - first) / weeks rather
-    than linear regression because (a) bodyweight is noisy enough that
-    daily variance swamps a fit on 14 points, and (b) the
-    health_metrics bodyweight series can have gaps. Endpoints over a
-    smoothed mean-of-3 is a defensible compromise.
+    window. Delegates the arithmetic to
+    ``sessions.smoothed_rate_per_week``: mean-of-3 smoothed endpoints
+    divided by the span between the two groups' MEAN dates.
+
+    This used to be a second copy of that arithmetic, and the copy divided
+    the centroid-to-centroid change by the OUTER first-to-last span. That
+    is the classic smoothing bug — it shrinks every rate toward zero by
+    however much series the smoothing consumed, up to 42% on this
+    tracker's own data. Because this number drives ``coach_action_hint``
+    and the pre-committed stop conditions ("loss faster than 0.5 kg/wk for
+    2 weeks"), a shrunk rate makes those stop conditions fire late, which
+    is the direction you least want to be wrong in. One helper, one
+    definition of "rate".
 
     Returns None when fewer than 4 bodyweight readings exist in the
     window, or when the time span is too short (< 7 days).
@@ -101,18 +110,11 @@ def recent_phase_rate_kg_per_wk(bodyweight_series: list[dict],
         return None
 
     in_window.sort()
-    # Smooth endpoints with mean-of-3 to reduce daily noise.
-    head_vals = [v for (_, v) in in_window[:3]]
-    tail_vals = [v for (_, v) in in_window[-3:]]
-    head_mean = sum(head_vals) / len(head_vals)
-    tail_mean = sum(tail_vals) / len(tail_vals)
-
-    days_span = (in_window[-1][0] - in_window[0][0]).days
-    if days_span < 7:
+    if (in_window[-1][0] - in_window[0][0]).days < 7:
         return None
 
-    rate_per_day = (tail_mean - head_mean) / days_span
-    return round(rate_per_day * 7.0, 3)
+    rate = smoothed_rate_per_week(in_window)
+    return None if rate is None else round(rate, 3)
 
 
 def _consecutive_rate_breaches(bodyweight_series: list[dict],

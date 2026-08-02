@@ -1,9 +1,11 @@
 """Constants and capability tables for the /coach read pipeline.
 
-Pure data — no functions. Everything here is module-level so it can be
-imported once and referenced cheaply from every analytics module.
+Mostly pure data. Everything is module-level so it can be imported once
+and referenced cheaply from every analytics module; the handful of
+functions at the bottom (``age_band``, the priority-tier resolvers) are
+pure lookups over these tables with no I/O.
 
-Three groups:
+Five groups:
 
 - **Source capabilities**: per-data-source feature map
   (``SOURCE_CAPABILITIES``) plus the ``DEFAULT_DATA_SOURCE`` fallback for
@@ -11,10 +13,20 @@ Three groups:
 - **Sheet conventions**: ``DELOAD_MARKER`` (case-insensitive substring on
   TOTAL-row Notes) and ``TOTAL_LABEL`` (the canonical TOTAL-row exercise
   sentinel).
-- **Volume + muscle taxonomy**: ``VOLUME_LANDMARKS`` (per-muscle MV/MEV/
-  MAV/MRV bands), ``MUSCLE_ALIASES`` (database-token → snake_case key),
-  ``SECTION_PRIMARY`` (## SECTION header → primary muscle), and
-  ``SUBSECTION_PRIMARY_HINTS`` (subsection-substring overrides).
+- **Volume + muscle taxonomy**: ``RP_DIRECT_SET_LANDMARKS`` (as
+  published, direct sets), ``SYNERGIST_CREDIT_MEASUREMENT`` (the raw
+  pooled median / mean per muscle) and the ``SYNERGIST_CREDIT_OFFSET``
+  derived from it (the unit conversion), the derived ``VOLUME_LANDMARKS``
+  (per-muscle MV/MEV/MAV/
+  MRV bands **in the tracker's fractional unit**), ``MUSCLE_ALIASES``
+  (database-token → snake_case key), ``SECTION_PRIMARY`` (## SECTION
+  header → primary muscle), and ``SUBSECTION_PRIMARY_HINTS``
+  (subsection-substring overrides).
+- **Priority tiers**: ``PRIORITY_TIER_BAND`` / ``BLOCK_EMPHASIS_DEFAULT``
+  plus ``muscle_priority_tiers`` and ``muscle_volume_targets`` — the
+  emphasis / grow / maintain model (mid-MAV / MEV / MV).
+- **Prescription specs**: ``CORE_WEEK_SPEC`` and ``ARM_WEEK_SPEC``, the
+  distribution-shaped weekly targets the render validators enforce.
 """
 from __future__ import annotations
 
@@ -91,11 +103,65 @@ DEFAULT_DATA_SOURCE = "xml"
 DELOAD_MARKER = "deload workout"
 TOTAL_LABEL = "TOTAL"
 
-# Per-muscle weekly volume landmarks (hard sets). Source: current
-# (2024-26) Renaissance Periodization muscle-by-muscle guides + Mike
-# Israetel's published per-muscle videos, cross-referenced — where the
-# source muscle was actually measured — against Schoenfeld 2017 (J Sports
-# Sci, dose-response meta-analysis), Baz-Valle 2022 (J Human Kinetics
+# =============================================================================
+# Volume landmarks — TWO tables and one conversion between them
+# =============================================================================
+#
+# UNITS. This is the part that was silently wrong before 2026-08 and is
+# the reason the table is now split in two.
+#
+#   * `RP_DIRECT_SET_LANDMARKS` is in Renaissance Periodization's own unit:
+#     **direct hard sets per week**, i.e. sets whose PRIMARY target is that
+#     muscle. RP counts a set of bench press toward chest and toward
+#     nothing else.
+#   * The tracker does not measure that. `strength.weekly_volume_per_muscle`
+#     credits the primary muscle 1.0 and every listed synergist 0.5
+#     (training-science §1; Pelland/Helms/Schoenfeld tested direct vs
+#     fractional head-to-head and fractional won every comparison,
+#     2xlog BF 9.48-45.96). So the tracker's unit is **fractional sets per
+#     week** = direct + 0.5 x synergist.
+#
+# Those are different axes. Comparing a fractional measurement against a
+# direct-set landmark understates every muscle that receives synergist
+# credit: 6 credited triceps sets can be 0 curls plus 12 pressing sets,
+# which is exactly the failure `render_validators.workout_arm_dose_warnings`
+# was written to catch after the fact. The landmark, not the validator,
+# is the right place to fix it.
+#
+# CONVERSION. Fractional volume decomposes additively:
+#
+#     Q_fractional = Q_direct + S
+#
+# where S is the synergist credit the muscle receives from the program's
+# COMPOUND work. S is driven by compound volume, not by isolation volume,
+# so it is an OFFSET, not a multiplier — scaling the landmark by the
+# observed fractional/direct ratio would be wrong (it would make the
+# requirement grow with the isolation work that is supposed to satisfy it).
+# A threshold on the direct axis therefore maps to the fractional axis by
+# a shift of origin, and the SAME shift applies to MV, MEV, MAV and MRV.
+#
+# PROVENANCE OF THE OFFSETS. `SYNERGIST_CREDIT_OFFSET` below was measured,
+# not assumed: per-week synergist-only credit over a 26-week window across
+# both live trackers (52 person-weeks), pooled, then floored to a whole
+# set. Flooring is deliberate — an offset that is too large silently
+# raises every MEV and manufactures below-MEV verdicts, so the estimator
+# is biased low on purpose.
+#
+# LIMITS, stated rather than hidden:
+#   * S depends on the program. When compound volume drops (as it does
+#     when most muscles move to the `maintain` tier), the true S drops
+#     with it and these offsets become slightly too high. Re-measure at
+#     each block boundary.
+#   * Three muscles cannot be restated honestly and are left at their
+#     direct values with offset 0 — see the `# AMBIGUOUS` markers. A
+#     fourth (`external_rotators`) IS measurable and is restated; what it
+#     lacks is a way to HIT the resulting target — see `# UNHITTABLE`.
+#
+# Source of the direct numbers: current (2024-26) Renaissance
+# Periodization muscle-by-muscle guides + Mike Israetel's published
+# per-muscle videos, cross-referenced — where the source muscle was
+# actually measured — against Schoenfeld 2017 (J Sports Sci,
+# dose-response meta-analysis), Baz-Valle 2022 (J Human Kinetics
 # systematic review), and Pelland/Helms/Schoenfeld 2025 meta-regression
 # (Sports Medicine). Verified by full-text grep: none of the three
 # contains a single abdominal outcome, so this cross-reference does NOT
@@ -123,18 +189,38 @@ TOTAL_LABEL = "TOTAL"
 # are reasonable practitioner extrapolations and should be treated as such.
 # core has a published RP landmark but NO intervention evidence of any kind —
 # the meta-analyses cited above contain no abdominal outcomes. See §24.1.
-VOLUME_LANDMARKS = {
+RP_DIRECT_SET_LANDMARKS = {
     "chest":        {"mv": 3,  "mev": 8,  "mav": 16, "mrv": 22},
     "back":         {"mv": 6,  "mev": 10, "mav": 18, "mrv": 25},
     "quads":        {"mv": 4,  "mev": 8,  "mav": 14, "mrv": 18},
     "hamstrings":   {"mv": 2,  "mev": 4,  "mav": 12, "mrv": 16},
     "glutes":       {"mv": 0,  "mev": 4,  "mav": 12, "mrv": 16},
+    # front_delts is the THIRD MV == MEV collapse in this table, and the
+    # only one the OFFSET creates rather than a published-range
+    # correction: direct MV 0 / MEV 0 (RP recommends ~no direct front-delt
+    # work — pressing covers it) both become 2 once the measured offset of
+    # 2 is applied. So a muscle whose maintenance requirement was ZERO now
+    # demands 2 fractional sets/wk, and `maintain` and `grow` target the
+    # same number for it. Flagged, not adjusted: the collapse is what the
+    # unit conversion honestly implies, since ~2 fractional sets/wk is
+    # exactly what any pressing week already supplies, and front_delts is a
+    # `maintain`-tier muscle whose target is therefore met by construction.
+    # It becomes a real problem only if front_delts is ever nominated
+    # `grow`, which would ask for MEV and be satisfied by doing nothing.
     "front_delts":  {"mv": 0,  "mev": 0,  "mav": 6,  "mrv": 12},
     "side_delts":   {"mv": 6,  "mev": 8,  "mav": 16, "mrv": 22},
-    "rear_delts":   {"mv": 6,  "mev": 8,  "mav": 16, "mrv": 22},
+    # rear_delts MEV was 8. RP's current published rear-delt range tops out
+    # at 6 for MEV; 8 sat above their own band with no source. Lowered
+    # 2026-08-02 (D9). MV is left at 6 and now EQUALS MEV, which collapses
+    # the maintain/grow distinction for this muscle — flagged rather than
+    # silently adjusted, because lowering MV was not authorised. rear_delts
+    # is an `emphasis` muscle this block, so nothing reads its MV today.
+    "rear_delts":   {"mv": 6,  "mev": 6,  "mav": 16, "mrv": 22},
     "biceps":       {"mv": 5,  "mev": 8,  "mav": 16, "mrv": 22},
     "triceps":      {"mv": 4,  "mev": 6,  "mav": 12, "mrv": 16},
-    "calves":       {"mv": 6,  "mev": 8,  "mav": 14, "mrv": 18},
+    # calves MEV was 8, likewise above RP's published range. Same MV == MEV
+    # caveat as rear_delts, and likewise an `emphasis` muscle this block.
+    "calves":       {"mv": 6,  "mev": 6,  "mav": 14, "mrv": 18},
     "forearms":     {"mv": 2,  "mev": 4,  "mav": 8,  "mrv": 12},
     # Core = the abdominal wall (rectus abdominis + obliques). NOT the spinal
     # erectors, which have their own landmark below and carry the compound
@@ -167,6 +253,260 @@ VOLUME_LANDMARKS = {
     "external_rotators": {"mv": 0,  "mev": 2,  "mav": 6,  "mrv": 12},
     "adductors":    {"mv": 0,  "mev": 2,  "mav": 8,  "mrv": 12},
     "neck":         {"mv": 0,  "mev": 2,  "mav": 6,  "mrv": 12},
+}
+
+# The raw measurement behind the offsets, as DATA rather than as a
+# comment: per-week synergist-only credit over 26 weeks x 2 trackers
+# (52 person-weeks), pooled. `(pooled_median, pooled_mean)`.
+#
+# THE DERIVATION RULE, written down because the numbers do not imply it
+# and because the two estimators disagree for two of the six rows:
+#
+#     offset = floor(min(pooled_median, pooled_mean))
+#
+# The SMALLER estimator wins, and only then is it floored. Both halves
+# are the same bias: an offset that is too large silently raises every
+# landmark and manufactures below-MEV verdicts, so the estimator is
+# deliberately biased low (see LIMITS above). Using the median alone
+# would hand `front_delts` and `glutes` an offset of 3 instead of 2 —
+# those are the two rows where `floor(median) != floor(mean)`, and they
+# are exactly the rows where a 26-week median lands on a round number
+# while the mean records the weeks the pattern was absent.
+#
+# `SYNERGIST_CREDIT_OFFSET` is derived from this table, so the published
+# estimate and the applied integer cannot drift apart. `test_w4_specs.py`
+# pins the rule, the resulting integers, AND the derived
+# `VOLUME_LANDMARKS` values every consumer actually reads — a bare
+# `landmarks == published + offset` assertion is true for any offset at
+# all and did not notice when the biceps offset was mutated 3 -> 6
+# (which moved its MEV 11 -> 14 with the whole suite green).
+SYNERGIST_CREDIT_MEASUREMENT = {
+    #                     pooled median, pooled mean   -> offset
+    "biceps":            (3.00, 3.00),               # -> 3
+    "triceps":           (3.50, 3.45),               # -> 3
+    "front_delts":       (3.00, 2.48),               # -> 2
+    "glutes":            (3.00, 2.76),               # -> 2
+    "rear_delts":        (1.50, 1.58),               # -> 1
+    "external_rotators": (1.00, 1.05),               # -> 1, see UNHITTABLE
+}
+
+# Weekly synergist credit (0.5 per synergist tag) a muscle receives from
+# the compound work in the reference program. Adding this to a direct-set
+# landmark converts it to the tracker's fractional unit. See the block
+# comment above for method; see `tests/test_w4_specs.py` for the
+# assertions that keep the two tables consistent and that check every
+# offset against the catalog's own synergist tags.
+#
+# Everything omitted from this table has offset 0. For nine of them that
+# is STRUCTURAL, not an estimate: adductors, calves, core, neck and
+# side_delts appear zero times as a synergist anywhere in
+# `exercises-database.md`, and back / chest / quads / hamstrings appear so
+# rarely that 26 weeks of real logs measured a fractional/direct ratio of
+# 1.00-1.01. For those muscles the two units are the same unit and the
+# published landmark transfers unchanged. `core` being in that list is the
+# load-bearing case: no catalog entry credits core as a synergist (squat
+# and deadlift abdominal EMG is null, §24.5), so the core landmark needs
+# no restatement at all.
+#
+# AMBIGUOUS — deliberately left at 0 rather than guessed. The marker
+# means ONE thing: the number is not known. Keeping it to that one
+# meaning is what makes the three remaining markers worth reading.
+#   erectors            0 primary entries logged in either program; ALL of
+#                       the measured credit is synergist. The two trackers
+#                       disagree completely (one hinges, one does not:
+#                       median 3.0/wk vs 0.0/wk) — a program difference,
+#                       not noise, so the pooled median of 0 is not
+#                       meaningful either. Whether RP's erector MEV is
+#                       meant to be satisfied by hinges is genuinely
+#                       unsettled.
+#   forearms            2 synergist entries (Suitcase Carry, Dumbbell
+#                       Farmer Walk); neither has ever been logged, so the
+#                       measurement is 0 by absence, not by structure. Will
+#                       need re-measuring once carries enter the rotation.
+#   neck                no data.
+#
+# UNHITTABLE — measured, restated, and knowingly out of reach:
+#   external_rotators   pooled median 1.00, pooled mean 1.05, nonzero in
+#                       BOTH trackers independently (Cable Face Pull is
+#                       the crediting entry). The measurement is not
+#                       ambiguous and it was mislabelled as such until
+#                       2026-08-02. What is true is narrower: the catalog
+#                       has ZERO primary entries for the muscle, so direct
+#                       sets are not expressible in the current vocabulary
+#                       and the restated MEV of 3 cannot be hit by any
+#                       prescription this coach can write.
+#
+#                       Restated anyway, because SATISFIABILITY is not the
+#                       question this table answers. The offset is a UNIT
+#                       CONVERSION; withholding a measured conversion
+#                       because the converted target is hard to hit
+#                       conflates two concerns, and the conflation is not
+#                       neutral — at offset 0 the muscle's ~1.05 fractional
+#                       sets/wk were compared against a DIRECT-set MEV of
+#                       2 and read as 52% of target, when the honest
+#                       fractional comparison is 1.05 against 3, i.e. 35%.
+#                       The old marker made the least-served muscle in the
+#                       table read as the better-served one. An unhittable
+#                       target that reads "you are not training this, and
+#                       you cannot until the catalog gains a primary entry"
+#                       is the accurate signal; the remedy is a catalog
+#                       entry (external-rotation work exists — it is the
+#                       vocabulary that is missing), not a softer landmark.
+SYNERGIST_CREDIT_OFFSET = {
+    # floor(min(median, mean)); both estimates are non-negative, so int()
+    # IS floor here.
+    muscle: int(min(median, mean))
+    for muscle, (median, mean) in SYNERGIST_CREDIT_MEASUREMENT.items()
+}
+
+# The table every consumer reads. Unit: FRACTIONAL sets per week
+# (direct + 0.5 x synergist) — the same unit
+# `strength.weekly_volume_per_muscle` emits. Derived, not hand-maintained,
+# so the published numbers and the unit conversion can never drift apart.
+VOLUME_LANDMARKS = {
+    muscle: {
+        band: value + SYNERGIST_CREDIT_OFFSET.get(muscle, 0)
+        for band, value in bands.items()
+    }
+    for muscle, bands in RP_DIRECT_SET_LANDMARKS.items()
+}
+
+
+# =============================================================================
+# Priority tiers — emphasise / grow / maintain
+# =============================================================================
+#
+# Chasing MEV on all 18 muscles at once routes meaningfully to none of
+# them: the weekly set budget is finite, so a target every muscle shares
+# is a target no muscle owns. RP's own guidance is a three-tier split, and
+# this table is the machine-readable version of it.
+#
+#   emphasis  -> mid-MAV, i.e. the midpoint of [MEV, MAV]. The middle of
+#                the productive band, not its ceiling: MAV is where returns
+#                start costing more fatigue than they give back, so sitting
+#                ON it for a whole block is a fatigue decision, not a
+#                growth one.
+#   grow      -> MEV. The smallest dose that still drives adaptation.
+#   maintain  -> MV. Preserves the muscle while its budget goes elsewhere.
+#
+# `maintain` is the DEFAULT. A muscle that nobody nominated is not a
+# muscle to grow; it is a muscle to hold. That default is the whole point
+# of the tier model — without it the table would degrade back into "grow
+# everything".
+PRIORITY_TIER_BAND = {
+    "emphasis": "mid_mav",
+    "grow":     "mev",
+    "maintain": "mv",
+}
+PRIORITY_TIERS = tuple(PRIORITY_TIER_BAND)
+DEFAULT_PRIORITY_TIER = "maintain"
+
+# `profile.csv` key carrying the per-person override. Value format is a
+# semicolon-separated list of `muscle:tier` pairs, e.g.
+#   muscle_priority_tiers,core:emphasis;side_delts:emphasis;biceps:grow
+# Unlisted muscles fall to DEFAULT_PRIORITY_TIER. Unknown muscle names and
+# unknown tier names are ignored (a typo must not silently retier a muscle);
+# `muscle_priority_tiers` reports them via its `unknown` return.
+MUSCLE_PRIORITY_PROFILE_KEY = "muscle_priority_tiers"
+
+# Fallback used when `profile.csv` carries no override. This is the
+# 2026-08-02 block's emphasis set (D8), not a permanent property of the
+# system: core because 6 months of logs are 94% spinal flexion; side and
+# rear delts, calves and traps because they are the muscles the current
+# split under-serves. Biceps and triceps were considered and dropped —
+# both already sit at or above MEV.
+#
+# The accepted trade: chest, back, quads, hamstrings and glutes run at
+# MAINTENANCE this block. Bench and squat volume goes down. That is the
+# cost of emphasising anything at all.
+BLOCK_EMPHASIS_DEFAULT = (
+    "core", "side_delts", "rear_delts", "calves", "traps",
+)
+
+
+# =============================================================================
+# Prescription specs — distribution-shaped weekly targets
+# =============================================================================
+#
+# WHY THESE HAVE THREE AXES AND NOT ONE.
+#
+# The 2026-07 fix made per-week core SET COUNT the enforced target. The
+# next generated plan met it with `Ab Crunch Machine x2 sets x4 sessions`:
+# target satisfied, training goal not. Measured outcome over the following
+# six months — 94% of all core work spinal or hip flexion, anti-rotation 0
+# sets, loaded carry 0 sets, anti-lateral-flexion 1 set.
+#
+# The lesson generalises past core: this coach optimises precisely to what
+# is measured and stops there, so a target with only a QUANTITY axis is
+# always satisfiable by the cheapest legal item x N. Every spec below
+# therefore carries three machine-checkable axes:
+#
+#   quantity   how much   (sets per session / per week)
+#   diversity  how spread (distinct exercises, distinct pattern categories)
+#   identity   which      (a required category; a per-exercise frequency cap)
+#
+# Drop any one axis and a degenerate solution reappears. Drop diversity and
+# you get one exercise x N. Drop identity and you get three flavours of the
+# same movement. Drop quantity and you get one token set of each.
+CORE_WEEK_SPEC = {
+    # QUANTITY. Per session, keyed by session type (D3). Lower days carry
+    # the bigger share because they have the isolation slots to spare.
+    "sets_per_session": {"lower": 4, "upper": 2},
+    # A third set on an upper day is not a training problem; a fifth is.
+    # Under-dosing is never tolerated - that is the failure being fixed.
+    "session_set_overshoot_tolerance": 1,
+    # DIVERSITY.
+    "min_distinct_exercises_per_week": 3,
+    "min_pattern_categories_per_week": 3,
+    # IDENTITY. Pattern categories are the CORE subsections in
+    # `exercises-database.md` (Flexion / Anti-Extension / Anti-Rotation /
+    # Anti-Lateral-Flexion / Rotation) - read from the catalog, never
+    # duplicated here.
+    "max_sessions_per_exercise_per_week": 2,
+    "min_loaded_flexion_exercises_per_week": 1,
+    "flexion_category": "flexion",
+    # QUANTITY again, but on the PATTERN rather than on the total — and
+    # the two flexion keys are different constraints, not a duplicate.
+    # `min_loaded_flexion_exercises_per_week` counts EXERCISES, so one
+    # bullet carrying one set satisfies it in full. Measured exploit
+    # (2026-08-02): a four-session week of 8 core sets carrying a SINGLE
+    # flexion set (12.5%) and 70 seconds of bodyweight holds cleared every
+    # axis in this file and rendered at exit 0. Flexion set count was the
+    # one thing the 2026-08 rebuild left unmeasured when it replaced a
+    # scalar set target with distribution-shaped ones, and §5.2 of the
+    # spec says in advance what happens to anything unmeasured.
+    #
+    # WHY A THIRD. §4.2's rotation pool is two slots per session — slot A
+    # loaded flexion, slot B rotating non-flexion — so the structure the
+    # coach is instructed to follow already implies ~50% flexion. The
+    # floor is set deliberately BELOW that, because the pool is a default
+    # and a week that legitimately spends an extra slot on anti-rotation
+    # or a carry has to stay authorable. A third is the largest share that
+    # never contradicts the pool, and it is the point below which flexion
+    # stops being a pattern the week trains and becomes a token it names.
+    #
+    # WHY ALSO AN ABSOLUTE THREE. A share alone is scale-free: at 3 core
+    # sets a third is 1 set, and one set of anything is a rehearsal (the
+    # same judgement as `MIN_SETS_PER_DISTINCT_EXERCISE` = 2). Three is
+    # the smallest count that is a real dose plus evidence of intent, and
+    # it sits just under RP's published core MEV of 4 direct sets —
+    # under, on purpose, because a floor must not read as the target.
+    #
+    # This is a FLOOR, not a band. Nothing here caps flexion; that is
+    # `min_pattern_categories_per_week`'s job. The failure being fixed is
+    # 12%, and the failure before it was 94%, so both ends need an axis
+    # and they are different axes.
+    "min_flexion_share_of_core_sets": 1 / 3,
+    "min_flexion_sets_per_week": 3,
+}
+
+# Same shape, one muscle each side of the elbow. The >=6 direct sets/week
+# floor is unchanged; the distinct-exercise axis is new and exists for the
+# same reason core's does - 6 sets of one pushdown is a quantity target met
+# and a training target missed.
+ARM_WEEK_SPEC = {
+    "min_direct_sets_per_week": 6,
+    "min_distinct_exercises_per_week": 2,
 }
 
 # Canonicalise the muscle tokens that appear in exercises-database.md to the
@@ -483,6 +823,73 @@ SESSION_GATE_THRESHOLDS = {
     # ---- Tier E: over-recovered / taper warning ----
     "tier_e_tsb_high":                 10.0,
 }
+
+
+def muscle_priority_tiers(profile: dict | None = None) -> tuple[dict, list[str]]:
+    """Resolve every muscle to an ``emphasis`` / ``grow`` / ``maintain`` tier.
+
+    Returns ``(tiers, unknown_tokens)``. ``tiers`` covers every key in
+    ``VOLUME_LANDMARKS``; ``unknown_tokens`` lists the ``muscle:tier``
+    pairs that were dropped so the caller can surface a typo instead of
+    silently applying the default.
+
+    ``profile`` is the ``profile.csv`` dict from
+    ``shared.csv_store_profile.read_profile``. The override lives under
+    ``MUSCLE_PRIORITY_PROFILE_KEY``; when it is absent the
+    ``BLOCK_EMPHASIS_DEFAULT`` set is applied and everything else falls to
+    ``DEFAULT_PRIORITY_TIER``. Config wins over the default in full — a
+    profile that names an emphasis set replaces the built-in one rather
+    than adding to it, so a person can drop core from emphasis without
+    editing code.
+    """
+    tiers = {m: DEFAULT_PRIORITY_TIER for m in VOLUME_LANDMARKS}
+    unknown: list[str] = []
+
+    raw = (profile or {}).get(MUSCLE_PRIORITY_PROFILE_KEY)
+    raw = raw.strip() if isinstance(raw, str) else ""
+    if not raw:
+        for muscle in BLOCK_EMPHASIS_DEFAULT:
+            tiers[muscle] = "emphasis"
+        return tiers, unknown
+
+    for pair in raw.replace(",", ";").split(";"):
+        pair = pair.strip()
+        if not pair:
+            continue
+        muscle, _, tier = pair.partition(":")
+        muscle = muscle.strip().lower().replace(" ", "_")
+        tier = tier.strip().lower()
+        if muscle in tiers and tier in PRIORITY_TIER_BAND:
+            tiers[muscle] = tier
+        else:
+            unknown.append(pair)
+    return tiers, unknown
+
+
+def muscle_volume_targets(tiers: dict | None = None,
+                          landmarks: dict | None = None) -> dict:
+    """Per-muscle weekly set target implied by its priority tier.
+
+    ``{muscle: {"tier": str, "band": str, "target_sets": float}}``, in the
+    same FRACTIONAL unit as ``VOLUME_LANDMARKS`` and
+    ``strength.weekly_volume_per_muscle`` — see the units note above the
+    landmark tables. ``mid_mav`` is the midpoint of ``[mev, mav]``.
+    """
+    if tiers is None:
+        tiers, _ = muscle_priority_tiers()
+    marks = landmarks if landmarks is not None else VOLUME_LANDMARKS
+
+    out: dict = {}
+    for muscle, bands in marks.items():
+        tier = tiers.get(muscle, DEFAULT_PRIORITY_TIER)
+        band = PRIORITY_TIER_BAND.get(tier, PRIORITY_TIER_BAND[DEFAULT_PRIORITY_TIER])
+        if band == "mid_mav":
+            target = (bands["mev"] + bands["mav"]) / 2.0
+        else:
+            target = float(bands[band])
+        out[muscle] = {"tier": tier, "band": band,
+                       "target_sets": round(target, 1)}
+    return out
 
 
 def age_band(norms_table: dict, sex: str, age: int) -> dict | None:

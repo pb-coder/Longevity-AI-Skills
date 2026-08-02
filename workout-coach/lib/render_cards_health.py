@@ -21,7 +21,37 @@ from .render_components import (
 )
 from .render_cards_common import _heading, coach_block
 
-def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
+# One-cell State labels for an unresolved bodyweight trend, keyed off the
+# reason CODE ``sessions.bodyweight_trend`` emits. The distinction the
+# old bare "no trend" erased: "no data" and "the data does not resolve a
+# direction" are different answers, and only one of them is the user's
+# fault to fix.
+_BW_STATE_LABEL = {
+    "no_readings":             "no weigh-ins",
+    "too_few_readings":        "too few weigh-ins",
+    "window_shorter_than_min": "window under 28d",
+    "no_time_variance":        "one day only",
+    "ci_straddles_zero":       "direction unresolved",
+}
+
+
+def _bw_state_label(block):
+    if not isinstance(block, dict):
+        return "trend unresolved"
+    return _BW_STATE_LABEL.get(block.get("reason"), "trend unresolved")
+
+
+def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text,
+                bw_trend_block=None):
+    """Vitals table.
+
+    ``bw_trend_block`` is ``tracker.bodyweight_trend``. The bodyweight
+    State cell used to read a bare "no trend" whenever the scalar was
+    null, which conflates "no weigh-ins" with "the direction is not
+    resolved by four weeks of data" — the second is a real finding and
+    the estimator supplies the reason for it. Read the block; do not
+    summarise a null as an absence.
+    """
     hrv_series = [w.get("hrv_sdnn") for w in weekly]
     rhr_series = [w.get("resting_hr") for w in weekly]
     wt_series  = [w.get("wrist_temp_c") for w in weekly]
@@ -104,7 +134,8 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
          "Peak rate of oxygen uptake. A standard fitness ceiling indicator."),
         ("Bodyweight", f'{fmt(bw.get("kg"), 2)} <span class="muted">kg</span>',
          sparkline(bw_weekly or [], "amber" if (bw_trend or 0) < -0.1 else "muted"),
-         signed(bw_trend, 2) + " kg/wk" if bw_trend is not None else "no trend",
+         (signed(bw_trend, 2) + " kg/wk" if bw_trend is not None
+          else _bw_state_label(bw_trend_block)),
          "amber" if (bw_trend or 0) < -0.1 else "muted",
          "Morning bodyweight, sparse-merge by date."),
     ]

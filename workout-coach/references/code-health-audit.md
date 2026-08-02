@@ -252,7 +252,7 @@ or product direction.
 3. **`tests/test_render_dashboard_snapshot.py`** — runs
    `render_dashboard.py` against `tests/fixtures/<Person>/` and
    `tests/fixtures/<OtherPerson>/`, diffs against a stored
-   `tests/snapshots/{nihad,fabian}-dashboard.html` (strip the
+   `tests/snapshots/{person,otherperson}-dashboard.html` (strip the
    `generated at` timestamp line). Catches empty-state suppression,
    capability gating, pill orphans, hex regressions.
 4. **`scripts/silent_gap_audit.py`** — walks `read_tracker.py` output,

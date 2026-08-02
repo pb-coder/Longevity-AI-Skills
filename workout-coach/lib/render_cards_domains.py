@@ -411,15 +411,53 @@ def card_sleep_domain(sleep, sleep_regularity, rem_anomaly, coach_text,
 '''
 
 
-def card_body_comp_domain(bw, bw_trend, longevity_state, coach_text):
+# Short, true sublabels for each ``bodyweight_trend.reason`` the
+# estimator emits. Keyed off the reason CODE, not the prose, so a wording
+# change in ``sessions.bodyweight_trend`` cannot silently desync this
+# card; an unrecognised code falls through to the block's own ``note``,
+# and a missing block to a statement that claims nothing.
+_BW_UNRESOLVED_SUB = {
+    "no_readings":              "no fasted weigh-ins in the window",
+    "too_few_readings":         "too few weigh-ins to fit a rate",
+    "window_shorter_than_min":  "window shorter than the 28-day minimum",
+    "no_time_variance":         "all weigh-ins fall on one day",
+    "ci_straddles_zero":        "direction not resolved — 95% interval spans zero",
+}
+
+
+def _bw_unresolved_sub(block):
+    """Sublabel for an unresolved bodyweight trend, sourced from the block."""
+    if not isinstance(block, dict):
+        return "rate not resolvable from the current window"
+    reason = block.get("reason")
+    if reason in _BW_UNRESOLVED_SUB:
+        return _BW_UNRESOLVED_SUB[reason]
+    note = block.get("note")
+    return note if note else "rate not resolvable from the current window"
+
+
+def card_body_comp_domain(bw, bw_trend, longevity_state, coach_text,
+                          bw_trend_block=None):
     """Body composition domain card. Hero: bodyweight + trend context.
-    Body fat and visceral fat secondaries are explicit DEXA-pending."""
+    Body fat and visceral fat secondaries are explicit DEXA-pending.
+
+    ``bw_trend_block`` is ``tracker.bodyweight_trend`` — the same rate
+    with its ``state`` / ``reason`` / ``note``. When ``bw_trend`` is
+    ``None`` the card MUST say why from that block rather than assert a
+    cause of its own: the estimator is an OLS fit over a >=28-day window
+    that reports ``unresolved`` for five distinct reasons, and the card
+    previously claimed a sixth one that no longer exists ("needs 8+
+    fasted entries" was the pre-2026-08 rule). A renderer inventing the
+    reason for a missing number is how a dashboard tells the user
+    something false about their own data.
+    """
     bw_val = (bw or {}).get("kg")
     has_profile = bool(longevity_state)
 
     # Hero: bodyweight with trend status
     if bw_trend is None:
-        cls, status, sub = "muted", "no trend yet", "needs 8+ fasted entries"
+        cls, status = "muted", "trend unresolved"
+        sub = _bw_unresolved_sub(bw_trend_block)
     elif -0.1 <= bw_trend <= 0.4:
         cls, status, sub = "good", "lean-bulk range", f'{signed(bw_trend, 2)} kg/wk · target +0.2 to +0.4'
     elif bw_trend > 0.4:

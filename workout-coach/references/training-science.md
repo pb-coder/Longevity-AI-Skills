@@ -436,10 +436,13 @@ under training conditions.
 (95% CI 0.1 to 1.3)**. Evidence tier: **Moderate** — a real RCT, but a postpartum
 diastasis-recti population, untrained, dose never reported in sets, small effect.
 
-**Practical minimum: 2 working sets per strength session across 3-4 sessions = 6-8
-sets/week.** This clears MEV with margin and costs roughly **9% of a 22-set session
-budget** (~5 minutes of a 60-minute session). It is a floor, not a target to exceed:
-**cap core at 3 sets per session.** Core does not earn budget from chest, back or legs.
+**The per-session dose is `core_week_spec.sets_per_session` in `lib/constants.py`, not a
+number in this file** — 4 on lower days, 2 on upper (D3), with the weekly target read from
+`muscle_volume_targets["core"]`. Lower days carry the larger share because they have the
+isolation slots to spare. The dose is enforced as a blocking render error in both directions:
+under-allocation is the failure this block exists to fix, over-allocation past the tolerance
+means core is eating budget it did not earn. It costs a few minutes of a 60-minute session
+either way; core does not take sets from chest, back or legs.
 
 **Frequency: 3-4 sessions/week — for logistical reasons, not physiological ones.**
 Frequency has negligible independent effect on hypertrophy once weekly volume is equated
@@ -532,11 +535,43 @@ is invisible to all three: `reps=0, kg=0` rows classify as isometric holds and c
 axis, so a stalled plank is undetectable by design. **Prescribing loadable core is what makes
 core progression legible at zero cost to the schema.**
 
-Loadable, in rough order of preference:
+But "prefer loadable" applied to a flat list is what produced six months of 94% spinal
+flexion and zero anti-rotation, zero loaded carry: the loadable movements are almost all
+flexion, so ranking by loadability ranks by pattern without saying so. The rule is therefore
+scoped to a slot, not to the session.
 
-- **Kneeling Cable Crunch**, **Ab Crunch Machine** — pin-loaded, direct spinal flexion.
-- **Hanging Leg Raise**, **Captain's Chair Knee Raise** — add a dumbbell between the feet.
-- **Cable Reverse Crunch**, **Roman Chair Sit-Up** (weighted / declined).
+**Two slots. Slot A is loaded flexion and is mandatory weekly. Slot B rotates
+non-flexion by category.**
+
+**Slot A — flexion, at least one loaded movement per week.** Progress DOWN the rungs across
+blocks, not within a session. Existing catalog entries only:
+
+machine (Ab Crunch Machine, Stomach Press Machine) → cable (Kneeling Cable Crunch, Standing
+Cable Crunch, Cable Reverse Crunch) → hanging L1 (Hanging Knee Raise) → hanging L2 (Hanging
+Leg Raise) → apparatus (Captain's Chair Knee Raise, Roman Chair Sit-Up) → floor (Crunch,
+V-Up, Leg Raise, Bicycle Crunch, Flutter Kick, Mountain Climber).
+
+Hanging Knee Raise is the rung below Hanging Leg Raise, not a synonym for it. Both hanging
+rungs load with a dumbbell between the feet; Roman Chair Sit-Up loads weighted or declined.
+
+**Slot B — rotating non-flexion, one category per session, cycled by block:**
+
+| Category | Rungs, easiest first |
+|---|---|
+| Anti-extension | Dead Bug → Plank → Hollow Body Hold → Ab Wheel Rollout → L-Sit |
+| Anti-rotation | Bird Dog → Cable Pallof Press → Plate Around the World |
+| Anti-lateral-flexion | Side Plank → Suitcase Carry |
+| Rotation | Cable Woodchop (both directions), Cable Russian Twist, Landmine Rotation, Rotary Torso Machine, Russian Twist, Roman Chair Side Bend |
+| Loaded carry (finisher, budgeted outside the core allocation per D4) | Dumbbell Farmer Walk |
+
+Ab Wheel Rollout is the only progressable rung in anti-extension; every other entry there is
+a fixed-position hold whose one overload knob is time. Plate Around the World carries no
+peer-reviewed EMG or intervention data at all — its anti-rotation classification is a
+mechanistic analogy to the Pallof press, and it must never satisfy the flexion requirement.
+
+The countable part of all this — how many distinct exercises, how many categories, how often
+one movement may repeat, and the one-loaded-flexion-per-week floor — is `core_week_spec` in
+`lib/constants.py`, enforced as blocking render errors. Do not restate those numbers in prose.
 
 **Prefer the movements <Person> will actually perform.** A prescription with a 0% completion
 rate delivers 0 sets regardless of its evidence base. When adherence data exists in the log,
@@ -568,9 +603,16 @@ downside, and it is conditional on a diagnosis the tracker cannot see. An anti-e
 policy is not evidence-based, and it would exclude precisely the most progressively loadable
 movements.
 
-**Pattern coverage: at least one spinal-flexion movement per session.** Rectus abdominis is
-the hypertrophy target; flexion is how it is loaded through a range of motion.
-Anti-extension and anti-rotation work is optional and never substitutes for the flexion set.
+**Pattern coverage: at least one LOADED spinal-flexion movement per WEEK, not per session.**
+Rectus abdominis is the hypertrophy target and flexion is how it is loaded through a range of
+motion, so flexion stays mandatory. The per-session version of this rule was withdrawn on
+2026-08-02: on a 4-on-lower / 2-on-upper budget it spends at least one bullet per session on
+flexion, which on an upper day is the entire core allocation, and the best a scheduler can do
+under both it and a pattern-category requirement is a 50% flexion floor. It cannot coexist
+with a distribution target because it IS a distribution target, pointed at one pattern. It
+was one of three rules that produced six months of 94%-flexion logged core work. The weekly
+form is stricter about what counts (the movement must carry external load) and is enforced by
+`core_week_errors`, not by prose.
 
 **Lengthened position (§5) does not apply here — not because it's wrong, but because it is
 untested for this muscle.** No study has tested long-muscle-length or lengthened-partial
@@ -778,7 +820,14 @@ otherwise-equal movements — not a reason to prescribe.
   the contribution belongs to `erectors` and is already counted there.
 - **Do not credit two-handed carries with ab work.** Rectus abdominis sits at **3.9% MVC**
   during a two-handed 30 kg farmer's walk (McGill, Marshall & Andersen 2013, Ergonomics
-  56(2):293-302) — indistinguishable from standing.
+  56(2):293-302) — indistinguishable from standing. **The one-handed carry is the exception,
+  and it is not a technicality.** Ellestad et al., *Int J Exerc Sci* 2024;17(1):480-490:
+  a suitcase carry reaches **33.0% MVIC in the contralateral external oblique**, against
+  **34.5%** for a plank, while the bilateral farmer's carry reaches only **11-14%** because
+  the two loads cancel. The asymmetry IS the mechanism, so **both sides must be performed** —
+  one side is half the prescription, not a lighter version of it. Per decision D4,
+  `Suitcase Carry` counts as core and is budgeted inside the core allocation;
+  `Dumbbell Farmer Walk` is a finisher budgeted outside it and still earns no ab credit.
 - **Do not program "upper" and "lower" abs as separate volume targets.** The regions are real;
   the EMG-to-growth inference is broken (Zabaleta-Korta 2024).
 - **Do not track transverse abdominis.** MRI cannot isolate it and it is never visible.

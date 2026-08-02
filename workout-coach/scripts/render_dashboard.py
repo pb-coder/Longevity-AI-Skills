@@ -37,11 +37,12 @@ if str(_SKILLS_ROOT) not in sys.path:
 from tracker.validation import validate_tracker_json
 from workout_coach.lib.render_helpers import esc
 from workout_coach.lib.render_validators import (
+    is_deload_week,
+    payload_spec_errors,
+    tier_budget_by_index,
     validate_coach_reads,
     validate_workout_md,
-    workout_arm_dose_warnings,
-    workout_core_warnings,
-    workout_set_budget_warnings,
+    validate_workout_plan,
 )
 # Direct submodule imports bypass the render_assets / render_components /
 # render_cards / render_cards_trajectory compatibility facades. Each
@@ -53,6 +54,7 @@ from workout_coach.lib.render_styles import STYLESHEET
 from workout_coach.lib.render_scripts import INLINE_JS
 from workout_coach.lib.render_cards_today import (
     card_acwr,
+    card_block_position,
     card_drivers,
     card_hero,
     card_muscle_volume,
@@ -97,6 +99,12 @@ def render(j: TrackerJSON, coach: CoachReads, workout_md: str, person: str) -> s
     cardio_zones = j.get("cardio_hr_zones_28d") or {}
     bw = j.get("bodyweight_latest") or {}
     bw_trend = j.get("bodyweight_trend_kg_per_week")
+    # The scalar is None for five distinct reasons. Both bodyweight
+    # surfaces read the reason CODE off this block instead of narrating a
+    # cause of their own: without it they fall back to a reason-less
+    # "unresolved", which is what let the dashboard report a confident
+    # loss over a stretch the user actually gained 1.7 kg across.
+    bw_trend_block = j.get("bodyweight_trend")
     vo2max = j.get("vo2max_latest") or {}
     vo2_trend = j.get("vo2max_trend_per_4w")
     wow = j.get("week_over_week") or {}
@@ -212,6 +220,7 @@ def render(j: TrackerJSON, coach: CoachReads, workout_md: str, person: str) -> s
     {card_acwr(acwr, coach_cards.get("today_acwr"))}
     {card_rings(rings_html, coach_cards.get("activity_rings"))}
     {card_neat(j.get("daily_activity_28d"))}
+    {card_block_position(j.get("block"), j.get("dose_staleness"), coach_cards.get("block_position"))}
     {card_training_load(series, ctl, atl, tsb, tsb_trend, coach_cards.get("training_load"))}
     {card_muscle_volume(weekly_volume, coach_cards.get("muscle_volume"), hr_divergence=j.get("hr_at_volume_divergence"))}
     {card_strength(e_items, coach_cards.get("strength"))}
@@ -224,11 +233,11 @@ def render(j: TrackerJSON, coach: CoachReads, workout_md: str, person: str) -> s
     {card_swim_trajectory(j.get("swim_summary"), coach_cards.get("swim_trajectory_callout"))}
     {card_recovery_domain(recovery, weekly, coach_cards.get("trajectory_recovery"))}
     {card_sleep_domain(j.get("sleep_summary"), sleep_regularity, rem_anomaly, coach_cards.get("trajectory_sleep"), longevity_state=longevity_state)}
-    {card_body_comp_domain(bw, bw_trend, longevity_state, coach_cards.get("trajectory_body_comp"))}
+    {card_body_comp_domain(bw, bw_trend, longevity_state, coach_cards.get("trajectory_body_comp"), bw_trend_block)}
     {card_nutrition_phase(j.get("nutrition_phase"), coach_cards.get("nutrition_phase_callout"))}
     {card_metabolic_domain(longevity_state, coach_cards.get("trajectory_metabolic"))}
     {card_behavioral_domain(movement_consistency, sleep_regularity, acwr, j.get("cardio_hr_zones_28d") or {}, coach_cards.get("trajectory_behavioral"))}
-    {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"))}
+    {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"), bw_trend_block)}
     {card_sleep(j.get("sleep_summary"), coach_cards.get("sleep"))}
     {card_recovery_practices(thermal, light, coach_cards.get("recovery_practices"))}
     {card_risk_flags(longevity_state, coach_cards.get("trajectory_risk_flags"))}
@@ -263,6 +272,11 @@ def main():
         j = json.loads(Path(args.tracker).read_text(encoding="utf-8"))
 
     tracker_errors, tracker_warnings = validate_tracker_json(j)
+    # `tracker.validation` types the prescription specs as free dicts, so
+    # a corrupt one reaches the coach as a prescription. Checked here
+    # rather than there because the expected shape is the coach's
+    # constant and `tracker/` must not import the coach.
+    tracker_errors = list(tracker_errors) + payload_spec_errors(j)
     for w in tracker_warnings:
         print(f"tracker_json warning: {w}", file=sys.stderr)
     if tracker_errors:
@@ -288,40 +302,63 @@ def main():
             print(f"workout_md validation error: {e}", file=sys.stderr)
         return 2
 
-    # Working-set budget check (tier-aware, PER WORKOUT). Session length is
-    # set-count driven; deload/downgrade legitimately trim, so scale the
-    # budget by tier before comparing and emit warnings (non-blocking) when
-    # a workout drifts. A reactive_deload / rest scales the WHOLE plan, but
-    # a Tier C `downgrade` trims ONLY the first `expected_rebound_by_session`
-    # workouts — later ones keep the full budget — so the scale must be
-    # applied per workout index, not globally (a global scale falsely
-    # flagged the full later sessions as "over").
+    # Prescription-CONTENT validation: core dose + weekly core
+    # distribution, direct-arm dose + diversity, block rotation against
+    # the previous block, and the tier-scaled working-set budget.
+    #
+    # The core and arm findings are BLOCKING, and that is the change.
+    # They were printed to stderr and the next generated plan ignored
+    # them; the 2026-07-18 plan met every numeric target the system
+    # checked and was still wrong. The core and arm checks also used to
+    # sit behind `if base_budget:`, so a payload without
+    # `target_working_sets` skipped core and arm validation entirely —
+    # an unrelated missing key silently disabling the checks that matter
+    # most.
+    #
+    # ROTATION IS ADVISORY THIS RELEASE and this script does not decide
+    # that. `validate_workout_plan` routes rotation findings by the one
+    # named constant `render_validators.BLOCK_ROTATION_ENFORCED`, so they
+    # arrive here in `plan_warnings` and no rotation finding can produce
+    # an exit 2. Nothing below needs to change when stage two flips it:
+    # the findings simply arrive in `plan_errors` instead.
+    #
+    # A prescribed whole-week deload demotes the VOLUME findings to
+    # warnings, because cutting volume is what a deload IS. Diversity and
+    # placement stay blocking — they cost no fatigue. A Tier C recovery
+    # downgrade is NOT a deload and keeps every floor: see
+    # `render_validators.DELOAD_WEEK_LABELS`.
+    #
+    # THE SPECS ARE NOT PASSED IN, and that is deliberate. `read_tracker`
+    # writes `core_week_spec` / `arm_week_spec` into the payload straight
+    # from `constants`, which is the same constant `render_validators`
+    # already imports, so this call used to hand the validator back its
+    # own defaults — a measured no-op (passing `None` instead changed no
+    # output anywhere). It was not a harmless one, though: it made the
+    # gate's thresholds an input to the gate, so a payload could have
+    # lowered the bar it was about to be judged against, and every key
+    # access downstream was unguarded (a partial spec exited 1 on a
+    # KeyError, which claims "crash" where "refusal" was meant). One
+    # concept, one source of truth, and for a merge gate that source
+    # cannot be the artifact under review. The payload copy stays — the
+    # coach reads it while authoring — and `payload_spec_errors` above
+    # keeps it well formed.
     base_budget = j.get("target_working_sets")
-    if base_budget:
-        sr = j.get("session_recommendation") or {}
-        label = sr.get("label")
-        tier = sr.get("tier")
-        rebound = sr.get("expected_rebound_by_session") or 1
-
-        def _budget_for(idx: int) -> int:
-            if tier == "A":                       # rest day — no strength budget
-                return 0
-            if label == "reactive_deload":        # whole-week deload
-                return round(base_budget * 0.5)
-            if label == "downgrade":              # only first `rebound` workouts trim
-                return round(base_budget * 0.6) if idx < rebound else base_budget
-            return base_budget
-
-        for w in workout_set_budget_warnings(
-            workout_md, base_budget, budget_by_index=_budget_for
-        ):
-            print(f"workout_md set-budget warning: {w}", file=sys.stderr)
-
-        for w in workout_core_warnings(workout_md):
-            print(f"workout_md core warning: {w}", file=sys.stderr)
-
-        for w in workout_arm_dose_warnings(workout_md):
-            print(f"workout_md arm dose warning: {w}", file=sys.stderr)
+    session_rec = j.get("session_recommendation")
+    block = j.get("block")
+    plan_errors, plan_warnings = validate_workout_plan(
+        workout_md,
+        target_working_sets=base_budget,
+        budget_by_index=tier_budget_by_index(session_rec, base_budget),
+        prev_block=block,
+        plan_date=j.get("today"),
+        deload_week=is_deload_week(session_rec, block),
+    )
+    for w in plan_warnings:
+        print(f"workout_md plan warning: {w}", file=sys.stderr)
+    if plan_errors:
+        for e in plan_errors:
+            print(f"workout_md validation error: {e}", file=sys.stderr)
+        return 2
 
     out = render(j, coach, workout_md, args.person)
     out_path = Path(args.out)

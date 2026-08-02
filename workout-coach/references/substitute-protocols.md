@@ -147,6 +147,7 @@ Same session pattern as the planned workout, but with the modifications baked in
 - **Finisher**: drop the conditioning finisher entirely
 - **PR attempts**: not allowed
 - **Warm-up**: unchanged — keep the two prep movements and the ramp sets into the first heavy compound. A recovery downgrade reduces working volume, not the warm-up.
+- **Core and direct arms are NOT halved.** `core_week_spec` and `arm_week_spec` are blocking render errors and they are not tier-scoped: a Tier C plan carries its full core and arm dose or it does not render. The isolation cut comes out of the rest of the accessory block. Only an explicit deload (Tier B, or a prescribed deload session) reduces them.
 
 The workout markdown looks like a normal session but with the held loads explicit:
 
@@ -167,10 +168,13 @@ Recovery: sauna ___ / cold ___ / rlt ___
 - Dumbbell Flat Bench Press: 25kgx5 (warmup) /// 35kgx3 (warmup) /// 50kgx8 /// 50kgx8
   — hold last session's load
 - Incline Chest Press Machine: 50kgx10 /// 50kgx10
-- Cable Lateral Raise: 12kgx12  *(halved from 3 sets to 2)*
-- Cable Tricep Pushdown: 35kgx12  *(halved from 3 sets to 2)*
+- Cable Lateral Raise: 12kgx12 /// 12kgx12
+- Kneeling Cable Crunch: 20kgx12 /// 20kgx12
+- Cable Tricep Pushdown: 35kgx12 /// 35kgx12
 - (no finisher this session)
 ```
+
+Two things the example is showing on purpose. The halved isolations are still written as one `///` token per set: a bullet reading `Cable Lateral Raise: 12kgx12` is ONE set, so writing two sets that way silently halves them again. And `PUSH` classifies as an upper day, so its core allocation is 2 sets, sitting inside the cable block rather than at the end.
 
 If the gate fired Tier C because of a specific over-MRV muscle, also rotate the affected exercise to a different movement pattern (e.g. if chest is over MRV, swap flat bench → incline DB for this session).
 

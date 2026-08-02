@@ -135,6 +135,181 @@ def card_neat(daily_activity):
 '''
 
 
+# How a `dose_staleness.carried[].change_kind` reads to a human. The
+# keys are `adherence._dose_delta`'s vocabulary; anything absent from
+# this map is a kind that did not move the dose, and those are counted
+# as held rather than narrated.
+_DOSE_CHANGE_PHRASE = {
+    "load_up":      "took weight",
+    "load_down":    "came down in weight",
+    "reps_up":      "took reps",
+    "reps_down":    "came down in reps",
+    "sets_up":      "gained a set",
+    "sets_down":    "lost a set",
+    "load_added":   "gained external load",
+    "load_removed": "dropped external load",
+}
+
+# Names listed inline before the row collapses to "and N more". Four is
+# what fits on one line at the narrow breakpoint.
+_DOSE_NAMES_SHOWN = 4
+
+
+def _dose_delta_rows(dose_staleness):
+    """The "what actually moved" rows under the block-position hero.
+
+    Without these the card's own disclosure works against it: "selection
+    is stable by design" and nothing else on the card reads as "nothing
+    changed", which is the opposite of true inside a block, where the
+    load and the rep target are precisely what move.
+
+    Two rows, not a table. Which lifts moved and how, then which held.
+    The card does not say WHY a lift held — the payload carries
+    ``generations_static``, not a reason, and the reason (a hold-loads
+    recovery band, a stall response, a deload) is the coach's to write in
+    the `block_position` callout. Printing a guessed reason here is how
+    the card would start disagreeing with the coach line beneath it.
+    """
+    ds = dose_staleness or {}
+    carried = ds.get("carried") or []
+    total = ds.get("carried_count")
+    if not carried or not total:
+        # A first generation has nothing to diff against. Say that,
+        # rather than omitting the row and leaving "selection is stable"
+        # to stand alone.
+        return secondary_metric_row(
+            "Dose vs. last plan", "no earlier plan to compare", "muted",
+            sublabel="The dose delta starts with the next generation.")
+
+    unchanged = [c for c in carried if not c.get("dose_changed")]
+    moved = [c for c in carried if c.get("dose_changed")]
+
+    counts = {}
+    for c in moved:
+        phrase = _DOSE_CHANGE_PHRASE.get(c.get("change_kind"))
+        if phrase:
+            counts[phrase] = counts.get(phrase, 0) + 1
+    breakdown = ", ".join(f"{n} {phrase}" for phrase, n
+                          in sorted(counts.items(), key=lambda kv: -kv[1]))
+    oscillating = ds.get("oscillating_count") or 0
+    if oscillating:
+        # A dose that alternates 90 / 92.5 / 90 / 92.5 changed on every
+        # generation and progressed nothing. It counts as moved above,
+        # so it has to be named here or the headline overstates.
+        breakdown = (f"{breakdown}. {oscillating} of them are oscillating "
+                     f"rather than progressing").lstrip(". ")
+
+    # `meets_target` is the payload's own verdict against
+    # `target_max_pct`; the card does not re-derive the threshold.
+    moved_cls = "good" if ds.get("meets_target") else "amber"
+    rows = secondary_metric_row(
+        "Dose moved", f"{len(moved)} of {total} carried lifts", moved_cls,
+        sublabel=breakdown or None)
+
+    if unchanged:
+        names = [c.get("exercise") or "?" for c in unchanged]
+        shown = ", ".join(names[:_DOSE_NAMES_SHOWN])
+        if len(names) > _DOSE_NAMES_SHOWN:
+            shown += f", and {len(names) - _DOSE_NAMES_SHOWN} more"
+        longest = max((c.get("generations_static") or 0) for c in unchanged)
+        held_sub = shown
+        if longest >= 2:
+            held_sub += f". Longest hold: {longest} generations"
+        rows += secondary_metric_row(
+            "Held at the same dose", f"{len(unchanged)} of {total}",
+            "muted" if ds.get("meets_target") else "warn",
+            sublabel=held_sub)
+    return rows
+
+
+def card_block_position(block, dose_staleness, coach_text):
+    """Where this plan sits in its training block. REQUIRED every week.
+
+    This card exists to disclose a design decision the user was never
+    told about: inside a block the exercise SELECTION is held stable on
+    purpose and the load and rep targets are the moving parts. Without
+    the disclosure a week that looks like last week reads as the coach
+    repeating itself, which is exactly the complaint that started this
+    work. It therefore renders on EVERY run, including the runs where
+    nothing changed — a card that only appears when there is news cannot
+    do this job.
+
+    NEVER COMPUTES A DATE. ``block`` carries ``weeks_to_boundary``, a
+    horizon, and deliberately not ``boundary_due_by``, a date: the
+    payload is an as-of snapshot, and a payload anchored at 2026-06-01
+    containing the string "2026-07-10" trips the horizon rule and every
+    backtest that checks it. Rendering ``today + weeks_to_boundary``
+    here would reintroduce exactly the string the payload dropped. See
+    `blocks.block_payload`.
+
+    Three states:
+
+    * **Mid-block** — "Week 2 of 6 in this block", the design sentence,
+      then the countdown.
+    * **Boundary due** (``boundary_due``) — the countdown is replaced by
+      "Rotating this week", because a countdown to now is not a
+      countdown.
+    * **No block yet** — ``block`` absent, null, or present with no
+      ``age_weeks`` (which is what `block_status` returns when nothing is
+      on record, and what the payload therefore carries on a first run).
+      Says the block starts with this plan and prints NO countdown. A
+      fabricated "Week 1 of 6" would be a claim about a block that does
+      not exist.
+
+    ``age_weeks`` is elapsed weeks (0.0 on the day the block started), so
+    the week the user is IN is ``int(age_weeks) + 1``: 1.1 weeks elapsed
+    is week 2. Not capped at ``max_weeks`` on purpose — a block that has
+    run past its ceiling should read "Week 7 of 6", which is the
+    disclosure working, not a formatting bug.
+    """
+    b = block or {}
+    age = b.get("age_weeks")
+    max_weeks = b.get("max_weeks")
+
+    if age is None:
+        hero = metric_hero(
+            "Block starts here", "with this plan", "muted",
+            sublabel="From here the exercise selection is held stable on "
+                     "purpose and the load and rep targets are what move. "
+                     "Visible changes to the movements themselves arrive at "
+                     "the next block boundary.")
+        countdown = ""
+    else:
+        week_n = int(age) + 1
+        denom = (f'<span class="denom"> of {esc(str(max_weeks))}</span>'
+                 if max_weeks else "")
+        hero = metric_hero(
+            f"Week {week_n}{denom}", "in this block", "muted",
+            sublabel="Exercise selection stays put by design, the load and "
+                     "rep targets are what move.")
+        if b.get("boundary_due"):
+            countdown = ('<div class="hero-recommendation amber">'
+                         'Rotating this week.</div>')
+        else:
+            weeks = b.get("weeks_to_boundary")
+            if weeks is None:
+                # No horizon on record. Silence beats a fabricated one.
+                countdown = ""
+            else:
+                # A whole number of weeks prints without the ".0" — the
+                # tenth is meaningful at 4.9, noise at 1.0.
+                shown = fmt(weeks, 0 if float(weeks).is_integer() else 1)
+                noun = "week" if weeks == 1 else "weeks"
+                countdown = ('<div class="hero-recommendation muted">'
+                             f'Next rotation in {esc(shown)} '
+                             f'{noun}.</div>')
+
+    return f'''
+<section class="card">
+  <h2>Block position</h2>
+  {hero}
+  {countdown}
+  <div class="secondary-metrics">{_dose_delta_rows(dose_staleness)}</div>
+  {coach_block(coach_text)}
+</section>
+'''
+
+
 def card_training_load(series, ctl, atl, tsb, tsb_trend, coach_text):
     svg = load_chart_svg(series)
     return f'''

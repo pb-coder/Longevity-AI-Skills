@@ -134,6 +134,7 @@ Organized by primary muscle group > movement pattern. Tags:
 ### Traps
 - Dumbbell Shrug [DB]
 - Cable Shrug [Cable]
+- Incline Y-Raise [DB] — +rear delts
 
 ---
 

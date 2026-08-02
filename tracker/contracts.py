@@ -158,6 +158,16 @@ class TrackerJSON(TypedDict, total=False):
     # renderer must not invent one.
     waist_latest: dict[str, JsonValue] | None
     waist_trend_cm_per_4w: dict[str, JsonValue]
+    # The other two body-composition columns of the 19-col schema, same
+    # pair-of-keys shape as waist. ``*_latest`` is None until the column
+    # carries a reading; the trend block is emitted regardless, because
+    # "never recorded" is an answer a renderer must not have to infer
+    # from a missing key. Lean mass is scale-DERIVED from bodyweight and
+    # body fat, so a resolved rate there restates those two.
+    body_fat_latest: dict[str, JsonValue] | None
+    body_fat_trend_pct_per_4w: dict[str, JsonValue]
+    lean_mass_latest: dict[str, JsonValue] | None
+    lean_mass_trend_kg_per_4w: dict[str, JsonValue]
     health_metrics_weekly: list[dict[str, JsonValue]]
     health_metrics_recent: list[dict[str, JsonValue]] | None
     vo2max_latest: dict[str, JsonValue] | None

@@ -19,8 +19,15 @@ Public surface:
 
 - ``parse_plan(text, plan_date)`` / ``parse_plan_file(path)`` — the plan
   markdown into per-workout, per-slot prescriptions.
-- ``session_type_from_title(title)`` — ``lower`` / ``upper`` / ``full``
-  / ``None`` off a workout heading.
+- ``session_type_from_title(title, slots, db)`` — ``lower`` / ``upper``
+  / ``full`` / ``None`` for a workout, off its heading AND its bullets.
+  Pass the bullets: a heading is coach free text and was choosing its own
+  core budget (R-13).
+- ``session_type_from_content(slots, db)`` /
+  ``session_content_regions(slots, db)`` — the content half on its own.
+- ``ledger_progression(plan, rows, db, ...)`` — per exercise, whether a
+  prescription progresses, holds or only looks like it moved, judged
+  against what the LEDGER says was performed (R-01).
 - ``load_plans(person, today_d, limit)`` — the dated plan series, parsed,
   oldest first, never past the ``--today`` horizon.
 - ``reconcile_plan(plan, window, rows, db, catalog)`` — one plan against
@@ -166,15 +173,280 @@ _UPPER_TITLE_RE = re.compile(r"\b(upper|push|pull|chest|back|shoulders?|arms?)\b
                              re.IGNORECASE)
 _FULL_TITLE_RE = re.compile(r"\bfull[\s-]?body\b", re.IGNORECASE)
 
+# --------------------------------------------- session type from CONTENT
+#
+# THE DEFECT THIS CLOSES (R-13). The session type decides the per-session
+# core budget — four sets on a lower day, two on an upper one — and until
+# now it was read off the heading alone. The heading is free text the
+# coach writes, so the coach picked its own threshold by naming the
+# session: `## Workout 1: PUSH` full of squats and leg presses resolved
+# CONFIDENTLY to ``upper`` and bought the 2-set budget. `FULL BODY` and
+# unclassifiable headings had already been closed by failing safe to the
+# lower-day dose; `PUSH` / `PULL` had not, because they classify
+# confidently and a push or pull day may well be a leg day.
+#
+# The fix is not a better vocabulary — any name list is still a name
+# list. It is to make the CONTENT able to refuse the name. The bullets
+# are coach-written too, but the exercise NAMES in them have to resolve
+# to the catalog (an off-catalog name is already a blocking error), and
+# the muscle each name trains is stated BY THE CATALOG. So the region
+# split below is derived from a source the coach does not write, which is
+# the only class of input this system treats as safe.
 
-def session_type_from_title(title: str | None) -> str | None:
-    """``lower`` / ``upper`` / ``full`` from a workout heading, else ``None``.
+# Which body region a catalog entry's PRIMARY muscle belongs to. The
+# vocabulary is the ``primary`` field carried by both catalog shapes in
+# this repo (`extract.load_exercises_db` and `blocks.load_pattern_catalog`),
+# so this maps a fact the catalog states rather than re-deriving one from
+# an exercise name.
+#
+# Deliberately not exhaustive. What is NOT in either set matters as much
+# as what is, and there are three cases:
+#
+#   ``core``   NEUTRAL, excluded from the denominator entirely. Core work
+#              appears on every session type and is the very thing being
+#              budgeted, so padding a session with it must not move the
+#              verdict. Same for warmup and cardio entries.
+#   in the catalog, anything else
+#              BOTH. A movement the catalog knows but does not assign to
+#              one half — the FULL BODY (Compound) section (thrusters,
+#              cleans, jumps, carries), ``erectors`` back extensions, the
+#              WELLNESS entries — trains both halves, so it is counted on
+#              both sides. See the WHY "BOTH" note below for the hole
+#              that closes.
+#   not in the catalog
+#              UNCLASSIFIED. Reported, counted nowhere. An off-catalog
+#              name is already a blocking error in
+#              `render_validators.validate_workout_md`, so this is not a
+#              way through: inventing a name costs one blocked render per
+#              bullet.
+LOWER_BODY_PRIMARIES = frozenset({
+    "quads", "hamstrings", "glutes", "calves", "adductors",
+})
+UPPER_BODY_PRIMARIES = frozenset({
+    "chest", "back", "biceps", "triceps", "forearms", "traps", "neck",
+    "front_delts", "side_delts", "rear_delts",
+})
+# Excluded from the denominator rather than counted for either side.
+NEUTRAL_PRIMARIES = frozenset({"core"})
 
-    The heading is the only place a plan states its own session type, and
-    several downstream rules (the D3 core budget, block slot identity)
-    are keyed on it. ``None`` is returned rather than a guess when the
-    heading says neither — a wrong session type silently applies the
-    wrong budget.
+# WHY "BOTH" AND NOT "NEITHER", found by attacking the first version of
+# this file. Treating an unassigned catalog entry as neutral reopened the
+# defect through a different door: `## Workout 1: PUSH` built from four
+# FULL BODY (Compound) movements — Barbell Clean, Barbell Thruster, Box
+# Jump, Dumbbell Farmer Walk, 16 working sets — produced ZERO
+# region-classifiable sets, so the content could not answer, so the
+# heading stood and bought the 2-set upper budget on a session that is at
+# least half legs. Every one of those is a legal catalog name, so the
+# attack cost nothing.
+#
+# Counting them on both sides is honest — a thruster IS a squat and a
+# press — and it is fail-safe in the one direction that matters: adding
+# an equal amount to both sides can only pull the share toward 0.5, which
+# resolves as ``full`` and carries the DEMANDING budget. It cannot
+# manufacture an ``upper`` verdict.
+
+# Share of a session's region-classifiable working sets one region must
+# hold before the CONTENT is taken to state a session type.
+#
+# 0.6 rather than a bare majority, because the legitimate case has to
+# survive: a PPL pull day carrying one Romanian Deadlift among five
+# upper-body movements is an upper day and must keep the 2-set budget.
+# Measured against the real corpus, a legitimate PUSH/PULL day lands at
+# 0.79-1.00 upper and a leg day named PUSH lands at 0.00.
+SESSION_CONTENT_DOMINANCE = 0.6
+
+# Below this many region-classifiable working sets there is no content
+# signal at all — a mobility block, a cardio session, an all-core
+# session. Three is the smallest count where a 0.6 share means anything
+# other than "two bullets out of three".
+SESSION_CONTENT_MIN_SETS = 3
+
+
+def _muscle_index(db: dict | None = None) -> dict:
+    """The catalog, keyed by lowercased name, carrying ``primary``.
+
+    ``db`` may be either shape this repo already builds — the coach's
+    ``extract.load_exercises_db`` output or ``blocks.load_pattern_catalog``'s
+    — because both carry ``primary`` under that name. Omitting it loads
+    the coach parser's copy, which is ``lru_cache``d, so the repeated
+    calls a plan series makes cost one parse.
+
+    Never raises. A catalog that cannot be read yields no content signal,
+    and no content signal means the heading stands — which is exactly the
+    behaviour that shipped before this existed.
+    """
+    if db is not None:
+        return db
+    try:
+        from .extract import load_exercises_db
+        from shared.exercises_database import DATABASE_PATH
+        return load_exercises_db(DATABASE_PATH) or {}
+    except Exception:                                    # pragma: no cover
+        return {}
+
+
+def _slot_name_and_sets(slot: dict) -> tuple[str, int]:
+    """``(exercise name, working sets)`` out of either slot shape.
+
+    This module's own slots say ``exercise`` / ``prescribed_sets``;
+    `render_validators._iter_workout_exercise_bullets` says ``name`` /
+    ``sets``. Both are exercise bullets with a working-set count, and the
+    classifier has to read the ones the gate holds, so it reads both
+    spellings rather than forcing a translation layer at the call site.
+    """
+    name = slot.get("exercise")
+    if name is None:
+        name = slot.get("name")
+    sets = slot.get("prescribed_sets")
+    if sets is None:
+        sets = slot.get("sets")
+    try:
+        sets = int(sets)
+    except (TypeError, ValueError):
+        sets = 0
+    return (name or "").strip(), max(sets, 0)
+
+
+def session_content_regions(slots, db: dict | None = None) -> dict:
+    """How a session's own bullets split between lower- and upper-body work.
+
+    Counted in WORKING SETS, not bullets: a four-set squat and a one-set
+    lateral raise are not the same evidence about what session this is.
+    A bullet whose set count is missing or unparseable counts as one, so
+    a session written in a form the set parser cannot read still votes.
+
+    Returns ``{"lower_sets", "upper_sets", "both_halves_sets",
+    "neutral_sets", "unclassified", "classified_sets", "lower_share",
+    "upper_share", "verdict"}``. ``verdict`` is the answer
+    `session_type_from_content` returns; the rest is why, and it is
+    emitted so a disagreement between the heading and the bullets can be
+    read rather than guessed at. ``lower_sets`` and ``upper_sets`` each
+    INCLUDE ``both_halves_sets`` — a thruster is counted on both sides —
+    so the two do not sum to ``classified_sets``.
+    """
+    index = _muscle_index(db)
+    lower = upper = neutral = both = 0
+    unclassified: list[str] = []
+    for slot in slots or []:
+        name, sets = _slot_name_and_sets(slot)
+        if not name:
+            continue
+        sets = sets or 1
+        meta = index.get(name.lower())
+        if meta is None:
+            unclassified.append(name)
+            continue
+        if meta.get("is_warmup") or meta.get("is_cardio"):
+            neutral += sets
+            continue
+        primary = (meta.get("primary") or "").strip().lower()
+        if primary in LOWER_BODY_PRIMARIES:
+            lower += sets
+        elif primary in UPPER_BODY_PRIMARIES:
+            upper += sets
+        elif primary in NEUTRAL_PRIMARIES:
+            neutral += sets
+        else:
+            # In the catalog, assigned to neither half. Counted on both.
+            both += sets
+            lower += sets
+            upper += sets
+    total = lower + upper
+    lower_share = round(lower / total, 3) if total else None
+    upper_share = round(upper / total, 3) if total else None
+    # The min-sets gate counts each set ONCE. ``total`` double-counts the
+    # both-halves entries by design — that is what makes their share
+    # 0.5/0.5 — but using it here would let two thruster sets read as
+    # four and clear a floor meant to say "there is enough content to
+    # judge".
+    distinct = lower + upper - both
+    if distinct < SESSION_CONTENT_MIN_SETS:
+        verdict = None
+    elif lower_share >= SESSION_CONTENT_DOMINANCE:
+        verdict = "lower"
+    elif upper_share >= SESSION_CONTENT_DOMINANCE:
+        verdict = "upper"
+    else:
+        verdict = "full"
+    return {
+        "lower_sets":       lower,
+        "upper_sets":       upper,
+        "both_halves_sets": both,
+        "neutral_sets":     neutral,
+        "unclassified":     sorted(set(unclassified)) or None,
+        "classified_sets":  total,
+        "lower_share":     lower_share,
+        "upper_share":     upper_share,
+        "verdict":         verdict,
+    }
+
+
+def session_type_from_content(slots, db: dict | None = None) -> str | None:
+    """``lower`` / ``upper`` / ``full`` from a session's BULLETS, else ``None``.
+
+    ``None`` means "the content does not answer" — too few
+    region-classifiable sets to read — and is distinct from ``full``,
+    which means "the content answers, and the answer is that this trains
+    both halves".
+    """
+    return session_content_regions(slots, db)["verdict"]
+
+
+def session_type_from_title(title: str | None, slots=None,
+                            db: dict | None = None) -> str | None:
+    """``lower`` / ``upper`` / ``full`` for a workout, else ``None``.
+
+    The repo's one classifier for this question. The name is historical:
+    it reads the heading, and it CHECKS the heading against the session's
+    own bullets whenever they are supplied. Call it with ``slots``
+    wherever the content is in hand — a title-only call is a heading
+    taking itself at its word, which is what R-13 exploited.
+
+    THE RULE, and it is one sentence: **content may move the answer to a
+    more demanding core budget, never to a cheaper one.**
+
+    ``upper`` is the only session type whose core budget (2 sets) sits
+    below the fail-safe the other three share (4 sets, the lower-day
+    dose). So ``upper`` is the only answer a name can profit from, and it
+    is the only answer the content is allowed to overturn:
+
+      * heading says ``upper``, content says otherwise -> the content
+        wins. A `PUSH` day of squats and leg presses is a leg day and
+        gets the leg day's budget.
+      * heading says nothing, content says ``lower`` or ``full`` -> the
+        content wins. Same budget as the ``None`` fail-safe, and it is
+        the honest label.
+      * heading says ``lower`` or ``full``, content says ``upper`` -> the
+        HEADING stands. Honouring the content here would hand the cheaper
+        budget to a session that asked for the dearer one, which is the
+        exploit running backwards. Over-asking costs the coach two core
+        sets; under-asking is invisible.
+      * the content does not answer (fewer than
+        ``SESSION_CONTENT_MIN_SETS`` region-classifiable sets) -> the
+        heading stands, exactly as before this existed.
+
+    ``None`` is still returned rather than a guess when neither the
+    heading nor the bullets say anything: a wrong session type silently
+    applies the wrong budget, and every consumer already fails safe on
+    ``None``.
+    """
+    named = _session_type_from_name(title)
+    if slots is None:
+        return named
+    content = session_type_from_content(slots, db)
+    if content is None or content == "upper":
+        return named
+    if named is None or named == "upper":
+        return content
+    return named
+
+
+def _session_type_from_name(title: str | None) -> str | None:
+    """The heading's own claim about the session type. ADVERSARIAL INPUT.
+
+    Split out from `session_type_from_title` so the name-only read has a
+    name of its own and cannot be reached by accident. Every caller
+    should be going through `session_type_from_title` with the bullets.
     """
     t = title or ""
     if _FULL_TITLE_RE.search(t):
@@ -335,12 +607,18 @@ def _slot_from_bullet(exercise: str, spec: str, position: int) -> dict:
     }
 
 
-def parse_plan(text: str, plan_date: str) -> dict:
+def parse_plan(text: str, plan_date: str, db: dict | None = None) -> dict:
     """Parse one plan markdown into its prescriptions.
 
     Returns ``{"plan_date", "workouts": [...], "parse_errors": [...]}``.
     Each workout is ``{"index", "title", "session_type", "slots": [...]}``
     and each slot the shape ``_slot_from_bullet`` returns.
+
+    ``session_type`` is resolved from the heading AND the bullets — see
+    `session_type_from_title`. ``db`` is the catalog that classification
+    needs; omitting it loads the coach parser's cached copy, so callers
+    that already hold one should pass it and callers that do not still
+    get the checked answer rather than the heading's unchecked claim.
 
     Only ``## Workout N:`` sections are walked. ``## Cardio N:`` bullets
     are prose ("Work: 5 x 3 min at HR 158bpm plus") and would parse into
@@ -386,7 +664,10 @@ def parse_plan(text: str, plan_date: str) -> dict:
                 "label":        m.group(2),
                 "title":        m.group(3).strip(),
                 "session":      session_key(m.group(3), idx),
-                "session_type": session_type_from_title(m.group(3)),
+                # Provisional: the heading's own claim. Re-resolved
+                # against the bullets once they have all been read — see
+                # the content pass after the loop.
+                "session_type": _session_type_from_name(m.group(3)),
                 "is_deload":    m.group(1).lower().startswith("deload"),
                 "slots":        [],
             }
@@ -433,6 +714,32 @@ def parse_plan(text: str, plan_date: str) -> dict:
                 f"{where}: '{name.strip()}: {spec.strip()}' prescribes no "
                 f"working sets — read as a duration or cue, not as work")
         current["slots"].append(slot)
+
+    # THE CONTENT PASS (R-13). The heading was read before its bullets
+    # existed; now they do, so the claim gets checked. `session_type` is
+    # overwritten with the resolved answer because every consumer already
+    # reads that key and none of them should be reading an unchecked one;
+    # the heading's own claim survives beside it so the two can be
+    # compared, and `session_type_basis` says which produced the answer.
+    for w in workouts:
+        named = w["session_type"]
+        regions = session_content_regions(w["slots"], db)
+        resolved = session_type_from_title(w["title"], w["slots"], db)
+        w["session_type"] = resolved
+        w["session_type_heading"] = named
+        w["session_type_content"] = regions["verdict"]
+        w["session_type_basis"] = (
+            "heading" if regions["verdict"] is None
+            else "content_override" if resolved != named
+            else "heading_corroborated")
+        if resolved != named:
+            notes.append(
+                f"{plan_date} {w['title']}: heading reads as "
+                f"{named or 'unclassifiable'}, but {regions['lower_sets']} of "
+                f"{regions['classified_sets']} classifiable working sets are "
+                f"lower-body — session type resolved as {resolved} from the "
+                f"bullets, not the name")
+
     if not workouts:
         errors.append(f"{plan_date}: no '## Workout N:' headings found")
     elif not any(s["prescribed_sets"] for w in workouts for s in w["slots"]):
@@ -448,15 +755,17 @@ def parse_plan(text: str, plan_date: str) -> dict:
     }
 
 
-def parse_plan_file(path: Path, plan_date: str | None = None) -> dict:
+def parse_plan_file(path: Path, plan_date: str | None = None,
+                    db: dict | None = None) -> dict:
     """``parse_plan`` on a file, inferring ``plan_date`` from the filename."""
     path = Path(path)
     if plan_date is None:
         plan_date = path.name[:10]
-    return parse_plan(path.read_text(encoding="utf-8"), plan_date)
+    return parse_plan(path.read_text(encoding="utf-8"), plan_date, db)
 
 
-def load_plans(person: str, today_d: date, limit: int | None = None) -> list[dict]:
+def load_plans(person: str, today_d: date, limit: int | None = None,
+               db: dict | None = None) -> list[dict]:
     """Parsed plan series for ``person``, oldest first.
 
     Plans dated after ``today_d`` are dropped: a backtest must not see a
@@ -471,7 +780,7 @@ def load_plans(person: str, today_d: date, limit: int | None = None) -> list[dic
         if d is None or d > today_d:
             continue
         try:
-            out.append(parse_plan_file(path, plan_date))
+            out.append(parse_plan_file(path, plan_date, db))
         except OSError as exc:                       # pragma: no cover - io
             out.append({"plan_date": plan_date, "workouts": [],
                         "parse_errors": [f"{plan_date}: unreadable ({exc})"],
@@ -1099,7 +1408,10 @@ def build_adherence(person: str, rows: list[dict], db: dict, today_d: date,
     so ``_compact`` drops the key rather than emitting a block of zeroes
     that reads like 0% adherence.
     """
-    plans = load_plans(person, today_d, limit=history)
+    # ``db`` is threaded so the session-type classifier reads the catalog
+    # this caller already parsed rather than loading a second copy — and
+    # so every `session_type` in the ledger is the content-checked answer.
+    plans = load_plans(person, today_d, limit=history, db=db)
     if not plans:
         return None
     windows = plan_windows(plans, today_d)
@@ -1412,6 +1724,53 @@ def _dose_delta(prev: dict, cur: dict) -> tuple[str, bool]:
     return ("none", False)
 
 
+def _plan_doses(plan: dict, db: dict | None = None) -> dict[str, dict]:
+    """One prescription per exercise for one plan, keyed lowercased.
+
+    ONE DOSE PER EXERCISE PER PLAN, chosen by SET COUNT and only then by
+    load. A movement prescribed in two workouts has to collapse to a
+    single prescription or any comparison is between arbitrary halves.
+    Picking the HEAVIEST was a laundering channel: a stalled lift kept
+    identical in Workout 1 — three sets at the same weight, the session
+    the user actually performs — plus a single token set five kilos
+    heavier bolted onto Workout 3 made the whole stall finding disappear
+    while the training prescribed did not change at all. The prescription
+    carrying the most working sets defines the stimulus, so it is the one
+    that has to move; a heavier second exposure only wins the tie-break
+    when it carries as many sets, at which point it is a real second
+    exposure rather than a token.
+
+    Warmups and cardio are dropped: they carry no dose to progress, and
+    "Jumping Jacks: 50" unchanged for eight generations pads the
+    denominator with rows that can only ever read as unchanged.
+
+    ``prescribed_sets`` is type-checked rather than trusted. The block
+    artifact is JSON on disk and reaches this through
+    `render_validators._block_as_plan`; a dose written before the field
+    existed, or carrying null, used to raise KeyError / TypeError here.
+    Exit 1 says "the program broke" where "cannot compare" was meant.
+    """
+    best: dict[str, dict] = {}
+    for w in plan.get("workouts") or []:
+        for s in w.get("slots") or []:
+            sets = s.get("prescribed_sets")
+            if not isinstance(sets, (int, float)) or isinstance(sets, bool):
+                continue
+            if sets <= 0:
+                continue
+            key = s["exercise"].strip().lower()
+            cat = (db or {}).get(key) or {}
+            if cat.get("is_warmup") or cat.get("is_cardio"):
+                continue
+            cur = best.get(key)
+            if cur is None or (
+                    (sets, s.get("load_kg") or 0)
+                    > (cur.get("prescribed_sets") or 0,
+                       cur.get("load_kg") or 0)):
+                best[key] = s
+    return best
+
+
 def dose_staleness(plans: list[dict], db: dict | None = None) -> dict | None:
     """Per carried-forward exercise: did its dose move, and for how long not.
 
@@ -1425,52 +1784,22 @@ def dose_staleness(plans: list[dict], db: dict | None = None) -> dict | None:
     "the dose must change" by alternating 90 / 92.5 / 90 / 92.5 has
     changed the dose on every generation and progressed nothing.
 
-    ONE DOSE PER EXERCISE PER PLAN, chosen by SET COUNT and only then by
-    load. A movement prescribed in two workouts of one plan has to
-    collapse to a single prescription or the comparison is between
-    arbitrary halves; the question is which one. Picking the HEAVIEST was
-    a laundering channel: a stalled lift kept identical in Workout 1 —
-    three sets at the same weight, the session the user actually
-    performs — plus a single token set five kilos heavier bolted onto
-    Workout 3 made the whole stall finding disappear, while the training
-    that was prescribed did not change at all. The prescription that
-    carries the most working sets is the one that defines the stimulus,
-    so it is the one that has to move; a heavier second exposure only
-    wins the tie-break when it carries as many sets, at which point it is
-    a real second exposure rather than a token.
+    One prescription per exercise per plan, collapsed by `_plan_doses` —
+    see there for which one wins and why the obvious choice was a
+    laundering channel.
+
+    WHAT THIS CANNOT SEE, and it is the whole of R-01: every number here
+    comes from two COACH-AUTHORED plans. Shifting every rep window up one
+    (``x8-10`` -> ``x9-11``) without touching a weight reads as material
+    on this comparison, so a coach can pass it forever without adding
+    load. `ledger_progression` is the counterpart that grounds the same
+    question in what was PERFORMED.
     """
     if len(plans) < 2:
         return None
     series: dict[str, list[tuple[str, dict]]] = {}
     for plan in plans:
-        best: dict[str, dict] = {}
-        for w in plan.get("workouts") or []:
-            for s in w["slots"]:
-                sets = s.get("prescribed_sets")
-                if not isinstance(sets, (int, float)) or isinstance(sets, bool):
-                    # The block artifact is JSON on disk and reaches this
-                    # through `render_validators._block_as_plan`; a dose
-                    # written before the field existed, or carrying null,
-                    # used to raise KeyError / TypeError here. Exit 1 says
-                    # "the program broke" where "cannot compare" was meant.
-                    continue
-                if sets <= 0:
-                    continue
-                key = s["exercise"].strip().lower()
-                # Warmups carry no dose to progress. "Jumping Jacks: 50"
-                # unchanged for eight generations is not dose staleness,
-                # and leaving them in pads the denominator with rows that
-                # can only ever read as unchanged.
-                cat = (db or {}).get(key) or {}
-                if cat.get("is_warmup") or cat.get("is_cardio"):
-                    continue
-                cur = best.get(key)
-                if cur is None or (
-                        (sets, s.get("load_kg") or 0)
-                        > (cur.get("prescribed_sets") or 0,
-                           cur.get("load_kg") or 0)):
-                    best[key] = s
-        for key, slot in best.items():
+        for key, slot in _plan_doses(plan, db).items():
             series.setdefault(key, []).append((plan["plan_date"], slot))
 
     latest_date = plans[-1]["plan_date"]
@@ -1534,6 +1863,439 @@ def dose_staleness(plans: list[dict], db: dict | None = None) -> dict | None:
         "carried":         sorted(carried,
                                   key=lambda c: (-c["generations_static"],
                                                  c["exercise"])),
+    }
+
+
+# -------------------------------------------- ledger-derived progression
+#
+# R-01, groundwork. `dose_staleness` above answers "did the written dose
+# move" by comparing two plans, and both of them are coach-authored, so
+# the answer is a comparison between two things the party being policed
+# wrote. Two measured consequences: shifting every rep window up one
+# (``x8-10`` -> ``x9-11``) reads as material without a kilo being added,
+# and a coach can cycle back to a byte-identical plan on the third
+# generation. `render_validators.DOSE_PROGRESSION_ENFORCED` is False
+# because of exactly this.
+#
+# Everything below reads the LEDGER instead — the logged sets, which the
+# user writes and the coach does not. It answers a different question:
+# not "does this prescription differ from the last one" but "does this
+# prescription ask for anything the person has not already done". The
+# rep-window shuffle fails that question flat, because the ledger already
+# contains the reps the wider window asks for.
+#
+# NOT WIRED INTO THE GATE. `DOSE_PROGRESSION_ENFORCED` and the findings
+# that read it live in `render_validators`, which a later round owns.
+# This is the input that round needs; the consumer contract is in
+# `ledger_progression`'s docstring.
+
+# How many trailing sessions in which the exercise was actually performed
+# define the reference. Four, because the question "has the load stopped
+# yielding reps" needs a run to look at, and because a fifth adds little
+# once a load has been held that long.
+LEDGER_PROGRESSION_SESSIONS = 4
+
+# Sessions at one load without a rep gain before the ledger says the load
+# itself is what is owed. Two is the smallest number that can mean
+# "again": one session at a load is the load being introduced.
+LEDGER_LOAD_STALL_SESSIONS = 2
+
+# How far back a performance reference may be drawn from. Beyond this the
+# person is not the person the number describes — a load last touched
+# four months ago is not evidence about what they can do now.
+LEDGER_LOOKBACK_DAYS = 120
+
+
+def performed_sessions(rows: list[dict], db: dict | None = None,
+                       since: date | None = None,
+                       until: date | None = None) -> dict[str, list[dict]]:
+    """Per exercise, one record per date it was performed. Oldest first.
+
+    ``{exercise_key: [{"date", "sets", "top_load_kg", "reps_at_top",
+    "sets_at_top", "best_reps", "best_e1rm_kg"}, ...]}``.
+
+    Working sets only, via `sessions._is_working_set` — the repo's one
+    definition of a counted hard set — and warmup / cardio catalog
+    entries dropped, so this counts the same sets every other volume
+    surface counts.
+
+    ``top_load_kg`` is the heaviest load moved that session and
+    ``reps_at_top`` the MOST reps achieved at it. Most, not fewest or
+    mean: it is the number a progression has to beat, and taking the
+    generous reading of what the person managed is what keeps the bar for
+    claiming a rep progression honest. ``top_load_kg`` is ``None`` for a
+    session of purely bodyweight work, where ``best_reps`` carries the
+    signal instead.
+    """
+    by: dict[str, dict[str, dict]] = {}
+    names: dict[str, str] = {}
+    for r in rows or []:
+        if not _is_working_set(r):
+            continue
+        d = _parse_iso_date(r.get("date"))
+        if d is None:
+            continue
+        if since is not None and d < since:
+            continue
+        if until is not None and d > until:
+            continue
+        key = (r.get("exercise") or "").strip().lower()
+        if not key:
+            continue
+        cat = (db or {}).get(key) or {}
+        if cat.get("is_warmup") or cat.get("is_cardio"):
+            continue
+        names.setdefault(key, (r.get("exercise") or "").strip())
+        kg = float(r.get("kg") or 0)
+        reps = int(r.get("reps") or 0)
+        day = by.setdefault(key, {}).setdefault(
+            r["date"], {"date": r["date"], "sets": 0, "loads": [], "reps": []})
+        day["sets"] += 1
+        day["loads"].append(kg)
+        day["reps"].append(reps)
+
+    out: dict[str, list[dict]] = {}
+    for key, days in by.items():
+        hist = []
+        for d in sorted(days):
+            rec = days[d]
+            pairs = list(zip(rec["loads"], rec["reps"]))
+            loaded = [(kg, reps) for kg, reps in pairs if kg > 0]
+            top_load = max((kg for kg, _ in loaded), default=None)
+            at_top = [reps for kg, reps in loaded if kg == top_load]
+            e1rms = [kg * (1.0 + reps / 30.0) for kg, reps in loaded if reps > 0]
+            all_reps = [reps for _kg, reps in pairs if reps > 0]
+            hist.append({
+                "date":         rec["date"],
+                "exercise":     names[key],
+                "sets":         rec["sets"],
+                "top_load_kg":  top_load,
+                "reps_at_top":  max(at_top) if at_top and max(at_top) > 0 else None,
+                "sets_at_top":  len(at_top) or None,
+                "best_reps":    max(all_reps) if all_reps else None,
+                "best_e1rm_kg": round(max(e1rms), 1) if e1rms else None,
+            })
+        out[key] = hist
+    return out
+
+
+def _loads_equal(a: float | None, b: float | None) -> bool:
+    """Same load, to the granularity a plate stack can express."""
+    if a is None or b is None:
+        return a is None and b is None
+    if a <= 0 or b <= 0:
+        return a == b
+    return abs(a - b) / max(a, b) < DOSE_LOAD_MIN_PCT
+
+
+def ledger_reference(history: list[dict]) -> dict | None:
+    """What the ledger says this exercise currently is. ``None`` with no history.
+
+    ``{"date", "load_kg", "reps", "sets_at_load", "sessions_at_load",
+    "reps_run", "reps_trend", "reps_stalled"}``.
+
+    ``reps_stalled`` is True when the top load has been HELD for at least
+    ``LEDGER_LOAD_STALL_SESSIONS`` performing sessions and the newest of
+    them did not beat the best rep count of the earlier ones. It says one
+    thing and only that thing: the reps at this load have stopped
+    arriving.
+
+    IT IS NOT "THE LIFT HAS EARNED MORE WEIGHT", and the distinction cost
+    a wrong verdict on live data before it was drawn. Flat reps at a load
+    have two causes the ledger cannot separate — the person capped out at
+    the top of a rep range they were told to stop at, and the person
+    stuck at a load that is too heavy — because the range that would
+    separate them is coach-authored. What the ledger CAN say is that
+    asking again for reps which have not been arriving is not evidence of
+    a progression, and that is exactly what `progression_verdict` uses it
+    for: it makes the rep-window shuffle visible without asserting which
+    of the two stalls it is.
+    """
+    hist = [h for h in (history or []) if h][-LEDGER_PROGRESSION_SESSIONS:]
+    if not hist:
+        return None
+    ref = hist[-1]
+    ref_load = ref["top_load_kg"]
+    ref_reps = ref["reps_at_top"] if ref_load else ref["best_reps"]
+
+    run = [ref]
+    for prev in reversed(hist[:-1]):
+        if not _loads_equal(prev["top_load_kg"], ref_load):
+            break
+        run.append(prev)
+    run.reverse()
+    reps_run = [(h["reps_at_top"] if ref_load else h["best_reps"]) or 0
+                for h in run]
+    if len(reps_run) < 2:
+        trend, earned = "first_session_at_load", False
+    elif reps_run[-1] > max(reps_run[:-1]):
+        trend, earned = "climbing", False
+    else:
+        trend = "flat" if reps_run[-1] == max(reps_run[:-1]) else "falling"
+        earned = len(run) >= LEDGER_LOAD_STALL_SESSIONS
+    return {
+        "date":             ref["date"],
+        "exercise":         ref.get("exercise"),
+        "load_kg":          ref_load,
+        "reps":             ref_reps,
+        "sets_at_load":     ref["sets_at_top"],
+        "sessions_at_load": len(run),
+        "reps_run":         reps_run,
+        "reps_trend":       trend,
+        "reps_stalled":     earned,
+    }
+
+
+def expected_next_dose(history: list[dict]) -> dict | None:
+    """The increment the LEDGER says is owed. ``None`` with no history.
+
+    ``{"lever", "min_load_kg", "min_reps", "why"}`` — what a prescription
+    has to reach to count as a progression, expressed as a floor rather
+    than as a number.
+
+    ``lever`` is ``reps`` while the reps at the current load are still
+    arriving, and ``load_or_variation`` once they have stopped. The
+    second is deliberately not just ``load``: flat reps mean the load has
+    stopped yielding, and SKILL.md's sanctioned responses to that are
+    more load, a rep-range change or a variation swap — the ledger can
+    say the current load is done, not which of the three to pick. What it
+    rules out is a wider rep window at the same load, which asks again
+    for the very thing that stopped happening.
+
+    ``min_load_kg`` is a percentage floor, not a rounded plate step: the
+    equipment increment is a fact about the gym and it lives in
+    `blocks._INCREMENT` with the load derivations that need it. A
+    consumer that wants a suggestion rounds this up to the increment; a
+    consumer that only wants to judge a written prescription compares
+    against the floor directly.
+    """
+    ref = ledger_reference(history)
+    if ref is None:
+        return None
+    load, reps = ref["load_kg"], ref["reps"]
+    min_load = (round(load * (1.0 + DOSE_LOAD_MIN_PCT), 2)
+                if load else None)
+    min_reps = (int(reps + DOSE_REP_MIN_MIDPOINT) if reps is not None else None)
+    if ref["reps_stalled"]:
+        return {
+            "lever":       "load_or_variation",
+            "min_load_kg": min_load,
+            "min_reps":    min_reps,
+            "why": (f"{ref['sessions_at_load']} sessions at "
+                    f"{load}kg and the reps stopped climbing "
+                    f"({'/'.join(str(r) for r in ref['reps_run'])}); this load "
+                    f"has stopped yielding reps"),
+        }
+    return {
+        "lever":       "reps",
+        "min_load_kg": min_load,
+        "min_reps":    min_reps,
+        "why": (f"the last session logged {reps} rep(s) at "
+                f"{load if load is not None else 'bodyweight'}"
+                f"{'kg' if load is not None else ''}; there is rep headroom "
+                f"at this load, so holding it and asking for more reps is a "
+                f"real progression"),
+    }
+
+
+def progression_verdict(history: list[dict], prescription: dict) -> dict:
+    """Does ``prescription`` progress, hold, or only look like it moved?
+
+    Judged entirely against ``history`` — what the ledger says was
+    PERFORMED — and never against a previous prescription. That is the
+    whole point: two coach-authored plans can differ without anything
+    being asked of the athlete that they have not already done.
+
+    ``verdict`` is one of:
+
+      ``progression``  the prescription asks for more load than was
+                       performed, or for more reps at a load that still
+                       has rep headroom.
+      ``hold``         LEGITIMATE. The ledger has the person AT OR BELOW
+                       this prescription's own floor at this load, so the
+                       range still has unclaimed room above them and
+                       re-asking is the correct instruction, not a
+                       re-copy. ``<=`` and not ``<`` is load-bearing:
+                       ``65kgx6-8`` against six reps performed is a lift
+                       working up through its range, and reading it as a
+                       cosmetic re-copy was wrong on three real
+                       prescriptions before the boundary was fixed.
+      ``cosmetic``     the prescription asks for nothing the ledger does
+                       not already contain. Two kinds, and
+                       ``rep_window_shift`` is the R-01 bypass by name:
+                       the reps at this load have stopped climbing, so
+                       the increment owed was load, and the window moved
+                       instead.
+      ``regression``   materially less than was performed. NOT a verdict
+                       on legitimacy — a deload week is a regression and
+                       is meant to be. The caller pairs this with
+                       ``block.deload_prescribed`` or the recovery gate.
+      ``unknown``      no logged history, or nothing comparable in the
+                       prescription (a timed carry against a rep target).
+
+    ``material`` is the one boolean a gate would branch on: True only for
+    ``progression`` and ``hold``. Everything else means the coach has not
+    yet written a prescription this ledger can call an instruction.
+    """
+    ref = ledger_reference(history)
+    if ref is None:
+        return {"verdict": "unknown", "kind": "no_logged_history",
+                "material": False, "performed": None, "expected": None,
+                "why": "no working sets logged for this movement in the window"}
+    expected = expected_next_dose(history)
+    p_load = prescription.get("load_kg")
+    p_lo, p_hi = prescription.get("rep_lo"), prescription.get("rep_hi")
+    ref_load, ref_reps = ref["load_kg"], ref["reps"]
+
+    def _out(verdict, kind, material, why):
+        return {"verdict": verdict, "kind": kind, "material": material,
+                "performed": ref, "expected": expected, "why": why}
+
+    # Load first: it is the axis the ledger can judge without any
+    # reference to a rep target at all.
+    if ref_load is not None and p_load is not None and ref_load > 0:
+        rel = (p_load - ref_load) / ref_load
+        if rel >= DOSE_LOAD_MIN_PCT:
+            return _out("progression", "load_up", True,
+                        f"{p_load}kg against {ref_load}kg performed on "
+                        f"{ref['date']}")
+        if rel <= -DOSE_LOAD_MIN_PCT:
+            return _out("regression", "load_down", False,
+                        f"{p_load}kg against {ref_load}kg performed on "
+                        f"{ref['date']} — legitimate under a deload, which "
+                        f"this function does not know about")
+    elif (ref_load is None) != (p_load is None):
+        if p_load is not None:
+            return _out("progression", "load_added", True,
+                        f"external load added to a movement performed at "
+                        f"bodyweight on {ref['date']}")
+        return _out("regression", "load_removed", False,
+                    f"load dropped from a movement performed at "
+                    f"{ref_load}kg on {ref['date']}")
+
+    # Load held. Everything from here is about reps, and the ledger has
+    # the reps.
+    if p_hi is None or ref_reps is None:
+        return _out("unknown", "no_rep_comparison", False,
+                    "the prescription or the log carries no rep count to "
+                    "compare (a timed hold or a loaded carry)")
+    if p_lo is not None and ref_reps <= p_lo:
+        return _out("hold", "working_up_through_range", True,
+                    f"{ref_reps} rep(s) performed on {ref['date']} against a "
+                    f"floor of {p_lo}; the range still has room above where "
+                    f"the ledger has this lift, so re-asking is the instruction")
+    if p_hi >= ref_reps + DOSE_REP_MIN_MIDPOINT:
+        if ref["reps_stalled"]:
+            return _out("cosmetic", "rep_window_shift", False,
+                        f"the range now runs {p_lo}-{p_hi} and the ledger is "
+                        f"already at {ref_reps} rep(s), above its floor; "
+                        f"{expected['why']}, so asking for more reps at the "
+                        f"same load re-asks for what has stopped arriving")
+        return _out("progression", "reps_up", True,
+                    f"{p_hi} reps asked against {ref_reps} performed on "
+                    f"{ref['date']}, at a load with rep headroom "
+                    f"({ref['reps_trend']})")
+    return _out("cosmetic", "repeat_of_performed", False,
+                f"the range tops out at {p_hi} and {ref_reps} rep(s) were "
+                f"already performed at this load on {ref['date']}; nothing is "
+                f"being asked that the ledger does not already contain")
+
+
+def ledger_progression(plan: dict, rows: list[dict], db: dict | None = None,
+                       today_d: date | None = None,
+                       lookback_days: int = LEDGER_LOOKBACK_DAYS) -> dict | None:
+    """Per exercise in ``plan``: progression, hold, or cosmetic nudge.
+
+    THE CONSUMER CONTRACT.
+
+    ``plan``   a parsed plan (`parse_plan` / `parse_plan_file`), or the
+               block artifact run through
+               `render_validators._block_as_plan` — anything with
+               ``{"workouts": [{"slots": [...]}]}`` whose slots carry
+               ``exercise`` / ``load_kg`` / ``rep_lo`` / ``rep_hi`` /
+               ``prescribed_sets``. One prescription per exercise is
+               chosen by `_plan_doses`.
+    ``rows``   the monthly ledger rows, same list every other coach
+               module reads.
+    ``db``     `extract.load_exercises_db`'s output, to drop warmup and
+               cardio entries. Optional; without it those entries are
+               judged like any other and read as unknown or cosmetic.
+    ``today_d`` / ``lookback_days``
+               the performance window. A reference older than
+               ``lookback_days`` is not evidence about the person now.
+
+    Returns ``None`` when the plan prescribes nothing judgeable.
+    Otherwise::
+
+        {"basis": "ledger", "window": {"from", "to", "days"},
+         "counts": {verdict: n, ...},
+         "material_pct": float,     # progression + hold, over all judged
+         "exercises": [ {exercise, verdict, kind, material, why,
+                         prescribed: {...}, performed: {...},
+                         expected: {...}}, ... ]}
+
+    ``exercises`` is sorted with the findings a gate would act on first —
+    ``cosmetic`` before ``regression`` before the rest — then by name, so
+    the head of the list is the actionable part and the order is stable.
+
+    HOW A GATE SHOULD READ THIS, when a later round wires it up. The
+    blocking question is not "is every lift progressing"; a week where
+    every lift progresses is a week that will stall. It is whether the
+    plan contains ANY prescription the ledger can call an instruction —
+    ``material_pct`` — and specifically whether a lift the ledger says
+    has earned a load increase got one. ``kind == "rep_window_shift"`` is
+    the confirmed bypass and is the narrowest thing worth blocking on.
+    Pair a ``regression`` with the deload flags before calling it a
+    defect: this function deliberately does not know whether a deload was
+    prescribed.
+    """
+    doses = _plan_doses(plan or {}, db)
+    if not doses:
+        return None
+    until = today_d
+    since = (today_d - timedelta(days=lookback_days)
+             if today_d is not None and lookback_days else None)
+    history = performed_sessions(rows, db, since=since, until=until)
+
+    out = []
+    counts: dict[str, int] = {}
+    for key in sorted(doses):
+        slot = doses[key]
+        verdict = progression_verdict(history.get(key) or [], slot)
+        counts[verdict["verdict"]] = counts.get(verdict["verdict"], 0) + 1
+        out.append({
+            "exercise":   slot["exercise"],
+            "verdict":    verdict["verdict"],
+            "kind":       verdict["kind"],
+            "material":   verdict["material"],
+            "why":        verdict["why"],
+            "prescribed": {
+                "load_kg":         slot.get("load_kg"),
+                "rep_lo":          slot.get("rep_lo"),
+                "rep_hi":          slot.get("rep_hi"),
+                "rep_target":      slot.get("rep_target"),
+                "prescribed_sets": slot.get("prescribed_sets"),
+            },
+            "performed":  verdict["performed"],
+            "expected":   verdict["expected"],
+        })
+    rank = {"cosmetic": 0, "regression": 1, "hold": 2, "progression": 3,
+            "unknown": 4}
+    out.sort(key=lambda e: (rank.get(e["verdict"], 9), e["exercise"]))
+    judged = sum(n for v, n in counts.items() if v != "unknown")
+    return {
+        "basis":  "ledger",
+        "window": {
+            "from": since.isoformat() if since else None,
+            "to":   until.isoformat() if until else None,
+            "days": lookback_days if since else None,
+        },
+        "counts":        counts,
+        "judged_count":  judged,
+        "material_pct":  (round((counts.get("progression", 0)
+                                 + counts.get("hold", 0)) / judged, 3)
+                          if judged else None),
+        "exercises":     out,
     }
 
 

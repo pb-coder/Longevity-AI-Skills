@@ -243,10 +243,21 @@ class NewCatalogEntryTests(unittest.TestCase):
     CATALOG_BASELINE = 234          # commit 67b2d03, the spec baseline
     CATALOG_ADDED_HIP_THRUST = 1    # Dumbbell Hip Thrust (this branch)
     CATALOG_ADDED_W6A = len(NEW_ENTRIES)
+    # Incline Y-Raise, added 2026-08-02 on an explicit user decision. This
+    # is a scope exception to spec §6, taken deliberately: `### Traps` held
+    # only Dumbbell Shrug and Cable Shrug — ONE movement pattern in two
+    # equipment flavours — so a rotating traps slot could never legally
+    # rotate, and traps is an emphasis muscle this block. That made the
+    # catalog, not the code, the thing blocking stage two. The Y-raise is
+    # scapular upward rotation (lower/mid traps), a genuinely different
+    # pattern from shrug elevation, which is what the rotation rule
+    # requires. Equipment flavour would not have been enough.
+    CATALOG_ADDED_TRAPS_ROTATION = 1
 
     def test_catalog_grew_by_exactly_four(self) -> None:
         expected = (self.CATALOG_BASELINE + self.CATALOG_ADDED_HIP_THRUST
-                    + self.CATALOG_ADDED_W6A)
+                    + self.CATALOG_ADDED_W6A
+                    + self.CATALOG_ADDED_TRAPS_ROTATION)
         actual = len(exdb._all_canonical_names())
         self.assertEqual(
             actual, expected,

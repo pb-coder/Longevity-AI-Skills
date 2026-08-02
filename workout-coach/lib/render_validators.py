@@ -1379,14 +1379,27 @@ def _core_pattern_categories() -> "tuple[set[str], dict[str, set[str]]]":
     return core_names, categories
 
 
-def _session_core_set_bounds(title: str, spec: dict) -> "tuple[int, int]":
+def _session_core_set_bounds(title: str, spec: dict,
+                             bullets=None) -> "tuple[int, int]":
     """``(min_sets, max_sets)`` of core work for one workout heading.
 
     Which per-session core budget a workout gets (D3). Read off the
-    workout heading, because that is the only place the plan states its
-    own session type — and read by
+    workout heading AND the session's own bullets, through
     ``adherence.session_type_from_title``, the repo's one classifier for
-    that question. This module used to carry a second pair of heading
+    that question.
+
+    ``bullets`` is what closes the last free-text hole. The heading is
+    written by the party being policed, and ``upper`` is the only session
+    type whose budget (2) sits BELOW the fail-safe the other three share
+    (4) — so it is the only answer a name can profit from. A leg day
+    named ``PUSH`` classified confidently as upper and bought the 2-set
+    budget; ``FULL BODY`` and unclassifiable headings had already been
+    closed by failing safe, but a confident wrong answer is not fixable
+    by a fail-safe. Passing the bullets lets the classifier check the
+    claim against the catalog-derived regions of the movements actually
+    prescribed, which the coach does not author. Content may move the
+    answer to a MORE demanding budget, never to a cheaper one — the
+    reverse would be the same exploit running backwards. This module used to carry a second pair of heading
     regexes; two vocabularies for one concept is how the ledger and the
     validator end up disagreeing about which sessions are lower days,
     and the answer drives the 4-on-lower / 2-on-upper budget.
@@ -1420,7 +1433,7 @@ def _session_core_set_bounds(title: str, spec: dict) -> "tuple[int, int]":
     per_session = spec["sets_per_session"]
     lower, upper = per_session["lower"], per_session["upper"]
     tol = spec.get("session_set_overshoot_tolerance", 0)
-    stype = session_type_from_title(title)
+    stype = session_type_from_title(title, bullets)
     if stype == "lower":
         return lower, lower + tol
     if stype == "upper":
@@ -1520,7 +1533,7 @@ def _core_session_findings(text: str, spec: "dict | None" = None,
         if not any(b["sets"] for b in bullets):
             continue
         lo, hi = ((min_sets, max_sets) if flat_band
-                  else _session_core_set_bounds(title, spec))
+                  else _session_core_set_bounds(title, spec, bullets))
 
         core_bullets = [b for b in bullets if b["name"].lower() in core_names]
         if not core_bullets:

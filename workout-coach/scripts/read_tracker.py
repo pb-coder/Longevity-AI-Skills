@@ -61,6 +61,16 @@ Emits one JSON blob on stdout organised around session-level signals
     populated only when ``state == "resolved"``. A single measurement
     returns ``unresolved`` / ``too_few_readings``, never 0.0.
 
+  Body fat and lean mass (same two importers, same 19-col schema):
+  - body_fat_latest: ``{value_pct, date}``; absent until first recorded.
+  - body_fat_trend_pct_per_4w: same block shape, minimum 84-day window.
+  - lean_mass_latest: ``{value_kg, date}``; absent until first recorded.
+  - lean_mass_trend_kg_per_4w: same block shape, minimum 112-day window.
+    Scale-DERIVED from bodyweight and body fat rather than measured, so a
+    resolved rate here restates those two rather than corroborating them.
+    Both trend blocks are emitted even when the column has never been
+    written; ``state``/``reason``/``note`` then say the channel is empty.
+
   Apple Health:
   - health_metrics_weekly (4-week aggregates; raw daily behind
     --include-daily-health)
@@ -158,8 +168,10 @@ from workout_coach.lib.health_session_rec import (  # noqa: E402
 )
 from workout_coach.lib.sessions import (  # noqa: E402
     _is_working_set,
+    body_fat_trend,
     bodyweight_trend,
     build_monthly_sessions,
+    lean_mass_trend,
     progression_summary,
     waist_trend,
 )
@@ -391,62 +403,71 @@ def _bodyweight_weekly_kg(bw_all: list[dict], today_d: date,
     return out
 
 
-def _waist_readings(health_all: list[dict]) -> list[dict]:
-    """Waist measurements off the health-metrics rows, ASC by date.
+def _body_comp_readings(health_all: list[dict], column: str,
+                        value_key: str) -> list[dict]:
+    """One body-composition column off the health-metrics rows, ASC by date.
 
-    ``Waist (cm)`` is written by BOTH importers (the native-XML path via
-    ``apple_health_daily``, the HealthAutoExport path via its own field
-    map), so this reader is source-agnostic on purpose: it takes the
-    column, not the exporter. ``health_all`` has already been through
-    ``_clip_series``, so the ``--today`` horizon is applied before
-    anything here sees a row.
+    ``Waist (cm)``, ``Body Fat %`` and ``Lean Mass (kg)`` are written by
+    BOTH importers (the native-XML path via ``apple_health_daily``, the
+    HealthAutoExport path via its own field map), so this reader is
+    source-agnostic on purpose: it takes the column, not the exporter.
+    ``health_all`` has already been through ``_clip_series``, so the
+    ``--today`` horizon is applied before anything here sees a row.
 
     Blank cells are skipped rather than yielded as ``0`` — a person who
     has never measured returns ``[]``, which reads downstream as "no
-    data" instead of "flat at zero".
+    data" instead of "flat at zero". That is the whole difference
+    between an empty channel and a channel pinned at the origin, and it
+    is why all three columns share this one reader rather than growing a
+    second copy that forgets the rule.
     """
     out: list[dict] = []
     for entry in health_all:
-        cm = entry.get("waist_cm")
-        if cm is None:
+        value = entry.get(column)
+        if value is None:
             continue
-        out.append({"date": entry["date"], "cm": cm})
+        out.append({"date": entry["date"], value_key: value})
     out.sort(key=lambda e: e["date"])
     return out
 
 
-def _attach_waist_weekly(weekly: list[dict], waist_readings: list[dict],
-                         today_d: date, weeks: int = 4) -> list[dict]:
-    """Fold a per-ISO-week waist mean onto each ``health_metrics_weekly``
-    entry, keyed by ``week_start``.
+def _attach_body_comp_weekly(weekly: list[dict], readings: list[dict],
+                             value_key: str, out_key: str,
+                             today_d: date, weeks: int = 4) -> list[dict]:
+    """Fold a per-ISO-week mean of one body-composition column onto each
+    ``health_metrics_weekly`` entry, keyed by ``week_start``.
 
-    ``waist_cm`` is not part of ``health_metrics_weekly``'s own key list
-    and is added here instead so the vitals table can draw the waist
-    sparkline from the same series every other vitals row uses. Weeks
-    with no measurement are left with ``waist_cm = None``, which
-    ``_compact`` strips — the sparkline then sees a gap rather than an
-    invented value, and a series with fewer than two real points renders
-    as an empty box rather than a flat line.
+    None of these columns is part of ``health_metrics_weekly``'s own key
+    list; they are added here so the vitals table can draw their
+    sparklines from the same series every other vitals row uses. Weeks
+    with no measurement are left at ``None``, which ``_compact`` strips —
+    the sparkline then sees a gap rather than an invented value, and a
+    series with fewer than two real points renders as an empty box rather
+    than a flat line.
+
+    A column that has never been written attaches NOTHING, so the key is
+    absent rather than present-and-null across every week. The renderer
+    reads that as "no channel" and says so.
     """
-    if not weekly or not waist_readings:
+    if not weekly or not readings:
         return weekly
     cutoff = today_d - timedelta(days=max(weeks * 7 - 1, 0))
     by_week: dict[str, list[float]] = {}
-    for row in waist_readings:
+    for row in readings:
         d = _parse_iso_date(row.get("date"))
         if d is None or d < cutoff or d > today_d:
             continue
         try:
-            value = float(row["cm"])
-        except (TypeError, ValueError):
+            value = float(row[value_key])
+        except (TypeError, ValueError, KeyError):
             continue
         iso = d.isocalendar()
         monday = date.fromisocalendar(iso.year, iso.week, 1).isoformat()
         by_week.setdefault(monday, []).append(value)
     for entry in weekly:
         vals = by_week.get(entry.get("week_start"))
-        entry["waist_cm"] = (round(sum(vals) / len(vals), 2) if vals
-                             else None)
+        entry[out_key] = (round(sum(vals) / len(vals), 2) if vals
+                          else None)
     return weekly
 
 
@@ -967,7 +988,7 @@ def main() -> int:
     # (``_trend_verdict``), so a single measurement returns an explicit
     # ``too_few_readings`` rather than a slope. ``today_d`` anchors the
     # window, which is the second horizon guard behind ``_clip_series``.
-    waist_readings = _waist_readings(health_all)
+    waist_readings = _body_comp_readings(health_all, "waist_cm", "cm")
     waist_latest = (
         {"value_cm": waist_readings[-1]["cm"],
          "date":     waist_readings[-1]["date"]}
@@ -976,8 +997,47 @@ def main() -> int:
     waist_trend_block = waist_trend(waist_readings, today_d=today_d)
     # The vitals table draws its waist sparkline off the weekly series,
     # the same way HRV / RHR / VO2max do.
-    weekly_health = _attach_waist_weekly(weekly_health, waist_readings,
-                                         today_d, weeks=4)
+    weekly_health = _attach_body_comp_weekly(
+        weekly_health, waist_readings, "cm", "waist_cm", today_d, weeks=4)
+
+    # ---- Body fat % and lean mass. The remaining two columns of the
+    # 19-col health_metrics schema, both written by both importers and,
+    # until now, read by nothing — the same gap waist had.
+    #
+    # NEITHER IS PRESENT IN ANY EXPORT YET, so what actually ships here is
+    # the empty state. The three failure modes it exists to prevent are a
+    # rendered 0.0, a flat sparkline through a single point, and the
+    # channel silently vanishing; all three read as a finding to a coach
+    # that cannot tell "unmeasured" from "unchanged".
+    #
+    # ``latest`` is a fact and is emitted as soon as one reading exists.
+    # The trend goes through the SAME gate as bodyweight and waist, so a
+    # thin series returns an explicit reason rather than a slope. Lean
+    # mass is additionally NOT independent of the other two — see
+    # ``sessions.lean_mass_trend``.
+    body_fat_readings = _body_comp_readings(health_all, "body_fat_pct", "pct")
+    body_fat_latest = (
+        {"value_pct": body_fat_readings[-1]["pct"],
+         "date":      body_fat_readings[-1]["date"]}
+        if body_fat_readings else None
+    )
+    body_fat_trend_block = body_fat_trend(body_fat_readings, today_d=today_d)
+    weekly_health = _attach_body_comp_weekly(
+        weekly_health, body_fat_readings, "pct", "body_fat_pct",
+        today_d, weeks=4)
+
+    lean_mass_readings = _body_comp_readings(
+        health_all, "lean_body_mass_kg", "kg")
+    lean_mass_latest = (
+        {"value_kg": lean_mass_readings[-1]["kg"],
+         "date":     lean_mass_readings[-1]["date"]}
+        if lean_mass_readings else None
+    )
+    lean_mass_trend_block = lean_mass_trend(lean_mass_readings,
+                                            today_d=today_d)
+    weekly_health = _attach_body_comp_weekly(
+        weekly_health, lean_mass_readings, "kg", "lean_mass_kg",
+        today_d, weeks=4)
 
     # ---- Week-over-week comparison block (used by the assessment HTML
     # dashboard's bottom card). Composes existing extracts; no new data
@@ -1231,6 +1291,18 @@ def main() -> int:
         # There is no bare-scalar twin on purpose — a caller that wants
         # the number has to pass through ``state`` to reach it.
         "waist_trend_cm_per_4w": waist_trend_block,
+        # ---- Body fat % and lean mass ----
+        # Same pair-of-keys shape as waist. ``*_latest`` is None (and so
+        # dropped by ``_compact``) until the column carries a reading;
+        # the trend block is ALWAYS emitted, because "never recorded" is
+        # an answer the coach has to be able to read rather than infer
+        # from a missing key. Lean mass is scale-DERIVED from bodyweight
+        # and body fat, so a resolved rate there restates those two
+        # rather than corroborating them — its note says so.
+        "body_fat_latest":            body_fat_latest,
+        "body_fat_trend_pct_per_4w":  body_fat_trend_block,
+        "lean_mass_latest":           lean_mass_latest,
+        "lean_mass_trend_kg_per_4w":  lean_mass_trend_block,
         # ---- Apple Health weekly aggregates (raw daily behind a flag) ----
         "health_metrics_weekly": weekly_health,
         "health_metrics_recent": health_recent if args.include_daily_health else None,

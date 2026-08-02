@@ -52,6 +52,7 @@ from workout_coach.lib.sessions import (
     BODYWEIGHT_TREND_MIN_READINGS,
     BODYWEIGHT_TREND_MIN_SPAN_DAYS,
     BODYWEIGHT_TREND_MIN_WINDOW_DAYS,
+    TREND_MIN_EFFECTIVE_READINGS,
     WAIST_MEASUREMENT_SD_CM,
     WAIST_TREND_MAX_STALE_DAYS,
     WAIST_TREND_MIN_READINGS,
@@ -193,6 +194,162 @@ class AStaleFitIsNotACurrentRateTests(unittest.TestCase):
         self.assertEqual(block["span_days"], 3)
         self.assertLess(block["span_days"], WAIST_TREND_MIN_SPAN_DAYS)
         self.assertEqual(block["reason"], "readings_stale")
+
+
+# ------------------------------------------------------------- leverage
+class TheSpanIsNotTheDistributionTests(unittest.TestCase):
+    """C1's sibling: the span gate measures the ENDS, not the middle.
+
+    Three readings clustered today plus one 39-55 days back spans 39-55
+    days, carries four readings and is perfectly fresh. It clears the
+    span gate, the recency gate and the sample-size gate, and it is a
+    two-point slope: a cluster, a lone anchor, and nothing observed
+    between them.
+
+    It is not merely uninformative. ``Sxx`` is maximised by pushing mass
+    to the ends, so the clustered design reports a NARROWER interval than
+    the evenly-spread one the span floor was derived from -- 1.79 cm/4wk
+    of half-interval against 2.07 at the same n and span. The extra
+    confidence is bought from geometry rather than from measurement, and
+    one mis-read tape at either end then clears the smaller bar.
+    """
+
+    # 3.2 cm of apparent narrowing across the hole. Reproduces the
+    # shipped defect exactly: -1.99 cm/4wk, SE 0.37, interval clear of
+    # zero, off two effective points.
+    CLUSTERED = waist([(45, 90.2), (2, 87.1), (1, 87.0), (0, 87.1)])
+
+    def test_the_fixture_cleared_every_gate_that_came_before(self) -> None:
+        """Guard the guard. If it failed for span or recency instead, the
+        leverage check below would be passing for the wrong reason."""
+        block = waist_trend(self.CLUSTERED, today_d=T)
+        self.assertGreaterEqual(block["span_days"], WAIST_TREND_MIN_SPAN_DAYS)
+        self.assertGreaterEqual(block["n_readings"], WAIST_TREND_MIN_READINGS)
+        self.assertLessEqual(block["days_since_last_reading"],
+                             WAIST_TREND_MAX_STALE_DAYS)
+
+    def test_a_cluster_plus_one_anchor_no_longer_resolves(self) -> None:
+        block = waist_trend(self.CLUSTERED, today_d=T)
+        self.assertEqual(block["state"], "unresolved")
+        self.assertEqual(block["reason"], "too_few_effective_readings")
+        self.assertIsNone(block["cm_per_4w"])
+        # Not a point estimate either: -1.99 cm/4wk off two effective
+        # points is an artifact of where the readings sit, not a lean.
+        self.assertIsNone(block["point_cm_per_4w"])
+        self.assertIsNone(block["ci95_cm_per_4w"])
+
+    def test_the_block_reports_the_gap_and_what_the_series_is_worth(self) -> None:
+        block = waist_trend(self.CLUSTERED, today_d=T)
+        self.assertEqual(block["span_days"], 45)
+        self.assertEqual(block["max_gap_days"], 43)
+        self.assertAlmostEqual(block["effective_readings"], 2.05, places=2)
+
+    def test_the_note_names_the_gap_not_the_span(self) -> None:
+        note = waist_trend(self.CLUSTERED, today_d=T)["note"]
+        self.assertIn("43 days", note)
+        self.assertIn("2.0 evenly spaced", note)
+
+    def test_it_fails_across_the_whole_39_to_55_day_family(self) -> None:
+        for back in (39, 45, 50, 55):
+            for drift in (2.8, 3.2, 3.6):
+                with self.subTest(back=back, drift=drift):
+                    block = waist_trend(
+                        waist([(back, 87.0 + drift), (2, 87.1),
+                               (1, 87.0), (0, 87.1)]), today_d=T)
+                    self.assertEqual(block["reason"],
+                                     "too_few_effective_readings")
+
+    def test_the_effective_sample_size_is_exact_for_an_even_cadence(self) -> None:
+        """``n_eff = 1 + span / max_gap`` is not a heuristic: for n
+        readings evenly spread over a span the largest gap is exactly
+        ``span / (n - 1)``, so inverting it returns n. Anything else and
+        the floor below would not mean what it says.
+
+        Step 5 rather than 7 so every n here fits inside the 56-day
+        window; the metric is emitted on every verdict, so the assertion
+        holds whether or not the series also clears the span floor."""
+        for n in (4, 5, 6, 8, 12):
+            with self.subTest(n=n):
+                step = 5
+                block = waist_trend(
+                    waist([(step * i, 87.0 + 0.4 * i + (0.2 if i % 2 else 0))
+                           for i in range(n)]), today_d=T)
+                self.assertEqual(block["n_readings"], n)
+                self.assertAlmostEqual(block["effective_readings"], float(n),
+                                       places=6)
+
+    def test_the_floor_is_the_two_point_slope_boundary(self) -> None:
+        """2 effective readings IS a two-point slope -- every reading at
+        one of two ends, the stretch between them unobserved, and the
+        error estimated off within-cluster scatter. 3 is the smallest
+        design carrying an interior anchor, so the floor is 3 rather than
+        a tuned number."""
+        self.assertEqual(TREND_MIN_EFFECTIVE_READINGS, 3.0)
+        # Every all-at-two-ends design scores exactly 2, including the
+        # replicated-endpoint one that a maximum-leverage test scores as
+        # healthy because no single reading dominates.
+        replicated = waist([(45, 90.2), (45, 90.0), (0, 87.1), (0, 87.0)])
+        block = waist_trend(replicated, today_d=T)
+        self.assertEqual(block["effective_readings"], 2.0)
+        self.assertEqual(block["reason"], "too_few_effective_readings")
+
+    def test_the_floor_leaves_the_sparsest_legal_cadence_headroom(self) -> None:
+        """A floor no honest cadence clears is a deleted column. The
+        sparsest series the other gates admit -- 4 measurements evenly
+        spread over the 39-day span floor -- must score a full reading
+        clear of the floor, and stay clear under a day of jitter."""
+        even = waist([(39, 90.0), (26, 89.1), (13, 88.4), (0, 87.4)])
+        block = waist_trend(even, today_d=T)
+        self.assertEqual(block["effective_readings"], 4.0)
+        self.assertNotEqual(block["reason"], "too_few_effective_readings")
+        for jitter in (-1, 1):
+            with self.subTest(jitter=jitter):
+                jittered = waist([(39, 90.0), (26 + jitter, 89.1),
+                                  (13 + jitter, 88.4), (0, 87.4)])
+                self.assertNotEqual(waist_trend(jittered, today_d=T)["reason"],
+                                    "too_few_effective_readings")
+
+    def test_an_ordinary_weekly_cadence_is_untouched(self) -> None:
+        pts = [(7 * i, 90.0 - 0.25 * (7 - i) + (0.2 if i % 2 else -0.2))
+               for i in range(8)]
+        block = waist_trend(waist(pts), today_d=T)
+        self.assertEqual(block["state"], "resolved")
+        self.assertEqual(block["effective_readings"], 8.0)
+
+    def test_a_ramp_up_from_one_old_reading_is_not_punished(self) -> None:
+        """One measurement, then a real cadence starting later, is how a
+        channel actually begins. It must not be read as a cluster."""
+        pts = [(42, 90.0), (28, 89.2), (21, 88.9), (14, 88.4), (7, 88.0),
+               (0, 87.4)]
+        block = waist_trend(waist(pts), today_d=T)
+        self.assertNotEqual(block["reason"], "too_few_effective_readings")
+        self.assertGreaterEqual(block["effective_readings"],
+                                TREND_MIN_EFFECTIVE_READINGS)
+
+    def test_bodyweight_inherits_the_check_from_the_shared_gate(self) -> None:
+        block = bodyweight_trend(
+            weighins([(22, 76.4), (2, 78.2), (1, 78.1), (0, 78.3)]), today_d=T)
+        self.assertEqual(block["reason"], "too_few_effective_readings")
+        self.assertIsNone(block["kg_per_week"])
+        self.assertIn("20 days", block["note"])
+
+    def test_the_live_bodyweight_shapes_still_clear_the_floor(self) -> None:
+        """Both tracked series resolve today and must keep resolving. The
+        offsets are the real reading CADENCE (not the values, which are
+        invented): 15 near-daily weigh-ins with a 6-day hole, and 11 with
+        an 8-day one. The second sits at 3.25 effective readings, which
+        is thin enough to be worth pinning rather than rediscovering."""
+        dense = [0, 1, 3, 7, 8, 14, 15, 17, 19, 20, 21, 22, 23, 24, 26]
+        gappy = [0, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18]
+        for offsets, expected in ((dense, 5.33), (gappy, 3.25)):
+            with self.subTest(n=len(offsets)):
+                block = bodyweight_trend(
+                    weighins([(o, 78.0 + 0.07 * (30 - o)) for o in offsets]),
+                    today_d=T)
+                self.assertAlmostEqual(block["effective_readings"], expected,
+                                       places=2)
+                self.assertNotEqual(block["reason"],
+                                    "too_few_effective_readings")
 
 
 # ----------------------------------------------------- near-zero SE
@@ -399,10 +556,25 @@ class TheGateOnlyGotTighterTests(unittest.TestCase):
         [(0, 87.0), (7, 87.0), (14, 87.0), (21, 87.0), (28, 87.0),
          (35, 87.0), (42, 87.0), (49, 87.0)],
         [(0, 84.0), (12, 85.5), (24, 87.0), (36, 88.5), (48, 90.0)],
+        # Clustered-leverage family: cluster + one distant anchor, at
+        # both ends of the reachable span, plus the replicated-endpoint
+        # shape. All of these RESOLVED before the leverage check.
+        [(0, 87.1), (1, 87.0), (2, 87.1), (45, 90.2)],
+        [(0, 87.1), (1, 87.0), (2, 87.1), (39, 90.2)],
+        [(0, 87.1), (0, 87.0), (55, 90.1), (55, 90.2)],
     ]
 
     def _pts(self, case):
         return sorted((T - timedelta(days=d), cm) for d, cm in case)
+
+    def _after(self, pts):
+        return sessions._trend_verdict(
+            pts, T, None, WAIST_TREND_MIN_WINDOW_DAYS,
+            WAIST_TREND_MIN_READINGS,
+            min_span_days=WAIST_TREND_MIN_SPAN_DAYS,
+            max_stale_days=WAIST_TREND_MAX_STALE_DAYS,
+            noise_sd_floor=WAIST_MEASUREMENT_SD_CM,
+            min_effective_readings=TREND_MIN_EFFECTIVE_READINGS)
 
     def test_no_case_moves_from_unresolved_to_resolved(self) -> None:
         for i, case in enumerate(self.CASES):
@@ -411,27 +583,41 @@ class TheGateOnlyGotTighterTests(unittest.TestCase):
                 before = sessions._trend_verdict(
                     pts, T, None, WAIST_TREND_MIN_WINDOW_DAYS,
                     WAIST_TREND_MIN_READINGS)
-                after = sessions._trend_verdict(
-                    pts, T, None, WAIST_TREND_MIN_WINDOW_DAYS,
-                    WAIST_TREND_MIN_READINGS,
-                    min_span_days=WAIST_TREND_MIN_SPAN_DAYS,
-                    max_stale_days=WAIST_TREND_MAX_STALE_DAYS,
-                    noise_sd_floor=WAIST_MEASUREMENT_SD_CM)
-                if after[0] == "resolved":
+                if self._after(pts)[0] == "resolved":
                     self.assertEqual(before[0], "resolved",
                                      "the gate got LOOSER on this series")
 
     def test_the_fixtures_exercise_both_verdicts(self) -> None:
         """Guard the guard: an all-unresolved fixture set would make the
         monotonicity assertion vacuous."""
-        after = [sessions._trend_verdict(
-            self._pts(c), T, None, WAIST_TREND_MIN_WINDOW_DAYS,
-            WAIST_TREND_MIN_READINGS,
-            min_span_days=WAIST_TREND_MIN_SPAN_DAYS,
-            max_stale_days=WAIST_TREND_MAX_STALE_DAYS,
-            noise_sd_floor=WAIST_MEASUREMENT_SD_CM)[0] for c in self.CASES]
+        after = [self._after(self._pts(c))[0] for c in self.CASES]
         self.assertIn("resolved", after)
         self.assertIn("unresolved", after)
+
+    def test_every_new_parameter_defaults_to_off(self) -> None:
+        """The pre-fix behaviour has to stay reachable EXACTLY, or the
+        comparison above is against a re-implementation rather than
+        against the old code path."""
+        sig = inspect.signature(sessions._trend_verdict)
+        for name in ("min_span_days", "min_effective_readings"):
+            with self.subTest(name):
+                self.assertEqual(sig.parameters[name].default, 0)
+        for name in ("max_stale_days", "noise_sd_floor"):
+            with self.subTest(name):
+                self.assertIsNone(sig.parameters[name].default)
+
+    def test_the_leverage_check_is_what_catches_the_clustered_family(self) -> None:
+        """The three clustered fixtures must fail for the LEVERAGE reason
+        specifically. A span or recency reason there would mean the new
+        gate is dead weight and the older ones happened to cover it."""
+        for i in (7, 8, 9):
+            with self.subTest(case=i):
+                before = sessions._trend_verdict(
+                    self._pts(self.CASES[i]), T, None,
+                    WAIST_TREND_MIN_WINDOW_DAYS, WAIST_TREND_MIN_READINGS)
+                after = self._after(self._pts(self.CASES[i]))
+                self.assertEqual(before[0], "resolved")
+                self.assertEqual(after[1], "too_few_effective_readings")
 
 
 # ------------------------------------------------------------------- C8

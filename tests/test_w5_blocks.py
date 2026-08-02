@@ -1262,27 +1262,55 @@ class RotationCandidateSelectionTests(unittest.TestCase):
 
 # ---------------------------------------------------------------------------
 class TrapsRotationPoolTests(unittest.TestCase):
-    """Reported, not fixed. `SHOULDERS/Traps` has exactly two members and
-    they differ only by an equipment word, so rule 3 rejects the only
-    move a traps rotating slot could make — and traps is an emphasis
-    muscle. Closing it needs a catalog entry, not code."""
+    """CLOSED 2026-08-02 by a catalog entry, not by code.
 
-    def test_the_traps_pool_cannot_legally_rotate(self) -> None:
-        traps = sorted(m["name"] for m in _CATALOG.values()
-                       if m["pattern"] == "SHOULDERS/Traps")
-        self.assertEqual(traps, ["Cable Shrug", "Dumbbell Shrug"])
+    `SHOULDERS/Traps` used to hold exactly two members, Dumbbell Shrug and
+    Cable Shrug, which differ only by an equipment word. Rule 3 rejects an
+    equipment-flavour swap, so the only move a traps rotating slot could
+    make was illegal — and traps is an emphasis muscle this block, which
+    made the CATALOG the thing blocking stage two.
+
+    `Incline Y-Raise` closes it: scapular upward rotation is a different
+    movement pattern from shrug elevation, which is what rule 3 asks for.
+    Another shrug variant would have bought nothing.
+
+    Both halves are pinned below, because the fix is only real if the
+    equipment-flavour rejection still works. A pool that rotates because
+    rule 3 stopped rejecting anything is a regression wearing this test's
+    green tick."""
+
+    def _diff(self, first: str, second: str) -> str:
         prev = new_block("2026-06-01", {"upper_a": [
             _slot(1, "Cable Lat Pulldown", "anchor"),
-            _slot(2, "Dumbbell Shrug", "rotating",
+            _slot(2, first, "rotating",
                   superset_with="Cable Lat Pulldown")]})
         new = new_block("2026-07-13", {"upper_a": [
             _slot(1, "Cable Lat Pulldown", "anchor"),
-            _slot(2, "Cable Shrug", "rotating",
+            _slot(2, second, "rotating",
                   superset_with="Cable Lat Pulldown")]}, prev_block=prev)
-        errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
-        self.assertIn("differs only by equipment", errs,
-                      "if this ever passes, a third traps movement was "
-                      "added and this test should be deleted")
+        return "\n".join(rotation_diff_errors(prev, new, _CATALOG))
+
+    def test_the_pool_holds_more_than_one_movement_pattern(self) -> None:
+        traps = sorted(m["name"] for m in _CATALOG.values()
+                       if m["pattern"] == "SHOULDERS/Traps")
+        self.assertIn("Incline Y-Raise", traps)
+        self.assertGreaterEqual(
+            len(traps), 3,
+            "traps rotation needs a second movement pattern, not a third "
+            "equipment flavour of the shrug")
+
+    def test_a_traps_slot_can_now_legally_rotate(self) -> None:
+        self.assertNotIn("differs only by equipment",
+                         self._diff("Dumbbell Shrug", "Incline Y-Raise"),
+                         "shrug -> Y-raise is a pattern change and must be "
+                         "accepted; if this fails the entry stopped "
+                         "resolving to SHOULDERS/Traps")
+
+    def test_equipment_flavour_is_still_rejected(self) -> None:
+        self.assertIn("differs only by equipment",
+                      self._diff("Dumbbell Shrug", "Cable Shrug"),
+                      "the pool rotating must not come from rule 3 going "
+                      "quiet — a shrug is still a shrug")
 
 # ---------------------------------------------------------------------------
 class BlockPayloadDiffBasisTests(unittest.TestCase):

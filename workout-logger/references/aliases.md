@@ -16,6 +16,7 @@
 | Stomach crunches, Stomach Crunch | Ab Crunch Machine | the selectorized seated crunch machine |
 | Stomach Press, Stomach Press Vertical, Stomach Press Vertical Machine | Stomach Press Machine | a DIFFERENT machine from Ab Crunch Machine — do not merge the two; their load scales differ by ~3x and merging them destroys both progression series |
 | Crunch (alone) | Crunch | AMBIGUOUS — default shown is the bodyweight movement. Resolve to `Ab Crunch Machine` ONLY when a load is given; a load-free "crunch" is bodyweight. Ask if unclear. Renaming every bare "crunch" to the machine is what filed 0 kg bodyweight sets as machine rows |
+| Y Raise, Y-Raise, Prone Y Raise, Prone Y-Raise, Incline Y Raise, Prone Y | Incline Y-Raise | added 2026-08-02. Traps had only two shrugs — one movement pattern in two equipment flavours — so a rotating traps slot could never legally rotate. This is the second pattern: scapular upward rotation, lower/mid traps |
 | Hike, Hiking | Hike | — |
 | Swim, Swimming | Swim | — |
 | Walk, Walking | Walk | — |

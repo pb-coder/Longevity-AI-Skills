@@ -257,9 +257,16 @@ class WaistTrendHonestyTests(unittest.TestCase):
         # the window cannot tell a month of readings from four taken on
         # one weekend, which is the shape that reported -2.80 cm/4wk with
         # a zero-width interval.
+        # ``max_gap_days`` / ``effective_readings`` join them for the same
+        # reason one step further in: the span is first-to-last and says
+        # nothing about the DISTRIBUTION inside it, so a consumer holding
+        # only the span cannot tell an even cadence from a cluster plus
+        # one distant anchor -- the shape that resolved at -1.99 cm/4wk
+        # off what was really a two-point slope.
         shared = {"state", "reason", "note", "n_readings",
                   "window_start", "window_end", "window_days",
-                  "span_days", "days_since_last_reading", "method"}
+                  "span_days", "days_since_last_reading",
+                  "max_gap_days", "effective_readings", "method"}
         self.assertTrue(shared <= set(bw))
         self.assertTrue(shared <= set(waist))
         # Same key structure, unit-suffixed rate fields.

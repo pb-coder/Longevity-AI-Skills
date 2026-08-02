@@ -237,7 +237,7 @@ def render(j: TrackerJSON, coach: CoachReads, workout_md: str, person: str) -> s
     {card_nutrition_phase(j.get("nutrition_phase"), coach_cards.get("nutrition_phase_callout"))}
     {card_metabolic_domain(longevity_state, coach_cards.get("trajectory_metabolic"))}
     {card_behavioral_domain(movement_consistency, sleep_regularity, acwr, j.get("cardio_hr_zones_28d") or {}, coach_cards.get("trajectory_behavioral"))}
-    {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"), bw_trend_block, j.get("waist_latest"), j.get("waist_trend_cm_per_4w"))}
+    {card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, j.get("bodyweight_weekly") or [], coach_cards.get("vitals"), bw_trend_block, j.get("waist_latest"), j.get("waist_trend_cm_per_4w"), j.get("body_fat_latest"), j.get("body_fat_trend_pct_per_4w"), j.get("lean_mass_latest"), j.get("lean_mass_trend_kg_per_4w"))}
     {card_sleep(j.get("sleep_summary"), coach_cards.get("sleep"))}
     {card_recovery_practices(thermal, light, coach_cards.get("recovery_practices"))}
     {card_risk_flags(longevity_state, coach_cards.get("trajectory_risk_flags"))}

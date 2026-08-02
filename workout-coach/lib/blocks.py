@@ -32,6 +32,12 @@ Public surface:
 - ``block_status(block, today_d, deloads)`` — age, boundary, reason.
 - ``rotation_diff_errors(prev_block, new_block, catalog)`` — the
   blocking-error list W4's render validator calls.
+- ``core_spec_conflicts(block, catalog, spec, db)`` — which
+  ``core_week_spec`` axes this block's own core slots violate, so an
+  artifact from the pre-spec era cannot be copied forward silently
+  (R-05).
+- ``strip_benched_slots(block, benched)`` — a movement the ledger has
+  withdrawn must not survive in a slot the coach is told to copy.
 - ``reconcile_block_with_logs(block, rows, db, catalog, start, end)`` —
   fold gym-floor substitutions back into the artifact at the boundary.
 - ``derived_starting_load(exercise, e1rm, catalog, db, target_reps)`` —
@@ -52,7 +58,13 @@ from pathlib import Path
 # two implementations of that key would silently desync the two.
 # The dependency runs one way only — ``adherence`` never imports this
 # module.
-from .adherence import load_plans, session_key, session_type_from_title
+from .adherence import (
+    load_plans,
+    session_key,
+    session_type_from_content,
+    session_type_from_title,
+)
+from .constants import CORE_WEEK_SPEC
 from .parsing import _parse_iso_date
 from .sessions import _is_working_set
 
@@ -519,9 +531,14 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
     # with ``artifact``; the read path leaves it, and the render
     # validator's self-diff guard keys on it. See ``block_payload``.
     block["source"] = "derived_from_plan"
+    # CONTENT-CHECKED, not read off the heading (R-13). A session type
+    # decides the per-session core budget, and the heading is free text
+    # the coach writes — `## Workout 1: PUSH` full of squats classified
+    # confidently as an upper day and bought the 2-set budget. The plan's
+    # own bullets are passed so the name has to survive them.
     block["session_types"] = {
         session_key(w.get("title") or "", w.get("index") or 0):
-            session_type_from_title(w.get("title"))
+            session_type_from_title(w.get("title"), w.get("slots"))
         for w in plan.get("workouts") or []
     }
     return block
@@ -1296,6 +1313,285 @@ def _superset_errors(stype, slot, pos, name, new_slots, catalog, label,
     return out
 
 
+# ------------------------------------------- the artifact against the spec
+#
+# R-05. The block artifact ships beside `core_week_spec` and contradicts
+# it. Measured on the live payload, both people, 2026-08-02:
+#
+#     lower_a core: [Ab Crunch Machine]    upper_a core: [Ab Crunch Machine]
+#     lower_b core: [Cable Reverse Crunch] upper_b core: [Ab Crunch Machine]
+#     distinct core exercises: 2   (spec floor 3)
+#     Ab Crunch Machine in 3 sessions      (spec cap 2)
+#     one benched movement still holding a slot
+#
+# SKILL.md tells the coach an in-flight block outranks the
+# frequency-derived split, which reads as "copy the slots" — and copying
+# them fails the gate on several counts. The block descends from the
+# pre-spec era: it was derived from a plan written before these axes
+# existed.
+#
+# TWO DEFECTS, TWO DIFFERENT ANSWERS, and the difference is provenance.
+#
+# THE CORE AXES GET A MARKER, NOT A REWRITE. The block is a RECORD of
+# what was prescribed, and it is the basis every rotation check differs
+# the next generation against. Reconciling it into compliance means
+# inventing core slots nobody prescribed, and then generation N+1 is
+# compared against a block that was never written and never trained —
+# precisely the drift `reconcile_block_with_logs` exists to undo, run in
+# reverse. There is also nothing to reconcile FROM: the spec states
+# floors, not a selection, so "make it comply" has no unique answer and
+# the data layer has no authority to pick one. So the artifact keeps
+# saying what happened, and it carries a computed, machine-readable
+# statement of exactly which axes copying it would violate. The marker is
+# DERIVED — catalog plus spec, neither of them coach-written — so it
+# cannot be turned off by anything the coach writes.
+#
+# THE BENCHED SLOT GETS DELETED. That one is not a record of a
+# prescription worth keeping: `adherence.benched` is the ledger's finding
+# that the user does not perform this movement, and the payload's own
+# instruction is "must not re-prescribe". Leaving it in a slot the coach
+# is told to copy is the artifact contradicting the ledger. The same
+# defect was already closed one surface over — `read_tracker` excludes
+# benched movements from `rotation_candidates` for this exact reason —
+# and this is the other half of it. See `strip_benched_slots`.
+def core_spec_conflicts(block: dict | None, catalog: dict | None = None,
+                        spec: dict | None = None,
+                        db: dict | None = None) -> dict | None:
+    """Which `core_week_spec` axes this block's own core slots violate.
+
+    ``None`` when there is no block. Otherwise a dict the payload carries
+    verbatim::
+
+        {"spec": "core_week_spec",
+         "compliant": bool,
+         "copy_core_slots": bool,      # the directive, in one boolean
+         "conflicts": [{axis, observed, required, detail}, ...],
+         "core_slots": {session_type: [exercise, ...]},
+         "axes_checked": [...], "axes_not_checked": [...],
+         "directive": "<one sentence for the coach>"}
+
+    ``copy_core_slots`` is the field a consumer should branch on. False
+    means the block's core selection predates the current spec and
+    copying it forward reproduces a rejected plan; the coach must derive
+    the week's core work from `core_week_spec` and treat the block as
+    authoritative only for its NON-core slots.
+
+    WHAT IS CHECKED, and what deliberately is not. Four axes are
+    answerable from an artifact plus the catalog:
+
+      * ``sets_per_session`` — per session, using the CONTENT-derived
+        session type (`adherence.session_type_from_title` with the
+        block's own slots), never the stored heading claim. A session
+        whose type cannot be determined, or whose core slots carry no
+        recorded dose, is skipped rather than reported: this marker is
+        read by a coach, and a fabricated conflict tells it not to copy a
+        block that was fine.
+      * ``min_distinct_exercises_per_week``
+      * ``max_sessions_per_exercise_per_week``
+      * ``min_pattern_categories_per_week`` — the catalog's own CORE
+        ``### Subsection`` headings, read through ``pattern_group``.
+
+    The three flexion axes (``min_flexion_sets_per_week``,
+    ``min_flexion_share_of_core_sets``,
+    ``min_loaded_flexion_exercises_per_week``) are NOT checked here, and
+    that is a rule about this repo rather than about the data: the
+    combined requirement is one formula and it already has one
+    implementation, in `render_validators`. A second copy is how the two
+    end up disagreeing about the number that decides a render. They are
+    named in ``axes_not_checked`` so ``compliant: True`` reads as
+    "compliant on the axes an artifact can answer", never as "checked
+    everything".
+    """
+    sessions = (block or {}).get("sessions") or {}
+    if not sessions:
+        return None
+    if catalog is None:
+        catalog = load_pattern_catalog(db)
+    if spec is None:
+        spec = CORE_WEEK_SPEC
+
+    def _axis(key):
+        val = spec.get(key)
+        return CORE_WEEK_SPEC[key] if val is None else val
+
+    per_session = _axis("sets_per_session") or {}
+    lower_dose = per_session.get("lower", CORE_WEEK_SPEC["sets_per_session"]["lower"])
+    upper_dose = per_session.get("upper", CORE_WEEK_SPEC["sets_per_session"]["upper"])
+    tol = _axis("session_set_overshoot_tolerance")
+    stored_types = (block or {}).get("session_types") or {}
+
+    core_slots: dict[str, list[str]] = {}
+    sessions_per_exercise: dict[str, set[str]] = {}
+    categories: set[str] = set()
+    conflicts: list[dict] = []
+    undetermined: list[str] = []
+
+    for stype in sorted(sessions):
+        slots = sessions[stype] or []
+        core = [s for s in slots
+                if ((catalog.get((s.get("exercise") or "").strip().lower())
+                     or {}).get("muscle") == "CORE")]
+        core_slots[stype] = [s.get("exercise") for s in core]
+        for s in core:
+            name = (s.get("exercise") or "").strip()
+            sessions_per_exercise.setdefault(name, set()).add(stype)
+            pg = pattern_group(name, catalog)
+            if pg:
+                categories.add(pg)
+
+        kind = session_type_from_content(slots, db) or stored_types.get(stype)
+        if kind is None:
+            undetermined.append(stype)
+            continue
+        floor = (upper_dose if kind == "upper" else max(lower_dose, upper_dose))
+        doses = [(s.get("dose") or {}).get("prescribed_sets") for s in core]
+        if core and all(d is None for d in doses):
+            undetermined.append(stype)
+            continue
+        sets = sum(int(d) for d in doses if isinstance(d, (int, float))
+                   and not isinstance(d, bool))
+        if sets < floor:
+            conflicts.append({
+                "axis":     "sets_per_session",
+                "session":  stype,
+                "observed": sets,
+                "required": floor,
+                "detail":   (f"{stype} is a {kind} session and carries {sets} "
+                             f"core set(s); the spec budgets {floor}-"
+                             f"{floor + tol}"),
+            })
+        elif sets > floor + tol:
+            conflicts.append({
+                "axis":     "sets_per_session",
+                "session":  stype,
+                "observed": sets,
+                "required": floor + tol,
+                "detail":   (f"{stype} is a {kind} session and carries {sets} "
+                             f"core set(s); the spec budgets {floor}-"
+                             f"{floor + tol}"),
+            })
+
+    distinct_floor = _axis("min_distinct_exercises_per_week")
+    if len(sessions_per_exercise) < distinct_floor:
+        conflicts.append({
+            "axis":     "min_distinct_exercises_per_week",
+            "observed": len(sessions_per_exercise),
+            "required": distinct_floor,
+            "detail":   (f"the block holds {len(sessions_per_exercise)} distinct "
+                         f"core exercise(s) across the week "
+                         f"({', '.join(sorted(sessions_per_exercise)) or 'none'}); "
+                         f"the spec requires {distinct_floor}"),
+        })
+
+    cap = _axis("max_sessions_per_exercise_per_week")
+    for name, where in sorted(sessions_per_exercise.items()):
+        if len(where) > cap:
+            conflicts.append({
+                "axis":     "max_sessions_per_exercise_per_week",
+                "exercise": name,
+                "observed": len(where),
+                "required": cap,
+                "detail":   (f"{name} holds a slot in {len(where)} sessions "
+                             f"({', '.join(sorted(where))}); the spec caps one "
+                             f"core exercise at {cap} sessions a week"),
+            })
+
+    cat_floor = _axis("min_pattern_categories_per_week")
+    if categories and len(categories) < cat_floor:
+        conflicts.append({
+            "axis":     "min_pattern_categories_per_week",
+            "observed": len(categories),
+            "required": cat_floor,
+            "detail":   (f"the block's core slots span {len(categories)} pattern "
+                         f"categor(ies) ({', '.join(sorted(categories))}); the "
+                         f"spec requires {cat_floor}"),
+        })
+
+    compliant = not conflicts
+    return {
+        "spec":             "core_week_spec",
+        "compliant":        compliant,
+        "copy_core_slots":  compliant,
+        "conflicts":        conflicts,
+        "core_slots":       core_slots,
+        "sessions_undetermined": sorted(set(undetermined)) or None,
+        "axes_checked": [
+            "sets_per_session", "min_distinct_exercises_per_week",
+            "max_sessions_per_exercise_per_week",
+            "min_pattern_categories_per_week",
+        ],
+        # Named, not silently omitted: `compliant` must never read as
+        # "every axis was checked". See the docstring for why these three
+        # live in `render_validators` and only there.
+        "axes_not_checked": [
+            "min_flexion_sets_per_week", "min_flexion_share_of_core_sets",
+            "min_loaded_flexion_exercises_per_week",
+        ],
+        "directive": (
+            "This block's core slots satisfy every core_week_spec axis an "
+            "artifact can answer; they may be carried forward."
+            if compliant else
+            "This block predates the current core_week_spec and its core "
+            "slots violate it. DO NOT COPY THEM. Build the week's core work "
+            "from core_week_spec and treat the block as authoritative for "
+            "its non-core slots only."),
+    }
+
+
+def strip_benched_slots(block: dict | None, benched) -> tuple[dict | None, list]:
+    """Remove benched movements from every block slot. ``(block, removed)``.
+
+    A benched movement must never survive in a block slot. The bench list
+    is the LEDGER's finding — two consecutive prescriptions into sessions
+    that were trained, performed neither time — and the payload's
+    instruction on it is "must not re-prescribe". An artifact the coach is
+    told outranks the split, still holding that movement in a slot, is the
+    data layer handing over a prescription its own ledger has withdrawn.
+
+    Deleted rather than flagged, and the asymmetry with `core_spec_conflicts`
+    is deliberate. There the spec states a floor with many legal answers
+    and the artifact is the only record of which one was prescribed, so
+    rewriting it would invent history. Here the answer is unique and it is
+    "not this one" — removing the slot destroys no information the ledger
+    does not already hold, and every removal comes back in the returned
+    list so it is reported rather than silently disappeared.
+
+    ``benched`` may be the ``adherence["benched"]`` entries or a bare
+    iterable of names. ``bench_blocked`` entries must NOT be passed: those
+    are movements the route guard REFUSED to bench because they are the
+    last way into a muscle, and the coach is expected to keep prescribing
+    them.
+
+    Positions are left as they are. They came from counting bullets in the
+    plan this block was derived from, and renumbering them would make a
+    removal look like a reshuffle to the next generation's diff.
+    """
+    names = set()
+    for b in benched or []:
+        name = b.get("exercise") if isinstance(b, dict) else b
+        if name:
+            names.add(str(name).strip().lower())
+    if not block or not names:
+        return block, []
+    out = json.loads(json.dumps(block))
+    removed: list[dict] = []
+    for stype, slots in (out.get("sessions") or {}).items():
+        keep = []
+        for s in slots or []:
+            if (s.get("exercise") or "").strip().lower() in names:
+                removed.append({
+                    "session_type": stype,
+                    "position":     s.get("position"),
+                    "exercise":     s.get("exercise"),
+                    "tag":          s.get("tag"),
+                    "reason":       "benched",
+                })
+                continue
+            keep.append(s)
+        out["sessions"][stype] = keep
+    return out, removed
+
+
 # --------------------------------------------------------- reconciliation
 def reconcile_block_with_logs(block: dict | None, rows: list[dict], db: dict,
                               catalog: dict | None, start: date,
@@ -1957,7 +2253,7 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
     # Three newest plans: the newest two bootstrap a block (see WHICH
     # PLAN above), and the one before the newest is the PRIOR GENERATION
     # the deload cadence needs to tell a crossing from a standing debt.
-    plans = load_plans(person, today_d, limit=3)
+    plans = load_plans(person, today_d, limit=3, db=db)
     stored = read_block(person)
     source = "artifact"
     undiffable_reason = None
@@ -1972,6 +2268,17 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
         else:
             stored = block_from_plan(base, catalog)
             source = "derived_from_plan"
+
+    # R-05, first half. A benched movement must never reach a slot the
+    # coach is told to copy. Applied HERE, before every downstream read —
+    # reconciliation, at-risk marking, both projections — so there is no
+    # path on which a benched slot survives into the payload. The bench
+    # list is `adherence.benched` only: `bench_blocked` movements were
+    # deliberately NOT benched because they are the last route into a
+    # muscle, and dropping those would strand the muscle.
+    stored, benched_removed = strip_benched_slots(
+        stored, (adherence or {}).get("benched"))
+
     status = block_status(stored, today_d, deloads)
 
     # If today's plan is already on disk, the generation before it is the
@@ -2077,6 +2384,16 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
         # ``stalled_sessions``, ``performed_instead``) that a rotation
         # check needs and a flattening drops.
         "sessions":                (stored or {}).get("sessions") or None,
+        # R-05. Whether this block's core slots may be carried forward,
+        # and if not, exactly which `core_week_spec` axes copying them
+        # would violate. Computed from the catalog and the spec — neither
+        # of them coach-written — so nothing the coach writes can turn it
+        # off. See `core_spec_conflicts` for why the artifact is marked
+        # rather than rewritten.
+        "core_spec":               core_spec_conflicts(stored, catalog, db=db),
+        # Slots the ledger had already withdrawn and this block was still
+        # carrying. Reported, not silently dropped.
+        "benched_slots_removed":   benched_removed or None,
         "block_id":                status.get("block_id"),
         "started":                 status.get("started"),
         "age_weeks":               status.get("age_weeks"),

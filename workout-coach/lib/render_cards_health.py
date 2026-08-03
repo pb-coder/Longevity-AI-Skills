@@ -21,7 +21,186 @@ from .render_components import (
 )
 from .render_cards_common import _heading, coach_block
 
-def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
+# One-cell State labels for an unresolved bodyweight trend, keyed off the
+# reason CODE ``sessions.bodyweight_trend`` emits. The distinction the
+# old bare "no trend" erased: "no data" and "the data does not resolve a
+# direction" are different answers, and only one of them is the user's
+# fault to fix.
+_BW_STATE_LABEL = {
+    "no_readings":                "no weigh-ins",
+    "too_few_readings":           "too few weigh-ins",
+    "window_shorter_than_min":    "window under 28d",
+    "readings_stale":             "last weigh-in over 7d ago",
+    "span_shorter_than_min":      "weigh-ins span under 7d",
+    "too_few_effective_readings": "one gap over half the span",
+    "no_time_variance":           "one day only",
+    "ci_straddles_zero":          "direction unresolved",
+}
+
+
+def _bw_state_label(block):
+    if not isinstance(block, dict):
+        return "trend unresolved"
+    return _BW_STATE_LABEL.get(block.get("reason"), "trend unresolved")
+
+
+# Same idea for the three body-composition channels, against the reason
+# codes their estimators emit. The window and span floors differ per
+# channel (waist 56/39, body fat 84/49, lean mass 112/88) so those labels
+# differ; everything else reads the same way on purpose.
+#
+# ``span_shorter_than_min``, ``too_few_effective_readings`` and
+# ``readings_stale`` name the SPREAD of the measurements, their
+# DISTRIBUTION inside that spread, and the age of the newest one. None of
+# the three is the window, and a label that said "window" for any of them
+# would repeat the confusion the gate was built to end.
+#
+# The numbers below are restated from ``sessions``' constants rather than
+# imported, so the renderer stays free of the analytics module.
+# ``LabelsMatchTheGateTests`` in ``tests/test_body_comp_surface.py`` fails
+# if they drift apart.
+_WAIST_STATE_LABEL = {
+    "no_readings":                "not measured",
+    "too_few_readings":           "too few measurements",
+    "window_shorter_than_min":    "window under 56d",
+    "readings_stale":             "last measured over 4w ago",
+    "span_shorter_than_min":      "measurements span under 39d",
+    "too_few_effective_readings": "one gap over half the span",
+    "no_time_variance":           "one day only",
+    "ci_straddles_zero":          "direction unresolved",
+}
+
+_BODY_FAT_STATE_LABEL = {
+    "no_readings":                "not measured",
+    "too_few_readings":           "too few readings",
+    "window_shorter_than_min":    "window under 84d",
+    "readings_stale":             "last read over 4w ago",
+    "span_shorter_than_min":      "readings span under 49d",
+    "too_few_effective_readings": "one gap over half the span",
+    "no_time_variance":           "one day only",
+    "ci_straddles_zero":          "direction unresolved",
+}
+
+_LEAN_MASS_STATE_LABEL = {
+    "no_readings":                "not measured",
+    "too_few_readings":           "too few readings",
+    "window_shorter_than_min":    "window under 112d",
+    "readings_stale":             "last read over 4w ago",
+    "span_shorter_than_min":      "readings span under 88d",
+    "too_few_effective_readings": "one gap over half the span",
+    "no_time_variance":           "one day only",
+    "ci_straddles_zero":          "direction unresolved",
+}
+
+
+def _body_comp_cells(weekly, series_key, latest, latest_key,
+                     trend_block, rate_key, rate_unit, labels,
+                     favourable_sign=-1, census_noun="weeks logged"):
+    """Value / series / State / status-class for one body-composition row.
+
+    ONE implementation behind waist, body fat and lean mass. They differ
+    only in which weekly key carries the series, which block key carries
+    the rate, and which sign of that rate is the good news; sharing the
+    body is what keeps the three rows honest in the same way rather than
+    in three slightly different ways.
+
+    Three inputs, in descending order of how much they let the row say:
+
+    1. ``trend_block`` is the only thing that can put a RATE in the State
+       cell, and only when its ``state`` is ``resolved``. Otherwise the
+       cell names the reason the fit did not resolve.
+    2. ``latest`` supplies the headline measurement.
+    3. ``weekly`` — the ``health_metrics_weekly`` series carrying this
+       channel per ISO week — always supplies the sparkline, and backstops
+       the other two.
+
+    With none of the optional inputs the cell falls back to a CENSUS of
+    the series: how many weeks carry a measurement. A census is a fact
+    about the data rather than a claim about the body, so the row degrades
+    to saying less rather than to saying something unearned. It never
+    prints "flat", "stable", or a zero, and a series with fewer than two
+    real points draws an empty sparkline box rather than a flat line.
+
+    ``favourable_sign`` is ``-1`` where down is the good direction (waist,
+    body fat) and ``+1`` where up is (lean mass). It only ever picks
+    between "good" and "amber"; neither channel earns a "warn".
+    """
+    series = [w.get(series_key) for w in (weekly or [])]
+    present = [v for v in series if v is not None]
+
+    value = None
+    if isinstance(latest, dict):
+        value = latest.get(latest_key)
+    if value is None and present:
+        value = present[-1]
+
+    cls = "muted"
+    if isinstance(trend_block, dict):
+        rate = trend_block.get(rate_key)
+        # ``resolved`` with no rate is a malformed block, not a rate of
+        # zero. Fall through to the reason label rather than printing a
+        # bare unit with nothing in front of it.
+        if trend_block.get("state") == "resolved" and rate is not None:
+            state_text = f"{signed(rate, 2)} {rate_unit}"
+            # Moving the favourable way during a lifting block is good
+            # news; moving the other way is worth a look, not an alarm.
+            cls = "good" if rate * favourable_sign > 0 else "amber"
+        else:
+            state_text = labels.get(trend_block.get("reason"),
+                                    "trend unresolved")
+    elif not present:
+        state_text = "not measured"
+    elif len(present) == 1:
+        state_text = "1 week logged, no trend"
+    else:
+        state_text = f"{len(present)} {census_noun}"
+
+    return value, series, state_text, cls
+
+
+def _body_comp_value_cell(value, unit, digits=1):
+    """Value cell for a body-composition row.
+
+    The unit rides along ONLY when there is a number in front of it. An
+    empty channel rendering a bare "cm" or "%" is the placeholder cell
+    ``Skills/DESIGN.md`` bans, and it also reads as a measurement whose
+    value happens to be missing rather than as a channel nobody has
+    filled in. The State cell carries the whole message instead.
+    """
+    if value is None:
+        return ""
+    return f'{fmt(value, digits)} <span class="muted">{esc(unit)}</span>'
+
+
+def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text,
+                bw_trend_block=None, waist_latest=None, waist_trend_block=None,
+                body_fat_latest=None, body_fat_trend_block=None,
+                lean_mass_latest=None, lean_mass_trend_block=None):
+    """Vitals table.
+
+    ``bw_trend_block`` is ``tracker.bodyweight_trend``. The bodyweight
+    State cell used to read a bare "no trend" whenever the scalar was
+    null, which conflates "no weigh-ins" with "the direction is not
+    resolved by four weeks of data" — the second is a real finding and
+    the estimator supplies the reason for it. Read the block; do not
+    summarise a null as an absence.
+
+    The three body-composition arguments pairs — ``waist_*``,
+    ``body_fat_*``, ``lean_mass_*`` — are ``tracker.waist_latest`` /
+    ``waist_trend_cm_per_4w``, ``body_fat_latest`` /
+    ``body_fat_trend_pct_per_4w`` and ``lean_mass_latest`` /
+    ``lean_mass_trend_kg_per_4w``. All six are optional: each row renders
+    from its series on ``weekly`` alone and states a census of that
+    series instead of a rate when its trend block is not supplied. See
+    ``_body_comp_cells``.
+
+    Body fat and lean mass carry no data in any export yet, so what these
+    rows normally render TODAY is the empty state — the row is present
+    and says "not measured". That is deliberate and is the point of the
+    channel: a vitals row that vanishes when unmeasured cannot be told
+    apart from a vitals row nobody thought to add, and neither can a row
+    that draws a flat line through nothing.
+    """
     hrv_series = [w.get("hrv_sdnn") for w in weekly]
     rhr_series = [w.get("resting_hr") for w in weekly]
     wt_series  = [w.get("wrist_temp_c") for w in weekly]
@@ -81,6 +260,18 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
         if t >= -1.0: return "amber"
         return "warn"
 
+    waist_value, waist_series, waist_state, waist_cls = _body_comp_cells(
+        weekly, "waist_cm", waist_latest, "value_cm", waist_trend_block,
+        "cm_per_4w", "cm/4w", _WAIST_STATE_LABEL, favourable_sign=-1)
+    bf_value, bf_series, bf_state, bf_cls = _body_comp_cells(
+        weekly, "body_fat_pct", body_fat_latest, "value_pct",
+        body_fat_trend_block, "pct_per_4w", "pp/4w", _BODY_FAT_STATE_LABEL,
+        favourable_sign=-1)
+    lm_value, lm_series, lm_state, lm_cls = _body_comp_cells(
+        weekly, "lean_mass_kg", lean_mass_latest, "value_kg",
+        lean_mass_trend_block, "kg_per_4w", "kg/4w", _LEAN_MASS_STATE_LABEL,
+        favourable_sign=+1)
+
     rows = [
         ("HRV", f'{fmt(latest_hrv, 1)} <span class="muted">ms</span>',
          sparkline(hrv_series, hrv_status(latest_hrv)),
@@ -104,9 +295,59 @@ def card_vitals(weekly, vo2max, vo2_trend, bw, bw_trend, bw_weekly, coach_text):
          "Peak rate of oxygen uptake. A standard fitness ceiling indicator."),
         ("Bodyweight", f'{fmt(bw.get("kg"), 2)} <span class="muted">kg</span>',
          sparkline(bw_weekly or [], "amber" if (bw_trend or 0) < -0.1 else "muted"),
-         signed(bw_trend, 2) + " kg/wk" if bw_trend is not None else "no trend",
+         (signed(bw_trend, 2) + " kg/wk" if bw_trend is not None
+          else _bw_state_label(bw_trend_block)),
          "amber" if (bw_trend or 0) < -0.1 else "muted",
          "Morning bodyweight, sparse-merge by date."),
+        ("Waist",
+         _body_comp_value_cell(waist_value, "cm"),
+         sparkline(waist_series, waist_cls),
+         waist_state,
+         waist_cls,
+         # The old wording here — "the rate needs at least 56 days of
+         # measurements" — described a requirement the estimator did not
+         # have, and the one it did have let four readings taken over
+         # three days resolve. This states the gate as it is enforced.
+         "Waist circumference, entered in Apple Health under Body "
+         "Measurements and imported from either export. It separates "
+         "where the weight went from how much of it there is. Slow "
+         "moving: to resolve a direction it needs at least 4 "
+         "measurements taken within the last 8 weeks, spread over at "
+         "least 39 days, with no single gap covering more than half "
+         "that spread, and with the newest no more than 4 weeks old. "
+         "The sparkline shows the last 4 weeks; the rate is fitted over "
+         "up to 8, so the line can be shorter than the fit behind it."),
+        ("Body fat",
+         _body_comp_value_cell(bf_value, "%"),
+         sparkline(bf_series, bf_cls),
+         bf_state,
+         bf_cls,
+         "Body fat percentage, entered in Apple Health under Body "
+         "Measurements and imported from either export. Nothing writes "
+         "it yet, so this row normally reads as not measured — that is "
+         "an empty channel, not a body that has no fat. A "
+         "phone-linked scale fills it automatically. To resolve a "
+         "direction it needs at least 4 readings inside the last 12 "
+         "weeks, spread over at least 49 days, with no single gap "
+         "covering more than half that spread, and with the newest no "
+         "more than 4 weeks old. A bioimpedance reading moves about a "
+         "percentage point on hydration alone, which is roughly a month "
+         "of real change, so the bar is deliberately high."),
+        ("Lean mass",
+         _body_comp_value_cell(lm_value, "kg"),
+         sparkline(lm_series, lm_cls),
+         lm_state,
+         lm_cls,
+         "Lean body mass, entered in Apple Health under Body "
+         "Measurements and imported from either export. Nothing writes "
+         "it yet, so this row normally reads as not measured. Scales "
+         "do not measure it: they compute it from your weight and a "
+         "body-fat estimate, so a resolved rate here restates the "
+         "bodyweight and body-fat rows rather than confirming them. To "
+         "resolve a direction it needs at least 4 readings inside the "
+         "last 16 weeks, spread over at least 88 days, with no single "
+         "gap covering more than half that spread, and with the newest "
+         "no more than 4 weeks old."),
     ]
 
     body = []

@@ -42,6 +42,12 @@ def build_export_zip(path: Path) -> None:
         "Apple Sleeping Wrist Temperature (degC)",
         "Breathing Disturbances (count)",
         "Apple Exercise Time (min)",
+        # Body composition. A real HealthAutoExport daily CSV carries all
+        # three; the unit token in the header follows the user's in-app
+        # preference, so the importer resolves these by prefix.
+        "Waist Circumference (cm)",
+        "Body Fat Percentage (%)",
+        "Lean Body Mass (kg)",
     ]
     workout_header = [
         "Workout Type",
@@ -95,6 +101,9 @@ def build_export_zip(path: Path) -> None:
                 "36.1",
                 "1.2",
                 "75",
+                "84.5",
+                "0.181",
+                "63.2",
             ]],
         )
         _write_csv_to_zip(
@@ -227,6 +236,11 @@ class HealthAutoExportTests(unittest.TestCase):
         self.assertEqual(len(metrics), 1)
         self.assertEqual(metrics[0]["vo2max"], 46.5)
         self.assertIsNone(metrics[0]["time_in_bed_h"])
+        # Body composition, metric export. Body fat arrives as HealthKit's
+        # fraction and is stored as percentage points.
+        self.assertEqual(metrics[0]["waist_cm"], 84.5)
+        self.assertEqual(metrics[0]["body_fat_pct"], 18.1)
+        self.assertEqual(metrics[0]["lean_body_mass_kg"], 63.2)
         self.assertEqual(len(sleep), 1)
         self.assertEqual(sleep[0]["total_h"], 7.0)
         self.assertIsNone(sleep[0]["time_in_bed_h"])
@@ -247,7 +261,15 @@ class HealthAutoExportTests(unittest.TestCase):
             )
 
         self.assertIn("HealthAutoExport daily column missing", err.getvalue())
+        # Body-composition columns are prefix-resolved, so their absence is
+        # reported with a wildcard unit rather than a guessed metric name.
+        self.assertIn("Waist Circumference (<unit>)", err.getvalue())
+        self.assertIn("Body Fat Percentage (<unit>)", err.getvalue())
+        self.assertIn("Lean Body Mass (<unit>)", err.getvalue())
         self.assertEqual(len(metrics), 1)
+        self.assertIsNone(metrics[0]["waist_cm"])
+        self.assertIsNone(metrics[0]["body_fat_pct"])
+        self.assertIsNone(metrics[0]["lean_body_mass_kg"])
         self.assertEqual(sleep, [])
 
     def test_workout_stamps_use_minute_start_and_report_ambiguous_matches(self) -> None:

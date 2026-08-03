@@ -33,8 +33,6 @@ Exercises database:
 
 Profile / HR estimation:
 
-- ``_percentile(values, pct)`` — linear-interp percentile, used by HR
-  estimation and a few session-distribution checks.
 - ``_age_from_birthday(birthday_str, today_d)`` — dynamic age from
   ``Profile.birthday`` (clamped to a sane 5-100 range).
 - ``estimate_max_hr(workout_sessions_all, today_d, profile, fallback_age)``
@@ -49,8 +47,6 @@ from datetime import date, timedelta
 
 from .constants import (
     DELOAD_MARKER,
-    EMPTY_STREAK_STOP,
-    MONTHLY_RE,
     MUSCLE_ALIASES,
     SECTION_PRIMARY,
     SUBSECTION_PRIMARY_HINTS,
@@ -520,20 +516,6 @@ def _load_exercises_db_cached(path_str: str, _mtime_ns: int, _size: int) -> dict
 
 
 # ---------- profile / HR estimation ----------
-def _percentile(values: list[float], pct: float) -> float | None:
-    """Return the ``pct`` percentile (0-100) of a numeric list, linear-interp."""
-    if not values:
-        return None
-    s = sorted(values)
-    if len(s) == 1:
-        return s[0]
-    k = (pct / 100.0) * (len(s) - 1)
-    lo = int(k)
-    hi = min(lo + 1, len(s) - 1)
-    frac = k - lo
-    return s[lo] * (1 - frac) + s[hi] * frac
-
-
 def _age_from_birthday(birthday_str: str | None, today_d: date) -> int | None:
     """Return integer age in years from a YYYY-MM-DD birthday + today, or None."""
     bd = _parse_iso_date(birthday_str)

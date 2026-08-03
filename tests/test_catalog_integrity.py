@@ -136,7 +136,7 @@ class CatalogIntegrityTests(unittest.TestCase):
         today = date(2026, 1, 7)  # Wednesday of a clean week
         rows = [
             {
-                "date": date(2026, 1, 6),
+                "date": "2026-01-06",
                 "exercise": "Dumbbell Pullover",
                 "sets": 3,
                 "reps": 10,
@@ -148,11 +148,60 @@ class CatalogIntegrityTests(unittest.TestCase):
         db = load_exercises_db(_DB_PATH)
         unknown_out: set[str] = set()
         result = weekly_volume_per_muscle(rows, db, today, window_days=28, unknown_out=unknown_out)
+        current = result["current"]
         self.assertNotIn(
             "lats",
-            result,
+            current,
             "weekly_volume_per_muscle returned a 'lats' key — phantom landmark not removed",
         )
+        self.assertIn(
+            "back",
+            current,
+            "Dumbbell Pullover's '+lats' must land on 'back' — an empty result "
+            "means the fixture row was dropped and this test proves nothing",
+        )
+
+    # ── C-17: abs folded into core ──────────────────────────────────────────
+
+    def test_abs_is_not_a_volume_landmark(self) -> None:
+        """C-17: 'abs' must not be a standalone VOLUME_LANDMARKS key (folded into core)."""
+        self.assertNotIn(
+            "abs",
+            VOLUME_LANDMARKS,
+            "'abs' is a phantom landmark — it should be folded into 'core'",
+        )
+
+    def test_abs_token_canonicalizes_to_core(self) -> None:
+        """C-17: a future '+abs' tag must route to 'core', never split volume."""
+        self.assertEqual(_canon_muscle("abs"), "core")
+
+    def test_no_catalog_entry_resolves_to_abs(self) -> None:
+        """C-17: the loaded catalog must emit zero 'abs' muscle tokens — every
+        abdominal movement resolves to 'core'.
+
+        Why this is the right layer, not weekly_volume_per_muscle: today no
+        catalog entry carries a raw ``+abs`` tag, and ``Ab Crunch Machine``
+        reaches ``core`` via ``SECTION_PRIMARY['CORE']``, NOT via the
+        ``abs``→``core`` alias. So an end-to-end volume fixture can never
+        exercise the alias — it would pass no matter what the alias said,
+        which is exactly the vacuity this test was rewritten to avoid. The
+        alias is forward-defensive (it only bites the day someone adds a
+        ``+abs`` tag). So we assert the invariant directly on the loaded
+        catalog, and separately prove the defensive path resolves.
+        """
+        db = load_exercises_db(_DB_PATH)
+        self.assertTrue(db, "catalog failed to load")
+        for name, meta in db.items():
+            self.assertNotEqual(
+                meta.get("primary"), "abs",
+                f"{name!r} resolves to a phantom 'abs' primary — must be 'core'",
+            )
+            self.assertNotIn(
+                "abs", meta.get("synergists", []),
+                f"{name!r} carries a phantom '+abs' synergist — must resolve to 'core'",
+            )
+        # The forward-defensive alias itself (`+abs` tag → 'core') is proven
+        # directly by test_abs_token_canonicalizes_to_core above; not repeated.
 
     # ── D8 specific ─────────────────────────────────────────────────────────
 
@@ -186,6 +235,41 @@ class CatalogIntegrityTests(unittest.TestCase):
             "glutes",
             f"_primary_from_note('primary: posterior chain') returned {result!r}, expected 'glutes'",
         )
+
+    def test_farmer_walk_does_not_grant_core(self) -> None:
+        """C-22: a two-handed carry is not an ab exercise — RA sits at 3.9% MVC
+        (McGill, Marshall & Andersen 2013, Ergonomics 56(2):293-302). Guard against
+        a well-meaning '+core' being added back."""
+        db = load_exercises_db(_DB_PATH)
+        entry = db.get("dumbbell farmer walk")
+        self.assertIsNotNone(entry)
+        self.assertNotIn("core", entry["synergists"])
+        self.assertIsNone(entry["primary"])
+        self.assertIn("traps", entry["synergists"])
+
+    # ── W6a: the one-handed carve-out ───────────────────────────────────────
+
+    def test_suitcase_carry_is_core_and_farmer_walk_is_not(self) -> None:
+        """W6a / D4: the asymmetry IS the mechanism. Ellestad et al.,
+        Int J Exerc Sci 2024;17(1):480-490 measure contralateral external
+        oblique at 33.0% MVIC for the one-handed carry against 34.5% for a
+        plank, while the bilateral carry reaches only 11-14% because the
+        two loads cancel. So exactly one of these two entries may carry
+        core credit, and it is not the one above."""
+        db = load_exercises_db(_DB_PATH)
+        suitcase = db.get("suitcase carry")
+        self.assertIsNotNone(suitcase, "Suitcase Carry missing from the DB")
+        self.assertEqual(suitcase["primary"], "core")
+        self.assertIsNone(db["dumbbell farmer walk"]["primary"])
+
+    def test_no_core_entry_carries_the_lengthened_flag(self) -> None:
+        """The CORE preamble states this as a deliberate rule: the
+        lengthened-position principle has never been tested on any
+        abdominal muscle. Four entries were just added — assert it."""
+        db = load_exercises_db(_DB_PATH)
+        flagged = [n for n, m in db.items()
+                   if m.get("primary") == "core" and m.get("lengthened")]
+        self.assertEqual(flagged, [])
 
 
 class ExternalRotatorPrimaryGapTests(unittest.TestCase):

@@ -19,20 +19,22 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 
+from .constants import SLEEP_TARGETS
 from .parsing import _parse_iso_date
 
 
-# Clinical / consumer-grade Sleep Efficiency thresholds. >85% is the
-# textbook "healthy adult" anchor; <80% is the cutoff that sleep clinics
-# flag as disturbed in screening tools (PSQI, ISI). Used to surface
-# outlier nights without making a per-driver recovery-score weighting
-# decision here — that lives in health.py once we have 4-6w of data.
-EFFICIENCY_HEALTHY_MIN_PCT = 85.0
-EFFICIENCY_DISTURBED_MAX_PCT = 80.0
-WASO_OUTLIER_MIN_H = 1.0
-# Single source of truth: the threshold used to count low-REM nights AND
-# the value reported as target_min_pct in flag_rem_sleep_anomalies().
-REM_TARGET_MIN_PCT = 20.0
+# Clinical / consumer-grade Sleep Efficiency and REM thresholds. The values
+# are sourced from SLEEP_TARGETS in constants.py (the single source of truth
+# for sleep norms); these module names are local aliases used by the anomaly
+# checks below. >85% efficiency is the textbook "healthy adult" anchor; <80%
+# is the cutoff sleep clinics flag as disturbed (PSQI, ISI); <20% REM is the
+# low-REM threshold. Surfacing outlier nights only — the per-driver
+# recovery-score weighting lives in health.py once we have 4-6w of data.
+EFFICIENCY_DISTURBED_MAX_PCT = SLEEP_TARGETS["efficiency_pct_disturbed"]
+WASO_OUTLIER_MIN_H = 1.0  # sleep.py-specific; no SLEEP_TARGETS equivalent
+# The threshold used to count low-REM nights AND reported as target_min_pct
+# in flag_rem_sleep_anomalies().
+REM_TARGET_MIN_PCT = SLEEP_TARGETS["rem_pct_min"]
 
 
 def recent_sleep_nights(nights: list[dict], today_d: date,

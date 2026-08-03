@@ -49,7 +49,10 @@ class CanonicalizeLogsTests(unittest.TestCase):
         ]
         path = self.write_month("2026.05", [row])
 
-        renamed, cleared, ambiguous = canonicalize_logs.canonicalize_csv(path, self.canonical)
+        report = canonicalize_logs.canonicalize_csv(path, self.canonical)
+        renamed = report["renamed"]
+        cleared = report["cleared"]
+        ambiguous = report["ambiguous"]
 
         self.assertEqual(renamed, 1)
         self.assertEqual(cleared, 1)
@@ -69,7 +72,10 @@ class CanonicalizeLogsTests(unittest.TestCase):
         ]
         path = self.write_month("2026.05", [row])
 
-        renamed, cleared, ambiguous = canonicalize_logs.canonicalize_csv(path, self.canonical)
+        report = canonicalize_logs.canonicalize_csv(path, self.canonical)
+        renamed = report["renamed"]
+        cleared = report["cleared"]
+        ambiguous = report["ambiguous"]
 
         self.assertEqual(renamed, 0)
         self.assertEqual(cleared, 0)
@@ -97,11 +103,17 @@ class CanonicalizeLogsTests(unittest.TestCase):
         second_counts = canonicalize_logs.canonicalize_csv(path, self.canonical)
         second_text = path.read_text(encoding="utf-8")
 
-        self.assertEqual(first_counts, (1, 1, [(3, "Leg Curl")]))
+        self.assertEqual(
+            (first_counts["renamed"], first_counts["cleared"],
+             first_counts["ambiguous"]),
+            (1, 1, [(3, "Leg Curl")]))
         # Second pass: nothing left to rename or clear; the ambiguous row
         # is still surfaced every run (it is never silently dropped), but
         # the file content itself does not change.
-        self.assertEqual(second_counts, (0, 0, [(3, "Leg Curl")]))
+        self.assertEqual(
+            (second_counts["renamed"], second_counts["cleared"],
+             second_counts["ambiguous"]),
+            (0, 0, [(3, "Leg Curl")]))
         self.assertEqual(first_text, second_text)
 
 

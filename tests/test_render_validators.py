@@ -8,9 +8,12 @@ from workout_coach.lib import render_validators
 from workout_coach.lib.render_validators import (
     COACH_STRING_MAX,
     auto_wrap_terms,
+    core_week_errors,
     count_working_sets_per_workout,
     validate_coach_reads,
     validate_workout_md,
+    workout_arm_dose_warnings,
+    workout_core_warnings,
     workout_set_budget_warnings,
 )
 
@@ -33,6 +36,98 @@ _PLAN_SHORT = """# Workout plan — 2026-06-14
 - Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
 - Shoulder Press Machine: 60kgx8 /// 60kgx8
 - Cable Overhead Tricep Extension: 19kgx8 /// 19kgx8
+"""
+
+_PLAN_CORE_COMPLIANT = """# Workout plan — 2026-06-14
+
+## Workout 1: UPPER PUSH + CORE
+- Jumping Jacks: 50
+- Arm Circles: 20
+- Dumbbell Flat Bench Press: 28kgx5 (warmup) /// 40kgx3 (warmup) /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10 /// 54kgx8-10
+- Shoulder Press Machine: 45kgx8-10 /// 45kgx8-10 /// 45kgx8-10
+  — leave 1-2 in tank
+- Dumbbell Fly: 18kgx10 /// 18kgx10 /// 18kgx10
+- Kneeling Cable Crunch: 20kgx12-15 /// 20kgx12-15
+- Cable Lateral Raise: 15kgx10 /// 15kgx10 /// 15kgx10
+  — superset with the cable crunch above
+- Cable Overhead Tricep Extension: 35kgx8-10 /// 35kgx8-10 /// 35kgx8-10
+"""
+
+_PLAN_NO_CORE = """# Workout plan — 2026-06-14
+
+## Workout 1: LEGS
+- Jumping Jacks: 50
+- Barbell Back Squat: 90kgx8 /// 90kgx8 /// 90kgx8
+- Leg Press: 120kgx10 /// 120kgx10
+"""
+
+_PLAN_CORE_LAST = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Cable Lateral Raise: 14kgx10 /// 14kgx10
+- Kneeling Cable Crunch: 20kgx12 /// 20kgx12
+"""
+
+_PLAN_CORE_OVER_ALLOCATED = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Kneeling Cable Crunch: 20kgx12 /// 20kgx12 /// 20kgx12 /// 20kgx12
+- Cable Lateral Raise: 14kgx10 /// 14kgx10
+"""
+
+_PLAN_CORE_OPTIONAL_QUALIFIER = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Kneeling Cable Crunch: 20kgx12 /// 20kgx12 (if you can make it)
+- Cable Lateral Raise: 14kgx10 /// 14kgx10
+"""
+
+_PLAN_CORE_NO_FLEXION = """# Workout plan — 2026-06-14
+
+## Workout 1: PULL
+- Jumping Jacks: 50
+- Cable Lat Pulldown: 65kgx8 /// 65kgx8 /// 65kgx8
+- Cable Pallof Press: 15kgx10 /// 15kgx10
+- Cable Face Pull: 20kgx15 /// 20kgx15
+"""
+
+_PLAN_ARM_NONE = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Shoulder Press Machine: 60kgx8 /// 60kgx8
+"""
+
+_PLAN_ARM_DOSE_MET = """# Workout plan — 2026-06-14
+
+## Workout 1: PUSH
+- Jumping Jacks: 50
+- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8 /// 52kgx8
+- Cable Overhead Tricep Extension: 20kgx10 /// 20kgx10 /// 20kgx10
+- Cable Tricep Pushdown: 25kgx10 /// 25kgx10 /// 25kgx10
+- Shoulder Press Machine: 60kgx8 /// 60kgx8
+
+## Workout 2: PULL
+- Cable Lat Pulldown: 65kgx8 /// 65kgx8 /// 65kgx8
+- Incline Dumbbell Curl: 14kgx10 /// 14kgx10 /// 14kgx10
+- Bayesian Cable Curl: 12kgx10 /// 12kgx10 /// 12kgx10
+- Cable Face Pull: 20kgx15 /// 20kgx15
+"""
+
+_PLAN_ARM_CURL_LAST = """# Workout plan — 2026-06-14
+
+## Workout 1: PULL
+- Jumping Jacks: 50
+- Cable Lat Pulldown: 65kgx8 /// 65kgx8 /// 65kgx8
+- Cable Face Pull: 20kgx15 /// 20kgx15
+- Incline Dumbbell Curl: 14kgx10 /// 14kgx10 /// 14kgx10
 """
 
 
@@ -185,7 +280,12 @@ class RenderValidatorTests(unittest.TestCase):
   — brace before the first rep
 """)
         self.assertEqual(errors, [])
-        self.assertTrue(any("3 sub-bullets" in w for w in warnings))
+        # Pinned string updated 2026-08-02: the counter now says
+        # "rationale sub-bullets", because it counts only those. All three
+        # sub-bullets here ARE rationale (none is a superset or
+        # anchor-change routing line), so the COUNT is unchanged at 3 and
+        # this test still measures what it always measured.
+        self.assertTrue(any("3 rationale sub-bullets" in w for w in warnings))
         self.assertTrue(any("comparative-history" in w for w in warnings))
 
     def test_workout_md_flags_strength_sets_when_gate_says_zone_2(self) -> None:
@@ -229,6 +329,109 @@ class RenderValidatorTests(unittest.TestCase):
         # identical behavior to before this check was added.
         errors, warnings = validate_workout_md(_PLAN_17)
         self.assertFalse(any("gate" in e for e in errors))
+    def test_core_warnings_silent_on_compliant_workout(self) -> None:
+        # The SKILL.md worked example (fixed by Task D): core is
+        # supersetted inside the isolation block, 2 sets, a flexion
+        # movement, not the final bullet, no optional qualifier.
+        self.assertEqual(workout_core_warnings(_PLAN_CORE_COMPLIANT), [])
+
+    def test_core_warnings_flags_zero_core_bullets(self) -> None:
+        warns = workout_core_warnings(_PLAN_NO_CORE)
+        self.assertTrue(any(
+            "Workout 1: LEGS" in w and "no core exercise" in w for w in warns))
+
+    def test_core_warnings_flags_core_as_last_bullet(self) -> None:
+        # The known-bad shape: C-04 measured this in 24/24 real plans.
+        warns = workout_core_warnings(_PLAN_CORE_LAST)
+        self.assertTrue(any(
+            "core is the last bullet" in w and "isolation block" in w
+            for w in warns))
+
+    def test_core_warnings_flags_over_allocated_sets(self) -> None:
+        warns = workout_core_warnings(_PLAN_CORE_OVER_ALLOCATED)
+        self.assertTrue(any(
+            "4 core sets" in w and "over-allocated" in w for w in warns))
+        # Core isn't the last bullet here, so warning (2) must not fire.
+        self.assertFalse(any("last bullet" in w for w in warns))
+
+    def test_core_warnings_flags_optional_qualifier(self) -> None:
+        warns = workout_core_warnings(_PLAN_CORE_OPTIONAL_QUALIFIER)
+        self.assertTrue(any(
+            "Kneeling Cable Crunch" in w and "optional" in w for w in warns))
+
+    def test_flexion_is_a_weekly_requirement_not_a_per_session_one(self) -> None:
+        # REPLACES test_core_warnings_flags_zero_flexion_movement.
+        #
+        # A session whose only core movement is anti-rotation (Cable
+        # Pallof Press is CORE > Anti-Rotation) used to be flagged. It is
+        # not any more, and that is the point of W4: requiring flexion in
+        # EVERY session is the rule that produced 94% flexion over six
+        # months. See `workout_core_warnings`' docstring for the
+        # arithmetic. Flexion is now required once per WEEK, and more
+        # strictly — it must carry an external load.
+        self.assertEqual(
+            [w for w in workout_core_warnings(_PLAN_CORE_NO_FLEXION)
+             if "flexion" in w],
+            [])
+        week = _PLAN_CORE_NO_FLEXION + """
+## Workout 2: LOWER
+- Barbell Back Squat: 90kgx8 /// 90kgx8
+- Cable Pallof Press: 15kgx10 /// 15kgx10 /// 15kgx10 /// 15kgx10
+- Leg Press: 120kgx10 /// 120kgx10
+"""
+        self.assertTrue(any("loaded flexion" in e
+                            for e in core_week_errors(week)))
+
+    def test_core_warnings_does_not_hardcode_exercise_names(self) -> None:
+        # Regression guard for the audit's hard constraint: the core
+        # movement set and the flexion subset must come from the catalog
+        # parser, never a literal list living in this module.
+        import inspect
+        src = inspect.getsource(render_validators)
+        for catalog_name in ("Kneeling Cable Crunch", "Leg Raise",
+                              "Cable Pallof Press", "Plank", "Dead Bug"):
+            self.assertNotIn(catalog_name, src)
+
+    def test_arm_dose_warnings_flags_zero_direct_sets_for_both_muscles(self) -> None:
+        warns = workout_arm_dose_warnings(_PLAN_ARM_NONE)
+        self.assertTrue(any(
+            "0 direct biceps sets" in w and "floor is 6" in w for w in warns))
+        self.assertTrue(any(
+            "0 direct triceps sets" in w and "floor is 6" in w for w in warns))
+
+    def test_arm_dose_warnings_silent_when_weekly_floor_met(self) -> None:
+        # 6 direct biceps sets (Incline Dumbbell Curl + Bayesian Cable
+        # Curl) and 6 direct triceps sets (Cable Overhead Tricep
+        # Extension + Cable Tricep Pushdown) summed ACROSS both
+        # workouts meets the floor exactly; no dose warning fires. The
+        # compounds (bench, lat pulldown) contribute synergist credit
+        # only and must not be counted.
+        self.assertEqual(workout_arm_dose_warnings(_PLAN_ARM_DOSE_MET), [])
+
+    def test_arm_dose_warnings_flags_curl_as_last_bullet(self) -> None:
+        warns = workout_arm_dose_warnings(_PLAN_ARM_CURL_LAST)
+        self.assertTrue(any(
+            "biceps is the last bullet" in w and "isolation block" in w
+            for w in warns))
+
+    def test_arm_dose_warnings_fail_open_when_catalog_unresolved(self) -> None:
+        # A validator that cannot identify any biceps/triceps exercise
+        # must not flag every workout as arm-deficient.
+        with patch.object(
+            render_validators, "_biceps_triceps_exercise_names",
+            return_value=(set(), set()),
+        ):
+            self.assertEqual(workout_arm_dose_warnings(_PLAN_ARM_NONE), [])
+
+    def test_arm_dose_warnings_does_not_hardcode_exercise_names(self) -> None:
+        # Same regression guard as core: the biceps/triceps name sets must
+        # come from the catalog parser, never a literal list in this module.
+        import inspect
+        src = inspect.getsource(render_validators)
+        for catalog_name in ("Incline Dumbbell Curl", "Bayesian Cable Curl",
+                              "Cable Overhead Tricep Extension",
+                              "Cable Tricep Pushdown"):
+            self.assertNotIn(catalog_name, src)
 
     def test_workout_md_builds_exercise_catalog_once_per_validation(self) -> None:
         text = """# Workout plan — 2026-05-29
@@ -248,6 +451,63 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(warnings, [])
         names.assert_called_once_with()
+
+
+class ExternalLoadFlagTests(unittest.TestCase):
+    """``bullet["loaded"]`` means an EXTERNAL kg load and nothing else.
+
+    `_WORKOUT_EXTERNAL_LOAD_RE` is deliberately narrower than
+    `_WORKOUT_LOADED_RE`: the wider pattern also accepts a bare
+    digit-x-digit rep token, which says nothing about load. That one
+    regex is the only thing keeping a bodyweight crunch out of the core
+    spec's loaded-flexion axis, and until now nothing tested it —
+    widening it to the rep-x-load form left the whole suite green while
+    letting `Crunch: 3x15` count as progressively loadable work.
+    """
+
+    def _loaded(self, bullet: str) -> bool:
+        text = f"## Workout 1: PUSH\n- {bullet}\n"
+        bullets = render_validators._iter_workout_exercise_bullets(text)
+        return bullets["Workout 1: PUSH"][0]["loaded"]
+
+    def test_a_kg_load_is_loaded(self) -> None:
+        for body in ("Ab Crunch Machine: 30kgx12 /// 30kgx12",
+                     "Kneeling Cable Crunch: 20 kg x 12",
+                     "Suitcase Carry: 24kgx30m"):
+            with self.subTest(body=body):
+                self.assertTrue(self._loaded(body))
+
+    def test_a_rep_by_rep_token_is_not_a_load(self) -> None:
+        # THE case. `3x15` is sets-by-reps, not kilograms. If this ever
+        # reads as loaded, a bodyweight crunch satisfies the core spec's
+        # loaded-flexion requirement and the only progressively-loadable
+        # pattern quietly leaves the week.
+        for body in ("Crunch: 3x15 /// 3x15",
+                     "Hanging Leg Raise: 3 x 12",
+                     "Plank: 45s /// 45s",
+                     "Bird Dog: 12 /// 12"):
+            with self.subTest(body=body):
+                self.assertFalse(self._loaded(body))
+
+    def test_a_bodyweight_flexion_week_written_in_reps_still_fails(self) -> None:
+        # The same defect at the axis it protects, so this survives a
+        # refactor that moves the regex.
+        plan = """# Workout plan — 2026-08-02
+
+## Workout 1: LOWER A + CORE
+- Barbell Back Squat: 90kgx8 /// 90kgx8
+- Crunch: 3x15 /// 3x15
+- Plank: 45s /// 45s
+- Calf Raise Machine: 55kgx12 /// 55kgx12
+
+## Workout 2: UPPER A + CORE
+- Dumbbell Flat Bench Press: 50kgx8 /// 50kgx8
+- Crunch: 3x15 /// 3x15
+- Cable Lateral Raise: 14kgx10 /// 14kgx10
+"""
+        self.assertTrue(any("loaded flexion" in e
+                            for e in core_week_errors(plan)),
+                        core_week_errors(plan))
 
 
 if __name__ == "__main__":

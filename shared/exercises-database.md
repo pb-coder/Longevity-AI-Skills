@@ -1,7 +1,7 @@
 # Exercises Database
 
 Organized by primary muscle group > movement pattern. Tags:
-- `[BB]` Barbell `[DB]` Dumbbell `[Cable]` `[Machine]` `[BW]` Bodyweight `[Smith]` `[LM]` Landmine `[Band]`
+- `[BB]` Barbell `[DB]` Dumbbell `[Cable]` `[Machine]` `[BW]` Bodyweight `[Smith]` `[LM]` Landmine `[Band]` `[Plate]` loose weight plate
 - `+muscle` = synergist (coach counts as 0.5 set for that muscle)
 - `◆` = lengthened-position emphasis (prioritize per §5 of training science)
 
@@ -51,6 +51,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Decline Chest Press Machine [Machine] — +triceps
 - Push-Up [BW] — +front delt, +triceps
 - Dip [BW] — +front delt, +triceps ◆
+- Wide Chest Press Machine [Machine] — +front delt, +triceps
 
 ### Chest Isolation
 - Pec Deck [Machine]
@@ -136,6 +137,7 @@ Organized by primary muscle group > movement pattern. Tags:
 ### Traps
 - Dumbbell Shrug [DB]
 - Cable Shrug [Cable]
+- Incline Y-Raise [DB] — +rear delts
 
 ---
 
@@ -207,8 +209,8 @@ Organized by primary muscle group > movement pattern. Tags:
 
 ### Squat Pattern (Compound)
 - Barbell Back Squat [BB] — +glutes, +erectors ◆ (deep)
-- Barbell Front Squat [BB] — +core ◆ (deep)
-- Dumbbell Goblet Squat [DB] — +core ◆
+- Barbell Front Squat [BB] ◆ (deep)
+- Dumbbell Goblet Squat [DB] ◆
 - Dumbbell Bulgarian Split Squat [DB] — +glutes ◆
 - Hack Squat [Machine] — +glutes ◆ (deep)
 - Belt Squat Machine [Machine] — +glutes ◆
@@ -262,6 +264,36 @@ Organized by primary muscle group > movement pattern. Tags:
 - Hip Thrust Machine [Machine]
 - Cable Hip Thrust [Cable]
 - Reverse Hyperextension Machine [Machine] — +hamstrings, +erectors
+- Dumbbell Hip Thrust [DB]
+
+(No hip-thrust variant credits +hamstrings, and that is deliberate — but read
+the next paragraph before treating it as settled. The knee stays flexed and
+roughly static through the rep, so the biarticular hamstring shortens at the
+knee while it extends the hip, and it works over a shorter range than it does
+in a hinge. Contreras et al., J Appl Biomech 2015;31(6):452-458 measure biceps
+femoris in the barbell hip thrust at 40.8% mean MVIC. That is a substantial
+stimulus: 2.7x the back squat's 14.9% in the same study, though still well under
+the hip thrust's own gluteus maximus values (69.5% upper, 86.8% lower).
+Reverse Hyperextension keeps +hamstrings because there the knee is extended and
+the hamstring works long.
+
+INFERENCE, NOT MEASUREMENT: no published work maps an EMG amplitude onto a
+set-credit fraction, so "40.8% MVIC does not earn the 0.5-set synergist credit"
+is a judgement call, recorded here so a later reader can overturn it with better
+evidence rather than rediscover it.
+
+Scale of the removal, measured 2026-08-02 over the trailing 28 days: 0.5
+credited hamstring sets/wk for <OtherPerson>, 0.0 for <Person>. The entire
+corpus contains four Dumbbell Hip Thrust sets, all <OtherPerson>, one session on
+2026-07-27 — so 4 x 0.5 = 2.0 credited hamstring sets, ever. An earlier draft of
+this note said the tag was worth ~4.5 sets/wk; that figure was never measured
+and is wrong by about 9x. Hamstrings currently sit at 5.0 / 5.5 sets/wk against
+MEV 4, so the removal does not push either person under MEV.
+
+Direction of the entry itself: HEAD carries no Dumbbell Hip Thrust at all, so
+relative to the committed baseline this change ADDS the entry — worth about 1.0
+glute sets/wk for <OtherPerson> at current logging. It does not restore a
+previous state.)
 
 ### Isolation
 - Cable Kickback (Glutes) [Cable]
@@ -290,27 +322,83 @@ Organized by primary muscle group > movement pattern. Tags:
 
 ## CORE
 
-### Anti-Extension
-- Plank [BW]
-- Dead Bug [BW]
-- Hollow Body Hold [BW]
-- Ab Crunch Machine [Machine]
-
-### Anti-Rotation
-- Cable Pallof Press [Cable]
-- Bird Dog [BW]
+(Core = the abdominal wall: rectus abdominis + obliques. The spinal erectors are tracked
+separately as `erectors` and are fed by hinges and back extensions — see §24. No entry here
+carries ◆: the lengthened-position principle (§5) has never been tested on any abdominal
+muscle, and its absence is deliberate, not an oversight.)
 
 ### Flexion
-- Leg Raise [BW]
-- Captain's Chair Knee Raise [Machine]
+- Ab Crunch Machine [Machine]
+- Stomach Press Machine [Machine]
 - Kneeling Cable Crunch [Cable]
 - Standing Cable Crunch [Cable]
 - Cable Reverse Crunch [Cable]
+- Hanging Leg Raise [BW]
+- Hanging Knee Raise [BW]
+- Leg Raise [BW]
+- Captain's Chair Knee Raise [Machine]
+- Roman Chair Sit-Up [BW]
+- Crunch [BW]
 - Bicycle Crunch [BW]
 - V-Up [BW]
 - Flutter Kick [BW]
 - Mountain Climber [BW]
-- Roman Chair Sit-Up [BW]
+
+(Hanging Knee Raise is the rung below Hanging Leg Raise, not a synonym for it —
+the knee-flexed version shortens the lever and is the entry point to hanging
+work. Escamilla et al., Phys Ther 2006;86(5):656-671 measured the "hanging
+knee-up" as top-tier for rectus abdominis in its own right, so the easier rung
+is not a throwaway. Do not collapse the two names; that erased the progression
+for a movement with 11 logged sessions.)
+
+### Anti-Extension
+- Plank [BW]
+- Dead Bug [BW]
+- Hollow Body Hold [BW]
+- Ab Wheel Rollout [BW]
+- L-Sit [BW]
+
+(Ab Wheel Rollout is the only progressable rung in this subsection — every other
+entry is a fixed-position hold whose only overload knob is time. Escamilla et
+al., Phys Ther 2006;86(5):656-671 place the rollout in the top tier for upper
+AND lower rectus abdominis and for the external oblique, and separately report
+low lumbar paraspinal EMG amplitude for it.
+
+That is an activation reading, not a spine-load reading. The study performed no
+biomechanical modelling of compressive or shear load, so it cannot support a
+claim of "low lumbar compression" — an earlier draft of this note made exactly
+that claim and it has been withdrawn. The paper's own caution points the other
+way: the top-tier exercises "were also the most effective in activating
+extraneous musculature".
+
+Device matters. Escamilla tested the Power Wheel; the companion paper (J Orthop
+Sports Phys Ther 2006;36(2):45-57) found the commercial Ab Roller no better than
+a crunch. Treat the top-tier result as Power-Wheel-specific until someone
+measures the wheel actually in use. Progress by kneeling → standing and by
+rollout distance.)
+
+### Anti-Rotation
+- Cable Pallof Press [Cable]
+- Bird Dog [BW]
+- Plate Around the World [Plate]
+
+(Plate Around the World carries NO peer-reviewed EMG or intervention data — it is
+the weakest-evidenced entry in this file. Its anti-rotation classification is a
+mechanistic analogy to the Pallof press: a load orbiting the torso that the trunk
+has to resist. Treat the classification as a hypothesis, not a measurement, and
+never let it satisfy a flexion requirement.)
+
+### Anti-Lateral-Flexion
+- Side Plank [BW]
+- Suitcase Carry [DB] — +traps, +forearms
+
+(Suitcase Carry is the loaded rung above Side Plank and the reason this
+subsection is not bodyweight-only. Ellestad et al., Int J Exerc Sci
+2024;17(1):480-490: contralateral external oblique 33.0% MVIC, against 34.5% for
+a plank — while the BILATERAL farmer's carry reaches only 11-14%, because the two
+loads cancel. That asymmetry is the whole mechanism, so both sides must be
+performed; one side is half the prescription. The two-handed Dumbbell Farmer Walk
+stays under FULL BODY with no core credit for exactly this reason.)
 
 ### Rotation
 - Cable Woodchop (High to Low) [Cable]
@@ -320,10 +408,6 @@ Organized by primary muscle group > movement pattern. Tags:
 - Rotary Torso Machine [Machine]
 - Landmine Rotation [LM]
 - Roman Chair Side Bend [Machine]
-
-### Isometric
-- L-Sit [BW]
-- Side Plank [BW]
 
 ---
 
@@ -339,7 +423,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Dumbbell Thruster [DB]
 - Barbell Clean [BB]
 - Barbell Snatch [BB]
-- Dumbbell Farmer Walk [DB] — +traps, +forearms, +core
+- Dumbbell Farmer Walk [DB] — +traps, +forearms
 - Box Jump [BW]
 - Broad Jump [BW]
 - Tuck Jump [BW]

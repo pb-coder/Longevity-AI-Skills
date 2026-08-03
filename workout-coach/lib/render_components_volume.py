@@ -13,16 +13,32 @@ def muscle_bars(weekly_volume, hr_divergence=None):
     hr_divergence = hr_divergence or {}
 
     def gap_score(m):
+        """Lower sorts first. Below-MEV muscles rank ahead of over-MRV
+        muscles, which rank ahead of in-range muscles (three priority
+        tiers, each in its own score band so they never interleave).
+        *Within* the below-MEV and over-MRV tiers, the muscle furthest
+        from its landmark — i.e. needing the most attention — must sort
+        first: subtract the gap so a bigger deficit/overage produces a
+        more negative (earlier-sorting) score. Adding the gap instead
+        would rank the smallest deficit/overage first, showing the
+        least urgent muscle at the top of a chart whose job is to
+        surface what needs attention.
+        """
         v = current.get(m, 0.0)
         lm = landmarks.get(m, {})
         mev, mrv = lm.get("mev", 0), lm.get("mrv", 0)
         if v < mev:
-            return -2_000 + (mev - v)
+            return -2_000 - (mev - v)
         if v > mrv:
-            return -1_000 + (v - mrv)
+            return -1_000 - (v - mrv)
         return v - mev
 
-    muscles = sorted(current.keys(), key=gap_score)[:14]
+    # Show every tracked muscle. The former [:14] cap silently dropped
+    # whichever 2 muscles sorted last (currently 16 total landmarks) with
+    # no indication on the card — 16 bar-rows is not an unreasonable
+    # dashboard length and .bar-row has no fixed-height container that
+    # would require capping.
+    muscles = sorted(current.keys(), key=gap_score)
     xmax = max(
         max(current.values()) if current else 1,
         max((landmarks.get(m, {}).get("mrv", 0) for m in muscles), default=1),

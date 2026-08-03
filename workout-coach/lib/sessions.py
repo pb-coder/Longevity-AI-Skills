@@ -11,8 +11,31 @@ Functions:
   exercise.
 - ``_is_flagged_nonfasted(entry)`` — bodyweight-row note filter; pulls
   out non-morning/non-fasted entries so the trend slope isn't distorted.
-- ``bodyweight_trend_kg_per_week(entries)`` — slope over the last clean
-  8 entries.
+- ``smoothed_rate_per_week(points, smooth_n)`` — weekly rate of change
+  between mean-of-N smoothed endpoints, over their centroid span.
+- ``ols_rate_per_week(points)`` — least-squares weekly rate with its
+  standard error and 95% confidence interval.
+- ``_trend_verdict(points, anchor, start_d, ...)`` — the shared window /
+  sample-size / SPAN / recency / LEVERAGE / interval gate every
+  measurement trend below runs through. Window length, reading span and
+  reading distribution are three separate requirements: readings can sit
+  inside a long window and span three days, and they can span the whole
+  window while sitting at two ends of it.
+- ``_trend_block(...)`` — the one block builder behind every trend below,
+  parameterised only by the unit-suffixed rate key and its reporting
+  period. The block SHAPE is the contract.
+- ``bodyweight_trend(entries, today_d, start_date)`` — OLS weekly slope
+  over a minimum-28-day TIME window, with an explicit
+  ``resolved`` / ``unresolved`` state.
+- ``bodyweight_trend_kg_per_week(entries)`` — the scalar from that
+  block: the rate when it resolves, ``None`` when it does not.
+- ``waist_trend(readings, today_d)`` — the same gate over waist
+  circumference, reported in cm per 4 weeks over a minimum-56-day
+  window.
+- ``body_fat_trend(readings, today_d)`` / ``lean_mass_trend(...)`` — the
+  same gate over the remaining two body-composition columns, both in
+  per-4-week units. Neither column carries data in any export yet, so
+  both are pre-wiring and their EMPTY state is the shipped behaviour.
 - ``build_monthly_sessions(rows, summaries, totals, apple_sessions)`` —
   one entry per session-date with the kind (strength / cardio / other),
   TOTAL-row metadata, volume, and Apple-observed max HR folded in.
@@ -21,8 +44,9 @@ Functions:
 """
 from __future__ import annotations
 
+import math
 import re
-from datetime import date  # noqa: F401  (kept for type-hint forward-compat)
+from datetime import date, timedelta
 
 
 from .parsing import _parse_iso_date
@@ -130,42 +154,1164 @@ def _is_flagged_nonfasted(entry: dict) -> bool:
     return any(k in notes for k in ("not fasted", "evening", "after", "post-meal"))
 
 
-def bodyweight_trend_kg_per_week(
-    entries: list[dict],
-    start_date: str | date | None = None,
-) -> float | None:
-    """Simple slope over the last 8 entries: (last_kg - first_kg) / weeks_between.
+def smoothed_rate_per_week(points: list[tuple[date, float]],
+                           smooth_n: int = 3) -> float | None:
+    """Weekly rate of change from mean-of-N smoothed endpoints.
 
-    Returns None if fewer than 3 entries or the span is <7 days (too noisy).
-    Excludes entries with notes flagging non-morning/non-fasted context. When
-    ``start_date`` is supplied, the 8-entry window starts no earlier than that
-    date so active nutrition phases are judged inside their own window.
+    ``points`` is ``[(date, value), ...]``; it is sorted internally. The
+    head mean is the first ``n`` values, the tail mean the last ``n``, and
+    the denominator is the span between the two groups' MEAN DATES — not
+    between the outermost dates. Dividing a centroid-to-centroid change by
+    the full first-to-last span is the classic smoothing bug: it shrinks
+    every rate toward zero by the amount of series the smoothing consumed.
+
+    ``n`` is clamped to ``len(points) // 2`` so the head and tail groups
+    never overlap.
+
+    Raw endpoints are the wrong tool for a noisy daily series. A single
+    high or low reading at either end of the window swings the answer by
+    more than the real weekly signal. Clamping ``n`` all the way down to 1
+    — which is what a 3-point series used to do — silently hands back
+    exactly those raw endpoints under a name that promises smoothing, so
+    the caller has no way to tell a smoothed rate from an unsmoothed one.
+    We refuse instead: the clamp floors at 2, and a series too short to
+    form two disjoint pairs returns None.
+
+    Returns None when the clamped ``n`` would fall below 2 (fewer than 4
+    points) or the centroid span is under a day.
+    """
+    pts = sorted(points, key=lambda p: p[0])
+    n = min(smooth_n, len(pts) // 2)
+    if n < 2:
+        return None
+    head, tail = pts[:n], pts[-n:]
+    head_mean = sum(v for _, v in head) / n
+    tail_mean = sum(v for _, v in tail) / n
+    base = pts[0][0]
+    head_day = sum((d - base).days for d, _ in head) / n
+    tail_day = sum((d - base).days for d, _ in tail) / n
+    span_days = tail_day - head_day
+    if span_days < 1:
+        return None
+    return (tail_mean - head_mean) / span_days * 7.0
+
+
+# Two-tailed 95% Student-t critical values by degrees of freedom. A
+# bodyweight slope is fitted on a handful of noisy morning weigh-ins, so the
+# normal quantile (1.96) understates the interval badly at the sample sizes
+# that actually occur: at df=13 the correct multiplier is 2.160, which is 10%
+# wider. Past df=30 the two agree to under 3% and the table falls back.
+_T_CRIT_95 = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
+    8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160,
+    14: 2.145, 15: 2.131, 16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093,
+    20: 2.086, 21: 2.080, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.060,
+    26: 2.056, 27: 2.052, 28: 2.048, 29: 2.045, 30: 2.042,
+}
+_Z_CRIT_95 = 1.96
+
+
+def _t_crit_95(dof: int) -> float:
+    """Two-tailed 95% critical value for ``dof`` degrees of freedom."""
+    if dof < 1:
+        return float("inf")
+    return _T_CRIT_95.get(dof, _Z_CRIT_95)
+
+
+def ols_rate_per_week(points: list[tuple[date, float]],
+                      noise_sd_floor: float | None = None) -> dict | None:
+    """Least-squares weekly rate of change, with its uncertainty.
+
+    ``points`` is ``[(date, value), ...]``; it is sorted internally. Returns
+    ``None`` when there are fewer than 3 points or every reading falls on the
+    same day (no x-variance to regress against). Otherwise returns::
+
+        {"per_week", "se_per_week", "ci95_low", "ci95_high",
+         "n", "dof", "span_days", "residual_sd", "noise_floored"}
+
+    Every point in the window contributes, which is the difference that
+    matters against endpoint or mean-of-N smoothing: one aberrant weigh-in
+    moves an OLS slope by ``O(1/n)`` instead of by ``O(1/3)``.
+
+    The interval is the classic ``b ± t(0.975, n-2) · SE(b)``. It is the
+    load-bearing output, not decoration — a weekly bodyweight rate whose
+    interval spans zero has no resolved sign, and reporting the point
+    estimate as though it did is exactly the failure this replaces.
+
+    ``noise_sd_floor`` is a LOWER BOUND on the residual SD, in the unit of
+    ``points``. It exists because the fitted residual SD is not a
+    measurement of the instrument — it is a ``chi²(n-2)`` estimate from
+    the same handful of points that produced the slope, and at the sample
+    sizes this gate admits (``dof`` as low as 2) it can land anywhere,
+    including exactly zero. Four tape readings that happen to sit on a
+    straight line yield ``residual_sd = 0``, hence ``SE = 0``, hence a
+    zero-width 95% interval that "excludes zero" and reads as certainty.
+    That is not certainty; it is a sample too small to see its own noise.
+    No series can be quieter than the device that produced it, so the
+    caller supplies the device's documented test-retest SD and the fit
+    refuses to claim less noise than that. When the floor binds,
+    ``noise_floored`` is ``True`` and ``residual_sd`` reports the floor.
+    Default ``None`` leaves the classic estimator untouched.
+    """
+    pts = sorted(points, key=lambda p: p[0])
+    n = len(pts)
+    if n < 3:
+        return None
+    base = pts[0][0]
+    xs = [float((d - base).days) for d, _ in pts]
+    ys = [float(v) for _, v in pts]
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    if sxx <= 0:
+        return None
+    sxy = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+    slope_per_day = sxy / sxx
+    intercept = my - slope_per_day * mx
+    dof = n - 2
+    resid_ss = sum(
+        (ys[i] - (intercept + slope_per_day * xs[i])) ** 2 for i in range(n)
+    )
+    resid_var = resid_ss / dof
+    noise_floored = False
+    if noise_sd_floor is not None and resid_var < noise_sd_floor ** 2:
+        resid_var = float(noise_sd_floor) ** 2
+        noise_floored = True
+    se_per_day = math.sqrt(resid_var / sxx)
+    per_week = slope_per_day * 7.0
+    se_per_week = se_per_day * 7.0
+    half = _t_crit_95(dof) * se_per_week
+    return {
+        "per_week":      per_week,
+        "se_per_week":   se_per_week,
+        "ci95_low":      per_week - half,
+        "ci95_high":     per_week + half,
+        "n":             n,
+        "dof":           dof,
+        "span_days":     int((pts[-1][0] - pts[0][0]).days),
+        "residual_sd":   math.sqrt(resid_var),
+        "noise_floored": noise_floored,
+    }
+
+
+# A weekly bodyweight rate is only resolvable over a long enough baseline.
+# With the residual SD this tracker actually shows (~1.2 kg on morning
+# weigh-ins) the standard error of a weekly slope runs ~0.55 kg/wk over 14
+# days, ~0.30 over 21, ~0.20 over 28 and ~0.14 over 35. A 0.25 kg/wk target
+# is therefore not detectable below roughly four weeks, so 28 days is the
+# floor — and it is a floor in DAYS, not in readings. The estimator this
+# replaces took "the last 8 clean readings", which spanned 16 days at one
+# anchor and 9 days at another six weeks later: the same field silently
+# changed what period it described.
+BODYWEIGHT_TREND_MIN_WINDOW_DAYS = 28
+# Below 3 readings there is no slope at all. At exactly 3 there is one degree
+# of freedom, where the 95% t-multiplier is 12.7 and the interval is so wide
+# it can only ever say "unresolved" — so 4 is the floor, and the reason
+# reported is the honest one (too few readings) rather than a CI verdict
+# dressed up as a measurement.
+BODYWEIGHT_TREND_MIN_READINGS = 4
+# The window floor above is a floor on the WINDOW. The SE arithmetic it was
+# derived from is about T, the spread of the readings themselves, and those
+# are not the same quantity: four weigh-ins taken on four consecutive days
+# sit inside a 28-day window and span three days. The reported rate is then
+# pure ``1/T`` extrapolation — the same 0.3 kg of drift reads as one rate
+# over 3 days and a tenth of it over 28 — so the span needs its own floor.
+#
+# The floor is the REPORTING HORIZON: this estimator reports kg per WEEK,
+# so it must observe at least a week. Below that it is stating a change
+# over a period longer than the one it measured.
+#
+# The SE-derived floor is HIGHER than that and is not reachable here, which
+# is worth writing down rather than hiding. Bodyweight's own numbers are
+# sigma ≈ 1.2 kg residual on morning weigh-ins and a 0.25 kg/wk target:
+#
+#   * at the gate's minimum sample size (n = 4),
+#     T ≥ 7·1.2·sqrt(12) / (sqrt(4)·0.25) = 58 days;
+#   * at the near-daily cadence the comment above actually assumes (n = T),
+#     29.10/T^1.5 ≤ 0.25 → T ≥ 23.6 → 24 days.
+#
+# A 28-day window holds at most a 27-day span, so 58 is impossible and 24
+# would unresolve a real, well-sampled trend (11 weigh-ins over an 18-day
+# span, SE 0.23 kg/wk, interval comfortably clear of zero). Bodyweight's
+# signal-to-noise is simply too poor for a span gate to carry detectability;
+# that job belongs to the interval, which does it correctly. The span gate
+# here only guarantees the estimator is not extrapolating.
+BODYWEIGHT_TREND_MIN_SPAN_DAYS = 7
+# Recency, same horizon and same reason. The field is labelled "per week";
+# if the newest weigh-in is more than a week old the fit does not overlap
+# the period the label names, and the dashboard prints a current-sounding
+# rate for a stretch that has ended.
+BODYWEIGHT_TREND_MAX_STALE_DAYS = 7
+# Lower bound on the residual SD (see ``ols_rate_per_week``). Note what
+# this floor is a bound on. Waist's floor is the TAPE — an instrument
+# error. Bodyweight's scale is accurate to ~0.1 kg, so a scale-only floor
+# would be ~0.05 kg and would still let four perfectly collinear weekly
+# weigh-ins claim +0.10 kg/wk to within ±0.10, which is the false
+# certainty being removed. The residual in this model is not the scale;
+# it is everything that is not the trend, and for bodyweight that is
+# dominated by the day-to-day water and gut movement the docstring above
+# puts at ±1 kg. Read as a ~95% band about trend, that is an SD of
+# 1.0/1.96 ≈ 0.5 kg.
+#
+# Sizing check against the live trackers: observed residual SD is 0.89 kg
+# on one series and 0.54 kg on the other. The floor is BELOW both, so it
+# does not bind today — but the 0.54 is only 8% clear of it, so a quieter
+# month on that series would floor. The consequence there is bounded: at
+# a residual of 0.45 the interval widens ~11%, and a rate large enough to
+# have resolved before still resolves. A small rate resting on a residual
+# too low to be believed is the case that stops resolving, which is the
+# intent.
+BODYWEIGHT_MEASUREMENT_SD_KG = 0.5
+
+# ---------------------------------------------------------------- leverage
+#
+# The span floor above measures FIRST-TO-LAST and nothing in between, so it
+# cannot see where inside that stretch the readings sit. Three tape
+# readings taken today plus one 39-55 days back spans 39-55 days, carries
+# four readings, and is perfectly fresh: it clears every gate above and is
+# a TWO-POINT SLOPE. A cluster at one end, a lone anchor at the other, and
+# the entire interval between them unobserved.
+#
+# That design is not merely uninformative, it is over-confident, and the
+# arithmetic says why. ``SE(b) = sigma / sqrt(Sxx)``, and ``Sxx`` is
+# MAXIMISED by pushing mass to the extremes — so the clustered design
+# reports a NARROWER interval than the evenly-spread one the span floor was
+# derived from. At n = 4 over 39 days: evenly spread gives Sxx = 845 and a
+# 95% half-interval of 2.07 cm/4wk; three-today-plus-one gives Sxx = 1085
+# and 1.79. The clustered series buys 14% more confidence out of geometry
+# rather than out of measurement, and one mis-read tape at either end then
+# clears the smaller bar. Its residual is worse still: with the cluster
+# spanning 2 days, the ``dof = n - 2`` that estimates sigma is the tape's
+# SAME-WEEK repeatability, applied to a 39-day slope.
+#
+# The quantity that separates these designs is the largest hole in the
+# series. For n readings evenly spread over a span T the largest gap is
+# exactly ``T / (n - 1)``, so inverting that gives an EFFECTIVE SAMPLE SIZE:
+#
+#     n_eff = 1 + span_days / max_gap_days
+#
+# It returns n exactly for an even cadence at every n, and 2 for every
+# design whose readings all sit at two ends — including the replicated-
+# endpoint case (two readings at each end) that a maximum-leverage test
+# scores as healthy because no single point dominates.
+#
+# The floor is 2's neighbour, and it is the definition of the defect rather
+# than a tuned number: ``n_eff = 2`` IS a two-point slope, with nothing
+# observed between the ends and the error estimated off within-cluster
+# scatter. 3 is the smallest design carrying an interior anchor, so every
+# reading has something other than itself to be checked against.
+#
+# Two reachability checks, because a floor that no honest cadence clears is
+# just a deleted column:
+#
+#   * the sparsest cadence the gates already admit — 4 readings evenly
+#     spread over the 39-day waist span floor — scores n_eff = 4.0, a full
+#     reading of headroom, and stays above 3 under +-1 day of jitter;
+#   * the two live bodyweight series score 5.33 and 3.25.
+#
+# The 3.25 is thin and is worth stating out loud rather than discovering
+# later: that series is 1 weigh-in, an 8-day gap, then 10 near-daily ones,
+# which is a mild form of the very shape this gate refuses. It holds today.
+# One more skipped day at the head of that window (gap 10 against an 18-day
+# span) drops it to 2.8 and the trend unresolves — correctly, but the
+# reader should know the trigger. Same series as the R-08 noise-floor note;
+# it is the thin one on both axes.
+TREND_MIN_EFFECTIVE_READINGS = 3.0
+
+
+def _trend_verdict(clean: list[tuple[date, float]],
+                   anchor: date | None,
+                   start_d: date | None,
+                   min_window_days: int,
+                   min_readings: int,
+                   min_span_days: int = 0,
+                   max_stale_days: int | None = None,
+                   noise_sd_floor: float | None = None,
+                   min_effective_readings: float = 0.0) -> tuple:
+    """Run the window / sample-size / span / recency / interval gate.
+
+    ``clean`` is ``[(date, value), ...]`` in whatever unit the caller
+    measures, sorted internally. Returns
+    ``(state, reason, window_start, window_end, window_days, n_readings,
+    fit, span_days, stale_days, max_gap_days, n_effective)`` where ``fit``
+    is an ``ols_rate_per_week`` result or ``None``, ``span_days`` is the
+    actual spread of the in-window readings (``0`` when fewer than two
+    survive), ``stale_days`` is the gap between the newest in-window
+    reading and the anchor (``None`` when there are none),
+    ``max_gap_days`` is the longest stretch between two consecutive
+    in-window readings (``0`` when fewer than two survive) and
+    ``n_effective`` is ``1 + span_days / max_gap_days`` (``None`` when
+    there is no span to divide).
+
+    This is the ONE gate behind every measurement trend in this module,
+    and it is deliberately not parameterised by unit: the caller supplies
+    only its own thresholds and, afterwards, its own wording. The failure
+    that motivated the gate — a two-point slope reporting −0.37 kg/wk over
+    a stretch whose honest fit was +0.07 ± 0.25 — is a property of the
+    estimator, not of kilograms. A second column that grows its own,
+    laxer copy of this logic reproduces that bug somewhere new, so new
+    measurements route through here and add wording only.
+
+    Four of the checks are about the READINGS rather than the window,
+    and they live here for that same reason — a per-column copy of them
+    is how the window/span confusion got in:
+
+    * ``readings_stale`` — the newest reading is older than
+      ``max_stale_days``. Without it, four measurements clustered eight
+      weeks ago resolve to a rate the dashboard prints as current.
+    * ``span_shorter_than_min`` — the readings spread across fewer than
+      ``min_span_days``. Without it, the window length stands in for the
+      spread and a three-day cluster is extrapolated to a monthly rate.
+    * ``min_effective_readings`` — the span is first-to-last and says
+      nothing about the DISTRIBUTION inside it, so a cluster plus one
+      distant anchor clears it while being a two-point slope. See
+      ``TREND_MIN_EFFECTIVE_READINGS``.
+    * ``noise_sd_floor`` — passed through to the fit so a degenerate
+      residual cannot masquerade as a narrow interval. This is NOT a
+      separate unresolved state, deliberately: a long, dense, genuinely
+      clean series has the strongest evidence in the file and must be
+      allowed to resolve. Flooring the noise widens the interval to what
+      the instrument can actually support and then lets the ordinary
+      ``ci_straddles_zero`` test decide — which is the same verdict every
+      other series gets, reached the same way.
+
+    Order matters. Window, presence and sample size come first because
+    they are facts about whether there is anything to fit at all.
+    Staleness precedes span because "your last measurement is two months
+    old" is both true and actionable when a series is stale AND short,
+    and telling someone to measure over a longer stretch when the real
+    problem is that they stopped measuring sends them the wrong way.
+    ``no_time_variance`` is kept ahead of the span check so the
+    all-on-one-day case keeps its own precise wording instead of being
+    absorbed into a generic "too short". The leverage check comes LAST of
+    the reading checks: "your readings are bunched inside the stretch
+    they cover" is only a sensible thing to say once that stretch is long
+    enough and recent enough to be worth covering at all.
+
+    ``window_start`` / ``window_end`` are ``None`` in exactly one case:
+    there is no anchor at all (no ``today_d`` and no readings to fall
+    back on), so there is no window to describe. Callers distinguish
+    "nothing was ever measured" from "nothing inside the window" on that.
+    """
+    pts_sorted = sorted(clean, key=lambda p: p[0])
+    if anchor is None:
+        # No explicit anchor: fall back to the newest reading so the
+        # helper stays usable on a bare series.
+        anchor = pts_sorted[-1][0] if pts_sorted else None
+    if anchor is None:
+        return ("unresolved", "no_readings", None, None, 0, 0, None, 0, None,
+                0, None)
+
+    window_start = (
+        start_d if start_d is not None
+        else anchor - timedelta(days=min_window_days - 1)
+    )
+    window_days = (anchor - window_start).days + 1
+    pts = [p for p in pts_sorted if window_start <= p[0] <= anchor]
+    span_days = (pts[-1][0] - pts[0][0]).days if pts else 0
+    stale_days = (anchor - pts[-1][0]).days if pts else None
+    # The longest stretch of consecutive days carrying no reading, and the
+    # evenly-spaced sample size that would produce it. ``max_gap_days`` is
+    # 0 for a single reading and for several readings on one day; both of
+    # those are caught by earlier checks, so the division below is only
+    # ever reached with a positive span and therefore a positive gap.
+    gaps = [(pts[i + 1][0] - pts[i][0]).days for i in range(len(pts) - 1)]
+    max_gap_days = max(gaps) if gaps else 0
+    n_effective = (1.0 + span_days / max_gap_days) if max_gap_days else None
+    tail = (window_start, anchor, window_days, len(pts))
+    measured = (span_days, stale_days, max_gap_days, n_effective)
+
+    if window_days < min_window_days:
+        return ("unresolved", "window_shorter_than_min", *tail, None, *measured)
+    if not pts:
+        return ("unresolved", "no_readings", *tail, None, *measured)
+    if len(pts) < min_readings:
+        return ("unresolved", "too_few_readings", *tail, None, *measured)
+    if max_stale_days is not None and stale_days > max_stale_days:
+        return ("unresolved", "readings_stale", *tail, None, *measured)
+    if span_days <= 0:
+        return ("unresolved", "no_time_variance", *tail, None, *measured)
+    if span_days < min_span_days:
+        return ("unresolved", "span_shorter_than_min", *tail, None, *measured)
+    if (min_effective_readings > 0 and n_effective is not None
+            and n_effective < min_effective_readings):
+        return ("unresolved", "too_few_effective_readings", *tail, None,
+                *measured)
+
+    fit = ols_rate_per_week(pts, noise_sd_floor=noise_sd_floor)
+    if fit is None:
+        return ("unresolved", "no_time_variance", *tail, None, *measured)
+    if fit["ci95_low"] <= 0.0 <= fit["ci95_high"]:
+        return ("unresolved", "ci_straddles_zero", *tail, fit, *measured)
+    return ("resolved", None, *tail, fit, *measured)
+
+
+def _noise_floor_clause(fit: dict | None, sd_text: str, source: str) -> str:
+    """One sentence, appended only when the noise floor actually bound.
+
+    Silence when it did not bind is the point: a caveat printed on every
+    fit is wallpaper. When it DID bind the reader needs to know the
+    interval is the known spread of ``source`` talking, not the sample's
+    — the readings came out too clean to have measured their own error,
+    which at four points is a sample-size artifact and not a fact about
+    the body.
+    """
+    if not fit or not fit.get("noise_floored"):
+        return ""
+    return (f" These readings fit too cleanly to estimate their own error, "
+            f"so the interval uses the {sd_text} spread {source} is known "
+            f"to carry rather than a residual this sample is too small to "
+            f"see.")
+
+
+def _trend_block(state: str, reason: str | None, note: str,
+                 window_start: date | None, window_end: date | None,
+                 window_days: int, n_readings: int,
+                 fit: dict | None = None,
+                 span_days: int = 0,
+                 stale_days: int | None = None,
+                 max_gap_days: int = 0,
+                 n_effective: float | None = None,
+                 *,
+                 rate_key: str,
+                 rate_scale: float,
+                 method: str) -> dict:
+    """Assemble a measurement-trend state block.
+
+    ONE builder for every measurement channel, because the shape is the
+    contract: a consumer that has learned to read ``bodyweight_trend``
+    can read waist, body fat and lean mass without being told anything
+    new, and the ``state``-before-the-number discipline is enforced in
+    one place instead of being re-typed per column. ``rate_key`` names
+    the unit-suffixed rate field (``kg_per_week``, ``cm_per_4w``, ...)
+    and ``rate_scale`` converts ``ols_rate_per_week``'s per-week slope
+    into that field's reporting period (1.0 weekly, 4.0 per 4 weeks).
+
+    ``span_days``, ``days_since_last_reading``, ``max_gap_days`` and
+    ``effective_readings`` are emitted beside ``window_days`` because
+    they are different quantities and the differences are load-bearing:
+    the window is what the estimator LOOKED at, the span is the stretch
+    it FIT, and the gap is how much of that stretch it never saw. A
+    consumer reading only ``window_days`` cannot tell a month of weigh-ins
+    from four taken on one weekend; a consumer reading only ``span_days``
+    cannot tell an even cadence from a cluster plus one distant anchor.
+    """
+    resolved = state == "resolved"
+    rate = fit["per_week"] * rate_scale if fit else None
+    se = fit["se_per_week"] * rate_scale if fit else None
+    return {
+        "state":             state,
+        "reason":            reason,
+        "note":              note,
+        # The headline scalar. Populated ONLY when the sign is resolved;
+        # ``None`` is the honest answer the rest of the time.
+        rate_key:            round(rate, 3) if resolved and fit else None,
+        # The point estimate is still reported when unresolved so a human
+        # can see which way the (statistically indistinguishable) fit leans.
+        f"point_{rate_key}": round(rate, 3) if fit else None,
+        f"se_{rate_key}":    round(se, 3) if fit else None,
+        f"ci95_{rate_key}":  ([round(fit["ci95_low"] * rate_scale, 3),
+                               round(fit["ci95_high"] * rate_scale, 3)]
+                              if fit else None),
+        "n_readings":        n_readings,
+        "window_start":      window_start.isoformat() if window_start else None,
+        "window_end":        window_end.isoformat() if window_end else None,
+        "window_days":       window_days,
+        # What the readings themselves cover, which is the quantity the
+        # SE arithmetic is about. Never inferred from ``window_days``.
+        "span_days":         span_days,
+        "days_since_last_reading": stale_days,
+        # The largest hole inside that span, and what the series is worth
+        # as an evenly spaced sample. See ``TREND_MIN_EFFECTIVE_READINGS``.
+        "max_gap_days":      max_gap_days,
+        "effective_readings": (round(n_effective, 2)
+                               if n_effective is not None else None),
+        "method":            method,
+    }
+
+
+def bodyweight_trend(
+    entries: list[dict],
+    today_d: date | str | None = None,
+    start_date: str | date | None = None,
+    min_window_days: int = BODYWEIGHT_TREND_MIN_WINDOW_DAYS,
+) -> dict:
+    """Weekly bodyweight slope over a minimum-28-day TIME window.
+
+    Always returns a block; read ``state`` before ``kg_per_week``.
+
+      * ``state == "resolved"`` — the 95% interval excludes zero, so the
+        sign is real. ``kg_per_week`` carries the rate.
+      * ``state == "unresolved"`` — ``kg_per_week`` is ``None`` and
+        ``reason`` says why: ``no_readings`` / ``too_few_readings`` /
+        ``window_shorter_than_min`` / ``readings_stale`` /
+        ``span_shorter_than_min`` / ``too_few_effective_readings`` /
+        ``no_time_variance`` / ``ci_straddles_zero``.
+
+    The window is ``[today_d - (min_window_days - 1), today_d]``, or the
+    whole open phase when ``start_date`` is supplied — a phase is judged
+    inside its own window, and a phase shorter than ``min_window_days``
+    cannot be judged yet at all. Entries whose notes flag a non-morning /
+    non-fasted weigh-in are excluded first.
+
+    Being inside the window is necessary and not sufficient. The weigh-ins
+    must also SPAN at least ``BODYWEIGHT_TREND_MIN_SPAN_DAYS`` and the
+    newest of them must be no more than ``BODYWEIGHT_TREND_MAX_STALE_DAYS``
+    old, because a window is not a measurement: four weigh-ins on four
+    consecutive days sit inside a 28-day window and say nothing about
+    28 days.
+
+    ``unresolved`` is a real answer, not a failure. Bodyweight moves ±1 kg
+    a day on water and gut content; over four weeks that noise is the same
+    size as a deliberate 0.25 kg/wk cut. Emitting ``None`` with a reason is
+    strictly better than emitting a confident sign the data cannot support
+    — the shipped estimator read −0.37 kg/wk over a stretch whose honest
+    fit was +0.07 ± 0.25, and the coach reported fat loss across a
+    stretch the user actually gained weight over.
     """
     start_d = (
         start_date if isinstance(start_date, date)
         else _parse_iso_date(start_date) if start_date else None
     )
-    clean = []
-    for e in entries:
+    anchor = (
+        today_d if isinstance(today_d, date)
+        else _parse_iso_date(today_d) if today_d else None
+    )
+
+    clean: list[tuple[date, float]] = []
+    for e in entries or []:
         if _is_flagged_nonfasted(e):
             continue
-        if start_d is not None:
-            d = _parse_iso_date(e.get("date"))
-            if d is None or d < start_d:
-                continue
-        clean.append(e)
-    window = clean[-8:]
-    if len(window) < 3:
-        return None
-    first_d = _parse_iso_date(window[0]["date"])
-    last_d = _parse_iso_date(window[-1]["date"])
-    if first_d is None or last_d is None:
-        return None
-    days = (last_d - first_d).days
-    if days < 7:
-        return None
-    weeks = days / 7.0
-    return round((window[-1]["kg"] - window[0]["kg"]) / weeks, 3)
+        d = _parse_iso_date(e.get("date"))
+        kg = e.get("kg")
+        if d is None or kg is None:
+            continue
+        try:
+            clean.append((d, float(kg)))
+        except (TypeError, ValueError):
+            continue
+    clean.sort(key=lambda p: p[0])
+
+    (state, reason, w_start, w_end, window_days, n_pts, fit,
+     span_days, stale_days, max_gap_days, n_eff) = _trend_verdict(
+        clean, anchor, start_d,
+        min_window_days, BODYWEIGHT_TREND_MIN_READINGS,
+        min_span_days=BODYWEIGHT_TREND_MIN_SPAN_DAYS,
+        max_stale_days=BODYWEIGHT_TREND_MAX_STALE_DAYS,
+        noise_sd_floor=BODYWEIGHT_MEASUREMENT_SD_KG,
+        min_effective_readings=TREND_MIN_EFFECTIVE_READINGS,
+    )
+
+    if reason == "no_readings" and w_start is None:
+        note = "No usable bodyweight readings."
+    elif reason == "no_readings":
+        note = "No bodyweight readings inside the window."
+    elif reason == "window_shorter_than_min":
+        note = (f"Window is {window_days} days; a weekly rate needs at least "
+                f"{min_window_days} days of baseline to separate signal from "
+                f"day-to-day fluctuation.")
+    elif reason == "too_few_readings":
+        note = (f"{n_pts} reading(s) in a {window_days}-day window; "
+                f"{BODYWEIGHT_TREND_MIN_READINGS} are needed to fit a rate "
+                "and its error.")
+    elif reason == "readings_stale":
+        note = (f"Newest weigh-in is {stale_days} days old; a weekly rate is "
+                f"only current while the last reading is within "
+                f"{BODYWEIGHT_TREND_MAX_STALE_DAYS} days. Weigh in to "
+                "resolve it.")
+    elif reason == "no_time_variance":
+        note = "All readings in the window fall on one day."
+    elif reason == "span_shorter_than_min":
+        note = (f"{n_pts} weigh-ins spanning {span_days} days; a weekly rate "
+                f"needs at least {BODYWEIGHT_TREND_MIN_SPAN_DAYS} days of "
+                "spread. Fitting a shorter stretch and reporting it per week "
+                "extrapolates rather than measures.")
+    elif reason == "too_few_effective_readings":
+        note = (f"{n_pts} weigh-ins spanning {span_days} days, but the "
+                f"longest stretch without one is {max_gap_days} days — over "
+                f"half the span. That leaves the series worth about "
+                f"{n_eff:.1f} evenly spaced weigh-ins: the rate rests on the "
+                "two ends with nothing observed between them, and one bad "
+                "reading at either end moves it. Weigh in inside the gap to "
+                "resolve it.")
+    elif reason == "ci_straddles_zero":
+        note = (f"Fit is {fit['per_week']:+.2f} kg/wk but the 95% interval "
+                f"[{fit['ci95_low']:+.2f}, {fit['ci95_high']:+.2f}] includes "
+                "zero — the direction is not resolved by this data. Do not "
+                "report a gain or a loss."
+                + _noise_floor_clause(fit, "0.5 kg/day", "morning bodyweight"))
+    else:
+        direction = "gaining" if fit["per_week"] > 0 else "losing"
+        note = (f"{direction} {abs(fit['per_week']):.2f} kg/wk "
+                f"(95% CI [{fit['ci95_low']:+.2f}, {fit['ci95_high']:+.2f}] "
+                f"over {fit['n']} readings spanning {span_days} days)."
+                + _noise_floor_clause(fit, "0.5 kg/day", "morning bodyweight"))
+
+    return _trend_block(state, reason, note,
+                        w_start, w_end, window_days, n_pts, fit,
+                        span_days, stale_days, max_gap_days, n_eff,
+                        rate_key="kg_per_week", rate_scale=1.0,
+                        method="ols_min_28d_window_7d_span_3eff")
+
+
+def bodyweight_trend_kg_per_week(
+    entries: list[dict],
+    start_date: str | date | None = None,
+    today_d: date | str | None = None,
+) -> float | None:
+    """Resolved weekly bodyweight slope, or ``None``.
+
+    Thin scalar accessor over ``bodyweight_trend`` — see that function for
+    the window rule and for why ``None`` is a first-class answer rather
+    than a failure. Callers that need the reason must read the block.
+    """
+    return bodyweight_trend(
+        entries, today_d=today_d, start_date=start_date,
+    )["kg_per_week"]
+
+
+# Waist circumference moves slowly and is read off a tape, so its window
+# floor is HIGHER than bodyweight's, not lower.
+#
+# Self-measured waist reproducibility is roughly 0.5-1.0 cm (test-retest
+# SD; tape height and tension are the error, not the body). The standard
+# error of an OLS slope over ``n`` readings spread across ``T`` days is
+# about ``sigma * sqrt(12) / (sqrt(n) * T)`` per day. At sigma = 0.8 cm,
+# expressed per 4 weeks:
+#
+#     T = 28d, n = 4   ->  SE ~= 1.4 cm / 4wk
+#     T = 56d, n = 8   ->  SE ~= 0.5 cm / 4wk
+#     T = 84d, n = 12  ->  SE ~= 0.3 cm / 4wk
+#
+# A real waist change during a cut runs about 1 cm per 4 weeks. At a
+# 28-day window the 95% half-interval is over 5 cm, so nothing honest
+# ever resolves there and anything that DOES resolve is a tape artifact
+# wearing a confidence interval. 56 days is the floor at which the
+# interval starts to be narrower than the effect it is trying to detect.
+WAIST_TREND_MIN_WINDOW_DAYS = 56
+# Same reasoning as BODYWEIGHT_TREND_MIN_READINGS: 3 points leave one
+# degree of freedom, where the 95% t-multiplier is 12.7 and the verdict
+# can only ever be "unresolved" for a reason that has nothing to do with
+# the body. 4 is the floor, and below it the reason reported is the
+# honest one.
+WAIST_TREND_MIN_READINGS = 4
+# T in the SE table above is the SPREAD OF THE READINGS. The window floor
+# is not that quantity, and substituting one for the other is what let
+# four tape readings taken over three days report −2.80 cm/4wk with a
+# zero-width interval: 0.3 cm of drift divided by a 3-day span and
+# multiplied back up to 28.
+#
+# Solve the same expression the table is built from for T, at the sample
+# size this gate actually admits (n = 4) and against the effect the
+# comment names (1 cm per 4 weeks):
+#
+#     SE_4w = 28·sigma·sqrt(12) / (sqrt(n)·T) ≤ 1.0 cm
+#           = 28·0.8·3.4641 / (2·T)          ≤ 1.0
+#     ->  T ≥ 38.80  ->  39 days
+#
+# which reproduces the table exactly: T = 28, n = 4 gives 1.39 cm (the
+# comment's "~1.4", and its reason for refusing a 28-day floor), and 39
+# is where that curve crosses the 1 cm effect. The window still holds it
+# — 56 days of window admits a 55-day span — so weekly (49 d) and
+# fortnightly (42 d) cadences both clear it, and only a burst of readings
+# crammed into part of the window does not.
+WAIST_TREND_MIN_SPAN_DAYS = 39
+# Recency. The field is labelled "per 4 weeks"; if the newest measurement
+# is older than 4 weeks the fit describes a period that does not overlap
+# the one the label names. This is the second half of the same defect:
+# four readings clustered 52-55 days ago resolved to a rate the dashboard
+# printed beside a sparkline that had nothing in it.
+WAIST_TREND_MAX_STALE_DAYS = 28
+# Lower bound on the residual SD (see ``ols_rate_per_week``). The
+# test-retest band cited above is 0.5-1.0 cm; the LOW end is the right
+# floor because a floor asserts what the tape cannot go below, not what
+# it typically is. Tape readings rounded to 0.1 cm on a slowly-moving
+# body land on a straight line often enough that the degenerate
+# zero-residual fit is a realistic input, not a synthetic one.
+WAIST_MEASUREMENT_SD_CM = 0.5
+
+# Keys ``waist_trend`` will read a value from, in order. ``cm`` is what
+# ``read_tracker`` passes; ``value`` is what
+# ``csv_store_dense.read_body_composition`` already returns; ``waist_cm``
+# is the raw health_metrics row key. Accepting all three means the second
+# tracked person's importer needs no adapter to reach this function.
+_WAIST_VALUE_KEYS = ("cm", "value", "waist_cm")
+
+
+def waist_trend(
+    readings: list[dict],
+    today_d: date | str | None = None,
+    min_window_days: int = WAIST_TREND_MIN_WINDOW_DAYS,
+) -> dict:
+    """Waist circumference slope in cm per 4 weeks, with its state.
+
+    ``readings`` is ``[{"date": "YYYY-MM-DD", "cm": 87.0}, ...]`` (``value``
+    and ``waist_cm`` are accepted as aliases for ``cm``). Order does not
+    matter; the series is sorted internally.
+
+    Always returns a block; read ``state`` before ``cm_per_4w``.
+
+      * ``state == "resolved"`` — the 95% interval excludes zero, so the
+        sign is real. ``cm_per_4w`` carries the rate.
+      * ``state == "unresolved"`` — ``cm_per_4w`` is ``None`` and
+        ``reason`` says why: ``no_readings`` / ``too_few_readings`` /
+        ``readings_stale`` / ``no_time_variance`` /
+        ``span_shorter_than_min`` / ``too_few_effective_readings`` /
+        ``ci_straddles_zero``. (The gate's
+        remaining reason, ``window_shorter_than_min``, needs a
+        caller-supplied window start the way bodyweight takes one from an
+        open nutrition phase; waist has no equivalent scoping and so
+        cannot emit it.)
+
+    The window is ``[today_d - (min_window_days - 1), today_d]``, so a
+    reading dated after ``today_d`` is outside it by construction and a
+    backtest cannot see a measurement that had not been taken yet.
+
+    Landing inside the window is not the same as describing it. Four
+    measurements taken over one weekend sit inside a 56-day window and
+    span three days; dividing their drift by three days and multiplying
+    it back up to four weeks is extrapolation, and the reported rate
+    changes by a factor of nine depending on which weekend it was. So
+    the measurements must also spread across at least
+    ``WAIST_TREND_MIN_SPAN_DAYS`` and end no more than
+    ``WAIST_TREND_MAX_STALE_DAYS`` before the anchor. ``note`` reports
+    the SPAN, never the window: a fit over three days that announces
+    itself as "over 56 days" is worse than no note at all.
+
+    Nor is spanning the stretch the same as covering it. Three
+    measurements taken today plus one 39 days back span 39 days and are
+    a two-point slope; ``TREND_MIN_EFFECTIVE_READINGS`` is the third
+    check and it looks at the largest hole rather than at the ends.
+
+    It is a fixed period, not a "last N measurements" rule, for the same
+    reason bodyweight's is: an elastic window makes the same key describe
+    a different stretch of time from run to run without saying so. The
+    cost is real and is the honest one to pay — someone who measures
+    monthly never has four measurements inside 56 days and gets
+    ``too_few_readings`` indefinitely. The fix for that is a denser
+    measuring cadence, which ``note`` asks for, not a wider window fitted
+    behind the user's back.
+
+    ONE reading is not a trend and this returns ``too_few_readings`` for
+    it, not ``0.0``. That distinction is the whole reason this routes
+    through ``_trend_verdict`` instead of subtracting two numbers: the
+    naive version of this function, applied to bodyweight, once reported
+    a confident loss across a stretch the user gained weight over.
+
+    Unit-confused input is not filtered here — ``apple_health_core``'s
+    ``PLAUSIBLE_RANGES`` is the single corruption gate and it runs at
+    import. What this estimator adds is that one surviving bad reading
+    inflates the residual spread and widens the interval, so the verdict
+    degrades to ``ci_straddles_zero`` rather than to a confident slope.
+    """
+    anchor = (
+        today_d if isinstance(today_d, date)
+        else _parse_iso_date(today_d) if today_d else None
+    )
+
+    clean: list[tuple[date, float]] = []
+    for e in readings or []:
+        d = _parse_iso_date(e.get("date"))
+        if d is None:
+            continue
+        raw = next(
+            (e[k] for k in _WAIST_VALUE_KEYS
+             if e.get(k) is not None),
+            None,
+        )
+        if raw is None:
+            continue
+        try:
+            clean.append((d, float(raw)))
+        except (TypeError, ValueError):
+            continue
+    clean.sort(key=lambda p: p[0])
+
+    (state, reason, w_start, w_end, window_days, n_pts, fit,
+     span_days, stale_days, max_gap_days, n_eff) = _trend_verdict(
+        clean, anchor, None, min_window_days, WAIST_TREND_MIN_READINGS,
+        min_span_days=WAIST_TREND_MIN_SPAN_DAYS,
+        max_stale_days=WAIST_TREND_MAX_STALE_DAYS,
+        noise_sd_floor=WAIST_MEASUREMENT_SD_CM,
+        min_effective_readings=TREND_MIN_EFFECTIVE_READINGS,
+    )
+
+    if reason == "no_readings" and w_start is None:
+        note = "No waist measurements on file."
+    elif reason == "no_readings":
+        note = "No waist measurements inside the window."
+    elif reason == "window_shorter_than_min":
+        note = (f"Window is {window_days} days; a waist rate needs at least "
+                f"{min_window_days} days of baseline, because tape-measure "
+                "error is about the size of a month of real change.")
+    elif reason == "too_few_readings":
+        lead = ("A single measurement is a value, not a trend. "
+                if n_pts <= 1 else "")
+        note = (f"{n_pts} measurement(s) in a {window_days}-day window; "
+                f"{WAIST_TREND_MIN_READINGS} are needed to fit a rate and "
+                f"its error. {lead}Measuring weekly makes this resolvable "
+                f"within {window_days} days.")
+    elif reason == "readings_stale":
+        note = (f"Newest measurement is {stale_days} days old; a cm/4wk rate "
+                f"describes the last 4 weeks and cannot be read off "
+                f"measurements that stop more than "
+                f"{WAIST_TREND_MAX_STALE_DAYS} days back. Measure again to "
+                "resolve it.")
+    elif reason == "no_time_variance":
+        note = "All measurements in the window fall on one day."
+    elif reason == "span_shorter_than_min":
+        note = (f"{n_pts} measurements spanning {span_days} days inside a "
+                f"{window_days}-day window; a cm/4wk rate needs at least "
+                f"{WAIST_TREND_MIN_SPAN_DAYS} days of spread. Over a shorter "
+                "stretch the tape's own error is larger than the change, and "
+                "dividing it by the span inflates it into a monthly rate.")
+    elif reason == "too_few_effective_readings":
+        note = (f"{n_pts} measurements spanning {span_days} days, but the "
+                f"longest stretch without one is {max_gap_days} days — over "
+                f"half the span. That leaves the series worth about "
+                f"{n_eff:.1f} evenly spaced measurements: the rate rests on "
+                "the two ends with nothing observed between them, and one "
+                "mis-read tape at either end moves it. Measure inside the "
+                "gap to resolve it.")
+    elif reason == "ci_straddles_zero":
+        note = (f"Fit is {fit['per_week'] * 4.0:+.2f} cm/4wk but the 95% "
+                f"interval [{fit['ci95_low'] * 4.0:+.2f}, "
+                f"{fit['ci95_high'] * 4.0:+.2f}] includes zero, so the "
+                "direction is not resolved by this data. Do not report a "
+                "gain or a loss."
+                + _noise_floor_clause(fit, "0.5 cm", "a tape measure"))
+    else:
+        direction = "widening" if fit["per_week"] > 0 else "narrowing"
+        note = (f"{direction} {abs(fit['per_week'] * 4.0):.2f} cm/4wk "
+                f"(95% CI [{fit['ci95_low'] * 4.0:+.2f}, "
+                f"{fit['ci95_high'] * 4.0:+.2f}] over {fit['n']} "
+                f"measurements spanning {span_days} days)."
+                + _noise_floor_clause(fit, "0.5 cm", "a tape measure"))
+
+    return _trend_block(state, reason, note,
+                        w_start, w_end, window_days, n_pts, fit,
+                        span_days, stale_days, max_gap_days, n_eff,
+                        rate_key="cm_per_4w", rate_scale=4.0,
+                        method="ols_min_56d_window_39d_span_3eff")
+
+
+# ======================================================================
+# Body fat % and lean mass — the other two columns of the 19-col schema.
+# ======================================================================
+#
+# Both are written by both importers into ``health_metrics.csv`` and, like
+# waist before this build, read by nothing. Neither is present in any
+# export in hand yet, so everything below is pre-wiring and the EMPTY
+# STATE is the part that ships: an absent channel must say it is absent.
+# It must not render a zero, a flat line, or nothing at all — those are
+# the three ways a not-yet-populated column has previously become a
+# reported finding.
+#
+# The thresholds are derived the same way waist's were — solve
+# ``SE_4w = 28·sigma·sqrt(12) / (sqrt(n)·T)`` for the span at the sample
+# size the gate admits (n = 4), and take the window as the smallest whole
+# number of 4-week reporting periods at which the 95% half-interval at a
+# WEEKLY cadence drops below the effect being looked for. Waist's shipped
+# 56-day window corresponds to the looser reading of that same curve (its
+# half-interval there is 1.20 cm against a 1.0 cm effect), which is why
+# these two floors are not a naive scaling of it.
+#
+# The honest caveat, and it is a real one: sigma for both is taken from
+# the literature on the instruments that write these columns, NOT measured
+# from this tracker, because this tracker has never seen a reading. Waist
+# earned the right to a measured residual only after the column filled up.
+# Re-derive both floors against the observed residual SD once either
+# column carries ~12 readings; until then every verdict here is
+# instrument-prior, and the gates below are what keep that prior from
+# being reported as a finding.
+
+# Consumer bioimpedance is what writes ``Body Fat %`` on a phone-linked
+# scale, and its day-to-day reproducibility is dominated by hydration
+# rather than by the electronics: roughly 1-2 percentage points between
+# consecutive mornings on the same body. Same principle as waist's floor —
+# a floor asserts what the instrument cannot go BELOW, so it takes the low
+# end of the band.
+BODY_FAT_MEASUREMENT_SD_PCT = 1.0
+# What counts as a real move over the reporting period. A percentage point
+# of body fat per 4 weeks is a brisk but attainable cut; anything the
+# estimator cannot separate from 1.0 pp is not worth a sentence.
+_BODY_FAT_EFFECT_PCT_PER_4W = 1.0
+# T >= 28·1.0·sqrt(12) / (sqrt(4)·1.0) = 48.50  ->  49 days.
+BODY_FAT_TREND_MIN_SPAN_DAYS = 49
+# At a weekly cadence the 95% half-interval is 1.50 pp at 56 days and
+# 0.74 pp at 84. 84 is the first whole 4-week multiple under the 1.0 pp
+# effect, and it holds the 49-day span floor with room to spare.
+BODY_FAT_TREND_MIN_WINDOW_DAYS = 84
+# Same reasoning as everywhere else in this module: 3 readings leave one
+# degree of freedom and a t-multiplier of 12.7.
+BODY_FAT_TREND_MIN_READINGS = 4
+# Recency is the reporting horizon, as with waist: the field says "per 4
+# weeks", so a fit whose newest reading is older than 4 weeks describes a
+# period the label does not name.
+BODY_FAT_TREND_MAX_STALE_DAYS = 28
+
+# ``Lean Mass (kg)`` is not independently measured by anything that writes
+# to this tracker. Every consumer scale computes it as
+# ``bodyweight × (1 − body_fat)``, so its noise is the propagation of the
+# two floors already in this file rather than a number of its own:
+#
+#     sd = sqrt( ((1-f)·sd_W)^2 + (W·sd_f)^2 )
+#        = sqrt( (0.80·0.5)^2 + (80·0.010)^2 )  =  0.894 kg
+#
+# at a representative 80 kg / 20% body fat, with sd_W =
+# BODYWEIGHT_MEASUREMENT_SD_KG and sd_f = BODY_FAT_MEASUREMENT_SD_PCT.
+LEAN_MASS_MEASUREMENT_SD_KG = 0.9
+# Half a kilo of lean tissue per 4 weeks is a good month for a trained
+# lifter; that is the bar the interval has to clear.
+_LEAN_MASS_EFFECT_KG_PER_4W = 0.5
+# T >= 28·0.9·sqrt(12) / (sqrt(4)·0.5) = 87.30  ->  88 days.
+LEAN_MASS_TREND_MIN_SPAN_DAYS = 88
+# Weekly cadence: half-interval 0.67 kg at 84 days, 0.42 at 112. 112 is
+# the first whole 4-week multiple under the 0.5 kg effect, and it holds
+# the 88-day span floor.
+#
+# Four months is a long window and that is the finding, not a defect: the
+# instrument's noise is roughly two months of real change, so a lean-mass
+# direction genuinely cannot be read off less. A shorter window would not
+# make lean mass measurable, it would make this estimator wrong.
+LEAN_MASS_TREND_MIN_WINDOW_DAYS = 112
+LEAN_MASS_TREND_MIN_READINGS = 4
+LEAN_MASS_TREND_MAX_STALE_DAYS = 28
+
+
+# Per-channel wording and thresholds for the two columns above. A spec
+# table rather than two near-identical functions: the only things that
+# actually differ are nouns, units and floors, and a second hand-written
+# copy of the gate wrapper is precisely how the window/span confusion got
+# into waist in the first place.
+_BODY_COMP_SPECS = {
+    "body_fat": {
+        # ``pct`` is what ``read_tracker`` passes, ``value`` is what
+        # ``csv_store_dense.read_body_composition`` returns, and
+        # ``body_fat_pct`` is the raw health_metrics row key — same
+        # three-way acceptance as ``_WAIST_VALUE_KEYS``.
+        "value_keys":  ("pct", "value", "body_fat_pct"),
+        "noun":        "reading",
+        "unit":        "pp/4wk",
+        "up_word":     "rising",
+        "down_word":   "falling",
+        "sd_text":     "1.0 pp",
+        "sd_source":   "a bioimpedance scale",
+        "rate_key":    "pct_per_4w",
+        "min_window_days": BODY_FAT_TREND_MIN_WINDOW_DAYS,
+        "min_readings":    BODY_FAT_TREND_MIN_READINGS,
+        "min_span_days":   BODY_FAT_TREND_MIN_SPAN_DAYS,
+        "max_stale_days":  BODY_FAT_TREND_MAX_STALE_DAYS,
+        "noise_sd_floor":  BODY_FAT_MEASUREMENT_SD_PCT,
+        "method":      "ols_min_84d_window_49d_span_3eff",
+        "empty_note":  ("Body fat has never been recorded. Apple Health "
+                        "carries it under Body Measurements; a "
+                        "phone-linked scale or a manual entry fills it, "
+                        "and both importers already write the column."),
+        "window_reason": ("because a bioimpedance reading moves about as "
+                          "much on hydration as a month of real change "
+                          "moves it on fat"),
+        "cadence_hint":  "Measuring weekly makes this resolvable",
+        "caveat":      "",
+    },
+    "lean_mass": {
+        "value_keys":  ("kg", "value", "lean_body_mass_kg"),
+        "noun":        "reading",
+        "unit":        "kg/4wk",
+        "up_word":     "gaining",
+        "down_word":   "losing",
+        "sd_text":     "0.9 kg",
+        "sd_source":   "a bioimpedance scale",
+        "rate_key":    "kg_per_4w",
+        "min_window_days": LEAN_MASS_TREND_MIN_WINDOW_DAYS,
+        "min_readings":    LEAN_MASS_TREND_MIN_READINGS,
+        "min_span_days":   LEAN_MASS_TREND_MIN_SPAN_DAYS,
+        "max_stale_days":  LEAN_MASS_TREND_MAX_STALE_DAYS,
+        "noise_sd_floor":  LEAN_MASS_MEASUREMENT_SD_KG,
+        "method":      "ols_min_112d_window_88d_span_3eff",
+        "empty_note":  ("Lean mass has never been recorded. Apple Health "
+                        "carries it under Body Measurements; a "
+                        "phone-linked scale or a manual entry fills it, "
+                        "and both importers already write the column."),
+        "window_reason": ("because a scale-derived lean mass carries about "
+                          "two months of real change as noise"),
+        "cadence_hint":  "Measuring weekly makes this resolvable",
+        # Ridealong on every RESOLVED lean-mass note. Nothing that writes
+        # this column measures it: it is bodyweight times one minus body
+        # fat, so a resolved lean-mass rate is not a third independent
+        # finding beside the bodyweight and body-fat ones. Saying so in
+        # the note is the cheapest place to stop the coach reporting one
+        # measurement three times.
+        "caveat":      (" Scale-derived lean mass is computed from "
+                        "bodyweight and body fat rather than measured, so "
+                        "read this alongside those two rather than as "
+                        "independent evidence."),
+    },
+}
+
+
+def _body_comp_trend(readings: list[dict] | None,
+                     today_d: date | str | None,
+                     spec: dict,
+                     min_window_days: int | None = None) -> dict:
+    """Shared per-4-week estimator for the body-fat / lean-mass channels.
+
+    Same gate, same block shape and same ``state``-before-the-number
+    discipline as ``waist_trend``; only the nouns, the units and the
+    floors come from ``spec``. Read ``state`` before the rate.
+
+      * ``state == "resolved"`` — the 95% interval excludes zero.
+      * ``state == "unresolved"`` — the rate field is ``None`` and
+        ``reason`` says why: ``no_readings`` / ``too_few_readings`` /
+        ``readings_stale`` / ``no_time_variance`` /
+        ``span_shorter_than_min`` / ``too_few_effective_readings`` /
+        ``ci_straddles_zero``.
+
+    ``no_readings`` with no window at all is the state BOTH channels are
+    in today, and its note names the column rather than apologising for a
+    missing number — an empty channel is a fact about what has been
+    measured, not a defect in the estimator.
+    """
+    anchor = (
+        today_d if isinstance(today_d, date)
+        else _parse_iso_date(today_d) if today_d else None
+    )
+    window = (min_window_days if min_window_days is not None
+              else spec["min_window_days"])
+
+    clean: list[tuple[date, float]] = []
+    for e in readings or []:
+        d = _parse_iso_date(e.get("date"))
+        if d is None:
+            continue
+        raw = next((e[k] for k in spec["value_keys"]
+                    if e.get(k) is not None), None)
+        if raw is None:
+            continue
+        try:
+            clean.append((d, float(raw)))
+        except (TypeError, ValueError):
+            continue
+    clean.sort(key=lambda p: p[0])
+
+    (state, reason, w_start, w_end, window_days, n_pts, fit,
+     span_days, stale_days, max_gap_days, n_eff) = _trend_verdict(
+        clean, anchor, None, window, spec["min_readings"],
+        min_span_days=spec["min_span_days"],
+        max_stale_days=spec["max_stale_days"],
+        noise_sd_floor=spec["noise_sd_floor"],
+        min_effective_readings=TREND_MIN_EFFECTIVE_READINGS,
+    )
+
+    noun, unit = spec["noun"], spec["unit"]
+    if reason == "no_readings" and not clean:
+        # The state both channels are in today. "Never recorded" and
+        # "recorded, but not lately" are different facts and the second
+        # one must not be reported as the first — the note that says the
+        # column is empty has to be true when it is printed.
+        note = spec["empty_note"]
+    elif reason == "no_readings":
+        note = (f"No {noun}s inside the {window_days}-day window; the "
+                f"newest on file is from {clean[-1][0].isoformat()}.")
+    elif reason == "window_shorter_than_min":
+        note = (f"Window is {window_days} days; a {unit} rate needs at least "
+                f"{window} days of baseline, "
+                + spec["window_reason"] + ".")
+    elif reason == "too_few_readings":
+        lead = (f"A single {noun} is a value, not a trend. "
+                if n_pts <= 1 else "")
+        note = (f"{n_pts} {noun}(s) in a {window_days}-day window; "
+                f"{spec['min_readings']} are needed to fit a rate and its "
+                f"error. {lead}{spec['cadence_hint']} within "
+                f"{window_days} days.")
+    elif reason == "readings_stale":
+        note = (f"Newest {noun} is {stale_days} days old; a {unit} rate "
+                f"describes the last 4 weeks and cannot be read off "
+                f"{noun}s that stop more than {spec['max_stale_days']} days "
+                "back. Measure again to resolve it.")
+    elif reason == "no_time_variance":
+        note = f"All {noun}s in the window fall on one day."
+    elif reason == "span_shorter_than_min":
+        note = (f"{n_pts} {noun}s spanning {span_days} days inside a "
+                f"{window_days}-day window; a {unit} rate needs at least "
+                f"{spec['min_span_days']} days of spread. Over a shorter "
+                "stretch the instrument's own error is larger than the "
+                "change, and dividing it by the span inflates it into a "
+                "monthly rate.")
+    elif reason == "too_few_effective_readings":
+        note = (f"{n_pts} {noun}s spanning {span_days} days, but the longest "
+                f"stretch without one is {max_gap_days} days — over half the "
+                f"span. That leaves the series worth about {n_eff:.1f} evenly "
+                f"spaced {noun}s: the rate rests on the two ends with nothing "
+                "observed between them. Measure inside the gap to resolve it.")
+    elif reason == "ci_straddles_zero":
+        note = (f"Fit is {fit['per_week'] * 4.0:+.2f} {unit} but the 95% "
+                f"interval [{fit['ci95_low'] * 4.0:+.2f}, "
+                f"{fit['ci95_high'] * 4.0:+.2f}] includes zero, so the "
+                "direction is not resolved by this data. Do not report a "
+                "rise or a fall."
+                + _noise_floor_clause(fit, spec["sd_text"],
+                                      spec["sd_source"]))
+    else:
+        direction = (spec["up_word"] if fit["per_week"] > 0
+                     else spec["down_word"])
+        note = (f"{direction} {abs(fit['per_week'] * 4.0):.2f} {unit} "
+                f"(95% CI [{fit['ci95_low'] * 4.0:+.2f}, "
+                f"{fit['ci95_high'] * 4.0:+.2f}] over {fit['n']} {noun}s "
+                f"spanning {span_days} days)."
+                + _noise_floor_clause(fit, spec["sd_text"],
+                                      spec["sd_source"])
+                + spec["caveat"])
+
+    return _trend_block(state, reason, note,
+                        w_start, w_end, window_days, n_pts, fit,
+                        span_days, stale_days, max_gap_days, n_eff,
+                        rate_key=spec["rate_key"], rate_scale=4.0,
+                        method=spec["method"])
+
+
+def body_fat_trend(
+    readings: list[dict] | None,
+    today_d: date | str | None = None,
+    min_window_days: int = BODY_FAT_TREND_MIN_WINDOW_DAYS,
+) -> dict:
+    """Body fat slope in percentage points per 4 weeks, with its state.
+
+    ``readings`` is ``[{"date": "YYYY-MM-DD", "pct": 18.4}, ...]``
+    (``value`` and ``body_fat_pct` are accepted aliases). Percentage
+    POINTS, never a fraction — ``apple_health_core.normalize_body_fat_pct``
+    owns that conversion at import and this estimator inherits it.
+
+    Always returns a block; read ``state`` before ``pct_per_4w``. See
+    ``_body_comp_trend`` for the reason codes and ``waist_trend`` for why
+    a fixed window beats a "last N readings" rule.
+    """
+    return _body_comp_trend(readings, today_d, _BODY_COMP_SPECS["body_fat"],
+                            min_window_days)
+
+
+def lean_mass_trend(
+    readings: list[dict] | None,
+    today_d: date | str | None = None,
+    min_window_days: int = LEAN_MASS_TREND_MIN_WINDOW_DAYS,
+) -> dict:
+    """Lean body mass slope in kg per 4 weeks, with its state.
+
+    ``readings`` is ``[{"date": "YYYY-MM-DD", "kg": 62.1}, ...]``
+    (``value`` and ``lean_body_mass_kg`` are accepted aliases).
+
+    Always returns a block; read ``state`` before ``kg_per_4w``.
+
+    This channel is DERIVED at the source, not measured: the scales that
+    write ``Lean Mass (kg)`` compute it from bodyweight and a bioimpedance
+    body-fat estimate. A resolved rate here is therefore not a third
+    independent finding beside ``bodyweight_trend`` and ``body_fat_trend``
+    — it is those two, restated. The resolved note says so, and any
+    consumer reporting all three must not present them as corroborating
+    each other.
+    """
+    return _body_comp_trend(readings, today_d, _BODY_COMP_SPECS["lean_mass"],
+                            min_window_days)
 
 
 def build_monthly_sessions(rows: list[dict],
@@ -377,26 +1523,41 @@ def build_monthly_sessions(rows: list[dict],
 def _is_working_set(r: dict) -> bool:
     """True when a row is a counted hard SET.
 
-    Two shapes count as one set each:
+    Three shapes count as one set each:
 
     1. A positive-rep set. Bodyweight (kg=0, reps>0 like Pull-Up) counts.
     2. A duration hold with reps==0 — an isometric (Plank, Side Plank) or
-       a loaded carry (Farmer Walk) — *provided* it is not a cardio bout
-       and not a pure distance row. The hold time substitutes for reps as
-       the work unit; per-muscle attribution still requires a DB primary
-       at the consumer, so an unknown/cardio-section exercise contributes
-       zero there.
+       a timed carry — *provided* it is not a cardio bout and not a pure
+       distance row. The hold time substitutes for reps as the work unit;
+       per-muscle attribution still requires a DB primary at the consumer,
+       so an unknown/cardio-section exercise contributes zero there.
+    3. A LOADED CARRY with reps==0: ``kg > 0`` plus either a duration or a
+       distance (Suitcase Carry 3 × 30m @ 24kg, Farmer Walk 2 × 40s @ 48kg).
+       The load is the work unit here, so a carry measured in metres rather
+       than seconds must not score zero. ``kg > 0`` is exactly what keeps
+       this clause disjoint from the distance→cardio gate in
+       ``_is_cardio_row``, which only fires on UNLOADED distance.
 
     Cardio rows and warmup-tagged rows (structured ``(warmup)`` marker or
     word-bounded "warm-up"/"warm up") are always excluded. Isometrics stay
     out of e1RM/progression — those paths gate on ``kg > 0`` independently.
+
+    Known gap: a carry logged with a load but with NO duration and NO
+    distance carries no work unit at all and still scores zero. The logger
+    writes carry time to ``Duration (min)``; rows predating that rule need
+    a data fix, not a code one.
     """
     if _notes_has_warmup(r.get("notes")):
         return False
     reps = r.get("reps") or 0
     if reps > 0:
         return True
-    # reps == 0 (or missing): only a non-cardio duration hold counts.
+    # reps == 0 (or missing). A LOADED carry counts on either work unit.
+    if (r.get("kg") or 0) > 0 and (
+        (r.get("duration_min") or 0) > 0 or (r.get("distance_km") or 0) > 0
+    ):
+        return True
+    # Otherwise only a non-cardio duration hold counts.
     if (r.get("duration_min") or 0) <= 0:
         return False
     if _is_cardio_row(r):

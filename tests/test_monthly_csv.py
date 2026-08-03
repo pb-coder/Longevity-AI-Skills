@@ -241,7 +241,7 @@ class MonthlyCsvTests(unittest.TestCase):
         # DISTINCT start times but durations within the +/-1 min collapse
         # tolerance. build_auto_cardio_payload used to drop each workout's
         # "start", so upsert_monthly_cardio fell back to duration-only matching
-        # and silently merged the two rides into one (Fabian 2026-06-30: an
+        # and silently merged the two rides into one (<OtherPerson>, 2026-06-30: an
         # 07:05 ride collapsed against a 16:59 ride). Both must survive, and a
         # re-import must be a no-op. Mirrors the shape both importers feed:
         # source-parser workout rows keyed by apple_type + "start" (HH:MM:SS).

@@ -314,6 +314,7 @@ previous state.)
 - Donkey Calf Raise Machine [Machine] ◆
 - Cable Standing Calf Raise [Cable]
 - Dumbbell Standing Calf Raise [DB] ◆
+- Rotary Calf Machine [Machine] ◆
 
 ---
 

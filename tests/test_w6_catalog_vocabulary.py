@@ -253,11 +253,17 @@ class NewCatalogEntryTests(unittest.TestCase):
     # pattern from shrug elevation, which is what the rotation rule
     # requires. Equipment flavour would not have been enough.
     CATALOG_ADDED_TRAPS_ROTATION = 1
+    # Rotary Calf Machine, added by /log on 2026-08-03 when the user trained
+    # it for the first time and the unknown-exercise gate proposed it. Growth
+    # from a real logged session is the one path spec §6 does not close: the
+    # alternative is silently counting those sets as zero volume.
+    CATALOG_ADDED_LOGGED_2026_08 = 1
 
     def test_catalog_grew_by_exactly_four(self) -> None:
         expected = (self.CATALOG_BASELINE + self.CATALOG_ADDED_HIP_THRUST
                     + self.CATALOG_ADDED_W6A
-                    + self.CATALOG_ADDED_TRAPS_ROTATION)
+                    + self.CATALOG_ADDED_TRAPS_ROTATION
+                    + self.CATALOG_ADDED_LOGGED_2026_08)
         actual = len(exdb._all_canonical_names())
         self.assertEqual(
             actual, expected,

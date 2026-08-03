@@ -53,6 +53,9 @@
 | Hanging knee raise, Hanging knee raises, Hanging Knee Up, Knee Raise (hanging), Hanging Knee-Up | Hanging Knee Raise | its own canonical, NOT a synonym for Hanging Leg Raise — the knee-flexed rung below it. Merging the two destroys the progression from one to the other |
 | Around the World, Plate Halo, Weight Plate Halo, Plate Around The World, Dumbbell Around the World | Plate Around the World | the plate halo (a weight orbiting the head/torso), NOT the World's Greatest Stretch — that is a separate WARMUP canonical |
 | Rowing, Rower, Erg, Row Erg, Rowing Erg, Concept 2, Concept2 | Rowing Machine | the cardio erg. Do NOT confuse with `Seated Row Machine` / `Low Row Machine`, which are back-strength machines |
+| Rotary Calf | Rotary Calf Machine | — |
+| Sotting Leg Curl | Leg Curl (Seated) | — |
+| cable Calf Raise | Cable Standing Calf Raise | — |
 
 ## Deliberately NOT aliased
 

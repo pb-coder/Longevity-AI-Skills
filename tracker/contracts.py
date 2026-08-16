@@ -136,6 +136,12 @@ class TrackerJSON(TypedDict, total=False):
     light_therapy_summary: dict[str, JsonValue] | None
     nutrition_phase: dict[str, JsonValue] | None
     daily_activity_28d: dict[str, JsonValue]
+    # Daily energy expenditure over 28 days: TDEE plus its active / basal
+    # split, and the per-week OLS trend on each. ``None`` — and so absent
+    # from the emitted JSON — when neither energy column carries a reading
+    # in the window, the same gate ``nutrition_phase`` uses. A renderer
+    # must gate its card on the key's presence rather than on a zero.
+    energy_28d: dict[str, JsonValue] | None
     recovery: Recovery
     training_load: TrainingLoad
     training_load_by_modality: dict[str, TrainingLoad]

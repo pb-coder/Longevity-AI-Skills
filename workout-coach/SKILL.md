@@ -18,7 +18,9 @@ description: >
 
 Two trackers live in per-person folders inside the workout directory:
 - `<Person>/data/` (CSV store: monthly/ + dense + swimming/)
-- `<OtherPerson>/data/` (same shape; HealthAutoExport-backed, no swim-lap store unless native XML data exists)
+- `<OtherPerson>/data/` (same shape)
+
+Both are HealthAutoExport-backed. Apple's native XML export has been retired entirely, so `data_source` is `health_auto_export` on every tracker. Neither person has a per-lap swim store any more; per-workout swim aggregates are written on both.
 
 Resolve which person this request is about BEFORE running the script:
 - If the user names a person or tracker, use that name.
@@ -30,7 +32,7 @@ Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at
 ## Setup
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
-2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis. When `swim_summary` is present in the JSON, also read `references/swim-coaching.md` for SWOLF / SPL / CSS-zone interpretation, retest cadence, and what NOT to say about swim form. When `nutrition_phase` is present AND `current.phase_type == "bulk"`, also read `references/bulking-science.md` for surplus / rate / off-ramp judgment and the binding `coach_action_hint` token semantics.
+2. Read `references/training-science.md` and use the Quick Lookup table for each part of your analysis. When `swim_summary` is present in the JSON, also read `references/swim-coaching.md` for SWOLF / SPL / CSS-zone interpretation, retest cadence, and what NOT to say about swim form. When `nutrition_phase` is present AND `current.phase_type == "bulk"`, also read `references/bulking-science.md` for surplus / rate / off-ramp judgment and the binding `coach_action_hint` token semantics. When `energy_28d` or `nutrition_phase.energy` is present on **any** phase type, read that same file's **The 7,700 kcal/kg constant** section: it is where every kcal target in this tracker comes from, in both directions, and it carries the caveats on the conversion.
 3. Run `scripts/read_tracker.py --person <Person>` from the workout-tracker root. The script reads that person's CSV store (`monthly/`, `health_metrics.csv`, `workout_sessions.csv`, `profile.csv`, plus `swimming/`, `sleep/`, `thermal/` and `light_therapy/` where they exist) and returns one JSON blob organised around session-level signals rather than raw arrays. Every key is documented under **Data Reading Strategy** below; read that section, not this line, for what is in the payload. Several blocks are gated on data presence and are simply absent when there is nothing to report. If the data folder isn't there, the script prints an error — relay it in one line and stop. Don't search the filesystem.
 
    **Output is compact (no indentation) by default** — saves ~20% of tokens vs pretty-printed. Pass `--pretty` for human inspection.
@@ -57,7 +59,7 @@ The dashboard is produced by **`scripts/render_dashboard.py`**. The script owns 
 The dashboard is organised across **three tabs**: Today (operational, "should I train hard?"), Trajectory (longevity, "am I aging well?"), and Workout (the markdown plan, rendered in the same visual style).
 
 - **Today** — headline, Recovery + Freshness hero (the recovery card absorbs the hard / moderate / easy call as a sub-line), recovery drivers, ACWR, activity rings, NEAT, the 90-day training-load chart, strength progression, week over week.
-- **Trajectory** — longevity score, cardiorespiratory, autonomic recovery, sleep architecture + Sleep Regularity Index, body composition, metabolic, the centenarian-decathlon framing, behavioural consistency, health vitals, sleep detail, recovery practices, personalized risk flags.
+- **Trajectory** — longevity score, cardiorespiratory, autonomic recovery, sleep architecture + Sleep Regularity Index, body composition, metabolic, energy expenditure, the centenarian-decathlon framing, behavioural consistency, health vitals, sleep detail, recovery practices, personalized risk flags. Three cards here are gated on their tracker block and simply do not render without it: swim, energy, nutrition phase.
 
 The card inventory, each card's data contract, the coach-reads schema, the validation rules, and the tooltip catalog live in **`references/assessment-dashboard.md`**. That file is the source of truth for all of it; do not restate it here.
 
@@ -108,8 +110,16 @@ Write both files in one pass at the end. Don't stream sections to chat while thi
 What the JSON contains:
 
 **Source + capabilities (read first to gate sections):**
-- `data_source`: `xml` (Apple's zipped XML) or `health_auto_export` (HealthAutoExport ZIP). Trust this string; don't override based on populated fields.
-- `capabilities`: per-source feature map. **False = structurally unsupported**, so gate sections on this rather than on null fields, and never ask the user to track something their source cannot emit. Native XML and HealthAutoExport both expose the full recovery / sleep / per-workout-HR surface. `sleep_nights` False means sleep is limited to the headline Total/Deep/REM on `health_metrics_weekly`. `thermal_log` and `light_therapy_log` are always True (manual-log, not source-dependent); their summary blocks are gated on data presence instead.
+- `data_source`: always `health_auto_export` (HealthAutoExport ZIP). Apple's native XML export is retired and no tracker carries `xml` any more. Trust this string; don't override based on populated fields.
+- `capabilities`: per-source feature map. **False = structurally unsupported**, so gate sections on this rather than on null fields, and never ask the user to track something their source cannot emit. HealthAutoExport exposes the full recovery / sleep / per-workout-HR surface, including the per-night `sleepStart` / `sleepEnd` timestamps, so `sleep_regularity` is True. `sleep_nights` False means sleep is limited to the headline Total/Deep/REM on `health_metrics_weekly`. `thermal_log` and `light_therapy_log` are always True (manual-log, not source-dependent); their summary blocks are gated on data presence instead.
+
+  **Permanently unavailable, whatever an empty field looks like.** These went with the XML retirement and are not coming back. Never list them under **Missing from your tracking**, and never read an emptied field as something that changed about the person:
+  - **Workout effort score** (Apple's 1-10 RPE). The tracker has no effort-in-reserve intake at all, which is why the stall language has to say it is inferred from load and reps.
+  - **Beat-to-beat intervals, so no RMSSD.** HRV is the SDNN scalar and nothing else.
+  - **ECG.**
+  - **Swim stroke style and SWOLF**, and the per-lap detail they lived on. Per-workout swim aggregates (pool length, laps, strokes, SPL, distance, water temp) are still written.
+  - **Apple's own HR-zone boundaries.** Every zone in this payload is HRR-derived from `estimated_max_hr` / `estimated_rest_hr`.
+  - **`n_segments` on sleep nights**, permanently blank, so sleep fragmentation is null on every night. **A null fragmentation is a retired field, not a better night.** Never write that fragmentation improved because the number went away.
 - `auto_cardio_enabled`: bool. True = Apple-recorded runs / hikes / HIIT auto-flow into the monthly sheets.
 - `today`: ISO date.
 - `estimated_max_hr`, `estimated_rest_hr`: derived once at the top. `max_hr` is the robust high observed Apple max-HR from the last 12 months (p99-style, to avoid one sensor spike) or 208 − 0.7×age fallback if none is observable. `rest_hr` is the 28-day mean of `resting_hr` (or 60 fallback if missing). Used by all HR-zone / TRIMP / load-band math below.
@@ -136,7 +146,14 @@ What the JSON contains:
 - `cardio_hr_zones_28d`: HRR (Karvonen) time-in-zone. **The canonical source for true Zone-2 minutes**, and it needs per-workout `avg_hr` on cardio rows. `z2_by_activity` splits Z2 into `run` / `swim` / `cycle` / `walk_hike` / `other`, so a 5-min swim does not read as the same dose as a 35-min run. **High `z3_pct` = grey-zone trap.** Polarized = `z2_pct + z4_z5_pct` dominant; pyramidal steps z2 > z3 > z4_z5 cleanly.
 
 **Daily activity (NEAT — non-exercise activity thermogenesis):**
-- `daily_activity_28d`: NEAT rollup. **`assessment`** is the band to act on: `low` (<15 min/day basis), `moderate` (15-45), `high` (≥45), where the basis is `exercise_min_daily_avg` when present and `walking_minutes_28d / 28` otherwise. It separates "sedentary then trains" from "active all day and trains", and the cardio prescription differs between them.
+- `daily_activity_28d`: NEAT rollup. **`assessment`** is the band to act on (`low` / `moderate` / `high`), and **`steps_daily_avg` is its primary basis** — steps are the honest NEAT channel because they accumulate all day without a workout being started, whereas Apple exercise minutes credit deliberate training. Step bands are `low` under 7,000/day, `moderate` 7,000 to 10,000, `high` at or above 10,000. `exercise_min_daily_avg` is the secondary basis and is used only when steps are absent (bands <15 / 15-45 / ≥45 min/day), with walking minutes per day as the last fallback; `walking_workouts_count` and `walking_distance_km_28d` are context, never the band. **`assessment_basis` names which of the three the band was actually read off** (`steps` / `exercise_min` / `walking_minutes` / null), and quoting the band without it hides a measured step count reading identically to a walking-workout proxy. Read `assessment` rather than re-deriving it. It separates "sedentary then trains" from "active all day and trains", and the cardio prescription differs between them.
+
+**Energy expenditure (28-day window, gated):**
+- `energy_28d`: daily energy expenditure measured off the export's active plus basal energy. **Absent when the source has no energy rows** (not null, and not a block of zeroes), and the Trajectory energy card does not render without it. **This is an EXPENDITURE block. Nothing in it is intake, and there is no intake block anywhere in this payload.**
+  - `tdee_kcal_daily_avg`, `active_kcal_daily_avg`, `basal_kcal_daily_avg`: kcal/day, whole numbers. Each is averaged over the days that actually carry its reading, so **the three means can rest on three different day sets and `tdee` need not equal `active + basal`.** `n_days` counts days carrying BOTH components (the days TDEE is built from); `n_active_days` and `n_basal_days` sit beside it so a disagreement is visible rather than silently averaged over.
+  - `tdee_trend_kcal_per_week` / `basal_trend_kcal_per_week`: the headline rates, **populated only when the fit resolves and null otherwise**, with the full `tdee_trend` / `basal_trend` blocks behind them carrying `state` / `reason` / `note`. **Same shape and same trap as `bodyweight_trend`.** Read `state` before you say the burn is rising or falling, and paraphrase `note` when it is unresolved. **`point_kcal_per_week` is the energy twin of `point_kg_per_week` and `point_cm_per_4w`**: it sits inside the block at the same level as `state`, needs no state check to reach, and is populated whenever a fit exists at all, which is precisely when the direction did not resolve. Never quote it as the rate.
+  - The two channels resolve independently. There is no basal trend without a basal column and no TDEE trend without both, so one can resolve while the other does not. Say which one you are quoting.
+- `nutrition_phase.energy` (optional sub-block on an open phase): `{tdee_kcal, target_deficit_kcal, implied_intake_kcal, basis}`. `implied_intake_kcal` is `tdee_kcal` minus `target_deficit_kcal`, so it is a **prescription derived from a measurement**, not a reading. `basis: "measured_28d"` says the TDEE came from `energy_28d`; any other basis is an estimate. Writing rules are under **Nutrition phase**.
 
 **Recovery + training load (Python-derived signals — use these instead of eyeballing raw metrics):**
 - `recovery`: `{score: 0-10|null, confidence, drivers: [...]}`. A renormalized weighted average of per-signal personal z-scores mapped to [0,10], over signals with a sufficient baseline sample. **5.0 means "average for this person across whatever signals are available"**, NOT "base 5 minus what's missing" — trackers with fewer usable signals are not biased downward. VO2max trend is **not** in it (chronic fitness; see `vo2max_*`). `drivers` are sorted by `|component_score - 5|` descending, so the most-deviating signal leads. `score: null` only when zero signals had sample. **Use the score directly for "should I train hard today?"** and cite the leading driver(s) by name.
@@ -178,7 +195,7 @@ What the JSON contains:
 - `vo2_percentile`: VO2max against Cooper/ACSM norms by age + sex; `longevity` is Attia's "elite-for-a-decade-younger" target. `null` when sex is unknown.
 - `hr_recovery`: 1-min HR Recovery against Cole 1999 NEJM bands. `<12 bpm` is abnormal, the 4x CV-mortality cutoff.
 - `acwr`: Gabbett 2016 acute:chronic ratio. 0.8-1.3 is the sweet spot.
-- `sleep_regularity`: SRI (Phillips 2017 / Windred 2024, UK Biobank n=60,977). **`null` on HealthAutoExport trackers** — it needs Apple XML's segment-level timestamps.
+- `sleep_regularity`: SRI (Phillips 2017 / Windred 2024, UK Biobank n=60,977). **Populated on every tracker.** The JSON export carries `sleepStart` / `sleepEnd` per night, which is all the index needs, so `capabilities.sleep_regularity` is True and a null here means too few nights in the window rather than a source that cannot emit it.
 - `rem_anomaly`: REM-proportion watch for Parkinson surveillance. `low_rem_nights` counts nights under 15% REM.
 - `movement_consistency`: days hitting Apple's 30-min exercise threshold (Paluch 2022 step-days proxy).
 
@@ -230,7 +247,7 @@ What the JSON contains:
 
 ❌ "Cardio: 60 min Z2, target 600. Add a session."
    → Misses the daily-activity context.
-✅ "Cardio 60 min Z2 vs 600 target. But daily activity 124 min/day exercise minutes (high) — base aerobic load is fine. Add 1 interval session for the VO2max stimulus, not 4 Z2."
+✅ "Cardio 60 min Z2 vs 600 target. But daily activity 11,400 steps/day (high), so base aerobic load is fine. Add 1 interval session for the VO2max stimulus, not 4 Z2."
 
 ❌ "TSB is fine, push hard."
    → Numbers, not adjectives. And "fine" misses bands.
@@ -267,7 +284,7 @@ Goals are fixed: hypertrophy + longevity. Never ask about goals. Your job is to 
 Three stages: **A** (Python insights), **B** (LLM authorship), **C** (HTML render). Stage B is split in two with a HARD CHECKPOINT between, so the workout plan is always built on top of a finalized assessment and never in parallel with it.
 
 1. **(Stage A) Read tracker data, 6 months back:** `python3 Skills/workout-coach/scripts/read_tracker.py --person <Name> --months 6 > /tmp/tracker.json`. Six months is required so the 90-day training-load chart's 42-day CTL EWMA is properly warmed up before the visible window begins (anything less and the chart shows a cold-start ramp that is not real fitness movement). The Python stage produces every metric, the 5-tier `session_recommendation` gate, `nutrition_phase`, and `swim_summary` — the LLM does not re-derive any of this.
-2. **(Stage B1 — assessment FIRST) Author and save `coach_reads.json`.** Read `/tmp/tracker.json`. Draft `headline` + every `cards.*` callout (including `swim_trajectory_callout` when `swim_summary` is present and `nutrition_phase_callout` when `nutrition_phase` is present). Validate copy rules locally as you write — no em-dashes, ≤ 280 chars per card string, ≤ 560 for the headline. Write the file to `plans/<Person>/<date>-coach_reads.json`. **HARD CHECKPOINT: this file MUST exist on disk before step 3 starts.** The file IS the assessment in structured form; the workout step consumes it as input.
+2. **(Stage B1 — assessment FIRST) Author and save `coach_reads.json`.** Read `/tmp/tracker.json`. Draft `headline` + every `cards.*` callout (including `swim_trajectory_callout` when `swim_summary` is present, `trajectory_energy` when `energy_28d` is present, and `nutrition_phase_callout` when `nutrition_phase` is present). Validate copy rules locally as you write — no em-dashes, ≤ 280 chars per card string, ≤ 560 for the headline. Write the file to `plans/<Person>/<date>-coach_reads.json`. **HARD CHECKPOINT: this file MUST exist on disk before step 3 starts.** The file IS the assessment in structured form; the workout step consumes it as input.
 3. **(Stage B2 — workout SECOND, built on top) Author `plans/<Person>/<date>-workout.md`.** Re-open `coach_reads.json` from disk (do NOT skip the re-read — it forces the workout plan to honor the saved assessment, not paraphrase it from memory). Quote the `headline` and `cards.session_recommendation_callout` as load-bearing references in the workout opener. Then draft the lean exercise bullets honoring the binding 5-tier `session_recommendation` gate from the tracker JSON. Rules in "Per-workout format in the file" below. **DO NOT draft `workout.md` before `coach_reads.json` is saved.**
 4. **(Stage C) Render:**
    ```
@@ -289,7 +306,7 @@ The key list and each card's contract live in `references/assessment-dashboard.m
 - `headline` is 2-3 sentences anchored on the longevity trajectory plus today's training call. Every `cards.*` string is one or two sentences.
 - The Today intensity gloss is `session_recommendation_callout`, and it falls back to `headline` when omitted. There is no `today_headline` and no `trajectory_decathlon` card; the renderer ignores both keys.
 - All `cards` keys are optional. Omit a key (or leave it `""`) and that card renders without a callout, pure data.
-- `swim_trajectory_callout` and `nutrition_phase_callout` are gated on `swim_summary` / `nutrition_phase` being in the tracker JSON. The validator does not warn when they are missing, because their cards may legitimately not render this turn. Author them whenever the data is present.
+- `swim_trajectory_callout`, `trajectory_energy` and `nutrition_phase_callout` are the gated keys, on `swim_summary` / `energy_28d` / `nutrition_phase` being in the tracker JSON. The validator does not warn when they are missing, because their cards may legitimately not render this turn. Author them whenever the data is present.
 
 The Trajectory tab's job is to translate raw numbers into **age-cohort context** and **longevity action**: every metric should answer *Where am I? Where should I be? What do I do about it?* — not just describe the data.
 
@@ -315,14 +332,14 @@ Keep coach lines tight. The user is an established trainee. Surface findings tha
 |---|---|
 | Strength sessions | {N} (avg TRIMP {X}, distribution: {N1} light / {N2} moderate / {N3} hard / {N4} red-line) |
 | Cardio sessions | {N} ({Z2_min} min Z2, {Z3_min} min Z3, {Z4Z5_min} min Z4–5) |
-| Daily activity | {exercise_min_daily_avg} min/day Apple exercise minutes ({assessment}); {walking_workouts_count} walking workouts totalling {walking_distance_km_28d} km |
+| Daily activity | {steps_daily_avg} steps/day ({assessment}); {exercise_min_daily_avg} min/day Apple exercise minutes; {walking_workouts_count} walking workouts totalling {walking_distance_km_28d} km |
 | Training load | CTL {ctl} / ATL {atl} / TSB {tsb} ({state}) |
 | Recovery score | {score}/10 ({confidence} confidence; {improving / drifting / mixed} vs prior 4w) |
 ```
 
 Where `{state}` is `well rested` (TSB > +5), `balanced` (−5 to +5), `carrying load` (−10 to −5), `fatigued` (−15 to −10), or `high fatigue` (≤ −15).
 
-Every value is a direct payload read. Two source-honest fallbacks: when `trimp` and `load_band` are null on every session in the window, drop the parenthetical and write the bare count, and when `exercise_min_daily_avg` is null, substitute `{walking_minutes_28d / 28} min/day walking ({assessment})`. Neither case gets an explanation in the row. Prefer `training_load_by_modality.strength` over whole-body `training_load` for the load row.
+Every value is a direct payload read. Two source-honest fallbacks: when `trimp` and `load_band` are null on every session in the window, drop the parenthetical and write the bare count, and when `steps_daily_avg` is null, lead the daily-activity row with `{exercise_min_daily_avg} min/day Apple exercise minutes ({assessment})` instead, falling through to `{walking_minutes_28d / 28} min/day walking ({assessment})` when that is null too. The band in parentheses always sits on whichever basis leads the row. Neither case gets an explanation in the row. Prefer `training_load_by_modality.strength` over whole-body `training_load` for the load row.
 
 **Recovery-score trend descriptor (deterministic):**
   1. Walk `health_metrics_weekly`. For each of HRV / RHR (inverted: lower is better) / sleep_total_h / wrist_temp_c (inverted) / hr_recovery_1min / vo2max, compare the most-recent week's value to the mean of the prior 3 weeks.
@@ -469,7 +486,7 @@ Compare cardio against §10 targets (150 min Zone 2 + ~20 min intervals per week
 
 Take the Zone-2 number from `cardio_hr_zones_28d.z2` and the interval count from `cardio_last_28d.interval_sessions`. Use `z2_by_activity` to qualify the dose when the mix matters: short swim Z2 minutes are real HR-zone exposure but not a substitute for a dedicated 30-45 min run or ride.
 
-**REQUIRED daily-activity gate.** Cross-check the shortfall against `daily_activity_28d.assessment` before prescribing anything, and state the call with its value and band: "Daily activity 124 min/day (high). Cardio prescription: hold Z2, add 1 interval session for VO2max." `high` plus a rising VO2max means keep the prescription minimal, the aerobic load is already arriving passively. `low` means add a Zone 2 session even when the 28d targets are met, because the base dose is too low. `moderate` takes the standard rule, and `null` says so out loud and falls through to it.
+**REQUIRED daily-activity gate.** Cross-check the shortfall against `daily_activity_28d.assessment` before prescribing anything, and state the call with the basis value and its band: "Daily activity 11,400 steps/day (high). Cardio prescription: hold Z2, add 1 interval session for VO2max." `high` plus a rising VO2max means keep the prescription minimal, the aerobic load is already arriving passively. `low` means add a Zone 2 session even when the 28d targets are met, because the base dose is too low. `moderate` takes the standard rule, and `null` says so out loud and falls through to it.
 
 Call out distribution problems when `cardio_hr_zones_28d` is populated: `z3_pct > 40` is the grey-zone trap (go easier or harder, the middle is the least productive ratio), `z2_pct + z4_z5_pct > 60` is healthy polarization, and z1 dominating with little Z2 means the long hikes are activity but not the Z2 stimulus.
 
@@ -493,6 +510,7 @@ Hard template (3–5 lines, plain bullets):
 - **Outlier flag.** If `sleep_summary.outliers` is non-empty, name the count + reason once: `Flag: {N} night(s) with efficiency<80% or WASO≥1h in the last 14d → look at pre-bed routine.` Don't list all dates; the user can drill in if they care.
 
 Source-honesty rules:
+- **Fragmentation is permanently null and gets no sentence.** It was derived from `n_segments`, which the current source no longer writes on any night. Do not report it, do not call it unknown as though it were a tracking gap the user could close, and above all **never write that fragmentation improved**: the number left because the field was retired, not because the nights got smoother. Efficiency, WASO and the schedule stdevs still carry the continuity story.
 - Don't claim a stage breakdown is "off" relative to population norms (e.g. "Deep should be 20% of total"). Apple's stage classifier is good enough for trend, not absolute. Stick to within-user comparison.
 - Don't act on a single bad night. Two-in-fourteen warrants a routine flag; one is noise.
 - `Unspecified` stage is Apple's "asleep but stage unknown" bucket. It's part of Total but isn't actionable on its own — don't surface it unless it's >25% of Total (signals stage-classifier failure, usually from a movement-heavy night).
@@ -542,6 +560,8 @@ Source-honesty rules:
 2. **Name ONE specific signal** driving the verdict — usually the metric in `delta_vs_prior_14d` with the largest absolute movement (lower = better for pace / SPL / SWOLF). When `pace_pr` or `swolf_pr` is True, mention it.
 3. **Give ONE actionable focus** for the next session (e.g., "tempo focus, hold SWOLF" or "log a CSS test"). Don't lecture technique — that's the swim-coaching.md no-go list.
 
+**SWOLF and stroke style are permanently unavailable from the live source.** They lived in the retired XML lap payload, along with all per-lap detail. Per-workout swim aggregates (pool length, laps, strokes, SPL, distance, water temp) are written and are real data, so the callout has plenty to work with: pace per 100m, SPL, distance, session count. Comment on SWOLF or stroke mix **only** when those fields are actually populated, which now means historical swims imported before the retirement. When they are absent, say nothing about them at all. An absent SWOLF is a retired field, not a swim that went unmeasured and not stroke economy that stopped improving, and `stroke_outliers` is absent for the same reason rather than empty because the strokes were clean.
+
 When `swim_summary.css` is null AND `swim_summary.css_test_detected` is non-null, prompt the user via the callout: "Looks like a 400m + 200m pair on {date} — was that a CSS test? Re-log with `CSS test` on the header to write it to your profile." When `swim_summary.css_missing_nudge` is present, prompt a CSS test rather than inventing zones. When `swim_summary.css_retest_due: True`, prompt the retest. When `swim_summary.stroke_outliers` is non-empty, flag the lap once as an Apple Watch misclassification candidate (one Butterfly lap in a Freestyle session = noise, not a stroke change).
 
 Example `swim_trajectory_callout`:
@@ -550,7 +570,7 @@ Example `swim_trajectory_callout`:
 
 ### Nutrition phase
 
-**REQUIRED when `nutrition_phase` is in the JSON — author `cards.nutrition_phase_callout` in coach_reads.json.** Skip the callout when the key is absent (no open phase row in `<person>/data/nutrition_phases.csv`). When `current.phase_type == "bulk"`, **read `references/bulking-science.md` first**: it owns surplus / rate / off-ramp judgment and the source-honesty rules (the 14d smoothed rate over raw daily noise, one bad week is not a stop signal, surplus changes go through the structured target rather than "just eat more", the 12-week lean-bulk cap).
+**REQUIRED when `nutrition_phase` is in the JSON — author `cards.nutrition_phase_callout` in coach_reads.json.** Skip the callout when the key is absent (no open phase row in `<person>/data/nutrition_phases.csv`). When `current.phase_type == "bulk"`, **read `references/bulking-science.md` first**: it owns surplus / rate / off-ramp judgment and the source-honesty rules (the 14d smoothed rate over raw daily noise, one bad week is not a stop signal, surplus changes go through the structured target rather than "just eat more", the 12-week lean-bulk cap). On **any** phase type, cut included, read that file's **The 7,700 kcal/kg constant** section before you write a kcal figure: it is the source of the deficit and surplus arithmetic and it spells out what the conversion cannot support.
 
 **What the callout MUST do** (one to two sentences, ≤280 chars):
 
@@ -562,6 +582,23 @@ Example `swim_trajectory_callout`:
 Example `nutrition_phase_callout`:
 
 > Continue phase. Week 2 at +0.24 kg/wk against a 0.25 target, no stop signals triggered. Re-evaluate after week 4; if rate creeps above 0.4 kg/wk, dial the surplus back 100-200 kcal.
+
+#### Energy: quote the measured TDEE, name the intake number, say the intake is untracked
+
+**REQUIRED when `energy_28d` is in the JSON: author `cards.trajectory_energy` too.** That card renders directly above the nutrition-phase card and is gated on the same block. These four rules bind both callouts, and rule 3 binds every other line you write about food.
+
+1. **Quote the measured TDEE, not a range.** `energy_28d.tdee_kcal_daily_avg` is a 28-day daily average of the export's own active plus basal energy. Write the number with its split: "measured TDEE 3204 kcal/day, 1058 active and 2146 basal". Generic band copy such as "cut 200 to 300 kcal" is retired: it was written when there was no TDEE anchor in the payload at all, and there is one now. Do not reach for a range when the measurement is on file.
+2. **Give the intake target as an actual number.** With a phase open, `nutrition_phase.energy.implied_intake_kcal` is TDEE minus `target_deficit_kcal`, and that figure is what you write: "eat about 2654 kcal/day". Check `energy.basis` first: `measured_28d` means it came off the export and can be stated flatly, and any other basis is an estimate the copy has to soften for. When the `energy` sub-block is absent there is no anchored number, so give the target as a rate in kg/wk and stop. Never derive a kcal figure yourself.
+3. **Say plainly that the intake number is untracked.** Nothing in this tracker logs food. Every HealthAutoExport nutrition column is empty, so the intake figure is a **prescription and never an observation**. Phrase it the way `protein_caveat` phrases protein: the number is a configured target, no intake log is stored here, so do not claim adherence. That rules out every sentence implying we know what was eaten, including "you are eating about 2650", "intake ran high this week", "your deficit was only 200 kcal", "you hit your calories", and any praise or criticism of how the person ate. The scale is the only feedback channel on whether the prescription is landing, so judge the phase on `actuals.rate_kg_per_wk_14d` and say out loud that the scale is what you are judging it on.
+4. **A falling basal trend during an open cut is adaptive thermogenesis.** A negative `energy_28d.basal_trend_kcal_per_week` while a cut is open means the expenditure floor moved down under the target, which is how a phase reads "on track" the same week the scale rate stalls. Name it as adaptation rather than a data error or a metabolism to be alarmed about, and say the intake number needs recomputing against today's TDEE instead of the one the phase opened on. `tdee_trend_kcal_per_week` is the same read on the total. The scalar is null unless the fit resolved, so a missing trend is an unresolved direction and not a flat one: read `basal_trend.state` and say so rather than reporting stability that was never established.
+
+Example `trajectory_energy`:
+
+> Measured TDEE 3204 kcal/day, 1058 of it active. Basal is drifting down about 9 kcal per week six weeks into the cut, which is adaptation, not a stall. Recompute the target against today's number rather than the one you opened on.
+
+Example `nutrition_phase_callout` with energy present:
+
+> Continue phase. Measured TDEE 3204 kcal/day puts the 0.5 kg/wk target at roughly 2654 kcal/day. Nothing here logs intake, so that is the prescription, and the 14-day scale rate, flat so far, is the only check on it.
 
 ## Phase 2: Planning (into `plans/<Person>/<date>-workout.md`)
 

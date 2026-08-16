@@ -78,9 +78,15 @@ For known issues / planned cleanup, see
 | Per-muscle HR creep / strength session HR / e1RM slope | [`lib/strength.py`](lib/strength.py) |
 | CSV store schemas and upserts | [`../shared/csv_store_dense.py`](../shared/csv_store_dense.py) and [`../shared/csv_store_periodic.py`](../shared/csv_store_periodic.py) |
 | Monthly workout CSV canonicalization/upserts | [`../shared/monthly_csv_canonicalize.py`](../shared/monthly_csv_canonicalize.py) and [`../shared/monthly_csv_upsert.py`](../shared/monthly_csv_upsert.py) |
-| Apple XML daily/sleep aggregation | [`../shared/apple_health_daily.py`](../shared/apple_health_daily.py) |
-| Apple XML strength/swim helper payloads | [`../shared/apple_health_strength.py`](../shared/apple_health_strength.py) and [`../shared/apple_health_swim.py`](../shared/apple_health_swim.py) |
-| Apple Health import orchestration | [`../shared/import_apple_health.py`](../shared/import_apple_health.py) (Apple XML) or [`../shared/import_health_auto_export.py`](../shared/import_health_auto_export.py) (HealthAutoExport) |
+| Health import — the ONLY importer: daily/sleep aggregation, workout + swim payloads, JSON vs. deprecated-CSV dispatch | [`../shared/import_health_auto_export.py`](../shared/import_health_auto_export.py) |
+| Unit conversion, plausibility ranges, timestamp parsing (source-agnostic) | [`../shared/health_units.py`](../shared/health_units.py) |
+| Strength-session clustering for monthly TOTAL-row metadata | [`../shared/strength_sessions.py`](../shared/strength_sessions.py) |
+| Apple's activity-type enum → canonical name / cardio-autolog set | [`../shared/apple_workout_types.py`](../shared/apple_workout_types.py) |
+| Per-person `data/` git history (one commit per confirmed write) | [`../shared/data_git.py`](../shared/data_git.py)::`commit_data` |
+| Daily energy expenditure (TDEE / active / basal + trends) | [`lib/cardio.py`](lib/cardio.py)::`energy_28d` |
+| Steps / NEAT rollup and its low/moderate/high band | [`lib/cardio.py`](lib/cardio.py)::`daily_activity_28d` |
+| Nutrition phase: on-track verdict, stop signals, energy prescription | [`lib/nutrition_phase.py`](lib/nutrition_phase.py)::`nutrition_phase_summary` |
+| Energy + nutrition-phase card HTML | [`lib/render_cards_programs.py`](lib/render_cards_programs.py)::`card_energy` / `card_nutrition_phase` |
 | Dashboard spec / card contracts | [`references/assessment-dashboard.md`](references/assessment-dashboard.md) |
 | Visual design system — colours, typography, pills, card chrome | [`Skills/DESIGN.md`](../DESIGN.md) |
 | Coach behavioral rules (Phase 2 planning) | [`SKILL.md`](SKILL.md) |
@@ -98,53 +104,57 @@ Skills/workout-coach/
 │   ├── training-science.md               physiology references the coach can cite + person profiles
 │   ├── substitute-protocols.md           Tier A–E substitute templates (rest / Z2 / deload / modified / normal)
 │   ├── swim-coaching.md                  CSS-zone interpretation, SWOLF/SPL guardrails
+│   ├── bulking-science.md                phase-rate targets + stop conditions the nutrition block cites
+│   ├── common-mistakes.md                recurring authoring errors
 │   └── code-health-audit.md              snapshot of issues + improvement backlog
 ├── scripts/
-│   ├── read_tracker.py (1155 lines)      CLI: reads CSV store, emits compact tracker JSON
-│   └── render_dashboard.py (336 lines)   CLI: composes the final HTML (thin orchestrator)
+│   ├── read_tracker.py (1375 lines)      CLI: reads CSV store, emits compact tracker JSON
+│   └── render_dashboard.py (386 lines)   CLI: composes the final HTML (thin orchestrator)
 └── lib/
     │
     ├── # ---- Analytics modules (consumed by read_tracker.py) ----
-    ├── constants.py (810)                capabilities, landmarks, aliases, MEV/MAV/MRV
+    ├── constants.py (915)                capabilities, landmarks, aliases, MEV/MAV/MRV
     ├── parsing.py (108)                  date + number coercions, _compact
-    ├── extract.py (555)                  CSV readers + exercises-database parser
-    ├── sessions.py (691)                 per-session aggregation + bodyweight trend
-    ├── adherence.py (1324)               prescription ledger: plan parser, planned-vs-performed, bench list
-    ├── blocks.py (1058)                  training blocks: pattern identity, artifact, boundary, rotation diff
+    ├── extract.py (550)                  CSV readers + exercises-database parser
+    ├── sessions.py (1565)                per-session aggregation + bodyweight trend + OLS trend verdict
+    ├── adherence.py (2339)               prescription ledger: plan parser, planned-vs-performed, bench list
+    ├── blocks.py (2487)                  training blocks: pattern identity, artifact, boundary, rotation diff
     ├── strength.py (625)                 volume, e1RM, HR-at-volume divergence
-    ├── cardio.py (609)                   cardio rollups, HR zones, TRIMP, CTL/ATL/TSB, NEAT
-    ├── health.py (77)                    compatibility facade for focused health modules
-    ├── health_windowing.py (162)         time-series primitives + weekly aggregates
-    ├── health_recovery.py (220)          recovery_score + recovery drivers
-    ├── health_longevity.py (497)         longevity_score + longevity_state I/O
-    ├── health_session_rec.py (472)       5-tier gate + 14-day tier history
-    ├── sleep.py (422)                    sleep_summary (stages, schedule, fragmentation, outliers)
-    ├── swim.py (347)                     swim_summary (pace, SPL, SWOLF, CSS zones)
-    ├── thermal.py (336)                  thermal_summary (sauna + cold)
-    ├── light_therapy.py (164)            light_therapy_summary (RLT / PBM / blue light)
+    ├── cardio.py (949)                   cardio rollups, HR zones, TRIMP, CTL/ATL/TSB, NEAT + steps, energy_28d
+    ├── nutrition_phase.py (495)          open-phase verdict, stop signals, energy prescription
+    ├── health.py (74)                    compatibility facade for focused health modules
+    ├── health_windowing.py (159)         time-series primitives + weekly aggregates
+    ├── health_recovery.py (242)          recovery_score + recovery drivers
+    ├── health_longevity.py (539)         longevity_score + longevity_state I/O
+    ├── health_session_rec.py (751)       5-tier gate + 14-day tier history
+    ├── sleep.py (428)                    sleep_summary (stages, schedule, fragmentation, outliers) + SRI
+    ├── swim.py (529)                     swim_summary (pace, SPL, SWOLF, CSS zones)
+    ├── thermal.py (363)                  thermal_summary (sauna + cold)
+    ├── light_therapy.py (158)            light_therapy_summary (RLT / PBM / blue light)
     │
     └── # ---- Renderer modules (consumed by render_dashboard.py) ----
     ├── render_helpers.py (60)            esc, fmt, signed, parse_date — zero-dep helpers
-    ├── render_validators.py (1224)       KNOWN_TERMS catalog, validate_coach_reads, validate_workout_md, validate_workout_plan, auto_wrap_terms
+    ├── render_validators.py (2694)       KNOWN_TERMS catalog, validate_coach_reads, validate_workout_md, validate_workout_plan, auto_wrap_terms
     ├── render_components.py (23)         compatibility facade for component modules
     ├── render_components_load.py (135)   training-load chart + EWMA series
-    ├── render_components_recovery.py (258)
+    ├── render_components_recovery.py (259)
     │                                      driver bars, scales, sparklines, metric rows
-    ├── render_components_volume.py (109) per-muscle volume bars
+    ├── render_components_volume.py (125) per-muscle volume bars
     ├── render_components_domain.py (192) comparison strips, dials, tier history
-    ├── render_components_misc.py (40)    rings + workout markdown embed
+    ├── render_components_misc.py (42)    rings + workout markdown embed
     ├── render_assets.py (11)             compatibility facade for dashboard assets
-    ├── render_styles.py (731)            STYLESHEET string
-    ├── render_scripts.py (256)           INLINE_JS string
-    ├── render_cards.py (76)              compatibility facade for card modules
-    ├── render_cards_common.py (39)       shared heading + coach callout helpers
-    ├── render_cards_today.py (472)       Today tab card templates
-    ├── render_cards_health.py (442)      health / sleep / recovery-practice cards
-    ├── render_cards_domains.py (581)     longevity-domain cards
-    └── render_cards_programs.py (371)    risk / swim / nutrition cards
+    ├── render_styles.py (740)            STYLESHEET string
+    ├── render_scripts.py (258)           INLINE_JS string
+    ├── render_cards.py (71)              compatibility facade for card modules
+    ├── render_cards_trajectory.py (38)   compatibility facade for the Trajectory-tab cards
+    ├── render_cards_common.py (34)       shared heading + coach callout helpers
+    ├── render_cards_today.py (652)       Today tab card templates
+    ├── render_cards_health.py (697)      health / sleep / recovery-practice cards
+    ├── render_cards_domains.py (619)     longevity-domain cards
+    └── render_cards_programs.py (550)    risk / swim / energy / nutrition cards
 ```
 
-> Line counts are accurate as of 2026-05-28. They will drift; re-check
+> Line counts are accurate as of 2026-08-15. They will drift; re-check
 > with `wc -l workout-coach/lib/*.py workout-coach/scripts/*.py` when
 > something looks off.
 
@@ -169,23 +179,57 @@ working; new changes should go to the focused module:
 
 ### Other analytics modules
 
-- [`lib/cardio.py`](lib/cardio.py) (~609) — cardio rollups, HR zones
-  (HRR/Karvonen), TRIMP, CTL/ATL/TSB rolling EWMA, daily-activity
-  (NEAT), `auto_deload_candidates`, per-session `hr_zone_label`.
-- [`lib/strength.py`](lib/strength.py) (~512) — volume, e1RM
+- [`lib/cardio.py`](lib/cardio.py) (~949) — cardio rollups, HR zones
+  (HRR/Karvonen), TRIMP, CTL/ATL/TSB rolling EWMA,
+  `auto_deload_candidates`, per-session `hr_zone_label`, plus the two
+  daily-rollup blocks below.
+  - `daily_activity_28d(...)` — the NEAT rollup. **Steps are the PRIMARY
+    basis** for its low / moderate / high band, exercise minutes are
+    secondary, and walking minutes are context only; `assessment_basis`
+    names which one the band actually came from, so a band built from a
+    fallback is never mistaken for a band built from steps.
+  - `energy_28d(...)` — daily expenditure: `tdee_kcal_daily_avg` /
+    `active_kcal_daily_avg` / `basal_kcal_daily_avg` over `n_days`, plus
+    `tdee_trend` and `basal_trend` state blocks. Those two are built with
+    the SAME OLS-with-state helper as `bodyweight_trend`
+    (`sessions._trend_verdict` + `sessions._trend_block`), so an
+    unresolved energy trend says WHY it is unresolved in exactly the
+    vocabulary the bodyweight trend already uses. Do not fit a second
+    estimator here.
+- [`lib/nutrition_phase.py`](lib/nutrition_phase.py) (~495) —
+  `nutrition_phase_summary`: open-phase verdict against its target rate,
+  pre-committed stop signals, `coach_action_hint`, and the `energy`
+  sub-block (`tdee_kcal`, `target_deficit_kcal`, `implied_intake_kcal`,
+  `basis`, plus the intake caveat keys). **Intake is not tracked
+  anywhere in this tracker**, so `implied_intake_kcal` is a PRESCRIPTION
+  derived from measured TDEE, never an observation — the caveat keys
+  exist so no renderer or coach line can quietly present it as one.
+- [`lib/strength.py`](lib/strength.py) (~625) — volume, e1RM
   (context-change aware), stale exercises, HR-at-volume divergence,
   strength-session HR trend.
-- [`lib/sleep.py`](lib/sleep.py) (~422) — sleep stage aggregation,
-  efficiency, fragmentation, schedule regularity, REM anomaly watch.
+- [`lib/sleep.py`](lib/sleep.py) (~428) — sleep stage aggregation,
+  efficiency, fragmentation, schedule regularity, REM anomaly watch,
+  `compute_sleep_regularity_index`. SRI reads the per-night
+  `first_segment_start` / `last_segment_end` clock times the importer
+  writes from the export's `sleepStart` / `sleepEnd`, which is why
+  `capabilities.sleep_regularity` is **True**. `N Segments` is
+  permanently blank on the other hand — no source writes it — so
+  `sleep_summary.fragmentation` degrades to null, and null here means
+  "not measurable", never "zero awakenings".
 - [`lib/extract.py`](lib/extract.py) (~550) — CSV readers (monthly +
   dense + swim), exercises-DB parser, age + max-HR helpers.
-- [`lib/swim.py`](lib/swim.py) (~347) — swim_summary (pace, SPL,
+  `health_metrics.csv` is 22 columns: `Steps`, `Active Energy (kcal)`,
+  and `Basal Energy (kcal)` were appended before `Notes`, which is what
+  `energy_28d` and the steps basis read.
+- [`lib/swim.py`](lib/swim.py) (~529) — swim_summary (pace, SPL,
   SWOLF, CSS zones, stroke-mix outliers, CSS retest prompt).
-- [`lib/thermal.py`](lib/thermal.py) (~336) — sauna + cold dose vs.
+- [`lib/thermal.py`](lib/thermal.py) (~363) — sauna + cold dose vs.
   HSP-induction threshold, paired protocol detection.
-- [`lib/sessions.py`](lib/sessions.py) (~691) —
+- [`lib/sessions.py`](lib/sessions.py) (~1565) —
   `build_monthly_sessions`, bodyweight trend, `progression_summary`.
-- [`lib/adherence.py`](lib/adherence.py) (~1324) — **the prescription
+  Also owns `_trend_verdict` / `_trend_block`, the shared OLS fit +
+  state vocabulary that `cardio.energy_28d` reuses.
+- [`lib/adherence.py`](lib/adherence.py) (~2339) — **the prescription
   ledger.** The system had no memory of its own prescriptions: nothing
   read the previous generation's plan, so generation N could not differ
   from N−1 and no planned-versus-performed number existed anywhere.
@@ -208,7 +252,7 @@ working; new changes should go to the focused module:
     whether the dose actually moved.
   - `read_bench_log` / `record_bench_response` + a CLI, so "ask once"
     survives across runs.
-- [`lib/blocks.py`](lib/blocks.py) (~1058) — **training blocks:** stable
+- [`lib/blocks.py`](lib/blocks.py) (~2487) — **training blocks:** stable
   anchors, rotating accessories, and the boundary that forces the
   rotation to happen.
   - `load_pattern_catalog(db)` / `pattern_group(exercise, catalog)` —
@@ -232,17 +276,22 @@ working; new changes should go to the focused module:
     first weight for a movement with no history, which is what makes
     rotating anything new in possible at all.
   - `block_payload(...)` — the `block` payload block.
-- [`lib/constants.py`](lib/constants.py) (~463) — capabilities matrix,
+- [`lib/constants.py`](lib/constants.py) (~915) — capabilities matrix,
   landmarks (MEV/MAV/MRV per muscle), aliases,
-  `SESSION_GATE_THRESHOLDS`.
-- [`lib/light_therapy.py`](lib/light_therapy.py) (~164) —
+  `SESSION_GATE_THRESHOLDS`, and the steps thresholds
+  `daily_activity_28d` bands against. `SOURCE_CAPABILITIES` holds one
+  entry (`health_auto_export`) because there is one importer; it keeps
+  its per-source shape because `capabilities` is published as a payload
+  contract and a second source may return.
+- [`lib/light_therapy.py`](lib/light_therapy.py) (~158) —
   light_therapy_summary (frequency + per-session dose).
 - [`lib/parsing.py`](lib/parsing.py) (~108) — coercions, `_parse_iso_date`,
   `_compact` (strips null leaves from output JSON for token efficiency).
 
-## Tracker payload keys — prescription memory and enforced targets
+## Tracker payload keys — prescription memory, enforced targets, energy
 
-Added by the 2026-08 core + variety build. Emitted from
+Added by the 2026-08 core + variety build and the energy build that
+followed it. Emitted from
 [`scripts/read_tracker.py`](scripts/read_tracker.py) and typed in
 [`../tracker/contracts.py`](../tracker/contracts.py); `_compact` drops
 any that resolve to `None`, so **absent means "unknown", not "zero"** —
@@ -262,6 +311,9 @@ it as 0% adherence would bench everything.
 | `volume_landmark_unit` | literal `"fractional"` | States which unit the landmarks and the tally are in (D9). RP publishes DIRECT sets; this tracker counts direct + 0.5 × synergist, and the two were silently compared for months. | Coach |
 | `synergist_credit_offset` | `constants.SYNERGIST_CREDIT_OFFSET` | The measured per-muscle synergist credit folded into the landmarks, so the conversion between the two units is stated rather than assumed. | Coach |
 | `bodyweight_trend` | `sessions.bodyweight_trend` | The OLS fit with its verdict: `state` (`resolved` \| `unresolved`), `reason`, `note`, `point_kg_per_week`, `se_kg_per_week`, `ci95_kg_per_week`, `n_readings`, window bounds. `bodyweight_trend_kg_per_week` beside it stays `float \| None` for existing consumers; this block says WHY it is `None`. | `card_body_comp_domain` and `card_vitals`, via `render_dashboard`'s `bw_trend_block` |
+| `energy_28d` | `cardio.energy_28d` | Daily expenditure: `tdee_kcal_daily_avg` / `active_kcal_daily_avg` / `basal_kcal_daily_avg` over `n_days`, the scalar `tdee_trend_kcal_per_week` / `basal_trend_kcal_per_week`, and the `tdee_trend` / `basal_trend` state blocks in the same `state` / `reason` / `note` vocabulary `bodyweight_trend` uses. The split is stored rather than the total because a falling basal during a cut is adaptive thermogenesis, and the sum destroys it. | `card_energy`; Coach; `nutrition_phase_summary` for its `energy` sub-block |
+| `daily_activity_28d` | `cardio.daily_activity_28d` | NEAT rollup with `steps_daily_avg` plus the exercise / walking minutes, an `assessment` band (low / moderate / high), and `assessment_basis` naming which input produced the band. **Steps are primary, exercise minutes secondary, walking minutes context only** — read `assessment_basis` before quoting the band. | `card_neat`; Coach |
+| `nutrition_phase` | `nutrition_phase.nutrition_phase_summary` | Open phase only: target vs observed rate, stop signals, `coach_action_hint`, and an `energy` sub-block (`tdee_kcal`, `target_deficit_kcal`, `implied_intake_kcal`, `basis`, intake-caveat keys). `tdee_kcal` is measured; **`implied_intake_kcal` is prescribed** — nothing in this tracker observes intake, and the caveat keys travel with the number so no consumer can present it as an observation. | `card_nutrition_phase`, `card_energy`; Coach |
 
 `bodyweight_trend.reason` has five values and each renders as different
 words, because "you have not measured enough" and "the data cannot
@@ -284,7 +336,7 @@ direction the data never supported.
 
 ## Renderer module index (`lib/render_*.py`)
 
-### [`lib/render_helpers.py`](lib/render_helpers.py) (~50 lines)
+### [`lib/render_helpers.py`](lib/render_helpers.py) (~60 lines)
 
 The tiniest formatters. Zero dependencies; every other `render_*` module
 imports from here. Keep it that way to avoid circular imports.
@@ -292,7 +344,7 @@ imports from here. Keep it that way to avoid circular imports.
 Functions: `esc(s)`, `fmt(v, digits, default)`, `signed(v, digits,
 default)`, `parse_date(s)`.
 
-### [`lib/render_validators.py`](lib/render_validators.py) (~1224 lines)
+### [`lib/render_validators.py`](lib/render_validators.py) (~2694 lines)
 
 Coach-text schema validation, the tooltip-term catalog, and **the gate
 that decides whether a plan is allowed to render at all**.
@@ -531,8 +583,11 @@ hex literals outside the `:root` block** (lint: `rg
 
 ### Card renderer split
 
-`lib/render_cards.py` is now a compatibility facade. Existing imports
-keep working; new card changes should go to the focused module:
+`lib/render_cards.py` is now a compatibility facade, and
+[`lib/render_cards_trajectory.py`](lib/render_cards_trajectory.py) is a
+second one re-exporting every Trajectory-tab card (health + domains +
+programs) under one import. Both keep existing imports working; new card
+changes go to the focused module:
 
 - [`lib/render_cards_common.py`](lib/render_cards_common.py) —
   `coach_block`, `_heading`, heading tooltip copy.
@@ -545,7 +600,11 @@ keep working; new card changes should go to the focused module:
   longevity domain cards: longevity score, cardio, recovery, sleep,
   body composition, metabolic, behavioral.
 - [`lib/render_cards_programs.py`](lib/render_cards_programs.py) —
-  risk flags, swim trajectory, nutrition phase.
+  risk flags, swim trajectory, `card_energy`, nutrition phase.
+  `card_energy` renders directly ABOVE the nutrition-phase card, because
+  measured expenditure is the anchor the phase's intake target is
+  derived from and the two read as one argument top to bottom. Keep that
+  order when reshuffling the Trajectory tab.
 
 Every `card_*` still returns a complete `<section>`. Renderer modules
 remain presentation-only: no disk I/O and no analytics imports.
@@ -648,9 +707,26 @@ pattern category, four times a week.
 4. Add an entry to the Coach-reads schema in
    [`references/assessment-dashboard.md`](references/assessment-dashboard.md)
    if the card has a coach callout.
-5. Add a `card_*` line to `COACH_CARD_KEYS` in
+5. Add the callout key to `COACH_CARD_KEYS` in
    [`lib/render_validators.py`](lib/render_validators.py) so a missing
    callout warns.
+6. If the card is GATED — it returns `""` unless some payload block is
+   present — add the same key to `GATED_COACH_CARD_KEYS` beside it.
+   Otherwise every run without that data emits a missing-callout warning
+   for a card that was never going to render, and the real warnings get
+   lost in the noise.
+
+Worked example, `card_energy`: implemented in
+[`lib/render_cards_programs.py`](lib/render_cards_programs.py) and
+re-exported through
+[`lib/render_cards_trajectory.py`](lib/render_cards_trajectory.py); no
+new CSS (it reuses the existing domain-card classes, so step 2 was a
+no-op); wired into `render()` directly above `card_nutrition_phase`;
+documented in
+[`references/assessment-dashboard.md`](references/assessment-dashboard.md);
+key `trajectory_energy` registered in **both** `COACH_CARD_KEYS` and
+`GATED_COACH_CARD_KEYS`, because it renders only when `energy_28d` is in
+the payload.
 
 **Change a card's layout.**
 - HTML / structure: the focused `lib/render_cards_*.py` module.
@@ -661,14 +737,17 @@ pattern category, four times a week.
   imports need it.
 
 **Change the recovery score formula.**
-- Drivers and weights: [`lib/health.py`](lib/health.py)::`recovery_score`.
+- Drivers and weights:
+  [`lib/health_recovery.py`](lib/health_recovery.py)::`recovery_score`
+  (`lib/health.py` only re-exports it).
 - Per-signal z-score normalization: `_z_score_signal` in the same file.
 - Sample-sufficiency thresholds: `SESSION_GATE_THRESHOLDS` in
   [`lib/constants.py`](lib/constants.py).
 
 **Change the 5-tier session-recommendation gate.**
 - Driver list, thresholds, tier-down logic:
-  [`lib/health.py`](lib/health.py)::`compute_session_recommendation`.
+  [`lib/health_session_rec.py`](lib/health_session_rec.py)::`compute_session_recommendation`
+  (`lib/health.py` only re-exports it).
 - Per-tier substitute templates the coach renders:
   [`references/substitute-protocols.md`](references/substitute-protocols.md).
 - Phase 2 binding-mandate copy: [`SKILL.md`](SKILL.md) (Phase 2 section).

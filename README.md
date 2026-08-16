@@ -13,7 +13,8 @@ A maintenance utility lives at `shared/maintain.py`. Run it directly when you ne
 ## Architecture
 
 The Git repo root is `Skills/`. Per-person data (`../<Person>`) and
-generated plans (`../plans`) stay outside Git.
+generated plans (`../plans`) are never committed to it. Each person's
+`../<Person>/data/` is a separate repository of its own — see below.
 
 Public CLIs remain stable and thin: they parse arguments, resolve a
 person, call domain code, and print status or JSON. Shared primitives
@@ -38,10 +39,24 @@ file I/O, canonicalization, and upserts split across
 `monthly_csv_schema.py`, `monthly_csv_values.py`, `monthly_csv_io.py`,
 `monthly_csv_canonicalize.py`, and `monthly_csv_upsert.py`.
 
-Apple XML import logic is split so `shared/import_apple_health.py`
-stays the CLI orchestration layer; daily aggregation, parsing, strength
-clustering, and swim payload construction live in `apple_health_*.py`
-modules.
+There is one importer: `shared/import_health_auto_export.py`, which
+reads `HealthAutoExport*.zip`. It dispatches on archive member — a
+`HealthAutoExport-*.json` member selects the JSON reader; anything else
+falls back to the deprecated CSV reader. JSON is the only supported
+format going forward, because it names metrics in canonical English
+regardless of phone locale and carries the per-night sleep timestamps
+the Sleep Regularity Index needs. Source-agnostic helpers live beside
+it: `shared/health_units.py` (unit conversion tables, plausibility
+ranges, timestamp parsing) and `shared/strength_sessions.py`
+(strength-session clustering). `shared/apple_workout_types.py` keeps
+its name because it genuinely models Apple's activity-type enum.
+
+Each person's `data/` directory is its own git repository.
+`shared/data_git.py::commit_data(person, message)` commits it after
+every confirmed write — one operation, one commit — from both
+`workout-logger/scripts/append_workout.py` and the importer. It never
+raises into the caller: losing the history of a write is an annoyance,
+losing the write is not acceptable.
 
 Code quality rules for this repo:
 
@@ -64,15 +79,15 @@ CSV under `<Person>/data/`, sibling to the skill repo:
 
 ```
 <Person>/data/
-├── health_metrics.csv          # daily Apple Health rollup
+├── health_metrics.csv          # daily health rollup, 22 columns
 ├── workout_sessions.csv        # one row per Apple workout
 ├── profile.csv                 # key/value config
 ├── monthly/YYYY.MM.csv         # per-month strength + cardio log
-├── swimming/                   # XML source only
-│   ├── YYYY.MM.workouts.csv
-│   └── YYYY.MM.laps.csv
-├── sleep/                      # XML source only (or manual /log entries)
-│   └── YYYY.MM.nights.csv      # per-night architecture (6 stages + InBed + Efficiency + segments + clock times)
+├── swimming/
+│   ├── YYYY.MM.workouts.csv    # per-workout aggregates
+│   └── YYYY.MM.laps.csv        # XML-era rows only; no importer writes laps now
+├── sleep/                      # importer or manual /log entries
+│   └── YYYY.MM.nights.csv      # per-night architecture (6 stages + InBed + Efficiency + clock times; N Segments blank)
 ├── thermal/                    # manual /log only (sauna + cold exposure)
 │   └── YYYY.MM.sessions.csv    # per-session heat (type/temp/rounds/durations/total) + cold (type/duration/temp)
 └── longevity/                  # personal data; never committed
@@ -90,7 +105,7 @@ The exercise catalog, alias table, training-science reference, and longevity fra
 
 `canonicalize_monthly_csv` is idempotent. Out-of-order rows and stale schema columns self-heal on the next pass.
 
-Apple native XML and HealthAutoExport both populate the full health/sleep/workout schema used by the coach. The coach still gates report sections on a `capabilities` dict so legacy or partially populated trackers don't see prompts for metrics their source can't provide.
+HealthAutoExport JSON populates the full health/sleep/workout schema the coach reads, including the per-night bedtime and wake timestamps the Sleep Regularity Index runs on. Two things it does not expose: per-lap swim detail and sleep segment counts, so swim SWOLF / stroke mix and sleep fragmentation degrade to null rather than to zero. The coach still gates report sections on a `capabilities` dict, so a partially populated tracker doesn't see prompts for metrics its data can't support.
 
 Recovery is a personal z-score against the user's own rolling baseline. 5/10 means average for this person. Weights renormalize over signals that are actually present.
 

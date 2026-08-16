@@ -14,7 +14,7 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │       ├── monthly/
     │       │   ├── 2026.05.csv
     │       │   └── …                      # one CSV per YYYY.MM
-    │       ├── swimming/                  # native XML lap detail only
+    │       ├── swimming/                  # per-workout aggregates; laps.csv is frozen history
     │       │   ├── YYYY.MM.workouts.csv
     │       │   └── YYYY.MM.laps.csv
     │       ├── sleep/                     # XML / HealthAutoExport sleep nights
@@ -35,8 +35,8 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │       └── …
     ├── Skills/
     │   └── shared/                        ← this file
-    ├── Export.zip / HealthAutoExport*.zip (transient; archived on success)
-    └── .processed/                        ← consumed export archive
+    ├── HealthAutoExport*.zip              (transient; deleted on success)
+    ├── archive/                           ← one cold pre-migration export; unread
 
 Every importer / logger / coach / maintain script accepts ``--person
 <Name>`` (e.g. ``--person <Person>``) and resolves the rest via this
@@ -45,7 +45,6 @@ module. No raw filesystem paths in the CLI surface.
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from pathlib import Path
 
 # This file lives at Workout Tracker/Skills/shared/person_paths.py.
@@ -380,23 +379,3 @@ def bench_log_json(person: str) -> Path:
     CSV consumer reads it.
     """
     return plans_dir(person) / "bench-log.json"
-
-
-def archive_processed_export(path: Path) -> Path:
-    """Move a consumed Apple/HealthAutoExport export into ``<root>/.processed/`` and
-    return its new path.
-
-    Used in place of ``unlink()`` so a downstream bug that damages the
-    monthly CSVs leaves the source file recoverable. On basename
-    collision the archived copy is suffixed with the move timestamp
-    (``HealthAutoExport….zip`` → ``HealthAutoExport….zip.20260509T114205``).
-    Idempotent in spirit — the destination directory is created on
-    demand.
-    """
-    archive_dir = WORKOUT_TRACKER_ROOT / ".processed"
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    dest = archive_dir / path.name
-    if dest.exists():
-        dest = archive_dir / f"{path.name}.{datetime.now().strftime('%Y%m%dT%H%M%S')}"
-    path.replace(dest)
-    return dest

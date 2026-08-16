@@ -327,9 +327,11 @@ COACH_CARD_KEYS = (
     "trajectory_behavioral", "trajectory_risk_flags",
     # TRAJECTORY tab — gated cards (callout only rendered when card renders).
     # Missing keys are not a warning for these because the card itself may
-    # not render this run (no swim data, no open nutrition phase).
+    # not render this run (no swim data, no open nutrition phase, no
+    # energy-expenditure block).
     "swim_trajectory_callout",
     "nutrition_phase_callout",
+    "trajectory_energy",
     # Retained (cross-tab cards)
     "vitals", "sleep", "recovery_practices",
 )
@@ -342,6 +344,9 @@ COACH_CARD_KEYS = (
 GATED_COACH_CARD_KEYS = frozenset({
     "swim_trajectory_callout",
     "nutrition_phase_callout",
+    # `card_energy` renders only when the payload carries `energy_28d`, and
+    # that block is ABSENT rather than null when there is no energy data.
+    "trajectory_energy",
     # Renders an empty-state card (and intentionally takes no callout) when no
     # sauna / cold / light sessions exist in the window, so a missing callout
     # is not a defect, only noise. See card_recovery_practices.

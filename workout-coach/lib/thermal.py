@@ -4,7 +4,7 @@ Consumes per-session rows from ``<person>/data/thermal/YYYY.MM.sessions.csv``
 and returns a structured ``thermal_summary`` block. Returns ``None`` when
 there are no sessions in the 28-day window — ``_compact`` then drops the
 key from the JSON output and the coach prompt's heat / cold section stays
-silent (e.g. HL trackers and XML trackers that haven't started logging).
+silent (a tracker that hasn't started logging these sessions).
 
 Public surface:
 

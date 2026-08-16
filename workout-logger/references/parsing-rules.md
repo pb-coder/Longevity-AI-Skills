@@ -109,11 +109,13 @@ Extended columns activate for the entire workout if any cardio row is present.
 Convert pace input: `8'53"` → `8:53`. Never use decimal for time fields.
 Leave fields blank if not provided.
 
-**Distance unit:** the tracker stores distance in km. If the user writes `Swim 550m` or `Run 800m`, convert (`550m` → `0.55`, `800m` → `0.8`). The Apple Health importer is unit-aware (reads the `unit` attribute from the XML) — never log `550` for a 550 m swim, that landed as `550 km` in the historical bug.
+**Distance unit:** the tracker stores distance in km. If the user writes `Swim 550m` or `Run 800m`, convert (`550m` → `0.55`, `800m` → `0.8`). The importer is unit-gated on its side — it reads the `units` field on each quantity and skips a value whose unit isn't the one expected — so imported distances arrive in km. Never log `550` for a 550 m swim; that landed as `550 km` in the historical bug.
 
-**Laps (swim) — no longer manually written.** The old `Laps` column on the monthly CSV was retired in 2026-05. Swim lap counts now live exclusively on `<Person>/data/swimming/YYYY.MM.workouts.csv`, populated by the Apple Health importer. If the user types `<N> laps` / `<N> lengths` / `<N> Bahnen` on a swim row, the parser may silently ignore it — the value has nowhere to go through `/log`, and the Apple importer will fill the canonical count post-hoc on the matching session.
+**Laps (swim) — no longer manually written.** The old `Laps` column on the monthly CSV was retired in 2026-05. Swim lap counts now live exclusively on `<Person>/data/swimming/YYYY.MM.workouts.csv`, populated by the importer. If the user types `<N> laps` / `<N> lengths` / `<N> Bahnen` on a swim row, the parser may silently ignore it — the value has nowhere to go through `/log`, and the importer derives the canonical count post-hoc on the matching session (distance ÷ pool length).
 
-**Per-lap swim detail (Stroke / SWOLF / per-lap pace) is NOT manually parseable.** Apple Health is the only source — the importer reads `HKWorkoutEventTypeLap` events and writes them to `<Person>/data/swimming/YYYY.MM.laps.csv`. A manual `/log` swim row records distance + duration only.
+**Per-workout swim aggregates come from the importer**, not from `/log`: pool length, laps, strokes, SPL, distance and water temperature all land on `swimming/YYYY.MM.workouts.csv`. A manual `/log` swim row records distance + duration only.
+
+**Per-lap swim detail (Stroke / SWOLF / per-lap pace) is permanently unavailable.** It isn't manually parseable and no import path supplies it either — HealthAutoExport exposes no per-lap payload, so no `swimming/*.laps.csv` is written at all (an empty lap file would read as "this swim had no laps", which is worse than an absent one). `Avg SWOLF` and `Stroke Mix` stay blank going forward. Don't tell the user an import will backfill them. Rows written before the migration keep the values they already have — sparse-merge never blanks them.
 
 ## CSS test (Critical Swim Speed)
 
@@ -268,7 +270,7 @@ not invent 30 seconds or another default. Pair sauna + cold from one
   - `water` / `lake` / `sea` / `swim` → `cold_water`
 - **Duration unit:** `s` / `sec` / `seconds` stays in seconds (typical for showers); `m` / `min` / `minutes` converts to seconds (×60). The store column is `cold_duration_sec`.
 - **Temperature:** Celsius, optional, signed (`-2`, `0`, `12.5`). Ambient air temp for `cold_air`; water temp for `cold_shower` / `cold_plunge` / `cold_water`.
-- **Outdoor temp matters.** A `cold_air` session at −5°C is a fundamentally different stimulus than one at 25°C — they're not the same dose. Always include the temperature on outdoor cold lines when you know it. **If a `cold_air` line is logged without a temperature, the logger asks once before writing** (`SKILL.md` § "Sauna + cold exposure"). Answer with a number in °C or `skip`. Apple Health does not export ambient air temperature in workout XML, so this datum can only come from you.
+- **Outdoor temp matters.** A `cold_air` session at −5°C is a fundamentally different stimulus than one at 25°C — they're not the same dose. Always include the temperature on outdoor cold lines when you know it. **If a `cold_air` line is logged without a temperature, the logger asks once before writing** (`SKILL.md` § "Sauna + cold exposure"). Answer with a number in °C or `skip`. The reason this one prompt survives is narrower than "the export has no temperature" — HealthAutoExport does carry ambient `temperature` and `humidity` on workouts, in clean °C. It's that **a standalone sauna or cold-air session is not a workout**: no workout record exists for it, so no imported ambient temperature attaches to it, and the datum can only come from you.
 
 ### Pairing rule
 

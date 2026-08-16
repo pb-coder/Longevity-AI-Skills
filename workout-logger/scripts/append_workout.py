@@ -109,6 +109,7 @@ from shared.csv_store import (  # noqa: E402
     upsert_thermal_sessions,
     write_profile,
 )
+from shared.data_git import commit_data  # noqa: E402
 from shared.person_paths import monthly_csv as monthly_csv_path  # noqa: E402
 
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -641,6 +642,16 @@ def main() -> int:
     except (FileNotFoundError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
+
+    # One /log run is one atomic change to the tracker, so it reads as one
+    # commit rather than one per touched CSV. Commit only after the write
+    # is confirmed; commit_data never raises, so a broken git state costs
+    # the history of this write and nothing else.
+    dates = sorted({str(r.get("date")) for r in rows if r.get("date")})
+    span = f"{dates[0]}..{dates[-1]}" if len(dates) > 1 else (dates[0] if dates else "no dates")
+    sha = commit_data(ctx.person, f"log: {len(rows)} rows, {span}")
+    if sha:
+        print(f"Committed {ctx.person} data: {sha}")
     return 0
 
 

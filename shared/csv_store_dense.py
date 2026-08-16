@@ -4,15 +4,21 @@ from __future__ import annotations
 from typing import Iterable
 
 from .csv_store_common import _date_str, _parse_value, _read_csv_rows, _write_csv
-from .csv_store_profile import read_profile
 from .person_paths import health_metrics_csv, workout_sessions_csv
 
 __all__ = [
+    "DATA_SOURCE",
+    "HEALTH_METRICS_HEADERS",
+    "HEALTH_METRICS_FIELDS",
+    "WORKOUT_SESSIONS_HEADERS",
+    "WORKOUT_SESSIONS_FIELDS",
     "HEALTH_METRICS_HEADERS_BY_SOURCE",
     "HEALTH_METRICS_FIELDS_BY_SOURCE",
     "WORKOUT_SESSIONS_HEADERS_BY_SOURCE",
     "WORKOUT_SESSIONS_FIELDS_BY_SOURCE",
     "BODY_COMPOSITION_FIELDS",
+    "BODY_COMPOSITION_LABELS",
+    "body_composition_lines",
     "STRENGTH_METADATA_DRIFT_THRESHOLD",
     "read_health_metrics",
     "read_body_composition",
@@ -23,12 +29,9 @@ __all__ = [
 ]
 
 # ============================================================ Schema (HM + WS)
-# Source-aware column sets. ``xml`` is Apple's native export (full HRV /
-# Resting HR / Wrist Temp / sleep stages / per-workout HR).
-# ``health_auto_export`` is HealthAutoExport's ZIP export; for the tracker
-# fields we consume, it has the same rich surface as ``xml``. ``hl_export``
-# is the retired HLExport text dump — kept only so old CSVs can still be read
-# during migration.
+# HealthAutoExport is the only source. The ``*_BY_SOURCE`` mappings are
+# retained as the public names every caller already imports, but they now
+# hold a single canonical entry rather than a per-source variant.
 
 # Schema migration 2026-08: ``Waist (cm)`` / ``Body Fat %`` /
 # ``Lean Mass (kg)`` were appended immediately before ``Notes``, matching
@@ -38,47 +41,53 @@ __all__ = [
 # still carrying the old header keeps parsing and the missing fields read
 # as None. Nothing reads this CSV positionally outside this module.
 
-HEALTH_METRICS_HEADERS_BY_SOURCE = {
-    "xml": [
-        "Date", "Bodyweight (kg)", "VO2max", "Resting HR", "HRV SDNN",
-        "Walking HR", "HR Recovery 1min", "Sleep Total", "Sleep Deep",
-        "Sleep REM", "Time in Bed", "Resp Rate", "Wrist Temp",
-        "Sleep Breath Dist", "Exercise Min",
-        "Waist (cm)", "Body Fat %", "Lean Mass (kg)", "Notes",
-    ],
-    # Retired HLExport text dump — read-only, kept so old CSVs still parse.
-    # Deliberately not extended: no HLExport tracker is active and that
-    # source never carried body-composition fields.
-    "hl_export": [
-        "Date", "Bodyweight (kg)", "VO2max", "HR Recovery 1min",
-        "Sleep Total", "Resp Rate", "Notes",
-    ],
-}
+DATA_SOURCE = "health_auto_export"
+
+# Schema migration 2026-08 (energy + steps): ``Steps`` /
+# ``Active Energy (kcal)`` / ``Basal Energy (kcal)`` appended immediately
+# before ``Notes``, the same position the body-composition columns took.
+#
+# The two energy components are stored rather than a single TDEE. TDEE is
+# their sum and trivially derived, but the split carries information the
+# sum destroys: active energy is a training-load signal, and basal energy
+# trending down during a cut is adaptive thermogenesis — the single most
+# useful thing this data can tell a cutting athlete, and invisible if
+# only the total is kept.
+HEALTH_METRICS_HEADERS = [
+    "Date", "Bodyweight (kg)", "VO2max", "Resting HR", "HRV SDNN",
+    "Walking HR", "HR Recovery 1min", "Sleep Total", "Sleep Deep",
+    "Sleep REM", "Time in Bed", "Resp Rate", "Wrist Temp",
+    "Sleep Breath Dist", "Exercise Min",
+    "Waist (cm)", "Body Fat %", "Lean Mass (kg)",
+    "Steps", "Active Energy (kcal)", "Basal Energy (kcal)", "Notes",
+]
 
 # Importer payload field names, in the same order as the headers above
 # (with the leading ``Date`` and trailing ``Notes`` columns dropped —
 # Date is the dedupe key, Notes is reserved for manual annotation and
 # the importer never touches it).
-HEALTH_METRICS_FIELDS_BY_SOURCE = {
-    "xml": [
-        "bodyweight_kg", "vo2max", "resting_hr", "hrv_sdnn",
-        "walking_hr", "hr_recovery_1min", "sleep_total_h", "sleep_deep_h",
-        "sleep_rem_h", "time_in_bed_h", "resp_rate", "wrist_temp_c",
-        "sleep_breath_dist", "exercise_min",
-        "waist_cm", "body_fat_pct", "lean_body_mass_kg",
-    ],
-    "hl_export": [
-        "bodyweight_kg", "vo2max", "hr_recovery_1min",
-        "sleep_total_h", "resp_rate",
-    ],
-}
+HEALTH_METRICS_FIELDS = [
+    "bodyweight_kg", "vo2max", "resting_hr", "hrv_sdnn",
+    "walking_hr", "hr_recovery_1min", "sleep_total_h", "sleep_deep_h",
+    "sleep_rem_h", "time_in_bed_h", "resp_rate", "wrist_temp_c",
+    "sleep_breath_dist", "exercise_min",
+    "waist_cm", "body_fat_pct", "lean_body_mass_kg",
+    "steps", "active_energy_kcal", "basal_energy_kcal",
+]
+
+# Daily energy expenditure fields. TDEE is their sum; see the schema note
+# above for why the split is what gets stored.
+ENERGY_FIELDS = ("active_energy_kcal", "basal_energy_kcal")
+
+HEALTH_METRICS_HEADERS_BY_SOURCE = {DATA_SOURCE: HEALTH_METRICS_HEADERS}
+HEALTH_METRICS_FIELDS_BY_SOURCE = {DATA_SOURCE: HEALTH_METRICS_FIELDS}
 
 # Body-composition fields on health_metrics.csv, in schema order.
 # ``bodyweight_kg`` is included: it is the same kind of measurement, and
 # ``read_body_composition`` is the one read path for all four.
 #
 # Units: waist in centimetres, body fat in **percentage points** (18.0,
-# not 0.18 — see apple_health_core.normalize_body_fat_pct), lean mass and
+# not 0.18 — see health_units.normalize_body_fat_pct), lean mass and
 # bodyweight in kilograms.
 #
 # All four accept manual entry, but not through ``/log``:
@@ -94,51 +103,66 @@ BODY_COMPOSITION_FIELDS = (
     "bodyweight_kg", "waist_cm", "body_fat_pct", "lean_body_mass_kg",
 )
 
-WORKOUT_SESSIONS_HEADERS_BY_SOURCE = {
-    "xml": [
-        "Date", "Start", "End", "Apple Type", "Duration (min)",
-        "Avg HR (bpm)", "Max HR (bpm)", "Min HR (bpm)",
-        "Active Cal (kcal)", "Distance (km)", "Source", "Incidental",
-        "Notes",
-    ],
-    "hl_export": [
-        "Date", "Start", "End", "Apple Type", "Duration (min)",
-        "Active Cal (kcal)", "Distance (km)", "Source", "Incidental",
-        "Notes",
-    ],
+BODY_COMPOSITION_LABELS = {
+    "bodyweight_kg": "Bodyweight",
+    "waist_cm": "Waist",
+    "body_fat_pct": "Body Fat",
+    "lean_body_mass_kg": "Lean Mass",
 }
 
-WORKOUT_SESSIONS_FIELDS_BY_SOURCE = {
-    "xml": [
-        "start", "end", "apple_type", "duration_min",
-        "avg_hr", "max_hr", "min_hr",
-        "active_cal", "distance_km", "source", "incidental", "notes",
-    ],
-    "hl_export": [
-        "start", "end", "apple_type", "duration_min",
-        "active_cal", "distance_km", "source", "incidental", "notes",
-    ],
-}
 
-# HealthAutoExport stores the same tracker fields as the native Apple XML path.
-HEALTH_METRICS_HEADERS_BY_SOURCE["health_auto_export"] = HEALTH_METRICS_HEADERS_BY_SOURCE["xml"]
-HEALTH_METRICS_FIELDS_BY_SOURCE["health_auto_export"] = HEALTH_METRICS_FIELDS_BY_SOURCE["xml"]
-WORKOUT_SESSIONS_HEADERS_BY_SOURCE["health_auto_export"] = WORKOUT_SESSIONS_HEADERS_BY_SOURCE["xml"]
-WORKOUT_SESSIONS_FIELDS_BY_SOURCE["health_auto_export"] = WORKOUT_SESSIONS_FIELDS_BY_SOURCE["xml"]
+def body_composition_lines(metric_entries: list[dict]) -> list[str]:
+    """Report per-field body-composition coverage in the parsed window.
+
+    Leanness is the one signal the tracker was blind to, and the exports
+    seen so far carry Body Mass only. Printing an explicit ``0 dates`` for
+    the fields that never appear keeps that gap visible as a
+    data-collection problem instead of letting it read as a clean import.
+    """
+    lines = []
+    for field in BODY_COMPOSITION_FIELDS:
+        label = BODY_COMPOSITION_LABELS[field]
+        dates = [e["date"] for e in metric_entries if e.get(field) is not None]
+        if dates:
+            lines.append(
+                f"Body composition / {label}: {len(dates)} dates "
+                f"(latest {max(dates)})"
+            )
+        else:
+            lines.append(
+                f"Body composition / {label}: 0 dates — not recorded in this export"
+            )
+    return lines
+
+WORKOUT_SESSIONS_HEADERS = [
+    "Date", "Start", "End", "Apple Type", "Duration (min)",
+    "Avg HR (bpm)", "Max HR (bpm)", "Min HR (bpm)",
+    "Active Cal (kcal)", "Distance (km)", "Source", "Incidental",
+    "Notes",
+]
+
+WORKOUT_SESSIONS_FIELDS = [
+    "start", "end", "apple_type", "duration_min",
+    "avg_hr", "max_hr", "min_hr",
+    "active_cal", "distance_km", "source", "incidental", "notes",
+]
+
+WORKOUT_SESSIONS_HEADERS_BY_SOURCE = {DATA_SOURCE: WORKOUT_SESSIONS_HEADERS}
+WORKOUT_SESSIONS_FIELDS_BY_SOURCE = {DATA_SOURCE: WORKOUT_SESSIONS_FIELDS}
 
 STRENGTH_METADATA_DRIFT_THRESHOLD = 0.05
 
 
 # ============================================================ Helpers
-def _resolve_source(person: str) -> str:
-    """Read the active source from the person's profile.
+def _resolve_source(_person: str) -> str:
+    """Return the schema key for a person's stores.
 
-    Falls back to ``xml`` when the profile is missing or unset — matches
-    today's xlsx behaviour and keeps <Person>'s tracker on the full schema
-    by default.
+    One source survives, so this is a constant. It stays a function
+    because every read and write path calls it, and a tracker whose
+    profile has not been migrated yet must still resolve to a real
+    schema rather than raising a KeyError mid-read.
     """
-    src = read_profile(person).get("source")
-    return src if src in HEALTH_METRICS_HEADERS_BY_SOURCE else "xml"
+    return DATA_SOURCE
 
 
 def read_health_metrics(person: str) -> list[dict]:

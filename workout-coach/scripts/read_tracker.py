@@ -6,9 +6,11 @@ Emits one JSON blob on stdout organised around session-level signals
   Source + capabilities:
   - today, data_source, capabilities, auto_cardio_enabled
   - estimated_max_hr, estimated_rest_hr — derived once at the top from
-    Apple max-HR observations (XML) or 208 − 0.7×age (HL fallback;
-    age is computed from Profile.birthday). Drives all HRR / TRIMP /
-    Karvonen-zone math below.
+    observed per-workout max HR, falling back to 208 − 0.7×age (age is
+    computed from Profile.birthday). Drives all HRR / TRIMP /
+    Karvonen-zone math below. Apple's own HR-zone boundaries were the
+    only independent read on max HR and are not in the export, so the
+    observed maximum is now the sole basis.
 
   Strength + cardio sessions:
   - monthly_sessions: canonical per-session record incl. TRIMP /
@@ -70,6 +72,17 @@ Emits one JSON blob on stdout organised around session-level signals
     resolved rate here restates those two rather than corroborating them.
     Both trend blocks are emitted even when the column has never been
     written; ``state``/``reason``/``note`` then say the channel is empty.
+
+  Daily activity and energy:
+  - daily_activity_28d: NEAT rollup. ``assessment`` (low / moderate /
+    high) is read off ``steps_daily_avg`` first, exercise minutes
+    second, walking minutes last; ``assessment_basis`` says which.
+  - energy_28d: daily TDEE with its active / basal split, ``n_days``,
+    and the per-week OLS trend on TDEE and on basal. ABSENT entirely
+    when neither energy column carries a reading in the window. TDEE is
+    summed per day from days carrying both components, never as the sum
+    of two independently-windowed means. Basal falling during an open
+    cut is adaptive thermogenesis and is why the split is stored.
 
   Apple Health:
   - health_metrics_weekly (4-week aggregates; raw daily behind
@@ -200,6 +213,7 @@ from workout_coach.lib.cardio import (  # noqa: E402
     compute_hr_recovery_summary,
     compute_movement_consistency_days,
     daily_activity_28d,
+    energy_28d,
     training_load_summary,
     trimp_per_session,
 )
@@ -408,9 +422,9 @@ def _body_comp_readings(health_all: list[dict], column: str,
     """One body-composition column off the health-metrics rows, ASC by date.
 
     ``Waist (cm)``, ``Body Fat %`` and ``Lean Mass (kg)`` are written by
-    BOTH importers (the native-XML path via ``apple_health_daily``, the
-    HealthAutoExport path via its own field map), so this reader is
-    source-agnostic on purpose: it takes the column, not the exporter.
+    the importer's own field map, and manual readings reach the same
+    columns, so this reader is source-agnostic on purpose: it takes the
+    column, not the writer.
     ``health_all`` has already been through ``_clip_series``, so the
     ``--today`` horizon is applied before anything here sees a row.
 
@@ -862,7 +876,7 @@ def main() -> int:
     age_years = _age_from_birthday(profile.get("birthday"), today_d)
     rest_hr = _mean_or_none(_values_in_window(health_all, "resting_hr", today_d, 28))
     if rest_hr is None and capabilities.get("resting_hr_daily") is False:
-        # HL fallback: typical adult RHR if the source can't supply it.
+        # Typical adult RHR, for a source that cannot supply one.
         rest_hr = 60.0
 
     recovery = recovery_score(health_all, today_d, capabilities)
@@ -909,6 +923,14 @@ def main() -> int:
     auto_deloads = auto_deload_candidates(monthly_sessions, deloads, today_d)
     weekly_health = health_metrics_weekly(health_all, today_d, weeks=4)
     daily_activity = daily_activity_28d(health_all, workout_sessions_all, today_d)
+    # ---- Daily energy expenditure. ``None`` when neither energy column
+    # carries a reading in the window, so ``_compact`` drops the key and a
+    # tracker without the data reads as an absent channel rather than as
+    # an athlete burning nothing. It is computed HERE, above the nutrition
+    # phase, because the phase block needs the measured TDEE to turn its
+    # target rate into an intake number. ----
+    energy = energy_28d(health_all, today_d)
+    measured_tdee = (energy or {}).get("tdee_kcal_daily_avg")
     swim = swim_summary(
         swim_workouts_all, swim_laps_all, today_d, profile, max_hr,
     )
@@ -960,6 +982,7 @@ def main() -> int:
     # happen AFTER the e1rm calculation above. ----
     nutrition_phase = nutrition_phase_summary(
         nutrition_phases_all, bw_all, today_d, estimated_1rm=e1rm,
+        tdee_kcal=measured_tdee,
     )
     nutrition_phase_start = (
         ((nutrition_phase or {}).get("current") or {}).get("start_date")
@@ -1259,8 +1282,16 @@ def main() -> int:
         # the renderer's card gate stays consistent with thermal /
         # light_therapy. ----
         "nutrition_phase":      nutrition_phase,
-        # ---- Daily activity (NEAT) — all-day movement beyond workouts. ----
+        # ---- Daily activity (NEAT) — all-day movement beyond workouts.
+        # ``assessment`` is now read off ``steps_daily_avg`` first;
+        # ``assessment_basis`` names which signal produced the band. ----
         "daily_activity_28d": daily_activity,
+        # ---- Daily energy expenditure: TDEE with its active / basal
+        # split, plus the OLS trend on each. Only present when the energy
+        # columns carry readings in the 28-day window; ``_compact`` drops
+        # None, the same gate ``sleep_summary`` / ``nutrition_phase``
+        # use. ----
+        "energy_28d": energy,
         # ---- Recovery + training load (Python-derived, not raw metrics) ----
         "recovery": recovery,
         "training_load": training_load,

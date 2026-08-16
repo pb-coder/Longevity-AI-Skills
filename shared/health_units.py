@@ -1,4 +1,10 @@
-"""Small Apple Health parsing primitives shared by import modules."""
+"""Unit conversion, plausibility gating, and timestamp primitives.
+
+Source-agnostic. These tables and gates are the single place either
+import path decides what a measurement means, so a unit the tracker
+cannot interpret drops in exactly one function rather than in each
+caller's own way.
+"""
 from __future__ import annotations
 
 import re
@@ -120,6 +126,12 @@ BODY_FAT_FRACTION_MAX = 1.0
 PLAUSIBLE_RANGES = {
     "waist_cm": (30.0, 250.0),
     "lean_body_mass_kg": (20.0, 150.0),
+    # HealthAutoExport labels ``lapLength`` "m" and sends kilometres: a
+    # 20 m pool arrives as ``0.02``. The importer multiplies by 1000 and
+    # gates the result here, so both halves of that trap — a missing
+    # x1000 and a genuinely odd pool — land as a blank cell rather than
+    # a Laps count divided by 0.02.
+    "swim_pool_length_m": (10.0, 60.0),
     # Essential fat is ~3% (men) and a fraction never exceeds 1.0, so the
     # floor also closes the fraction-heuristic dead zone: a raw reading in
     # (1.0, 3.0) is neither a plausible percentage nor a fraction this

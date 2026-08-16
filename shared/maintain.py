@@ -48,15 +48,14 @@ from .monthly_csv import (  # noqa: E402
     list_year_months,
 )
 from .csv_store import (  # noqa: E402
-    HEALTH_METRICS_HEADERS_BY_SOURCE,
+    HEALTH_METRICS_HEADERS,
     LIGHT_THERAPY_SESSIONS_HEADERS,
     SLEEP_NIGHTS_HEADERS,
     SWIM_LAPS_HEADERS,
     SWIM_WORKOUTS_HEADERS,
     THERMAL_SESSIONS_HEADERS,
-    WORKOUT_SESSIONS_HEADERS_BY_SOURCE,
+    WORKOUT_SESSIONS_HEADERS,
     migrate_health_metrics_header,
-    read_profile,
 )
 from .person_paths import (  # noqa: E402
     health_metrics_csv,
@@ -141,23 +140,20 @@ def validate_csvs(person: str) -> list[str]:
     for as long as the migration went unrun.
     """
     out: list[str] = []
-    profile = read_profile(person)
-    source = profile.get("source") or "xml"
-    if source not in HEALTH_METRICS_HEADERS_BY_SOURCE:
-        source = "xml"
 
     targets: dict[str, tuple] = {
         "health_metrics.csv":   (health_metrics_csv(person),
-                                 HEALTH_METRICS_HEADERS_BY_SOURCE[source],
+                                 HEALTH_METRICS_HEADERS,
                                  "desc"),
         "workout_sessions.csv": (workout_sessions_csv(person),
-                                 WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source],
+                                 WORKOUT_SESSIONS_HEADERS,
                                  "desc"),
         "profile.csv":          (profile_csv(person),
                                  ["key", "value"],
                                  None),
     }
-    # Per-month swim CSVs (XML trackers only — HL exports omit lap data).
+    # Per-month swim CSVs. Workout aggregates are written on every
+    # import; lap files are frozen history from the retired XML path.
     from .person_paths import (
         list_light_therapy_session_months,
         list_sleep_night_months,
@@ -173,8 +169,8 @@ def validate_csvs(person: str) -> list[str]:
         targets[f"swimming/{ym}.laps.csv"] = (
             swim_laps_csv(person, ym), SWIM_LAPS_HEADERS, "asc"
         )
-    # Per-month sleep CSVs (XML trackers only — HL exports omit per-stage data;
-    # also present on any tracker that has manual /log sleep entries).
+    # Per-month sleep CSVs. Written on every import, and on any tracker
+    # that has manual /log sleep entries.
     for ym in list_sleep_night_months(person):
         targets[f"sleep/{ym}.nights.csv"] = (
             sleep_nights_csv(person, ym), SLEEP_NIGHTS_HEADERS, "desc"
@@ -470,7 +466,7 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
 
     Returns 0 on success.
     """
-    from .csv_store import read_workout_sessions, _resolve_source  # noqa
+    from .csv_store import read_workout_sessions  # noqa
     import csv
 
     path = workout_sessions_csv(person)
@@ -478,8 +474,7 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
         print(f"workout_sessions.csv not found for {person}: {path}")
         return 0
 
-    source = _resolve_source(person)
-    headers = WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source]
+    headers = WORKOUT_SESSIONS_HEADERS
     # Use the header-aware reader (handles legacy 12-col rows).
     rows = read_workout_sessions(person)
 
@@ -490,7 +485,7 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
     fields = list(headers[1:])  # everything except Date
     field_keys: list[str] = []
     # Map header → internal field key (same order as csv_store
-    # WORKOUT_SESSIONS_FIELDS_BY_SOURCE; explicit map for clarity).
+    # WORKOUT_SESSIONS_FIELDS; explicit map for clarity).
     HEADER_TO_FIELD = {
         "Start": "start", "End": "end", "Apple Type": "apple_type",
         "Duration (min)": "duration_min",

@@ -4,7 +4,7 @@ Consumes the per-night CSVs at ``<person>/data/sleep/YYYY.MM.nights.csv``
 and returns a structured ``sleep_summary`` block that the coach prompt
 threads into its sleep section. Returns ``None`` when there are no
 nights in the 28-day window — ``_compact`` then drops the key from the
-JSON output and the prompt's sleep section stays silent (HL trackers
+JSON output and the prompt's sleep section stays silent (trackers
 or XML trackers with no recent sleep data).
 
 Public surface:

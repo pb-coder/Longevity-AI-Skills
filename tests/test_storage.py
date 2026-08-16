@@ -13,7 +13,7 @@ class StorageTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_root = person_paths.WORKOUT_TRACKER_ROOT
         person_paths.WORKOUT_TRACKER_ROOT = Path(self.tmp.name)
-        csv_store.write_profile("Test", source="xml", auto_cardio=True)
+        csv_store.write_profile("Test", source="health_auto_export", auto_cardio=True)
 
     def tearDown(self) -> None:
         person_paths.WORKOUT_TRACKER_ROOT = self.old_root
@@ -67,7 +67,7 @@ class StorageTests(unittest.TestCase):
         self.assertIn("custom_key,custom_value", path.read_text(encoding="utf-8"))
 
     def test_session_target_min_default_and_override(self) -> None:
-        csv_store.write_profile("Test", source="xml")
+        csv_store.write_profile("Test", source="health_auto_export")
         self.assertEqual(csv_store.read_profile("Test")["session_target_min"], 60)
         csv_store.write_profile("Test", session_target_min=75)
         self.assertEqual(csv_store.read_profile("Test")["session_target_min"], 75)
@@ -202,17 +202,17 @@ class StorageTests(unittest.TestCase):
                 [{"date": "2026-05-14", "duration_min": 10, "modality": "laser_pointer"}],
             )
 
-    def test_upsert_workout_sessions_reparsed_xml_timestamp_is_idempotent(self) -> None:
-        # Regression guard for a suspected re-import duplication bug: the
-        # Apple XML importer's start key comes from apple_health_core.hhmm(),
-        # re-derived from the XML timestamp on every import run (not cached).
-        # A real re-import re-parses the same underlying HealthKit event and
-        # must produce the identical (date, start) key both times, or the
-        # dense (date, start) dedupe in upsert_workout_sessions would insert
-        # a second row instead of updating the first.
+    def test_upsert_workout_sessions_reparsed_timestamp_is_idempotent(self) -> None:
+        # Regression guard for a re-import duplication bug: the start key
+        # comes from health_units.hhmm(), re-derived from the export's
+        # timestamp on every run (not cached). A real re-import re-parses
+        # the same underlying HealthKit event and must produce the
+        # identical (date, start) key both times, or the dense
+        # (date, start) dedupe in upsert_workout_sessions would insert a
+        # second row instead of updating the first.
         from datetime import datetime
 
-        from shared.apple_health_core import hhmm
+        from shared.health_units import hhmm
 
         def build_entry() -> dict:
             # Fresh datetime object each call, mirroring how each importer
@@ -235,12 +235,12 @@ class StorageTests(unittest.TestCase):
 
     def test_hhmm_preserves_seconds_not_just_minute(self) -> None:
         # Locks in hhmm()'s actual (second-precision) output. A prior audit
-        # mistakenly believed import_apple_health.py wrote minute-only start
-        # keys via hhmm(); this pins the true behavior so a future
-        # regression to minute truncation is caught immediately.
+        # mistakenly believed the importer wrote minute-only start keys via
+        # hhmm(); this pins the true behavior so a future regression to
+        # minute truncation is caught immediately.
         from datetime import datetime
 
-        from shared.apple_health_core import hhmm
+        from shared.health_units import hhmm
 
         self.assertEqual(hhmm(datetime(2026, 5, 1, 8, 15, 37)), "08:15:37")
 

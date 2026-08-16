@@ -2,6 +2,8 @@
 
 Quick-reference for the coach when interpreting `nutrition_phase` blocks where `current.phase_type == "bulk"`. Mirror of how `swim-coaching.md` services the swim card. Cite this doc by name in coach callouts when invoking a specific rule, so the user can trace the reasoning.
 
+**One section is not bulk-scoped.** [The 7,700 kcal/kg constant](#the-7700-kcalkg-constant) is the source of the kcal arithmetic in both directions, so it governs cuts and mini-cuts as much as surpluses. Read it whenever a phase carries an `energy` sub-block, whatever `phase_type` says.
+
 ## Why slow is better than fast
 
 The math of lean tissue gain has a hard ceiling. Trained lifters can synthesize roughly 0.25-0.5 lb (0.1-0.25 kg) of new muscle per week under optimal conditions: enough protein, enough surplus, enough recovery, enough training stimulus. Eating beyond this rate doesn't accelerate the muscle synthesis. The extra calories go to fat.
@@ -18,12 +20,42 @@ So: the slower, smaller surplus produces more lean tissue in less total time. Th
 - **Carbs:** prioritize peri-workout. Trained lifters perform better and recover faster on >3 g/kg carbs/day; the surplus calories most efficiently go through carbs given the training stimulus is glycolytic.
 - **Fats:** ≥0.6 g/kg for hormone production (especially testosterone). Below this and the calorie surplus stops translating to lean tissue at the same efficiency.
 
+## The 7,700 kcal/kg constant
+
+**Every kcal target in this tracker derives from one number: ~7,700 kcal per kg of body mass.** It lives here and only here. The arithmetic that uses it sits in code, but the derivation, the framing and the caveats belong in this doc rather than in a comment beside the calculation, because the coach reads this and does not read the code.
+
+Where it comes from: a kilogram of adipose tissue is roughly 87% lipid, and lipid carries about 9.4 kcal/g. 1000 g x 0.87 x 9.4 is about 8,200 kcal of stored fat, and the conventional working figure is rounded down to ~7,700 kcal/kg (the metric restatement of Wishnofsky's 3,500 kcal/lb).
+
+How the targets fall out of it, in both directions:
+
+```
+daily kcal delta = target rate (kg/wk) x 7,700 / 7
+```
+
+- **-0.5 kg/wk becomes -550 kcal/day.** This is where `nutrition_phase.energy.target_deficit_kcal` comes from, and `implied_intake_kcal` is then simply `tdee_kcal` minus that number.
+- **+0.25 kg/wk becomes +275 kcal/day**, which is why the lean-bulk surplus band of 200-400 kcal/day and the rate band of +0.25-0.5%/wk are the same recommendation stated twice.
+
+**Applies to cuts as much as to bulks.** The rest of this doc is bulk-specific; this section is not. A mini-cut, a planned deficit phase, and a surplus all run the same conversion with the sign flipped.
+
+### What the conversion assumes, and what it does not
+
+The constant is a planning tool. It converts a *goal rate* into a *starting intake target*. It is not a model of what the body will do, and four things break it:
+
+1. **It assumes the tissue moving is fat.** Lean mass is mostly water and costs roughly 1,800 kcal/kg, not 7,700. So a well-partitioned bulk moves the scale faster per surplus kcal than the constant predicts, and a cut that is shedding lean mass loses weight faster than the deficit "should" produce. A rate that overshoots is not automatically proof of overeating; it can be a partitioning story, which is why waist and e1RM are read alongside the scale.
+2. **It assumes expenditure holds still. It does not.** A sustained deficit drives adaptive thermogenesis, and `energy_28d.basal_trend_kcal_per_week` is the measurement of exactly that. A deficit computed once against an opening TDEE quietly shrinks as the TDEE falls underneath it. Recompute the target against the current measured TDEE rather than the one the phase opened on, and say so when the basal trend is negative.
+3. **It says nothing about water and glycogen.** Glycogen carries roughly 3 g of water per gram, so a few hundred grams of glycogen moves the scale 1-2 kg with no energy stored or released at all. That is the entire reason the phase reads a 14-day smoothed rate instead of a daily weight.
+4. **It cannot be run backwards.** The conversion turns a target rate into a target intake. It can never turn an observed rate back into an inferred intake, because **nothing in this tracker logs food**. Every nutrition column in the export is empty, so an off-target rate supports no claim about what the person ate. "The scale says you are eating more than 2,650" is not an inference this constant licenses; it is a fabrication. Say the rate missed the target and offer to adjust the prescription.
+
+**Precision.** 7,700 is a round number and the published range runs roughly 7,000-7,900 kcal/kg. Derived kcal figures inherit that slop, so round them to the nearest 50 and never present one to four significant figures as though it were measured. The measured half of the sentence is the TDEE; the derived half is an estimate wearing the TDEE's precision.
+
+**Evidence pointers.** Wishnofsky (1958), Metab Clin Exp, is the origin of the 3,500 kcal/lb rule. Hall (2008) Am J Physiol and Hall et al. (2011) Lancet are the dynamic-model corrections showing why the linear rule over-predicts long-run loss once adaptation is in play. Cite the linear rule as a starting point, not as a forecast.
+
 ## Training implications during a bulk
 
 - **Strength is the limiter.** If top-set e1RM isn't climbing across the bulk, the surplus is not being captured as muscle. It's going to fat. The coach should track e1RM movement on compound lifts (squat, bench, deadlift, overhead press, row) and flag when 3+ stalled 2+ weeks.
 - **Hypertrophy volume matters.** A bulk is the right time to push volume toward the upper end of the MAV-MRV range, since recovery is supported by the surplus. The minimum effective dose (~10 hard sets/muscle/wk) is not enough to capture the surplus efficiency.
 - **Cardio is allowed but capped.** Excess cardio blows the surplus (and adds recovery debt). Cap at 2-3 Zone 2 sessions of 30-45 min + at most 1 interval session. Skip the daily 10k step compulsion if it leaves you eating into the surplus.
-- **Sleep is non-negotiable.** Under-slept bulks partition more to fat (cortisol shifts substrate use). If sleep regularity drops below SRI 70, flag it to the user — the bulk math is degraded.
+- **Sleep is non-negotiable.** Under-slept bulks partition more to fat (cortisol shifts substrate use). If sleep regularity drops below SRI 70, flag it to the user — the bulk math is degraded. `sleep_regularity` is computed from the per-night `sleepStart` / `sleepEnd` timestamps the JSON export carries, so it is populated on every tracker and this rule is always live.
 
 ## When to stop a bulk (the off-ramp)
 

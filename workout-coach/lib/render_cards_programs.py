@@ -213,6 +213,187 @@ def card_swim_trajectory(swim_summary, coach_text):
 
 
 # =============================================================================
+# Energy expenditure card — TRAJECTORY tab. Gated on `energy_28d` presence
+# in tracker JSON. Sits directly ABOVE the Nutrition phase card, because
+# the two answer one question between them: this card says what the body
+# spends, the next says what the phase asks of it. Read apart, a falling
+# basal burn looks like a measurement artifact; read against an open cut it
+# is the adaptation that makes the prescribed deficit stop working.
+#
+# The block is ABSENT (not null) when there is no energy data — `_compact`
+# drops it — so every gate here is a presence check, never a null check.
+# =============================================================================
+
+# `nutrition_phase.energy.basis` codes, in reader-facing words. An
+# unrecognised code falls back to its own text with underscores stripped,
+# so a producer that adds a basis does not render a blank sublabel.
+_ENERGY_BASIS_LABELS = {
+    "measured_28d": "measured over the last 28 days",
+    "estimated":    "estimated, not measured",
+}
+
+
+def _is_number(value) -> bool:
+    """True for a real int/float. `bool` is excluded: `True` is not 1 kcal."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _kcal(value) -> str:
+    """Integer kcal with a thousands separator, or "" when not a number."""
+    return f"{value:,.0f}" if _is_number(value) else ""
+
+
+def _open_cut(nutrition_phase) -> bool:
+    """Whether the payload carries an OPEN cut.
+
+    `nutrition_phase` is itself the gate: `nutrition_phase_summary` returns
+    None unless a phase is open, and stamps `current.end_date` as None while
+    it stays open. The `end_date` re-check costs nothing and keeps this
+    honest if a caller ever hands over a closed phase row directly.
+    """
+    current = (nutrition_phase or {}).get("current") or {}
+    return current.get("phase_type") == "cut" and not current.get("end_date")
+
+
+def card_energy(energy_28d, nutrition_phase, coach_text):
+    """Render the Energy expenditure card. Renders ONLY when `energy_28d`
+    is present; returns "" otherwise, which is the whole gate.
+
+    Shape consumed (top-level `energy_28d` in the tracker JSON):
+      - tdee_kcal_daily_avg, active_kcal_daily_avg, basal_kcal_daily_avg
+      - n_days
+      - tdee_trend_kcal_per_week, basal_trend_kcal_per_week
+
+    `nutrition_phase` is passed in for two reasons and read for nothing
+    else: to know whether a cut is open (which is what turns a falling
+    basal trend from a neutral number into an amber flag), and to pick up
+    its optional `energy` sub-block
+    (`{tdee_kcal, target_deficit_kcal, implied_intake_kcal, basis}`) for the
+    implied-intake row. Both are optional; the card degrades to the hero
+    plus whatever trend rows the payload supports.
+
+    Rows whose input is missing are OMITTED rather than rendered with a
+    placeholder, per DESIGN.md's empty-state rule.
+    """
+    if not energy_28d:
+        return ""
+
+    tdee = energy_28d.get("tdee_kcal_daily_avg")
+    active = energy_28d.get("active_kcal_daily_avg")
+    basal = energy_28d.get("basal_kcal_daily_avg")
+    n_days = energy_28d.get("n_days")
+    tdee_trend = energy_28d.get("tdee_trend_kcal_per_week")
+    basal_trend = energy_28d.get("basal_trend_kcal_per_week")
+
+    # Hero: total daily burn, with the active/basal split beneath it. The
+    # status word carries NO verdict: a total-burn number is neither good
+    # nor bad on its own, and colouring it would spend the card's one
+    # colour signal on the row that cannot use it. The amber below can.
+    if _is_number(tdee):
+        hero_value = f'{_kcal(tdee)}<span class="denom"> kcal/day</span>'
+    else:
+        hero_value = '<span class="muted">not enough data</span>'
+
+    split_bits = []
+    if _is_number(active):
+        split_bits.append(f"{_kcal(active)} kcal active")
+    if _is_number(basal):
+        split_bits.append(f"{_kcal(basal)} kcal basal")
+    sub_bits = []
+    if split_bits:
+        sub_bits.append(" plus ".join(split_bits))
+    if _is_number(n_days):
+        sub_bits.append(f"{n_days:.0f} day average")
+    hero_html = metric_hero(
+        value_html=hero_value,
+        status_word="Total daily burn",
+        status_cls="muted",
+        sublabel=", ".join(sub_bits) or None,
+    )
+
+    secondaries = []
+
+    # Basal trend. THE row on this card. A resting burn that falls while a
+    # cut is open is adaptive thermogenesis: the deficit the phase
+    # prescribes shrinks under the person without the plan noticing, which
+    # is why the phase can read "on track" the same week the rate stalls.
+    # Amber, not warn: it is a signal to re-price the deficit, not an alarm.
+    #
+    # NO NOISE FLOOR, deliberately. Any negative slope flags while a cut is
+    # open, so a fit of -0.4 kcal/day per week reads amber alongside one of
+    # -40. A floor would need a calibration this card does not have, and
+    # over-flagging here is the cheaper error: the sublabel states the
+    # magnitude, so a reader can size the signal themselves.
+    if _is_number(basal_trend):
+        falling = basal_trend < 0
+        adaptive = falling and _open_cut(nutrition_phase)
+        if adaptive:
+            basal_sub = ("resting burn is falling while a cut is open. That is "
+                         "metabolic adaptation. Re-price the deficit or take a "
+                         "diet break.")
+        elif falling:
+            basal_sub = ("resting burn is drifting down. No cut is open, so read "
+                         "it against bodyweight before acting.")
+        else:
+            basal_sub = "resting burn is holding or rising."
+        secondaries.append(secondary_metric_row(
+            "Basal trend",
+            f'{signed(basal_trend, 1)} <span class="muted">kcal/day per week</span>',
+            "amber" if adaptive else "muted",
+            sublabel=basal_sub,
+        ))
+
+    # Total trend, for context under the basal row. Stays muted: total burn
+    # tracks bodyweight, so it falls during any successful cut and that is
+    # the phase working, not a finding.
+    if _is_number(tdee_trend):
+        secondaries.append(secondary_metric_row(
+            "Total trend",
+            f'{signed(tdee_trend, 1)} <span class="muted">kcal/day per week</span>',
+            "muted",
+            sublabel="total burn tracks bodyweight, so a cut moves it by design.",
+        ))
+
+    # Implied intake target. Only when a phase is open AND the optional
+    # `energy` sub-block arrived with it. Absent is the common case; an
+    # intake number invented without it would be the card's own arithmetic
+    # presented as the phase's prescription.
+    phase_energy = (nutrition_phase or {}).get("energy") or {}
+    implied = phase_energy.get("implied_intake_kcal")
+    if nutrition_phase and _is_number(implied):
+        deficit = phase_energy.get("target_deficit_kcal")
+        intake_bits = []
+        if _is_number(deficit):
+            side = "deficit" if deficit >= 0 else "surplus"
+            intake_bits.append(f"{_kcal(abs(deficit))} kcal {side}")
+        basis = phase_energy.get("basis")
+        basis_label = _ENERGY_BASIS_LABELS.get(
+            basis, (basis or "").replace("_", " ").strip())
+        if basis_label:
+            intake_bits.append(basis_label)
+        secondaries.append(secondary_metric_row(
+            "Implied intake target",
+            f'{_kcal(implied)} <span class="muted">kcal/day</span>',
+            "muted",
+            sublabel=", ".join(intake_bits) or None,
+        ))
+
+    secondaries_html = (
+        f'<div class="secondary-metrics">{"".join(secondaries)}</div>'
+        if secondaries else ""
+    )
+
+    return f'''
+<section class="card domain-card">
+  <h2>Energy expenditure</h2>
+  {hero_html}
+  {secondaries_html}
+  {coach_block(coach_text)}
+</section>
+'''
+
+
+# =============================================================================
 # Nutrition phase card — TRAJECTORY tab. Gated on `nutrition_phase`
 # presence in tracker JSON. Renders the open phase (bulk / cut / maintain /
 # recomp) with observed-vs-target rate, stop-signal status, and the

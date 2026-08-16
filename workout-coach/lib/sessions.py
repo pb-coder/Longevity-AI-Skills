@@ -898,7 +898,7 @@ def waist_trend(
     naive version of this function, applied to bodyweight, once reported
     a confident loss across a stretch the user gained weight over.
 
-    Unit-confused input is not filtered here — ``apple_health_core``'s
+    Unit-confused input is not filtered here — ``health_units``'s
     ``PLAUSIBLE_RANGES`` is the single corruption gate and it runs at
     import. What this estimator adds is that one surviving bad reading
     inflates the residual spread and widens the interval, so the verdict
@@ -1279,7 +1279,7 @@ def body_fat_trend(
 
     ``readings`` is ``[{"date": "YYYY-MM-DD", "pct": 18.4}, ...]``
     (``value`` and ``body_fat_pct` are accepted aliases). Percentage
-    POINTS, never a fraction — ``apple_health_core.normalize_body_fat_pct``
+    POINTS, never a fraction — ``health_units.normalize_body_fat_pct``
     owns that conversion at import and this estimator inherits it.
 
     Always returns a block; read ``state`` before ``pct_per_4w``. See

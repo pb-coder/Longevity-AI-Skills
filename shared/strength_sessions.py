@@ -1,4 +1,10 @@
-"""Strength-session clustering for Apple Health workout rows."""
+"""Strength-session clustering for imported workout rows.
+
+Groups same-day strength workouts into one session so the monthly CSV's
+TOTAL row carries session-level metadata. Source-agnostic: it reads the
+``apple_type`` / ``date`` / ``start`` keys both the importer payload and
+the workout-sessions store already use.
+"""
 from __future__ import annotations
 
 from datetime import datetime

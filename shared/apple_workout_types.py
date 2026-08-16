@@ -1,15 +1,14 @@
 """Apple workout type mappings — single source of truth.
 
-Used by both importers:
+The module keeps Apple's own name because it genuinely models Apple's
+activity-type enum, which HealthAutoExport's workout names still map
+onto. ``import_health_auto_export.py`` maps each export name to the
+canonical string below (``Running``, ``Hiking``, ...) before anything
+downstream sees it. ``RAWVALUE_TO_TYPE`` is retained for rows written by
+the retired XML importer, whose ``HKWorkoutActivityTypeRunning``-style
+raw values still sit in the stored history.
 
-- ``import_apple_health.py`` (XML): Apple emits ``HKWorkoutActivityTypeRunning``
-  style strings; the importer strips the prefix and the canonical names below
-  are the result (``Running``, ``Hiking``, ...).
-- ``import_health_auto_export.py`` (HealthAutoExport): workout names are
-  mapped to the same canonical name string before reaching downstream stores.
-  ``RAWVALUE_TO_TYPE`` is retained for legacy Apple raw-value compatibility.
-
-Both importers feed the same downstream:
+The canonical names feed:
 
 - ``CARDIO_AUTOLOG_TYPES`` — canonical names that are eligible for auto-append
   to the monthly ``YYYY.MM`` sheets when ``Profile.auto_cardio`` is True.

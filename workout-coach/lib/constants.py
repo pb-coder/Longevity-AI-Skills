@@ -33,11 +33,11 @@ Five groups:
 from __future__ import annotations
 
 # Per-source capability map. The coach reads this to decide which sections of
-# the report to write. ``xml`` is Apple's native zipped export; HealthAutoExport
-# has the same tracker-facing health/workout surface. ``hl_export`` is retained
-# only for old trackers during migration and stays capability-limited.
+# the report to write. HealthAutoExport's JSON export is the only source; the
+# map keeps its per-source shape because the coach payload publishes
+# ``capabilities`` as a contract, and a second source may return.
 SOURCE_CAPABILITIES = {
-    "xml": {
+    "health_auto_export": {
         "hrv":                True,
         "wrist_temp":         True,
         "resting_hr_daily":   True,
@@ -45,14 +45,14 @@ SOURCE_CAPABILITIES = {
         "sleep_stages":       True,
         "sleep_breath_dist":  True,
         "sleep_nights":       True,   # per-night architecture (all 6 stages +
-                                      # Time in Bed + Efficiency + N Segments +
+                                      # Time in Bed + Efficiency +
                                       # first/last segment clock times)
-        # SRI (Sleep Regularity Index) needs per-segment bedtime / wake
-        # timestamps. The Apple Health XML export carries these; the
-        # HealthAutoExport pipeline collapses to daily totals and drops
-        # them. Surfaces as a capability so compute_longevity_score can
-        # suppress sleep_regularity from the missing-inputs list when
-        # the source structurally can't provide it.
+        # SRI (Sleep Regularity Index) needs bedtime / wake timestamps.
+        # HealthAutoExport's JSON mode carries them as sleepStart /
+        # sleepEnd per night; the retired CSV mode did not, which is what
+        # this flag used to be False for. Surfaces as a capability so
+        # compute_longevity_score can suppress sleep_regularity from the
+        # missing-inputs list when the source cannot provide it.
         "sleep_regularity":   True,
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
@@ -63,42 +63,10 @@ SOURCE_CAPABILITIES = {
         "thermal_log":        True,
         "light_therapy_log":  True,
     },
-    "health_auto_export": {
-        "hrv":                True,
-        "wrist_temp":         True,
-        "resting_hr_daily":   True,
-        "walking_hr":         True,
-        "sleep_stages":       True,
-        "sleep_breath_dist":  True,
-        "sleep_nights":       True,
-        "sleep_regularity":   False,  # see note on xml: no segment-level timestamps
-        "exercise_min_daily": True,
-        "per_workout_hr_strength": True,
-        "thermal_log":        True,
-        "light_therapy_log":  True,
-    },
-    "hl_export": {
-        "hrv":                False,
-        "wrist_temp":         False,
-        "resting_hr_daily":   False,
-        "walking_hr":         False,
-        "sleep_stages":       False,
-        "sleep_breath_dist":  False,
-        "sleep_nights":       False,
-        "sleep_regularity":   False,
-        "exercise_min_daily": False,
-        "per_workout_hr_strength": False,
-        "thermal_log":        True,
-        "light_therapy_log":  True,
-    },
 }
 
-# Applied when the Profile sheet is missing or unset — treat the data as
-# coming from XML so existing <Person> trackers (created before the Profile
-# sheet existed) keep their full capability surface. New <OtherPerson> trackers
-# get bootstrapped to ``health_auto_export`` by
-# ``import_health_auto_export.py``.
-DEFAULT_DATA_SOURCE = "xml"
+# Applied when the profile is missing or unset.
+DEFAULT_DATA_SOURCE = "health_auto_export"
 
 # Deload marker now lives on the TOTAL row's Notes column (col 9). The
 # marker text is canonical "Deload Workout"; matching is case-insensitive.

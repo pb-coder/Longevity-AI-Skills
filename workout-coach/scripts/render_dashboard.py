@@ -81,6 +81,7 @@ from workout_coach.lib.render_cards_domains import (
     card_sleep_domain,
 )
 from workout_coach.lib.render_cards_programs import (
+    card_energy,
     card_nutrition_phase,
     card_risk_flags,
     card_swim_trajectory,
@@ -234,6 +235,7 @@ def render(j: TrackerJSON, coach: CoachReads, workout_md: str, person: str) -> s
     {card_recovery_domain(recovery, weekly, coach_cards.get("trajectory_recovery"))}
     {card_sleep_domain(j.get("sleep_summary"), sleep_regularity, rem_anomaly, coach_cards.get("trajectory_sleep"), longevity_state=longevity_state)}
     {card_body_comp_domain(bw, bw_trend, longevity_state, coach_cards.get("trajectory_body_comp"), bw_trend_block)}
+    {card_energy(j.get("energy_28d"), j.get("nutrition_phase"), coach_cards.get("trajectory_energy"))}
     {card_nutrition_phase(j.get("nutrition_phase"), coach_cards.get("nutrition_phase_callout"))}
     {card_metabolic_domain(longevity_state, coach_cards.get("trajectory_metabolic"))}
     {card_behavioral_domain(movement_consistency, sleep_regularity, acwr, j.get("cardio_hr_zones_28d") or {}, coach_cards.get("trajectory_behavioral"))}

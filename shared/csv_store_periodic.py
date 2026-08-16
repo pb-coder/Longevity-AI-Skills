@@ -250,12 +250,18 @@ def upsert_swim_laps(person: str, entries: Iterable[dict]) -> list[str]:
 # Per-night aggregate row. Dedupe key = ``Date`` (wake-up date). Sorted
 # DESC by date. Sparse-merge with manual-wins on Notes. Mirrors the
 # per-month-CSV pattern of ``monthly/YYYY.MM.csv`` and
-# ``swimming/YYYY.MM.workouts.csv`` for scalability. XML-only — HL
-# trackers never populate this folder. Segment-level detail is NOT
-# stored here; the per-night row captures fragmentation via N Segments
-# and schedule via First/Last Segment Start. Raw segments stay in the
-# archived Apple XML at ``<root>/.processed/Export*.zip`` and can be
-# re-extracted if a future need arises.
+# ``swimming/YYYY.MM.workouts.csv`` for scalability.
+#
+# Segment-level detail is NOT stored here, and is no longer recoverable:
+# the per-night row captured fragmentation via N Segments and schedule
+# via First/Last Segment Start, but HealthAutoExport reports one
+# aggregate row per night with no segment breakdown, so **N Segments is
+# permanently blank on every row written from now on**. The schedule
+# fields survive — ``sleepStart`` / ``sleepEnd`` are what the Sleep
+# Regularity Index reads — while ``sleep_summary``'s fragmentation
+# reader must degrade to null rather than report a fabricated zero. A
+# night that stops carrying a segment count did not become less
+# fragmented.
 SLEEP_NIGHTS_HEADERS = [
     "Date",
     "Sleep Total (h)", "Sleep Core (h)", "Sleep Deep (h)",

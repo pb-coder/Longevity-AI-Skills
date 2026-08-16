@@ -229,7 +229,7 @@ class HealthAutoExportTests(unittest.TestCase):
             path = Path(tmp) / "HealthAutoExport.zip"
             build_export_zip(path)
 
-            metrics, sleep, workouts = hae.parse_health_auto_export_zip(
+            metrics, sleep, workouts, _swim = hae.parse_health_auto_export_zip(
                 path, date(2026, 4, 1), date(2026, 4, 1)
             )
 
@@ -295,7 +295,7 @@ class HealthAutoExportTests(unittest.TestCase):
         self.assertEqual(parsed[0]["start"], "08:15:00")
         self.assertEqual(parsed[0]["stamp_status"], "ambiguous")
 
-    def test_replace_range_removes_hl_rows_and_is_idempotent(self) -> None:
+    def test_replace_range_removes_machine_rows_and_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             old_root = person_paths.WORKOUT_TRACKER_ROOT
@@ -303,7 +303,7 @@ class HealthAutoExportTests(unittest.TestCase):
             person_paths.WORKOUT_TRACKER_ROOT = root
             hae.WORKOUT_TRACKER_ROOT = root
             try:
-                csv_store.write_profile("Test", source="hl_export", auto_cardio=True)
+                csv_store.write_profile("Test", source="health_auto_export", auto_cardio=True)
                 csv_store.upsert_health_metrics(
                     "Test",
                     [{"date": "2026-04-01", "bodyweight_kg": 77.5, "vo2max": 45.0}],
@@ -318,7 +318,7 @@ class HealthAutoExportTests(unittest.TestCase):
                         "duration_min": 25,
                         "active_cal": 90,
                         "distance_km": 4.5,
-                        "source": "HLExport",
+                        "source": "LegacyImporter",
                     }],
                 )
                 monthly_csv.upsert_rows(

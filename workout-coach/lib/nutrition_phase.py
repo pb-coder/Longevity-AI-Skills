@@ -46,6 +46,12 @@ _CUT_TARGET_DEFAULT_KG_PER_WK = -0.5
 _CUT_TOO_FAST_KG_PER_WK = -1.0    # <-1 kg/wk risks lean tissue loss
 _MAINTAIN_BAND_KG_PER_WK = 0.15   # +/- 0.15 kg/wk is "flat enough"
 
+# Energy density of stored bodyweight change, kcal per kg. The standard
+# figure; see references/bulking-science.md for the derivation and its
+# limits. 7,700 / 7 = 1,100 exactly, which is why a target of -0.5 kg/wk
+# lands on a round -550 kcal/day.
+_KCAL_PER_KG = 7700.0
+
 
 def _current_open_phase(phases: list[dict]) -> dict | None:
     """Return the most recent phase with no end_date (the open one).
@@ -294,10 +300,67 @@ def _coach_action_hint(status: str, triggered: list[str], weeks_in_phase: float,
     return "consider_ending"
 
 
+def _phase_energy_block(tdee_kcal: int | float | None,
+                        target_rate_kg_per_wk: float | None) -> dict | None:
+    """Turn a measured TDEE plus the phase's target rate into a number.
+
+    Returns ``None`` — the key is then absent from the phase block rather
+    than present and full of nulls — unless BOTH inputs are real. There is
+    no default TDEE and there must not be one: a guessed maintenance
+    number, run through this arithmetic, produces an intake target that
+    looks exactly as authoritative as a measured one.
+
+    Sign convention: ``target_deficit_kcal`` is POSITIVE for a deficit and
+    negative for a surplus, so ``implied_intake_kcal = tdee - deficit``
+    reads the same way in both directions. A cut at -0.5 kg/wk gives
+    +550 kcal/day and intake below TDEE; a bulk at +0.25 kg/wk gives
+    -275 kcal/day and intake above it.
+
+    THE OUTPUT IS A PRESCRIPTION, NOT AN OBSERVATION. Nothing in this
+    tracker records what was eaten — every nutrition column the exporter
+    offers is empty — so ``implied_intake_kcal`` is the intake the target
+    rate implies, never the intake that happened. The block says so in
+    its own fields for the same reason ``protein_caveat`` does: a bare
+    number next to a measured TDEE is read as measured, and the coach
+    would then report adherence to a log that does not exist.
+    """
+    if tdee_kcal is None or target_rate_kg_per_wk is None:
+        return None
+    try:
+        tdee = float(tdee_kcal)
+        rate = float(target_rate_kg_per_wk)
+    except (TypeError, ValueError):
+        return None
+
+    deficit = round(-rate * _KCAL_PER_KG / 7.0)
+    return {
+        "tdee_kcal":            round(tdee),
+        "target_deficit_kcal":  deficit,
+        "implied_intake_kcal":  round(tdee) - deficit,
+        # Where the TDEE came from. The only value this ever takes today
+        # is ``measured_28d`` — the block does not exist otherwise — and
+        # it is emitted anyway so a future estimated basis cannot slip in
+        # without the consumer noticing the field changed.
+        "basis":                "measured_28d",
+        # The guard. Mirrors ``targets.protein_tracking_status`` /
+        # ``protein_caveat``: the status token is what a renderer branches
+        # on, the caveat is the sentence a coach must not drop.
+        "intake_tracking_status": "not_tracked",
+        "intake_caveat": (
+            "Intake is not tracked in this tracker; no food log exists. "
+            "implied_intake_kcal is a PRESCRIBED target derived from "
+            "measured TDEE and the phase's target rate, not a record of "
+            "what was eaten. Do not claim adherence, over- or "
+            "under-eating from it."
+        ),
+    }
+
+
 def nutrition_phase_summary(phases: list[dict],
                             bodyweight_series: list[dict],
                             today_d: date,
-                            estimated_1rm: dict | None = None) -> dict | None:
+                            estimated_1rm: dict | None = None,
+                            tdee_kcal: int | float | None = None) -> dict | None:
     """Aggregated nutrition-phase block. Returns None when no open phase.
 
     Output shape (compact, LLM-friendly):
@@ -309,6 +372,12 @@ def nutrition_phase_summary(phases: list[dict],
         stop_conditions (passthrough text)
       actuals:
         rate_kg_per_wk_14d, rate_vs_target_ratio (or None when no target)
+      energy (ABSENT unless ``tdee_kcal`` was supplied AND the phase has
+        a target rate):
+        tdee_kcal, target_deficit_kcal, implied_intake_kcal, basis,
+        intake_tracking_status, intake_caveat. A PRESCRIPTION derived
+        from measured TDEE — intake itself is not tracked anywhere.
+        See ``_phase_energy_block``.
       status: on_track / too_fast / too_slow / flat / regressing /
               insufficient_data
       stop_signals_triggered: list of strings (always present, [] when none)
@@ -381,6 +450,13 @@ def nutrition_phase_summary(phases: list[dict],
             "notes":                 p.get("notes"),
         })
 
+    # Measured TDEE turns the phase target into an actual intake number.
+    # ``None`` when the energy columns are empty, and the key is then
+    # omitted entirely rather than emitted with null arithmetic — the
+    # coach must fall back to its unanchored guidance in that case and be
+    # able to tell that it is doing so.
+    energy = _phase_energy_block(tdee_kcal, target_rate)
+
     return {
         "current": {
             "start_date":     open_phase.get("start_date"),
@@ -407,6 +483,11 @@ def nutrition_phase_summary(phases: list[dict],
             "rate_vs_target_ratio": ratio,
             "consecutive_rate_breach_weeks": consecutive_rate_breaches,
         },
+        # Deliberately NOT nested under ``actuals``: nothing in here was
+        # observed of the athlete's eating. ``tdee_kcal`` is measured,
+        # everything derived from it is prescribed, and the caveat inside
+        # says so.
+        "energy":                  energy,
         "status":                  status,
         "stop_signals_triggered":  triggered,  # always a list (possibly empty)
         "coach_action_hint":       hint,

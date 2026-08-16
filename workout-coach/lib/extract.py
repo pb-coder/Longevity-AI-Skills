@@ -16,12 +16,14 @@ CSV readers:
 - ``read_bodyweight(person)`` — bodyweight series sourced from
   ``health_metrics.csv`` col B, ASC.
 - ``read_health_metrics(person)`` — Health Metrics rows, ASC, with
-  source-aware column mapping and missing-key backfill so HL trackers
-  surface the same key surface as XML.
+  missing-key backfill, so a tracker whose CSV predates a schema
+  widening still presents the full key surface.
 - ``read_workout_sessions(person)`` — Apple Workout Sessions rows, ASC.
 - ``read_swim_workouts(person)`` / ``read_swim_laps(person)`` —
-  per-swim aggregates and per-lap detail; XML trackers only (HL has
-  no lap data, returns ``[]``).
+  per-swim aggregates and per-lap detail. Aggregates are written on
+  every import; per-lap detail is frozen history from the retired XML
+  path, so ``read_swim_laps`` returns ``[]`` on any month imported
+  since the migration.
 
 Exercises database:
 
@@ -239,12 +241,11 @@ def read_health_metrics(person: str) -> list[dict]:
     rows = _csv_store.read_health_metrics(person)
     if not rows:
         return []
-    src = _csv_store.read_profile(person).get("source") or "xml"
-    if src not in _csv_store.HEALTH_METRICS_FIELDS_BY_SOURCE:
-        src = "xml"
-    all_xml_keys = _csv_store.HEALTH_METRICS_FIELDS_BY_SOURCE["xml"]
-    active_keys = _csv_store.HEALTH_METRICS_FIELDS_BY_SOURCE[src]
-    missing_keys = [k for k in all_xml_keys if k not in active_keys]
+    # One source, one field list. The padding loop below is kept because
+    # a tracker whose CSV predates a schema widening still reads short,
+    # and trend helpers want a uniform shape either way.
+    active_keys = _csv_store.HEALTH_METRICS_FIELDS
+    missing_keys: list[str] = []
     out = []
     for entry in rows:
         # csv_store returns floats / ints / None already; pad missing
@@ -287,7 +288,7 @@ def read_sleep_nights(person: str) -> list[dict]:
     """Return per-night aggregate rows from ``sleep/YYYY.MM.nights.csv``.
 
     Pass-through to ``csv_store.read_sleep_nights``. Empty list when
-    the sleep folder is absent (HL trackers, or XML trackers that
+    the sleep folder is absent (a tracker that
     haven't imported / logged any sleep yet).
     """
     return _csv_store.read_sleep_nights(person)
@@ -328,17 +329,13 @@ def read_nutrition_phases(person: str) -> list[dict]:
 def read_workout_sessions(person: str) -> list[dict]:
     """Return Workout Sessions rows from the per-person CSV, ASC by date+start.
 
-    Reads ``<person>/data/workout_sessions.csv`` via ``csv_store``. The
-    schema follows ``Profile.source`` (xml / health_auto_export include
-    Avg/Max/Min HR; legacy hl_export rows omit HR fields).
+    Reads ``<person>/data/workout_sessions.csv`` via ``csv_store``, which
+    carries Avg / Max / Min HR alongside duration, calories and distance.
     """
     rows = _csv_store.read_workout_sessions(person)
     if not rows:
         return []
-    src = _csv_store.read_profile(person).get("source") or "xml"
-    if src not in _csv_store.WORKOUT_SESSIONS_FIELDS_BY_SOURCE:
-        src = "xml"
-    fields = _csv_store.WORKOUT_SESSIONS_FIELDS_BY_SOURCE[src]
+    fields = _csv_store.WORKOUT_SESSIONS_FIELDS
 
     numeric_keys = {"duration_min", "avg_hr", "active_cal", "distance_km"}
     int_keys     = {"max_hr", "min_hr"}
@@ -363,7 +360,7 @@ def read_workout_sessions(person: str) -> list[dict]:
             else:
                 entry[key] = v
         # Backfill keys missing from the active schema so downstream code
-        # (e.g. session-HR cross-check) doesn't KeyError on HL trackers.
+        # (e.g. session-HR cross-check) doesn't KeyError on short rows.
         for missing in ("avg_hr", "max_hr", "min_hr",
                         "duration_min", "active_cal", "distance_km",
                         "end", "apple_type", "source", "notes"):

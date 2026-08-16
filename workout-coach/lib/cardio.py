@@ -17,8 +17,11 @@ The cardio side of the analytics layer:
   — heuristic flag for unmarked deload weeks (≥35% volume drop AND
   ≥8 bpm avg-HR drop vs prior 4w).
 - ``daily_activity_28d(health_all, workout_sessions_all, today_d)`` —
-  NEAT rollup folding Apple exercise minutes + walking workouts into
-  one ``assessment`` band.
+  NEAT rollup folding daily step count, Apple exercise minutes and
+  walking workouts into one ``assessment`` band.
+- ``energy_28d(health_all, today_d)`` — daily energy expenditure over the
+  same 28-day window: TDEE, its active / basal split, and the OLS trend
+  on TDEE and on basal. ``None`` when the two energy columns are empty.
 """
 from __future__ import annotations
 
@@ -28,7 +31,13 @@ from datetime import date, timedelta
 
 from .health_windowing import _values_in_window
 from .parsing import _parse_iso_date
-from .sessions import _is_cardio_row
+from .sessions import (
+    TREND_MIN_EFFECTIVE_READINGS,
+    _is_cardio_row,
+    _noise_floor_clause,
+    _trend_block,
+    _trend_verdict,
+)
 
 
 # Karvonen / HR-zone definitions (% of HRR — heart rate reserve).
@@ -506,7 +515,7 @@ def compute_movement_consistency_days(health_all: list[dict],
     is dose-responsive even when the weekly mean is unchanged applies the
     same way here: one high-activity day still moves the mortality needle.
     Returns ``None`` when no exercise-minute data exists in the 28-day
-    window (HL trackers, or no Watch wear).
+    window (no Watch wear).
     """
     iso = today_d.isocalendar()
     monday = today_d - timedelta(days=iso.weekday - 1)
@@ -541,34 +550,80 @@ def compute_movement_consistency_days(health_all: list[dict],
     }
 
 
+# Step-count band edges, in steps/day, derived in the docstring below.
+# 7,000 is Paluch 2022's inflection in the all-cause-mortality curve;
+# 10,000 is where that curve has flattened in both Paluch 2022 and
+# Saint-Maurice 2020. They are named rather than inlined because the
+# assessment band and its test are the same two numbers.
+STEPS_LOW_PER_DAY = 7000
+STEPS_HIGH_PER_DAY = 10000
+
+
 def daily_activity_28d(health_all: list[dict],
                        workout_sessions_all: list[dict],
                        today_d: date) -> dict:
     """28-day rollup of all-day activity beyond logged workouts (NEAT).
 
-    Folds two complementary signals:
+    Folds three signals, in descending order of how directly they measure
+    all-day movement:
 
-    - Apple Activity ``exercise_min`` (XML only — Apple's "brisk activity"
+    - Daily ``steps`` from ``health_metrics``. This is the only one of the
+      three that is a COUNT of movement rather than a derived summary, and
+      it is the one the band is built on — see below.
+    - Apple Activity ``exercise_min`` (Apple's "brisk activity"
       heuristic). Daily values from ``health_metrics`` are averaged across
-      the last 28 days. HL trackers don't surface this, so the value falls
-      through to None.
+      the last 28 days. Falls through to None when the column is empty.
     - Walking sessions on ``Workout Sessions`` (apple_type == "Walking").
-      Both XML and HL importers write these. Distance and minutes are
-      summed; the importer's ``incidental walk`` flag (set on Walking
-      workouts under 15 min) is exposed as a separate count so the LLM
-      can distinguish a single 60-min city walk from twelve 5-min chore
-      walks.
+      Distance and minutes are summed; the importer's ``incidental``
+      flag (set on Walking workouts under 15 min) is exposed as a
+      separate count so the LLM can distinguish a single 60-min city walk
+      from twelve 5-min chore walks.
 
     The ``assessment`` band ("low" / "moderate" / "high") is the field the
-    coach actually consumes. Thresholds line up with Apple's 30 min/day
-    Exercise Ring guidance: <15 min/day = low, 15-45 = moderate, ≥45 =
-    high. When ``exercise_min_daily_avg`` is missing (HL), the band falls
-    back to walking_minutes_28d / 28 as a NEAT proxy — daily walks are
-    the dominant non-exercise movement signal anyway.
+    coach actually consumes, and ``assessment_basis`` names which of the
+    three produced it.
+
+    STEPS ARE THE PRIMARY BASIS. Walking-WORKOUT counts are the weakest
+    signal in the file: they see only the movement the watch chose to
+    classify as a walk, so a person who never starts a walk workout but
+    takes 14,000 steps a day around a city reads as sedentary. Exercise
+    minutes are better but still a threshold heuristic applied to the same
+    underlying accelerometer/HR stream, and they saturate — a hard hour of
+    training and a hard hour of training plus 12,000 steps of errands both
+    land near the same number.
+
+    Step thresholds come from the step-count mortality literature rather
+    than from a round number:
+
+    * **low: < 7,000/day.** Paluch 2022 (Lancet Public Health, ~47k adults
+      pooled) puts the steepest part of the all-cause-mortality curve
+      below roughly 6,000-8,000 steps/day, with the inflection near 7,000.
+      Below it, more daily movement is the single highest-value thing the
+      coach can prescribe, and it should be prescribed even when the
+      structured-cardio targets are already met.
+    * **moderate: 7,000-9,999/day.** At or past that inflection. Saint-
+      Maurice 2020 (JAMA) — 8,000 vs 4,000 steps/day, ~51% lower all-cause
+      mortality — sits inside this band.
+    * **high: >= 10,000/day.** The plateau. Both papers agree the curve
+      flattens here; additional NEAT buys little, so the cardio
+      prescription does not need to add volume for movement's sake.
+
+    The exercise-minute bands (<15 low / 15-45 moderate / >=45 high, keyed
+    to Apple's 30 min/day Exercise Ring and WHO's >=150 min/wk) are kept
+    as the SECONDARY basis for a tracker whose step column is empty, and
+    walking minutes per day as the last fallback, so a source that cannot
+    supply steps still gets a band instead of a silent null.
     """
     cutoff = today_d - timedelta(days=27)
 
-    # exercise_min daily mean across the last 28 days (XML only).
+    # Daily step count across the last 28 days.
+    steps_vals = _values_in_window(health_all, "steps", today_d, 28)
+    steps_daily_avg = (
+        round(sum(steps_vals) / len(steps_vals))
+        if steps_vals else None
+    )
+
+    # exercise_min daily mean across the last 28 days.
     exercise_min_vals = _values_in_window(health_all, "exercise_min", today_d, 28)
     exercise_min_daily_avg = (
         round(sum(exercise_min_vals) / len(exercise_min_vals), 1)
@@ -599,31 +654,296 @@ def daily_activity_28d(health_all: list[dict],
         if w.get("incidental") is True
         or (w.get("notes") or "").startswith("incidental"))
 
-    # Assessment basis: prefer Apple exercise_min when present, else use
-    # walking minutes per day as a NEAT proxy. HL trackers still get a
-    # band so the daily-activity gate in the coach doesn't quietly fall
-    # through on <OtherPerson>-style sources.
-    if exercise_min_daily_avg is not None:
-        basis = exercise_min_daily_avg
-    elif walking_minutes_28d > 0:
-        basis = walking_minutes_28d / 28.0
+    # Assessment basis, best signal first: steps, then exercise minutes,
+    # then walking minutes per day. A tracker that supplies none of the
+    # three still gets an explicit null band rather than a fabricated one,
+    # and the coach's daily-activity gate says so out loud.
+    if steps_daily_avg is not None:
+        assessment_basis = "steps"
+        if steps_daily_avg < STEPS_LOW_PER_DAY:
+            assessment = "low"
+        elif steps_daily_avg < STEPS_HIGH_PER_DAY:
+            assessment = "moderate"
+        else:
+            assessment = "high"
     else:
-        basis = None
+        if exercise_min_daily_avg is not None:
+            assessment_basis = "exercise_min"
+            basis = exercise_min_daily_avg
+        elif walking_minutes_28d > 0:
+            assessment_basis = "walking_minutes"
+            basis = walking_minutes_28d / 28.0
+        else:
+            assessment_basis = None
+            basis = None
 
-    if basis is None:
-        assessment = None
-    elif basis < 15:
-        assessment = "low"
-    elif basis < 45:
-        assessment = "moderate"
-    else:
-        assessment = "high"
+        if basis is None:
+            assessment = None
+        elif basis < 15:
+            assessment = "low"
+        elif basis < 45:
+            assessment = "moderate"
+        else:
+            assessment = "high"
 
     return {
+        "steps_daily_avg": steps_daily_avg,
         "exercise_min_daily_avg": exercise_min_daily_avg,
         "walking_workouts_count": len(walking_workouts),
         "walking_minutes_28d": walking_minutes_28d,
         "walking_distance_km_28d": walking_distance_km_28d,
         "incidental_walks_count": incidental_walks,
         "assessment": assessment,
+        # Which of the three signals the band was read off. A consumer
+        # that quotes the band without this cannot tell a measured
+        # step count from a walking-workout proxy, and those two mean
+        # very different things when they disagree.
+        "assessment_basis": assessment_basis,
     }
+
+
+# ======================================================================
+# Daily energy expenditure
+# ======================================================================
+#
+# ``health_metrics.csv`` stores the two components Apple exports — active
+# and basal — rather than their sum, because the sum destroys what makes
+# them worth having. Active energy is a training-load signal. Basal energy
+# falling during an open cut is adaptive thermogenesis, which is the single
+# most actionable thing daily energy data can tell a cutting athlete, and
+# it is invisible in the total.
+#
+# TDEE is therefore DERIVED here rather than stored, and it is derived
+# per DAY: ``mean(active_d + basal_d)`` over days carrying both readings,
+# never ``mean(active) + mean(basal)`` over two independently-windowed
+# means. Those two agree only when both columns are populated on exactly
+# the same days; when they are not, the second silently adds a number from
+# one set of days to a number from another and reports the result as one
+# person's day.
+
+# The trend gate below is ``sessions._trend_verdict`` — the same estimator
+# behind bodyweight, waist, body fat and lean mass. Only the thresholds
+# and the wording are per-channel; there is deliberately no second
+# regression in this module.
+#
+# Window: 28 days, matching the averages this block reports beside it. A
+# trend over a different stretch than the mean printed next to it is the
+# kind of quiet mismatch this file has been bitten by before.
+ENERGY_TREND_MIN_WINDOW_DAYS = 28
+# Same reasoning as BODYWEIGHT_TREND_MIN_READINGS: at 3 readings there is
+# one degree of freedom and the 95% t-multiplier is 12.7, so the verdict
+# can only ever be "unresolved" for a reason that has nothing to do with
+# the athlete.
+ENERGY_TREND_MIN_READINGS = 4
+# The reporting horizon. This estimator reports kcal per WEEK, so it must
+# observe at least a week; below that it states a change over a period
+# longer than the one it measured.
+ENERGY_TREND_MIN_SPAN_DAYS = 7
+# Recency, same horizon and same reason: a rate labelled "per week" read
+# off readings that stopped a fortnight ago describes a stretch that has
+# ended.
+ENERGY_TREND_MAX_STALE_DAYS = 7
+# Lower bounds on the residual SD (see ``sessions.ols_rate_per_week``).
+# A floor asserts what the instrument cannot go BELOW, not what it
+# typically shows.
+#
+# Active energy is estimated from accelerometer + heart rate, and
+# validation studies of wrist wearables against indirect calorimetry put
+# the error at roughly 20-30% of the active total. At the ~1,000 kcal/day
+# active expenditure this tracker actually shows, the LOW end of that band
+# is ~200 kcal; 150 is deliberately below it so the floor binds only on a
+# genuinely degenerate fit. TDEE inherits this floor because active is
+# what moves in the sum.
+TDEE_MEASUREMENT_SD_KCAL = 150.0
+# Basal energy is not measured at all — Apple computes it from an
+# anthropometric BMR formula over height / weight / age / sex, scaled by
+# wear time. Its only honest day-to-day variation is bodyweight drift
+# (0.5 kg against a ~2,100 kcal basal is ~15 kcal) plus incomplete wear.
+# That makes a near-collinear series the NORMAL case here rather than a
+# synthetic one, and without a floor a formula output would report a
+# zero-width interval on a trend it cannot support.
+BASAL_MEASUREMENT_SD_KCAL = 25.0
+
+
+def _energy_trend(points: list[tuple[date, float]],
+                  today_d: date,
+                  *,
+                  noise_sd_floor: float,
+                  channel: str,
+                  sd_text: str,
+                  source_text: str) -> dict:
+    """One energy channel's kcal/day-per-week slope, with its state.
+
+    ``points`` is ``[(date, kcal_per_day), ...]``. Always returns a block
+    in the same shape as ``bodyweight_trend`` / ``waist_trend``; read
+    ``state`` before ``kcal_per_week``.
+
+    ``channel`` is the noun used in ``note`` ("TDEE" / "basal energy"), so
+    both channels share the estimator and differ only in wording.
+    """
+    (state, reason, w_start, w_end, window_days, n_pts, fit,
+     span_days, stale_days, max_gap_days, n_eff) = _trend_verdict(
+        points, today_d, None,
+        ENERGY_TREND_MIN_WINDOW_DAYS, ENERGY_TREND_MIN_READINGS,
+        min_span_days=ENERGY_TREND_MIN_SPAN_DAYS,
+        max_stale_days=ENERGY_TREND_MAX_STALE_DAYS,
+        noise_sd_floor=noise_sd_floor,
+        min_effective_readings=TREND_MIN_EFFECTIVE_READINGS,
+    )
+
+    if reason == "no_readings" and w_start is None:
+        note = f"No {channel} readings on file."
+    elif reason == "no_readings":
+        note = f"No {channel} readings inside the window."
+    elif reason == "window_shorter_than_min":
+        note = (f"Window is {window_days} days; a weekly {channel} rate "
+                f"needs at least {ENERGY_TREND_MIN_WINDOW_DAYS} days.")
+    elif reason == "too_few_readings":
+        note = (f"{n_pts} day(s) of {channel} in a {window_days}-day window; "
+                f"{ENERGY_TREND_MIN_READINGS} are needed to fit a rate and "
+                "its error.")
+    elif reason == "readings_stale":
+        note = (f"Newest {channel} reading is {stale_days} days old; a weekly "
+                f"rate is only current while the last reading is within "
+                f"{ENERGY_TREND_MAX_STALE_DAYS} days. Wear the watch to "
+                "resolve it.")
+    elif reason == "no_time_variance":
+        note = f"All {channel} readings in the window fall on one day."
+    elif reason == "span_shorter_than_min":
+        note = (f"{n_pts} days of {channel} spanning {span_days} days; a "
+                f"weekly rate needs at least {ENERGY_TREND_MIN_SPAN_DAYS} "
+                "days of spread.")
+    elif reason == "too_few_effective_readings":
+        note = (f"{n_pts} days of {channel} spanning {span_days} days, but "
+                f"the longest stretch without one is {max_gap_days} days — "
+                f"over half the span. That leaves the series worth about "
+                f"{n_eff:.1f} evenly spaced days: the rate rests on the two "
+                "ends with nothing observed between them.")
+    elif reason == "ci_straddles_zero":
+        note = (f"Fit is {fit['per_week']:+.0f} kcal/day per week but the 95% "
+                f"interval [{fit['ci95_low']:+.0f}, {fit['ci95_high']:+.0f}] "
+                f"includes zero — the direction of {channel} is not resolved "
+                "by this data. Do not report a rise or a fall."
+                + _noise_floor_clause(fit, sd_text, source_text))
+    else:
+        direction = "rising" if fit["per_week"] > 0 else "falling"
+        note = (f"{channel} {direction} {abs(fit['per_week']):.0f} kcal/day "
+                f"per week (95% CI [{fit['ci95_low']:+.0f}, "
+                f"{fit['ci95_high']:+.0f}] over {fit['n']} days spanning "
+                f"{span_days} days)."
+                + _noise_floor_clause(fit, sd_text, source_text))
+
+    return _trend_block(state, reason, note,
+                        w_start, w_end, window_days, n_pts, fit,
+                        span_days, stale_days, max_gap_days, n_eff,
+                        rate_key="kcal_per_week", rate_scale=1.0,
+                        method="ols_min_28d_window_7d_span_3eff")
+
+
+def energy_28d(health_all: list[dict],
+               today_d: date,
+               window_days: int = 28) -> dict | None:
+    """28-day daily-energy rollup, or ``None`` when the columns are empty.
+
+    Returns:
+
+    * ``tdee_kcal_daily_avg`` / ``active_kcal_daily_avg`` /
+      ``basal_kcal_daily_avg`` — kcal/day, rounded to whole kcal. Each is
+      averaged over the days that actually carry the reading, so a
+      half-worn month reports the days it has rather than dividing by 28.
+    * ``n_days`` — days in the window carrying BOTH components, i.e. the
+      days ``tdee_kcal_daily_avg`` is built from. ``n_active_days`` and
+      ``n_basal_days`` are beside it because the three means can rest on
+      three different day sets, and a consumer that assumes
+      ``tdee = active + basal`` needs to be able to see when they do not.
+    * ``tdee_trend_kcal_per_week`` / ``basal_trend_kcal_per_week`` — the
+      headline rates, populated ONLY when the fit resolves. ``None``
+      otherwise, with ``tdee_trend`` / ``basal_trend`` carrying the
+      ``state`` / ``reason`` / ``note`` that say why.
+
+    ``None`` (rather than a block of zeroes) when no day in the window
+    carries either component: a tracker that has never exported energy
+    must read as an absent channel, not as an athlete burning nothing.
+    ``_compact`` then drops the key entirely, the same way it does for
+    ``sleep_summary`` and ``nutrition_phase``.
+
+    There is no basal trend without a basal column and no TDEE trend
+    without both, so the two trend blocks can disagree about whether they
+    resolved. That is a fact about the export, and it is reported rather
+    than smoothed over.
+    """
+    cutoff = today_d - timedelta(days=max(window_days - 1, 0))
+
+    active_pts: list[tuple[date, float]] = []
+    basal_pts: list[tuple[date, float]] = []
+    tdee_pts: list[tuple[date, float]] = []
+    for entry in health_all or []:
+        d = _parse_iso_date(entry.get("date"))
+        if d is None or d < cutoff or d > today_d:
+            continue
+        active = _as_float_or_none(entry.get("active_energy_kcal"))
+        basal = _as_float_or_none(entry.get("basal_energy_kcal"))
+        if active is not None:
+            active_pts.append((d, active))
+        if basal is not None:
+            basal_pts.append((d, basal))
+        # TDEE is a per-DAY sum. A day missing either component has no
+        # TDEE — it does not have half of one.
+        if active is not None and basal is not None:
+            tdee_pts.append((d, active + basal))
+
+    if not active_pts and not basal_pts:
+        return None
+
+    tdee_trend = _energy_trend(
+        tdee_pts, today_d,
+        noise_sd_floor=TDEE_MEASUREMENT_SD_KCAL,
+        channel="TDEE",
+        sd_text="150 kcal/day",
+        source_text="wrist-measured active energy",
+    )
+    basal_trend = _energy_trend(
+        basal_pts, today_d,
+        noise_sd_floor=BASAL_MEASUREMENT_SD_KCAL,
+        channel="basal energy",
+        sd_text="25 kcal/day",
+        source_text="a formula-derived basal estimate",
+    )
+
+    return {
+        "tdee_kcal_daily_avg":   _mean_kcal(tdee_pts),
+        "active_kcal_daily_avg": _mean_kcal(active_pts),
+        "basal_kcal_daily_avg":  _mean_kcal(basal_pts),
+        "n_days":                len(tdee_pts),
+        "n_active_days":         len(active_pts),
+        "n_basal_days":          len(basal_pts),
+        "window_days":           window_days,
+        # Headline scalars, null unless the matching block resolved.
+        "tdee_trend_kcal_per_week":  tdee_trend["kcal_per_week"],
+        "basal_trend_kcal_per_week": basal_trend["kcal_per_week"],
+        # ...and the state behind each, same shape as ``bodyweight_trend``.
+        "tdee_trend":  tdee_trend,
+        "basal_trend": basal_trend,
+    }
+
+
+def _as_float_or_none(value) -> float | None:
+    """Coerce a CSV cell to float; ``None`` for blank or unparseable."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _mean_kcal(points: list[tuple[date, float]]) -> int | None:
+    """Whole-kcal mean of ``[(date, kcal), ...]``; ``None`` when empty.
+
+    Rounded to an integer because a tenth of a kcal is three orders of
+    magnitude below what any of these instruments can resolve, and a
+    decimal there reads as precision the number does not have.
+    """
+    if not points:
+        return None
+    return round(sum(v for _, v in points) / len(points))

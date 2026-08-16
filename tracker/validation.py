@@ -24,7 +24,7 @@ _CONTRACT_DECLARED_KEYS: "dict[str, frozenset[str]]" = {
         "deloads", "auto_deload_candidates", "cardio_last_28d",
         "cardio_hr_zones_28d", "swim_summary", "sleep_summary",
         "thermal_summary", "light_therapy_summary", "nutrition_phase",
-        "daily_activity_28d", "recovery", "training_load",
+        "daily_activity_28d", "energy_28d", "recovery", "training_load",
         "training_load_by_modality",
         "hr_at_volume_divergence", "age_years", "estimated_max_hr",
         "estimated_rest_hr", "bodyweight_latest",

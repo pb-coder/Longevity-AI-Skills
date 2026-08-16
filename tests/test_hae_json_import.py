@@ -685,9 +685,32 @@ class FixtureImportTests(unittest.TestCase):
             self.assertIsNone(night["n_segments"])
 
     def test_the_fixture_carries_no_identifying_source_strings(self) -> None:
-        blob = FIXTURE.read_text()
-        for token in ("Watch von", "iPhone", "Nihad", "Fabian"):
-            self.assertNotIn(token, blob)
+        """Every ``source`` in the fixture is the neutral placeholder.
+
+        A real export names the device and the device carries its owner's
+        name ("Apple Watch von <Person>"). This fixture is committed to a
+        public repo, so it is screened on an allowlist rather than on a
+        denylist of known names: an identifier nobody thought to screen
+        for still fails, and the test does not itself have to spell out
+        the names it exists to keep out.
+        """
+        data = json.loads(FIXTURE.read_text()).get("data") or {}
+        sources: set[str] = set()
+
+        def collect(points) -> None:
+            for point in points or []:
+                if isinstance(point, dict) and point.get("source"):
+                    sources.add(point["source"])
+
+        for metric in data.get("metrics") or []:
+            collect(metric.get("data"))
+        for workout in data.get("workouts") or []:
+            collect([workout])
+            for value in workout.values():
+                if isinstance(value, list):
+                    collect(value)
+
+        self.assertEqual(sources, {"Device"})
 
 
 class ReaderDispatchTests(unittest.TestCase):

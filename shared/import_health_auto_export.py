@@ -12,10 +12,19 @@ the ZIP carries:
   JSON. It is localised and carries no sleep timestamps, so the Sleep
   Regularity Index cannot be computed from it.
 
-Both paths write the same surface: daily HRV / resting HR / walking HR /
-wrist temp / breathing disturbances / exercise minutes / body
-composition, per-night sleep architecture, per-workout sessions with
-average / max / min HR, and per-workout swim aggregates.
+Both paths write daily HRV / resting HR / walking HR / wrist temp /
+breathing disturbances / exercise minutes / body composition, per-night
+sleep architecture, per-workout sessions with average / max / min HR,
+and per-workout swim aggregates.
+
+**Only the JSON path writes steps and the active / basal energy split**,
+and only it carries the sleep timestamps the Sleep Regularity Index
+needs. A tracker left on CSV therefore reads with a null `energy_28d`
+and a null `daily_activity_28d` on top of the missing SRI — the source
+CSV does carry step count and both energy series, so this is a gap in
+the deprecated reader, not a limit of the export. It is deliberately
+not being closed: the fix is to move the phone to JSON, after which
+this reader goes.
 
 Usage:
     python3 import_health_auto_export.py --person <Person> \\

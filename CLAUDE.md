@@ -39,8 +39,10 @@ own git repository (see the versioning convention below), so the commit
 history is the rollback path when an import or a mis-parsed `/log`
 damages a CSV. HealthAutoExport ZIPs drop into the root and are
 **deleted after a successful import**; `--keep-export` is the escape
-hatch. One cold native `Export.zip` sits at `<root>/archive/` from
-before the migration; no code reads it.
+hatch. Nothing is archived: the native `Export.zip` and the hand-made
+pre-git `data/` snapshots were deleted on 2026-08-16, and git is the
+only rollback path. Pre-migration XML history is gone for good — do not
+write code or prose that offers to re-extract anything from it.
 
 ```
 <root>/

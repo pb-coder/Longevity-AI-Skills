@@ -36,7 +36,6 @@ Layout (post-PR3a — pure CSV, no xlsx):
     ├── Skills/
     │   └── shared/                        ← this file
     ├── HealthAutoExport*.zip              (transient; deleted on success)
-    ├── archive/                           ← one cold pre-migration export; unread
 
 Every importer / logger / coach / maintain script accepts ``--person
 <Name>`` (e.g. ``--person <Person>``) and resolves the rest via this

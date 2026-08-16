@@ -180,7 +180,7 @@ shared/               # Code + docs imported by multiple skills
   health_units.py         # Source-agnostic unit conversion and plausibility
                           # gating: PLAUSIBLE_RANGES, convert_unit,
                           # plausible_or_none, normalize_body_fat_pct, plus the
-                          # timestamp helpers parse_apple_dt / hhmm. The one
+                          # timestamp helper hhmm. The one
                           # place a measurement's meaning is decided, so an
                           # uninterpretable unit drops in exactly one function.
   strength_sessions.py    # Strength-session clustering (same-day workouts →

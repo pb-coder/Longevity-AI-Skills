@@ -75,10 +75,6 @@ HEALTH_METRICS_FIELDS = [
     "steps", "active_energy_kcal", "basal_energy_kcal",
 ]
 
-# Daily energy expenditure fields. TDEE is their sum; see the schema note
-# above for why the split is what gets stored.
-ENERGY_FIELDS = ("active_energy_kcal", "basal_energy_kcal")
-
 HEALTH_METRICS_HEADERS_BY_SOURCE = {DATA_SOURCE: HEALTH_METRICS_HEADERS}
 HEALTH_METRICS_FIELDS_BY_SOURCE = {DATA_SOURCE: HEALTH_METRICS_FIELDS}
 

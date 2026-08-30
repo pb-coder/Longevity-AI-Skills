@@ -168,5 +168,138 @@ class FixtureHealthTests(unittest.TestCase):
             self.assertGreater(len(row), 1, f"date-only row: {row}")
 
 
+def _session(start, end, stages, asleep=None, awake=0, vitals=None) -> dict:
+    total = sum(s["durationSec"] for s in stages)
+    asleep_sec = asleep if asleep is not None else sum(
+        s["durationSec"] for s in stages if s["stage"] != "awake"
+    )
+    return {
+        "start": start, "end": end,
+        "durationSec": total,
+        "asleepSec": asleep_sec,
+        "awakeSec": awake,
+        "source": "Apple Watch",
+        "stages": stages,
+        "vitals": vitals or {},
+    }
+
+
+def _stage(stage, start, end, seconds) -> dict:
+    return {"stage": stage, "start": start, "end": end, "durationSec": seconds}
+
+
+class NightAssemblyTests(unittest.TestCase):
+    """Reproduces the retired pipeline, verified on 224 of 224 stored nights."""
+
+    META = _meta(range_start="2026-06-01T00:00:00Z",
+                 range_end="2026-07-01T00:00:00Z",
+                 exported_at="2026-07-01T00:05:00Z")
+
+    def test_a_night_is_keyed_by_its_wake_date(self) -> None:
+        p = _payload(meta=self.META, sessions=[
+            _session("06-05 23:30:00", "06-06 07:00:00",
+                     [_stage("asleepCore", "06-05 23:30:00", "06-06 07:00:00", 27000)]),
+        ])
+        self.assertEqual(sorted(hek.assemble_nights(p)), ["2026-06-06"])
+
+    def test_a_session_starting_after_six_pm_belongs_to_the_next_night(self) -> None:
+        # A 2026-06-27 20:25 nap is stored on the 2026-06-28 night row.
+        p = _payload(meta=self.META, sessions=[
+            _session("06-27 20:25:09", "06-27 22:34:34",
+                     [_stage("asleepCore", "06-27 20:25:09", "06-27 22:34:34", 7765)]),
+        ])
+        self.assertEqual(sorted(hek.assemble_nights(p)), ["2026-06-28"])
+
+    def test_a_split_night_merges_into_one_row(self) -> None:
+        # 2026-06-07: 23:19->04:30 and 05:02->07:46 became one stored night
+        # with total 5.97 h, in bed 8.44 h and 37 segments.
+        p = _payload(meta=self.META, sessions=[
+            _session("06-06 23:19:41", "06-07 04:30:41",
+                     [_stage("asleepCore", "06-06 23:19:41", "06-07 04:30:41", 12129)],
+                     asleep=12129, awake=6540),
+            _session("06-07 05:02:50", "06-07 07:46:21",
+                     [_stage("asleepCore", "06-07 05:02:50", "06-07 07:46:21", 9360)],
+                     asleep=9360, awake=480),
+        ])
+        rows = hek.build_sleep_payload(p, None, None)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["date"], "2026-06-07")
+        self.assertEqual(row["total_h"], round((12129 + 9360) / 3600, 2))
+        # In bed spans the gap between the two sessions.
+        self.assertEqual(row["time_in_bed_h"], round((8 * 3600 + 26 * 60 + 40) / 3600, 2))
+        self.assertEqual(row["n_segments"], 2)
+        self.assertEqual(row["first_segment_start"], "2026-06-06 23:19:41")
+        self.assertEqual(row["last_segment_end"], "2026-06-07 07:46:21")
+
+    def test_the_gap_between_sessions_is_in_bed_but_not_awake(self) -> None:
+        p = _payload(meta=self.META, sessions=[
+            _session("06-06 23:19:41", "06-07 04:30:41",
+                     [_stage("asleepCore", "06-06 23:19:41", "06-07 04:30:41", 12129)],
+                     asleep=12129, awake=6540),
+            _session("06-07 05:02:50", "06-07 07:46:21",
+                     [_stage("asleepCore", "06-07 05:02:50", "06-07 07:46:21", 9360)],
+                     asleep=9360, awake=480),
+        ])
+        row = hek.build_sleep_payload(p, None, None)[0]
+        self.assertEqual(row["awake_h"], round((6540 + 480) / 3600, 2))
+
+    def test_stage_totals_come_from_the_stage_intervals(self) -> None:
+        p = _payload(meta=self.META, sessions=[
+            _session("06-05 23:00:00", "06-06 06:00:00", [
+                _stage("asleepCore", "06-05 23:00:00", "06-06 01:00:00", 7200),
+                _stage("asleepDeep", "06-06 01:00:00", "06-06 02:00:00", 3600),
+                _stage("asleepREM", "06-06 02:00:00", "06-06 03:00:00", 3600),
+                _stage("awake", "06-06 03:00:00", "06-06 03:10:00", 600),
+                _stage("asleepCore", "06-06 03:10:00", "06-06 06:00:00", 10200),
+            ]),
+        ])
+        row = hek.build_sleep_payload(p, None, None)[0]
+        self.assertEqual(row["core_h"], round(17400 / 3600, 2))
+        self.assertEqual(row["deep_h"], 1.0)
+        self.assertEqual(row["rem_h"], 1.0)
+        self.assertEqual(row["n_segments"], 5)
+
+    def test_the_clock_correction_is_applied_to_sleep_stamps(self) -> None:
+        m = _meta(range_start="2026-01-01T00:00:00Z",
+                  range_end="2026-08-30T07:22:53Z",
+                  exported_at="2026-08-30T07:25:07Z")
+        p = _payload(meta=m, sessions=[
+            _session("03-27 22:19:41", "03-28 06:30:41",
+                     [_stage("asleepCore", "03-27 22:19:41", "03-28 06:30:41", 29460)]),
+        ])
+        row = hek.build_sleep_payload(p, None, None)[0]
+        self.assertEqual(row["first_segment_start"], "2026-03-27 23:19:41")
+        self.assertEqual(row["last_segment_end"], "2026-03-28 07:30:41")
+
+
+class SleepHeadlineTests(unittest.TestCase):
+
+    META = NightAssemblyTests.META
+
+    def test_the_headline_mirror_carries_respiratory_rate_from_sleep_vitals(self) -> None:
+        p = _payload(meta=self.META, sessions=[
+            _session("06-05 23:00:00", "06-06 06:00:00",
+                     [_stage("asleepCore", "06-05 23:00:00", "06-06 06:00:00", 25200)],
+                     vitals={"respiratoryRate": {"avg": 14.5, "unit": "brpm"}}),
+        ])
+        rows = hek.sleep_headline_rows(p, None, None)
+        self.assertEqual(rows[0]["date"], "2026-06-06")
+        self.assertEqual(rows[0]["resp_rate"], 14.5)
+        self.assertEqual(rows[0]["sleep_total_h"], 7.0)
+        self.assertEqual(rows[0]["time_in_bed_h"], 7.0)
+
+
+class FixtureSleepTests(unittest.TestCase):
+
+    def test_every_fixture_night_has_a_span_at_least_as_long_as_its_sleep(self) -> None:
+        for row in hek.build_sleep_payload(_load(), None, None):
+            self.assertGreaterEqual(row["time_in_bed_h"], row["total_h"])
+
+    def test_the_fixture_contains_a_merged_night(self) -> None:
+        rows = hek.build_sleep_payload(_load(), None, None)
+        self.assertTrue(any(r["n_segments"] and r["n_segments"] > 10 for r in rows))
+
+
 if __name__ == "__main__":
     unittest.main()

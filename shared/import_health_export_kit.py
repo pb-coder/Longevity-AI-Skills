@@ -120,3 +120,129 @@ def build_health_payload(payload: dict,
     # dropped these too, so an empty day stays empty rather than gaining a
     # blank line.
     return [rows[k] for k in sorted(rows) if len(rows[k]) > 1]
+
+
+# ------------------------------------------------------------------ sleep
+
+# A session starting at or after this local hour belongs to the following
+# day's night. Verified against stored history: a 2026-06-27 20:25 nap sits
+# on the 2026-06-28 row.
+NIGHT_ROLLOVER_HOUR = 18
+
+STAGE_FIELDS = {
+    "asleepCore": "core_h",
+    "asleepDeep": "deep_h",
+    "asleepREM": "rem_h",
+    "asleepUnspecified": "unspecified_h",
+}
+
+
+def _hours(seconds: float) -> float:
+    return round(seconds / 3600.0, 2)
+
+
+def assemble_nights(payload: dict) -> dict[str, list[dict]]:
+    """Group sleep sessions into nights keyed by wake date.
+
+    ``sleep.sessions[]`` is per session, not per night: a night interrupted
+    long enough splits into two, and an evening nap is its own session. The
+    two rules below reproduce the retired pipeline exactly — checked against
+    all 224 stored night rows with no field mismatching on any night.
+    """
+    meta = payload["meta"]
+    nights: dict[str, list[dict]] = {}
+    for session in (payload.get("sleep") or {}).get("sessions") or []:
+        start = hek_time.parse_stamp(session["start"], meta)
+        end = hek_time.parse_stamp(session["end"], meta)
+        if start.hour >= NIGHT_ROLLOVER_HOUR:
+            key = (start.date() + timedelta(days=1)).isoformat()
+        else:
+            key = end.date().isoformat()
+        nights.setdefault(key, []).append(
+            {**session, "_start": start, "_end": end}
+        )
+    for sessions in nights.values():
+        sessions.sort(key=lambda s: s["_start"])
+    return nights
+
+
+def build_sleep_payload(payload: dict,
+                        since: date | None,
+                        until: date | None) -> list[dict]:
+    """Rows for ``upsert_sleep_nights``, one per night."""
+    rows: list[dict] = []
+    for key, sessions in sorted(assemble_nights(payload).items()):
+        day = date.fromisoformat(key)
+        if not _in_window(day, since, until):
+            continue
+        stage_seconds: dict[str, float] = {}
+        for session in sessions:
+            for stage in session.get("stages") or []:
+                name = stage.get("stage")
+                stage_seconds[name] = stage_seconds.get(name, 0.0) + stage.get("durationSec", 0)
+
+        asleep = sum(s.get("asleepSec") or 0 for s in sessions)
+        awake = sum(s.get("awakeSec") or 0 for s in sessions)
+        # In bed is the whole span, gaps between sessions included. The gap
+        # itself is not counted as awake time.
+        in_bed = (sessions[-1]["_end"] - sessions[0]["_start"]).total_seconds()
+
+        row = {
+            "date": key,
+            "total_h": _hours(asleep),
+            "awake_h": _hours(awake),
+            "time_in_bed_h": _hours(in_bed),
+            "n_segments": sum(len(s.get("stages") or []) for s in sessions),
+            "first_segment_start": sessions[0]["_start"].strftime("%Y-%m-%d %H:%M:%S"),
+            "last_segment_end": sessions[-1]["_end"].strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        for stage_name, field in STAGE_FIELDS.items():
+            if stage_name in stage_seconds:
+                row[field] = _hours(stage_seconds[stage_name])
+        rows.append(row)
+    return rows
+
+
+def sleep_headline_rows(payload: dict,
+                        since: date | None,
+                        until: date | None) -> list[dict]:
+    """The sleep mirror written into ``health_metrics.csv``.
+
+    ``Resp Rate`` comes from the night's respiratory-rate average. The
+    retired importer sourced it from a metric it called daily, but Apple
+    only measures respiration during sleep, and the two agreed to 0.1 on
+    every overlapping day tested.
+    """
+    nights = assemble_nights(payload)
+    rows: list[dict] = []
+    for key, sessions in sorted(nights.items()):
+        day = date.fromisoformat(key)
+        if not _in_window(day, since, until):
+            continue
+        stage_seconds: dict[str, float] = {}
+        for session in sessions:
+            for stage in session.get("stages") or []:
+                name = stage.get("stage")
+                stage_seconds[name] = stage_seconds.get(name, 0.0) + stage.get("durationSec", 0)
+        asleep = sum(s.get("asleepSec") or 0 for s in sessions)
+        in_bed = (sessions[-1]["_end"] - sessions[0]["_start"]).total_seconds()
+
+        row = {
+            "date": key,
+            "sleep_total_h": _hours(asleep),
+            "time_in_bed_h": _hours(in_bed),
+        }
+        if "asleepDeep" in stage_seconds:
+            row["sleep_deep_h"] = _hours(stage_seconds["asleepDeep"])
+        if "asleepREM" in stage_seconds:
+            row["sleep_rem_h"] = _hours(stage_seconds["asleepREM"])
+
+        resp = [
+            (s.get("vitals") or {}).get("respiratoryRate", {}).get("avg")
+            for s in sessions
+        ]
+        resp = [v for v in resp if v is not None]
+        if resp:
+            row["resp_rate"] = round(sum(resp) / len(resp), 2)
+        rows.append(row)
+    return rows

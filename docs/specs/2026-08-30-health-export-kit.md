@@ -109,7 +109,7 @@ Source file: <Person>, compact, 2026-01-01 → 2026-08-30, 242 days, 698 workout
 | Field | Result |
 |---|---|
 | Workout identity (date + start + duration + type) | **663 / 663** stored rows matched, after the §5.1 clock correction |
-| Sleep nights, reassembled per §6.4 | **224 / 224** on sleep total, time in bed, first segment start and last segment end. **Zero mismatches** on any field. Segment count matched on all 216 nights where the stored value is not blank; awake time on all 222 where present. |
+| Sleep nights, reassembled per §6.4 | Time in bed, first segment start, last segment end: **224 / 224 exact**. Awake time **222 / 222 exact**, segment count **216 / 216 exact** (the rest are blank in storage). Sleep total, core, deep and REM are exact on 215-220 of 224 and within **0.01 h on every night** — see §3.4. |
 | Resting HR | 225 / 225 |
 | Walking HR | 225 / 225 |
 | Bodyweight | 79 / 79 |
@@ -130,6 +130,22 @@ The energy mismatches are the two partial edge days (§5.2), not errors.
 | HR recovery | 106 / 115 match, others differ <1 bpm | HAE took the day's max; export averages, and rounds to whole bpm. |
 | Exercise minutes | 216 / 225 match | 7 of the 9 mismatches sit in the pre-DST window and are day-boundary spill (§5.1). Two are genuine small aggregation differences. |
 | Workout average HR | differs by >2 bpm on 13 of 93 August workouts, max 13.4 | Export uses HealthKit's own workout average; HAE used a windowed series. Checked against the raw per-second HR stream: the export is **closer** (mean absolute error 0.70 bpm vs 1.40). No regression. |
+
+### 3.4 The one residual difference
+
+Sleep total, core, deep and REM match the stored history exactly on 215 to 220 of 224 nights
+and differ on the rest by **exactly 0.01 h — one unit in the last decimal place of a
+two-decimal hour, 36 seconds.** Nothing differs by more.
+
+The cause is the rounding path, not the grouping. The retired importer reached hours through
+the source's own pre-rounded hour values; this one sums seconds and rounds once at the end.
+On a handful of nights the underlying seconds sit within a few seconds of a 36-second
+boundary and land on the other side of it.
+
+This is recorded rather than corrected. Rounding to match the old path would mean
+reproducing a less accurate intermediate step, and 36 seconds on a seven-hour night is
+0.14%. It is stated here so nobody later reads "224 / 224" as exact equality on every
+column — an earlier draft of this document did claim that, and it was wrong.
 
 ### 3.3 Not verified
 
@@ -281,8 +297,8 @@ correction = utcoffset(meta.timeZone, at meta.exportedAt)
 true_local = exported_naive + correction
 ```
 
-**Validated:** 663 / 663 stored workouts match and 224 / 224 sleep nights line up after
-applying it. Validated against one transition only (§3.3).
+**Validated:** 663 / 663 stored workouts match exactly, and all 224 sleep nights land on the
+right date with exact start and end times, after applying it. Validated against one transition only (§3.3).
 
 **Guard:** the importer must assert that the correction resolves to a whole number of
 hours and is within ±2 hours, and refuse the import with a clear error otherwise. A future
@@ -386,10 +402,11 @@ Reproduce the retired pipeline's behaviour, verified against stored rows:
    Verified: stored awake 1.94 h against the sessions' own 109 + 8 minutes.
 
 **Validation:** these four rules were run over all 235 sessions and compared to all 224
-stored night rows. Sleep total, time in bed, first segment start and last segment end
-matched on **224 / 224**. Segment count matched on all 216 nights whose stored value is
-not blank, awake time on all 222 where present. **No field mismatched on any night.**
-The 8 unmatched nights are 2026-08-23 onward, which the tracker never imported.
+stored night rows. Every night is produced, on the right date. Time in bed, first segment
+start and last segment end match **exactly on 224 / 224**; awake time on 222 / 222 and
+segment count on 216 / 216, which is every night where storage holds a value. The four
+stage-derived hour columns are covered in §3.4. The 8 extra nights the export produces are
+2026-08-23 onward, which the tracker never imported.
 
 ### 6.5 Idempotency
 

@@ -343,3 +343,66 @@ def build_workout_payload(payload: dict,
         rows.append(row)
     rows.sort(key=lambda r: (r["date"], r["start"]))
     return rows
+
+
+# ------------------------------------------------------------------ swims
+
+SWIM_TYPES = frozenset({"Swimming"})
+
+
+def build_swim_payload(payload: dict,
+                       since: date | None,
+                       until: date | None) -> list[dict]:
+    """Rows for ``upsert_swim_workouts``.
+
+    Lap count comes from ``events[].type == "lap"`` and was verified against
+    the tracker's historical per-lap files: identical on all 17 swims that
+    carry laps. The events themselves hold only ``{start, end, type}``, so
+    stroke style, SWOLF, pool length, stroke count and water temperature
+    have no source in this format and are left unset rather than guessed —
+    sparse merge then preserves whatever history already holds.
+
+    ``Location`` is better than it was: the retired importer could only ever
+    write "Open Water", because HealthAutoExport's location field disagreed
+    with its own indoor flag. Here ``isIndoor`` decides it outright.
+    """
+    meta = payload["meta"]
+    rows: list[dict] = []
+    for workout in (payload.get("activity") or {}).get("workouts") or []:
+        if (workout.get("type") or "") not in SWIM_TYPES:
+            continue
+        raw_start = workout.get("start")
+        if not raw_start:
+            continue
+        start = hek_time.parse_stamp(raw_start, meta)
+        if not _in_window(start.date(), since, until):
+            continue
+
+        row = {
+            "date": start.date().isoformat(),
+            "start": start.strftime("%H:%M:%S"),
+        }
+        raw_end = workout.get("end")
+        if raw_end:
+            row["end"] = hek_time.parse_stamp(raw_end, meta).strftime("%H:%M:%S")
+        duration = workout.get("durationSec")
+        if duration is not None:
+            row["duration_min"] = round(duration / 60.0, 1)
+        if workout.get("distanceKm"):
+            row["distance_km"] = workout["distanceKm"]
+        if workout.get("averageHeartRateBpm") is not None:
+            row["avg_hr"] = workout["averageHeartRateBpm"]
+        if workout.get("activeEnergyKcal") is not None:
+            row["active_cal"] = workout["activeEnergyKcal"]
+
+        laps = sum(1 for e in workout.get("events") or [] if e.get("type") == "lap")
+        if laps:
+            row["laps"] = laps
+
+        indoor = workout.get("isIndoor")
+        if indoor is not None:
+            row["location"] = "Pool" if indoor else "Open Water"
+
+        rows.append(row)
+    rows.sort(key=lambda r: (r["date"], r["start"]))
+    return rows

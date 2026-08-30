@@ -434,5 +434,66 @@ class FixtureWorkoutTests(unittest.TestCase):
         self.assertEqual(len(keys), len(set(keys)))
 
 
+class SwimTests(unittest.TestCase):
+
+    META = _meta(range_start="2026-07-01T00:00:00Z",
+                 range_end="2026-07-31T00:00:00Z",
+                 exported_at="2026-07-31T00:05:00Z")
+
+    SWIM = {
+        "start": "07-25 12:30:45", "end": "07-25 12:45:12",
+        "type": "Swimming", "isIndoor": False,
+        "durationSec": 864, "distanceKm": 0.38,
+        "averageHeartRateBpm": 128, "activeEnergyKcal": 127,
+        "source": "Apple Watch",
+        "events": ([{"type": "lap", "start": "07-25 12:31:00",
+                     "end": "07-25 12:31:20"}] * 19)
+                  + [{"type": "pause", "start": "07-25 12:45:12",
+                      "end": "07-25 12:45:12"}],
+    }
+
+    def _one(self, **overrides) -> dict:
+        rows = hek.build_swim_payload(
+            _payload(meta=self.META, workouts=[{**self.SWIM, **overrides}]),
+            None, None,
+        )
+        return rows[0]
+
+    def test_laps_are_counted_from_lap_events(self) -> None:
+        # 19 laps on 2026-07-25, matching the stored swimming file exactly.
+        self.assertEqual(self._one()["laps"], 19)
+
+    def test_pause_events_are_not_counted_as_laps(self) -> None:
+        row = self._one(events=[{"type": "pause", "start": "07-25 12:45:12",
+                                 "end": "07-25 12:45:12"}])
+        self.assertIsNone(row.get("laps"))
+
+    def test_outdoor_swims_are_open_water(self) -> None:
+        self.assertEqual(self._one(isIndoor=False)["location"], "Open Water")
+
+    def test_indoor_swims_are_pool(self) -> None:
+        self.assertEqual(self._one(isIndoor=True)["location"], "Pool")
+
+    def test_an_absent_indoor_flag_leaves_location_blank(self) -> None:
+        w = {k: v for k, v in self.SWIM.items() if k != "isIndoor"}
+        rows = hek.build_swim_payload(_payload(meta=self.META, workouts=[w]),
+                                      None, None)
+        self.assertIsNone(rows[0].get("location"))
+
+    def test_fields_with_no_source_are_left_unset(self) -> None:
+        row = self._one()
+        for field in ("pool_length_m", "strokes", "spl",
+                      "avg_swolf", "stroke_mix", "water_temp_c"):
+            self.assertNotIn(field, row)
+
+    def test_only_swims_are_returned(self) -> None:
+        rows = hek.build_swim_payload(_payload(meta=self.META, workouts=[
+            self.SWIM,
+            {"start": "07-25 18:00:00", "end": "07-25 18:30:00",
+             "type": "Walking", "isIndoor": False, "durationSec": 1800},
+        ]), None, None)
+        self.assertEqual(len(rows), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

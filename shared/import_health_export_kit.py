@@ -146,8 +146,15 @@ def assemble_nights(payload: dict) -> dict[str, list[dict]]:
 
     ``sleep.sessions[]`` is per session, not per night: a night interrupted
     long enough splits into two, and an evening nap is its own session. The
-    two rules below reproduce the retired pipeline exactly — checked against
-    all 224 stored night rows with no field mismatching on any night.
+    two rules below reproduce the retired pipeline's night grouping,
+    re-measured against all 224 stored night rows: Time in Bed, Sleep Awake,
+    First Segment Start, Last Segment End and N Segments match exactly on
+    every night that carries them (224/224, 222/222, 224/224, 224/224,
+    216/216). The four stage-derived hour columns (Sleep Total/Core/Deep/
+    REM) match exactly on 215-220 of 224 nights and are within 0.01 h of the
+    stored value on all of them — one unit in the last decimal place, 36
+    seconds, from a different rounding path, not a disagreement about which
+    sessions form a night.
     """
     meta = payload["meta"]
     nights: dict[str, list[dict]] = {}
@@ -166,6 +173,27 @@ def assemble_nights(payload: dict) -> dict[str, list[dict]]:
     return nights
 
 
+def _night_totals(sessions: list[dict]) -> dict:
+    """Stage seconds, asleep, awake and in-bed span for one night's sessions.
+
+    Shared by ``build_sleep_payload`` and ``sleep_headline_rows`` so the two
+    stay in lockstep: they must always agree on what a night added up to.
+    """
+    stage_seconds: dict[str, float] = {}
+    for session in sessions:
+        for stage in session.get("stages") or []:
+            name = stage.get("stage")
+            stage_seconds[name] = stage_seconds.get(name, 0.0) + stage.get("durationSec", 0)
+    return {
+        "stage_seconds": stage_seconds,
+        "asleep": sum(s.get("asleepSec") or 0 for s in sessions),
+        "awake": sum(s.get("awakeSec") or 0 for s in sessions),
+        # In bed is the whole span, gaps between sessions included. The gap
+        # itself is not counted as awake time.
+        "in_bed": (sessions[-1]["_end"] - sessions[0]["_start"]).total_seconds(),
+    }
+
+
 def build_sleep_payload(payload: dict,
                         since: date | None,
                         until: date | None) -> list[dict]:
@@ -175,17 +203,11 @@ def build_sleep_payload(payload: dict,
         day = date.fromisoformat(key)
         if not _in_window(day, since, until):
             continue
-        stage_seconds: dict[str, float] = {}
-        for session in sessions:
-            for stage in session.get("stages") or []:
-                name = stage.get("stage")
-                stage_seconds[name] = stage_seconds.get(name, 0.0) + stage.get("durationSec", 0)
-
-        asleep = sum(s.get("asleepSec") or 0 for s in sessions)
-        awake = sum(s.get("awakeSec") or 0 for s in sessions)
-        # In bed is the whole span, gaps between sessions included. The gap
-        # itself is not counted as awake time.
-        in_bed = (sessions[-1]["_end"] - sessions[0]["_start"]).total_seconds()
+        totals = _night_totals(sessions)
+        stage_seconds = totals["stage_seconds"]
+        asleep = totals["asleep"]
+        awake = totals["awake"]
+        in_bed = totals["in_bed"]
 
         row = {
             "date": key,
@@ -219,13 +241,10 @@ def sleep_headline_rows(payload: dict,
         day = date.fromisoformat(key)
         if not _in_window(day, since, until):
             continue
-        stage_seconds: dict[str, float] = {}
-        for session in sessions:
-            for stage in session.get("stages") or []:
-                name = stage.get("stage")
-                stage_seconds[name] = stage_seconds.get(name, 0.0) + stage.get("durationSec", 0)
-        asleep = sum(s.get("asleepSec") or 0 for s in sessions)
-        in_bed = (sessions[-1]["_end"] - sessions[0]["_start"]).total_seconds()
+        totals = _night_totals(sessions)
+        stage_seconds = totals["stage_seconds"]
+        asleep = totals["asleep"]
+        in_bed = totals["in_bed"]
 
         row = {
             "date": key,

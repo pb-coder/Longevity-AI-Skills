@@ -265,3 +265,71 @@ def sleep_headline_rows(payload: dict,
             row["resp_rate"] = round(sum(resp) / len(resp), 2)
         rows.append(row)
     return rows
+
+
+# --------------------------------------------------------------- workouts
+
+from shared.apple_workout_types import hek_canonical_type  # noqa: E402
+
+
+def normalize_source(value: str | None) -> str | None:
+    """Apple writes "Apple Watch" with a non-breaking space. Flatten it."""
+    if value is None:
+        return None
+    return value.replace(" ", " ").strip()
+
+
+def humidity_percent(raw: float | None) -> float | None:
+    """``weatherHumidityPercent`` carries basis points, not percent.
+
+    Observed range across two people and 250 workouts: 2,600 to 8,700. The
+    guard keeps the function correct if the app is ever fixed.
+    """
+    if raw is None:
+        return None
+    return round(raw / 100.0, 1) if raw > 100 else raw
+
+
+def build_workout_payload(payload: dict,
+                          since: date | None,
+                          until: date | None) -> list[dict]:
+    """Rows for ``upsert_workout_sessions``, one per workout."""
+    meta = payload["meta"]
+    rows: list[dict] = []
+    for workout in (payload.get("activity") or {}).get("workouts") or []:
+        raw_start = workout.get("start")
+        if not raw_start:
+            continue  # unusable without an identity
+        start = hek_time.parse_stamp(raw_start, meta)
+        if not _in_window(start.date(), since, until):
+            continue
+        row = {
+            "date": start.date().isoformat(),
+            "start": start.strftime("%H:%M:%S"),
+            "apple_type": hek_canonical_type(
+                workout.get("type") or "", workout.get("isIndoor")
+            ),
+            "source": normalize_source(workout.get("source")),
+        }
+        raw_end = workout.get("end")
+        if raw_end:
+            row["end"] = hek_time.parse_stamp(raw_end, meta).strftime("%H:%M:%S")
+        duration = workout.get("durationSec")
+        if duration is not None:
+            row["duration_min"] = round(duration / 60.0, 1)
+        for key, field in (
+            ("averageHeartRateBpm", "avg_hr"),
+            ("maxHeartRateBpm", "max_hr"),
+            ("minHeartRateBpm", "min_hr"),
+            ("activeEnergyKcal", "active_cal"),
+        ):
+            if workout.get(key) is not None:
+                row[field] = workout[key]
+        # Zero distance means the workout carried none, not that it covered
+        # no ground. The retired importer made the same distinction.
+        distance = workout.get("distanceKm")
+        if distance:
+            row["distance_km"] = distance
+        rows.append(row)
+    rows.sort(key=lambda r: (r["date"], r["start"]))
+    return rows

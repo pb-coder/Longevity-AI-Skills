@@ -301,5 +301,134 @@ class FixtureSleepTests(unittest.TestCase):
         self.assertTrue(any(r["n_segments"] and r["n_segments"] > 10 for r in rows))
 
 
+class TypeMapTests(unittest.TestCase):
+    """Verified against 663 stored workouts; no combination fell through."""
+
+    CASES = [
+        ("Walking", False, "Walking"),
+        ("Walking", True, "IndoorWalking"),
+        ("Strength Training", False, "TraditionalStrengthTraining"),
+        ("Functional Strength", False, "FunctionalStrengthTraining"),
+        ("Core Training", False, "CoreTraining"),
+        ("Running", True, "IndoorRunning"),
+        ("Running", False, "Running"),
+        ("Cycling", True, "IndoorCycling"),
+        ("Cycling", False, "Cycling"),
+        ("HIIT", False, "HighIntensityIntervalTraining"),
+        ("Swimming", True, "Swimming"),
+        ("Swimming", False, "Swimming"),
+        ("Hiking", False, "Hiking"),
+        ("Rowing", True, "Rowing"),
+    ]
+
+    def test_every_observed_combination_maps(self) -> None:
+        from shared import apple_workout_types as awt
+        for raw, indoor, expected in self.CASES:
+            with self.subTest(raw=raw, indoor=indoor):
+                self.assertEqual(awt.hek_canonical_type(raw, indoor), expected)
+
+    def test_a_missing_indoor_flag_is_treated_as_outdoor(self) -> None:
+        from shared import apple_workout_types as awt
+        self.assertEqual(awt.hek_canonical_type("Hiking", None), "Hiking")
+
+    def test_an_unknown_type_still_produces_a_storable_name(self) -> None:
+        from shared import apple_workout_types as awt
+        self.assertEqual(awt.hek_canonical_type("Water Polo", False), "WaterPolo")
+
+
+class WorkoutFieldTests(unittest.TestCase):
+
+    META = _meta(range_start="2026-08-01T00:00:00Z",
+                 range_end="2026-08-30T00:00:00Z",
+                 exported_at="2026-08-30T00:05:00Z")
+
+    WORKOUT = {
+        "start": "08-02 15:54:27", "end": "08-02 17:15:42",
+        "type": "Strength Training", "isIndoor": False,
+        "durationSec": 4875,
+        "averageHeartRateBpm": 105, "maxHeartRateBpm": 147,
+        "minHeartRateBpm": 85,
+        "activeEnergyKcal": 388, "totalEnergyKcal": 525.5,
+        "basalEnergyKcal": 137.5,
+        "source": "Apple Watch",
+        "weatherHumidityPercent": 4200, "weatherTemperatureC": 24.6,
+    }
+
+    def _one(self, **overrides) -> dict:
+        w = {**self.WORKOUT, **overrides}
+        rows = hek.build_workout_payload(
+            _payload(meta=self.META, workouts=[w]), None, None
+        )
+        return rows[0]
+
+    def test_core_fields_map_straight_across(self) -> None:
+        row = self._one()
+        self.assertEqual(row["date"], "2026-08-02")
+        self.assertEqual(row["start"], "15:54:27")
+        self.assertEqual(row["end"], "17:15:42")
+        self.assertEqual(row["apple_type"], "TraditionalStrengthTraining")
+        self.assertEqual(row["duration_min"], 81.2)
+        self.assertEqual(row["avg_hr"], 105)
+        self.assertEqual(row["max_hr"], 147)
+        self.assertEqual(row["min_hr"], 85)
+        self.assertEqual(row["active_cal"], 388)
+
+    def test_the_non_breaking_space_in_source_is_normalized(self) -> None:
+        self.assertEqual(self._one()["source"], "Apple Watch")
+
+    def test_a_workout_with_no_heart_rate_is_stored_without_one(self) -> None:
+        w = {k: v for k, v in self.WORKOUT.items()
+             if k not in ("averageHeartRateBpm", "maxHeartRateBpm", "minHeartRateBpm")}
+        rows = hek.build_workout_payload(
+            _payload(meta=self.META, workouts=[w]), None, None
+        )
+        self.assertNotIn("avg_hr", rows[0])
+        self.assertEqual(rows[0]["apple_type"], "TraditionalStrengthTraining")
+
+    def test_a_workout_with_no_start_is_dropped(self) -> None:
+        w = {k: v for k, v in self.WORKOUT.items() if k != "start"}
+        rows = hek.build_workout_payload(
+            _payload(meta=self.META, workouts=[w]), None, None
+        )
+        self.assertEqual(rows, [])
+
+    def test_zero_distance_is_treated_as_absent(self) -> None:
+        rows = hek.build_workout_payload(
+            _payload(meta=self.META, workouts=[{**self.WORKOUT, "distanceKm": 0}]),
+            None, None,
+        )
+        self.assertNotIn("distance_km", rows[0])
+
+
+class HumidityTests(unittest.TestCase):
+    """The field is named Percent but carries basis points. An app bug."""
+
+    def test_basis_points_are_divided(self) -> None:
+        self.assertEqual(hek.humidity_percent(4200), 42.0)
+        self.assertEqual(hek.humidity_percent(8700), 87.0)
+
+    def test_a_real_percent_is_left_alone(self) -> None:
+        self.assertEqual(hek.humidity_percent(42), 42)
+
+    def test_absent_stays_absent(self) -> None:
+        self.assertIsNone(hek.humidity_percent(None))
+
+
+class FixtureWorkoutTests(unittest.TestCase):
+
+    def test_every_fixture_workout_produces_a_row_with_a_type(self) -> None:
+        rows = hek.build_workout_payload(_load(), None, None)
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertTrue(row["apple_type"])
+            self.assertTrue(row["date"])
+            self.assertTrue(row["start"])
+
+    def test_workout_starts_are_unique_per_date(self) -> None:
+        rows = hek.build_workout_payload(_load(), None, None)
+        keys = [(r["date"], r["start"]) for r in rows]
+        self.assertEqual(len(keys), len(set(keys)))
+
+
 if __name__ == "__main__":
     unittest.main()

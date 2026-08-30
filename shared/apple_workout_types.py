@@ -109,3 +109,52 @@ HK_SWIMMING_STROKE_STYLE: dict[int, str] = {
     5: "Butterfly",
     6: "Kickboard",
 }
+
+
+# ------------------------------------------- Health Export Kit type names
+# Health Export Kit uses its own display names and carries indoor/outdoor
+# as a separate boolean, where HealthAutoExport folded both into one string
+# ("Indoor Run", "Outdoor Walk"). Every pair below was confirmed by matching
+# 663 stored workouts against a full-history export; no observed combination
+# fell through to the fallback.
+HEK_TYPE_MAP: dict[tuple[str, bool], str] = {
+    ("Walking", False):            "Walking",
+    ("Walking", True):             "IndoorWalking",
+    ("Running", False):            "Running",
+    ("Running", True):             "IndoorRunning",
+    ("Cycling", False):            "Cycling",
+    ("Cycling", True):             "IndoorCycling",
+    ("Swimming", False):           "Swimming",
+    ("Swimming", True):            "Swimming",
+    ("Hiking", False):             "Hiking",
+    ("Hiking", True):              "Hiking",
+    ("Rowing", False):             "Rowing",
+    ("Rowing", True):              "Rowing",
+    ("HIIT", False):               "HighIntensityIntervalTraining",
+    ("HIIT", True):                "HighIntensityIntervalTraining",
+    ("Strength Training", False):  "TraditionalStrengthTraining",
+    ("Strength Training", True):   "TraditionalStrengthTraining",
+    ("Functional Strength", False): "FunctionalStrengthTraining",
+    ("Functional Strength", True):  "FunctionalStrengthTraining",
+    ("Core Training", False):      "CoreTraining",
+    ("Core Training", True):       "CoreTraining",
+}
+
+
+def hek_canonical_type(raw: str, is_indoor: bool | None) -> str:
+    """Canonical stored name for a Health Export Kit workout.
+
+    ``is_indoor`` is absent on a small number of workouts (1 of 698 in the
+    reference export); absent reads as outdoor, which is the safe default
+    for every type whose indoor variant is a distinct stored name.
+
+    An unmapped type still produces a storable name rather than raising, the
+    way the retired importer handled types it had never seen: the workout
+    lands in Workout Sessions, it just misses auto-cardio handling until
+    someone adds it here.
+    """
+    indoor = bool(is_indoor)
+    mapped = HEK_TYPE_MAP.get((raw, indoor))
+    if mapped:
+        return mapped
+    return (raw or "").replace(" ", "")

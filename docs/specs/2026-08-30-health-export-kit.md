@@ -108,8 +108,8 @@ Source file: <Person>, compact, 2026-01-01 → 2026-08-30, 242 days, 698 workout
 
 | Field | Result |
 |---|---|
-| Workout identity (date + start + duration + type) | **663 / 663** stored rows matched, after the §5.1 clock correction |
-| Sleep nights, reassembled per §6.4 | **224 / 224** on sleep total, time in bed, first segment start and last segment end. **Zero mismatches** on any field. Segment count matched on all 216 nights where the stored value is not blank; awake time on all 222 where present. |
+| Workout identity (date + start + type) | **663 / 663** stored rows matched, after the §5.1 clock correction |
+| Sleep nights, reassembled per §6.4 | Time in bed, first segment start, last segment end: **224 / 224 exact**. Awake time **222 / 222 exact**, segment count **216 / 216 exact** (the rest are blank in storage). Sleep total, core, deep and REM are exact on 215-220 of 224 and within **0.01 h on every night** — see §3.3. |
 | Resting HR | 225 / 225 |
 | Walking HR | 225 / 225 |
 | Bodyweight | 79 / 79 |
@@ -131,7 +131,26 @@ The energy mismatches are the two partial edge days (§5.2), not errors.
 | Exercise minutes | 216 / 225 match | 7 of the 9 mismatches sit in the pre-DST window and are day-boundary spill (§5.1). Two are genuine small aggregation differences. |
 | Workout average HR | differs by >2 bpm on 13 of 93 August workouts, max 13.4 | Export uses HealthKit's own workout average; HAE used a windowed series. Checked against the raw per-second HR stream: the export is **closer** (mean absolute error 0.70 bpm vs 1.40). No regression. |
 
-### 3.3 Not verified
+| Workout duration | 601 of 663 exact; the rest differ by exactly 0.10 min | Rounding path. |
+| Workout distance | 656 of 663 agree; 7 differ by real amounts | Genuine per-source measurement differences. |
+
+### 3.3 The one residual difference
+
+Sleep total, core, deep and REM match the stored history exactly on 215 to 220 of 224 nights
+and differ on the rest by **exactly 0.01 h — one unit in the last decimal place of a
+two-decimal hour, 36 seconds.** Nothing differs by more.
+
+The cause is the rounding path, not the grouping. The retired importer reached hours through
+the source's own pre-rounded hour values; this one sums seconds and rounds once at the end.
+On a handful of nights the underlying seconds sit within a few seconds of a 36-second
+boundary and land on the other side of it.
+
+This is recorded rather than corrected. Rounding to match the old path would mean
+reproducing a less accurate intermediate step, and 36 seconds on a seven-hour night is
+0.14%. It is stated here so nobody later reads "224 / 224" as exact equality on every
+column — an earlier draft of this document did claim that, and it was wrong.
+
+### 3.4 Not verified
 
 - The §5.1 clock correction is validated against **one** DST transition (2026-03-29,
   CET→CEST). The October transition is untested. The importer carries a guard
@@ -189,7 +208,7 @@ Walking-quality columns (all new, from `additional.mobility`, all `avg` unless n
 | `Avg HR` / `Max HR` / `Min HR` | `averageHeartRateBpm` / `maxHeartRateBpm` / `minHeartRateBpm` |
 | `Active Cal (kcal)` | `activeEnergyKcal` |
 | `Distance (km)` | `distanceKm` |
-| `Source` | `source` — **contains U+00A0 non-breaking space** ("Apple Watch"). Normalize to a plain space. |
+| `Source` | `source`, normalized. **Two cautions.** The string carries a U+00A0 non-breaking space inside "Apple Watch" and must be normalized — write the `\u00a0` escape, never the literal character, which does not survive transcription and cannot be reviewed. Separately, the column changes meaning: the retired importer wrote the constant `HealthAutoExport`, this one passes the device name through, so 661 of 663 rows differ on this column alone. |
 | `Incidental` | existing tracker logic, unchanged |
 
 ### 4.3 Workout type map — verified on 663 rows, no unmapped combinations
@@ -211,8 +230,8 @@ Walking-quality columns (all new, from `additional.mobility`, all `avg` unless n
 | Hiking | false / absent | `Hiking` | 6 |
 | Rowing | true | `Rowing` | 4 |
 
-`isIndoor` may be **absent** (1 of 698 workouts). Treat absent as `false` for mapping and
-as unknown for swim location.
+`isIndoor` may be **absent** (1 of 698 workouts). Treat absent as `false` for mapping. Do not
+use it for swim location at all — see §7.3.
 
 Unknown export types must fall through to `type.replace(" ", "")` and still be stored, the
 way the HAE importer handled unknown types.
@@ -222,7 +241,7 @@ way the HAE importer handled unknown types.
 | Column | Source |
 |---|---|
 | `Laps` | count of `events[].type == "lap"` — **verified exact on 17 swims** |
-| `Location` | `isIndoor` true → `Pool`, false → `Open Water`, absent → blank |
+| `Location` | **no reliable source — do not write it.** See §7.3. |
 | `Duration`, `Distance`, `Avg HR`, `Active Cal` | workout summary fields |
 | `Pool Length (m)`, `Strokes`, `SPL`, `Water Temp (°C)` | **no source**, see §7.3 |
 | `Avg SWOLF`, `Stroke Mix` | no source, already permanently blank |
@@ -281,12 +300,19 @@ correction = utcoffset(meta.timeZone, at meta.exportedAt)
 true_local = exported_naive + correction
 ```
 
-**Validated:** 663 / 663 stored workouts match and 224 / 224 sleep nights line up after
-applying it. Validated against one transition only (§3.3).
+**Validated:** 663 / 663 stored workouts match exactly, and all 224 sleep nights land on the
+right date with exact start and end times, after applying it. Validated against one transition only (§3.4).
 
 **Guard:** the importer must assert that the correction resolves to a whole number of
-hours and is within ±2 hours, and refuse the import with a clear error otherwise. A future
-app version that fixes the bug would then fail loudly rather than shift good data.
+hours and is within ±2 hours, and refuse the import with a clear error otherwise. This
+bounds the correction; it does **not** detect an app that has been fixed. If a future
+version changes the defect into something that is not a whole number of hours, or larger
+than two, the import fails loudly. If a future version *fixes* it, the guard stays silent:
+an export taken in summer over a winter range still yields exactly +1:00, passes both
+checks, and shifts every pre-transition stamp an hour the wrong way — the same silent
+corruption, inverted. That is a known limitation of this design. The symptom is imported
+timestamps disagreeing with the tracker's stored history by an hour in the *opposite*
+direction from the original bug; the correction then has to be removed by hand.
 
 The shift also moves **daily totals**, not just timestamps — activity near local midnight
 lands on the wrong day. 7 of 78 pre-transition days show this in exercise minutes; the
@@ -345,7 +371,7 @@ within 60 seconds. Applies to the second tracker's history only; the primary tra
 
 ### 5.7 Non-breaking space in `source`
 
-`"Apple Watch"`, `"Apple Watch Ultra"`. Normalize
+Device names arrive with a U+00A0 non-breaking space between "Apple" and "Watch". Normalize
 U+00A0 to a plain space before comparing or storing.
 
 ---
@@ -386,10 +412,11 @@ Reproduce the retired pipeline's behaviour, verified against stored rows:
    Verified: stored awake 1.94 h against the sessions' own 109 + 8 minutes.
 
 **Validation:** these four rules were run over all 235 sessions and compared to all 224
-stored night rows. Sleep total, time in bed, first segment start and last segment end
-matched on **224 / 224**. Segment count matched on all 216 nights whose stored value is
-not blank, awake time on all 222 where present. **No field mismatched on any night.**
-The 8 unmatched nights are 2026-08-23 onward, which the tracker never imported.
+stored night rows. Every night is produced, on the right date. Time in bed, first segment
+start and last segment end match **exactly on 224 / 224**; awake time on 222 / 222 and
+segment count on 216 / 216, which is every night where storage holds a value. The four
+stage-derived hour columns are covered in §3.3. The 8 extra nights the export produces are
+2026-08-23 onward, which the tracker never imported.
 
 ### 6.5 Idempotency
 
@@ -425,13 +452,49 @@ written. Existing values stay.
 The recovery score treats wrist temperature as an optional signal and renormalizes over
 whatever is present, so this degrades rather than breaks.
 
-### 7.3 Swim detail
+### 7.3 Swim detail, including location
 
 Pool length, stroke count, strokes-per-length and water temperature have no source.
-Populated on 17 of 27 historical swims. Lap **timings** are recovered; lap **stroke style**
-and SWOLF are not, and were already permanently gone.
+Populated on 17 of 27 historical swims. Lap **timings** are recovered, and lap counts match the
+historical per-lap files exactly on all 17 swims that have them; lap **stroke style** and SWOLF
+are not recovered, and were already permanently gone.
 
-### 7.4 Body fat and lean mass
+**`Location` has no usable source either, and an earlier draft of this document was wrong to say
+otherwise.** It claimed `isIndoor` decides pool versus open water and called that an improvement.
+Measured against the stored history: `isIndoor` **disagrees on 24 of 27 swims** and agrees on 3.
+Every one of the six swims it marks indoor carries a GPS route of 39 to 287 points, and a pool
+swim does not produce a GPS track — the stored `Open Water` is right and the flag is wrong. The
+other 18 disagreements are stored as `Outdoor Pool`, a third value a two-way boolean cannot
+express at all.
+
+Because `upsert_swim_workouts` sparse-merges and a non-null incoming value overwrites the stored
+cell, writing this column would have rewritten 24 correct values with wrong ones on the first
+real import. The importer therefore leaves `Location` unset, which is what the retired importer
+did and for the same reason.
+
+`isIndoor` remains reliable for the workout **type** map (§4.3), where it was verified on 663
+workouts with every pair matching. It is unreliable specifically for swims.
+
+### 7.4 Workout average heart rate, on about 5% of workouts
+
+38 of 698 workouts in the reference export carry no `averageHeartRateBpm` at all, and 34 of
+those correspond to stored rows that had one. The retired importer filled them by averaging a
+top-level heart-rate series across the workout's window; this format exposes only Apple's own
+per-workout statistic, which is simply absent on those workouts.
+
+Recovery from `perMinute` does not work: only 2 of the 38 carry that series, and only 1 has
+usable values. No workout gains a heart rate in the other direction.
+
+This matters more than 5% suggests. Average heart rate drives TRIMP, and
+`Skills/workout-coach/lib/cardio.py` skips any session missing it, so those sessions contribute
+zero training load rather than an approximate amount. 26 of the 38 are short walks, but 12 are
+real sessions: 5 strength, 3 swims, and one each of hiking, rowing, HIIT and cycling.
+
+Recorded as a documented gap. The plausible mitigation — having the coach estimate from a
+session's own zone data rather than dropping it — is coach logic, not importer logic, and
+belongs to a later plan.
+
+### 7.5 Body fat and lean mass
 
 No source, and already 0/54 populated. No practical loss.
 
@@ -487,5 +550,24 @@ No source, and already 0/54 populated. No practical loss.
 3. **`PROJECT.md` and `CLAUDE.md` claims to correct** once implemented: sleep segments
    are recoverable, ECG is available, `N Segments` is no longer permanently blank, and
    the source-capability flags need a new `health_export_kit` entry.
-4. **Two stray 2023 bodyweight rows** in the primary tracker's `health_metrics.csv` were entered by
+4. **Accepted and deliberately left**, after the final whole-branch review triaged them:
+   - `resolve_year`'s 29-February-in-a-non-leap-year branch has no test. Only reachable on garbage
+     input, where refusing is the correct behaviour.
+   - `SUM_METRICS` lists `distanceKm`, `flightsClimbed` and `workoutCount`, which `ACTIVITY_FIELDS`
+     does not map. Inert — the coverage gate only fires for mapped keys — and they document which
+     export fields are sums.
+   - `hek_canonical_type` tests `if mapped:` rather than `is not None`. No map value is falsy.
+   - Nothing refuses an export whose range lies in the future. A 2027 export writes future-dated
+     rows. Windowed coach reads ignore them; latest-of-day reads would not.
+5. **`Source` changes meaning, and it is a product decision.** The retired importer wrote the
+   constant `HealthAutoExport`; this one passes the device name through, so 661 of 663 rows differ
+   on that column alone. Worth settling before a backfill rewrites the history.
+6. **Two exports present at once is an unresolved contradiction.** `resolve_export` takes the newest
+   by modification time and deletes only that file, so a second export survives to be imported on
+   the next `/log`, under whatever `--person` that run resolves. `workout-logger/SKILL.md` step 6
+   says always run and never prompt; `workout-logger/references/common-mistakes.md` says stop and
+   ask when ownership is ambiguous, and notes a cross-person import is **not** self-healing because
+   sparse merge will not undo it. Those two instructions disagree. Resolve before the first import
+   with both people's exports in the folder.
+7. **Two stray 2023 bodyweight rows** in the primary tracker's `health_metrics.csv` were entered by
    hand and are out of every export range. Leave them alone.

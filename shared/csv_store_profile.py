@@ -156,7 +156,7 @@ def _read_profile_cached(person: str) -> dict:
                 if v is None or v == "":
                     continue
                 s = str(v).strip().lower()
-                if s == "health_auto_export":
+                if s in ("health_auto_export", "health_export_kit"):
                     out["source"] = s
             elif k == "auto_cardio":
                 b = _coerce_bool(v)

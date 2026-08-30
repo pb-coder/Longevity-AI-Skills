@@ -1,0 +1,3639 @@
+{
+ "activity": {
+  "daily": [
+   {
+    "activeEnergyKcal": 1084.5,
+    "basalEnergyKcal": 2060.6,
+    "date": "2026-03-28",
+    "distanceKm": 11.68,
+    "flightsClimbed": 8,
+    "steps": 15114,
+    "workoutCount": 2
+   },
+   {
+    "activeEnergyKcal": 951.1,
+    "basalEnergyKcal": 1946.7,
+    "date": "2026-03-29",
+    "distanceKm": 8.48,
+    "exerciseMinutes": 130,
+    "flightsClimbed": 4,
+    "steps": 10663,
+    "workoutCount": 2
+   },
+   {
+    "activeEnergyKcal": 913.8,
+    "basalEnergyKcal": 2109.7,
+    "date": "2026-06-27",
+    "distanceKm": 7.49,
+    "exerciseMinutes": 79,
+    "flightsClimbed": 9,
+    "steps": 10639,
+    "workoutCount": 3
+   },
+   {
+    "activeEnergyKcal": 1086.2,
+    "basalEnergyKcal": 2143.7,
+    "date": "2026-06-28",
+    "distanceKm": 10.13,
+    "exerciseMinutes": 127,
+    "flightsClimbed": 12,
+    "steps": 14298,
+    "workoutCount": 6
+   },
+   {
+    "activeEnergyKcal": 1222.6,
+    "basalEnergyKcal": 2143.3,
+    "date": "2026-07-25",
+    "distanceKm": 13.33,
+    "exerciseMinutes": 85,
+    "flightsClimbed": 14,
+    "steps": 18862,
+    "workoutCount": 5
+   }
+  ],
+  "timeZone": "Europe/Paris",
+  "workouts": [
+   {
+    "activeEnergyKcal": 264.3,
+    "averageHeartRateBpm": 95,
+    "basalEnergyKcal": 113.7,
+    "durationSec": 4175,
+    "end": "03-28 13:47:54",
+    "events": [
+     {
+      "end": "03-28 13:47:54",
+      "start": "03-28 13:47:54",
+      "type": "pause"
+     }
+    ],
+    "maxHeartRateBpm": 133,
+    "minHeartRateBpm": 74,
+    "source": "Device",
+    "start": "03-28 12:38:19",
+    "totalEnergyKcal": 378,
+    "type": "Functional Strength",
+    "weatherHumidityPercent": 4700,
+    "weatherTemperatureC": 10
+   },
+   {
+    "activeEnergyKcal": 315.6,
+    "averageHeartRateBpm": 110,
+    "averagePaceSecPerKm": 636,
+    "averageSpeedKmh": 5.66,
+    "basalEnergyKcal": 104.9,
+    "distanceKm": 6.046,
+    "durationSec": 3843,
+    "elevationAscendedM": 48.9,
+    "end": "03-28 15:08:04",
+    "events": [
+     {
+      "end": "03-28 14:13:47",
+      "start": "03-28 14:13:47",
+      "type": "pause"
+     },
+     {
+      "end": "03-28 14:16:36",
+      "start": "03-28 14:16:36",
+      "type": "resume"
+     },
+     {
+      "end": "03-28 15:08:04",
+      "start": "03-28 15:08:04",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 120,
+    "minHeartRateBpm": 94,
+    "source": "Device",
+    "splits": [
+     {
+      "distanceMeters": 1000,
+      "durationSec": 622,
+      "elapsedSec": 622,
+      "index": 1,
+      "paceSecPerKm": 622
+     },
+     {
+      "avgHeartRateBpm": 110,
+      "distanceMeters": 1000,
+      "durationSec": 798,
+      "elapsedSec": 1420,
+      "index": 2,
+      "maxHeartRateBpm": 110,
+      "paceSecPerKm": 798
+     },
+     {
+      "distanceMeters": 1000,
+      "durationSec": 622,
+      "elapsedSec": 2041,
+      "index": 3,
+      "paceSecPerKm": 622
+     },
+     {
+      "avgHeartRateBpm": 112,
+      "distanceMeters": 1000,
+      "durationSec": 635,
+      "elapsedSec": 2676,
+      "index": 4,
+      "maxHeartRateBpm": 112,
+      "paceSecPerKm": 635
+     },
+     {
+      "avgHeartRateBpm": 110,
+      "distanceMeters": 1000,
+      "durationSec": 675,
+      "elapsedSec": 3351,
+      "index": 5,
+      "maxHeartRateBpm": 110,
+      "paceSecPerKm": 675
+     },
+     {
+      "distanceMeters": 1000,
+      "durationSec": 624,
+      "elapsedSec": 3975,
+      "index": 6,
+      "paceSecPerKm": 624
+     },
+     {
+      "distanceMeters": 46,
+      "durationSec": 28,
+      "elapsedSec": 4003,
+      "index": 7,
+      "paceSecPerKm": 607
+     }
+    ],
+    "start": "03-28 14:01:12",
+    "totalEnergyKcal": 420.6,
+    "type": "Walking",
+    "weatherHumidityPercent": 4800,
+    "weatherTemperatureC": 10.1
+   },
+   {
+    "activeEnergyKcal": 293.2,
+    "averageHeartRateBpm": 100,
+    "basalEnergyKcal": 113.8,
+    "durationSec": 4179,
+    "end": "03-29 12:52:59",
+    "events": [
+     {
+      "end": "03-29 12:52:59",
+      "start": "03-29 12:52:59",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 126,
+    "minHeartRateBpm": 71,
+    "source": "Device",
+    "start": "03-29 11:43:19",
+    "totalEnergyKcal": 407,
+    "type": "Functional Strength",
+    "weatherHumidityPercent": 6800,
+    "weatherTemperatureC": 7.6
+   },
+   {
+    "activeEnergyKcal": 231.2,
+    "averageHeartRateBpm": 108,
+    "averagePaceSecPerKm": 596,
+    "averageSpeedKmh": 6.04,
+    "basalEnergyKcal": 64.1,
+    "distanceKm": 3.947,
+    "durationSec": 2354,
+    "elevationAscendedM": 25.4,
+    "end": "03-29 13:45:18",
+    "events": [
+     {
+      "end": "03-29 13:45:18",
+      "start": "03-29 13:45:18",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 129,
+    "minHeartRateBpm": 90,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 110,
+      "distanceMeters": 1000,
+      "durationSec": 579,
+      "elapsedSec": 579,
+      "index": 1,
+      "maxHeartRateBpm": 110,
+      "paceSecPerKm": 579
+     },
+     {
+      "avgHeartRateBpm": 108,
+      "distanceMeters": 1000,
+      "durationSec": 575,
+      "elapsedSec": 1154,
+      "index": 2,
+      "maxHeartRateBpm": 108,
+      "paceSecPerKm": 575
+     },
+     {
+      "distanceMeters": 1000,
+      "durationSec": 606,
+      "elapsedSec": 1760,
+      "index": 3,
+      "paceSecPerKm": 606
+     },
+     {
+      "avgHeartRateBpm": 105,
+      "distanceMeters": 947,
+      "durationSec": 590,
+      "elapsedSec": 2349,
+      "index": 4,
+      "maxHeartRateBpm": 105,
+      "paceSecPerKm": 623
+     }
+    ],
+    "start": "03-29 13:06:05",
+    "totalEnergyKcal": 295.2,
+    "type": "Walking",
+    "weatherHumidityPercent": 5900,
+    "weatherTemperatureC": 8.9
+   },
+   {
+    "activeEnergyKcal": 39,
+    "averageHeartRateBpm": 116,
+    "averagePaceSecPerKm": 857,
+    "averageSpeedKmh": 4.2,
+    "basalEnergyKcal": 11.2,
+    "distanceKm": 0.476,
+    "durationSec": 408,
+    "elevationAscendedM": 4.7,
+    "end": "06-26 09:33:54",
+    "events": [
+     {
+      "end": "06-26 09:33:54",
+      "start": "06-26 09:33:54",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 125,
+    "minHeartRateBpm": 101,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 118,
+      "distanceMeters": 476,
+      "durationSec": 365,
+      "elapsedSec": 365,
+      "index": 1,
+      "maxHeartRateBpm": 125,
+      "paceSecPerKm": 766
+     }
+    ],
+    "start": "06-26 09:27:06",
+    "totalEnergyKcal": 50.3,
+    "type": "Walking",
+    "weatherHumidityPercent": 5400,
+    "weatherTemperatureC": 24.7
+   },
+   {
+    "activeEnergyKcal": 36.2,
+    "averageHeartRateBpm": 105,
+    "averagePaceSecPerKm": 874,
+    "averageSpeedKmh": 4.12,
+    "basalEnergyKcal": 13.9,
+    "distanceKm": 0.572,
+    "durationSec": 500,
+    "elevationAscendedM": 0.5,
+    "end": "06-26 20:10:27",
+    "events": [
+     {
+      "end": "06-26 20:10:27",
+      "start": "06-26 20:10:27",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 116,
+    "minHeartRateBpm": 87,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 106,
+      "distanceMeters": 572,
+      "durationSec": 493,
+      "elapsedSec": 493,
+      "index": 1,
+      "maxHeartRateBpm": 116,
+      "paceSecPerKm": 862
+     }
+    ],
+    "start": "06-26 20:02:07",
+    "totalEnergyKcal": 50.1,
+    "type": "Walking",
+    "weatherHumidityPercent": 3400,
+    "weatherTemperatureC": 31.4
+   },
+   {
+    "activeEnergyKcal": 39.4,
+    "averageHeartRateBpm": 98,
+    "averagePaceSecPerKm": 1057,
+    "averageSpeedKmh": 3.41,
+    "basalEnergyKcal": 18.4,
+    "distanceKm": 0.596,
+    "durationSec": 630,
+    "elevationAscendedM": 0.8,
+    "end": "06-27 12:49:14",
+    "events": [
+     {
+      "end": "06-27 12:39:15",
+      "start": "06-27 12:39:15",
+      "type": "pause"
+     },
+     {
+      "end": "06-27 12:39:44",
+      "start": "06-27 12:39:44",
+      "type": "resume"
+     },
+     {
+      "end": "06-27 12:49:14",
+      "start": "06-27 12:49:14",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 103,
+    "minHeartRateBpm": 90,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 98,
+      "distanceMeters": 596,
+      "durationSec": 652,
+      "elapsedSec": 652,
+      "index": 1,
+      "maxHeartRateBpm": 103,
+      "paceSecPerKm": 1094
+     }
+    ],
+    "start": "06-27 12:38:15",
+    "totalEnergyKcal": 57.9,
+    "type": "Walking",
+    "weatherHumidityPercent": 3500,
+    "weatherTemperatureC": 35.5
+   },
+   {
+    "activeEnergyKcal": 250.1,
+    "averageHeartRateBpm": 98,
+    "basalEnergyKcal": 61.3,
+    "durationSec": 2129,
+    "end": "06-27 15:09:10",
+    "events": [
+     {
+      "end": "06-27 15:09:10",
+      "start": "06-27 15:09:10",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 130,
+    "minHeartRateBpm": 76,
+    "source": "Device",
+    "start": "06-27 14:33:41",
+    "totalEnergyKcal": 311.5,
+    "type": "HIIT",
+    "weatherHumidityPercent": 3100,
+    "weatherTemperatureC": 37.7
+   },
+   {
+    "activeEnergyKcal": 44,
+    "averageHeartRateBpm": 100,
+    "averagePaceSecPerKm": 748,
+    "averageSpeedKmh": 4.81,
+    "basalEnergyKcal": 13.1,
+    "distanceKm": 0.621,
+    "durationSec": 465,
+    "elevationAscendedM": 3.8,
+    "end": "06-27 15:30:26",
+    "events": [
+     {
+      "end": "06-27 15:30:26",
+      "start": "06-27 15:30:26",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 111,
+    "minHeartRateBpm": 86,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 100,
+      "distanceMeters": 621,
+      "durationSec": 449,
+      "elapsedSec": 449,
+      "index": 1,
+      "maxHeartRateBpm": 111,
+      "paceSecPerKm": 724
+     }
+    ],
+    "start": "06-27 15:22:41",
+    "totalEnergyKcal": 57.1,
+    "type": "Walking",
+    "weatherHumidityPercent": 3000,
+    "weatherTemperatureC": 38.3
+   },
+   {
+    "activeEnergyKcal": 37.9,
+    "averageHeartRateBpm": 120,
+    "averagePaceSecPerKm": 764,
+    "averageSpeedKmh": 4.71,
+    "basalEnergyKcal": 11.5,
+    "distanceKm": 0.532,
+    "durationSec": 406,
+    "elevationAscendedM": 1.5,
+    "end": "06-28 15:45:40",
+    "events": [
+     {
+      "end": "06-28 15:45:40",
+      "start": "06-28 15:45:40",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 127,
+    "minHeartRateBpm": 111,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 120,
+      "distanceMeters": 532,
+      "durationSec": 403,
+      "elapsedSec": 403,
+      "index": 1,
+      "maxHeartRateBpm": 127,
+      "paceSecPerKm": 758
+     }
+    ],
+    "start": "06-28 15:38:54",
+    "totalEnergyKcal": 49.3,
+    "type": "Walking",
+    "weatherHumidityPercent": 3400,
+    "weatherTemperatureC": 37.9
+   },
+   {
+    "activeEnergyKcal": 63.1,
+    "averageHeartRateBpm": 140,
+    "averagePaceSecPerKm": 756,
+    "averageSpeedKmh": 4.76,
+    "basalEnergyKcal": 11.7,
+    "distanceKm": 0.55,
+    "durationSec": 416,
+    "end": "06-28 16:36:34",
+    "events": [
+     {
+      "end": "06-28 16:30:00",
+      "start": "06-28 16:29:41",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:30:16",
+      "start": "06-28 16:30:04",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:30:35",
+      "start": "06-28 16:30:16",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:31:26",
+      "start": "06-28 16:31:00",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:32:43",
+      "start": "06-28 16:32:19",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:33:13",
+      "start": "06-28 16:32:58",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:33:33",
+      "start": "06-28 16:33:13",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:34:32",
+      "start": "06-28 16:34:07",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:35:31",
+      "start": "06-28 16:35:08",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:36:07",
+      "start": "06-28 16:35:50",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:36:22",
+      "start": "06-28 16:36:07",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 16:36:34",
+      "start": "06-28 16:36:34",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 157,
+    "minHeartRateBpm": 104,
+    "perMinute": [
+     {
+      "avgHeartRateBpm": 136,
+      "minute": 1
+     },
+     {
+      "avgHeartRateBpm": 135,
+      "minute": 2
+     },
+     {
+      "avgHeartRateBpm": 131,
+      "minute": 3
+     },
+     {
+      "avgHeartRateBpm": 145,
+      "minute": 4
+     },
+     {
+      "avgHeartRateBpm": 143,
+      "minute": 5
+     },
+     {
+      "avgHeartRateBpm": 147,
+      "minute": 6
+     },
+     {
+      "avgHeartRateBpm": 151,
+      "minute": 7
+     }
+    ],
+    "source": "Device",
+    "start": "06-28 16:29:38",
+    "totalEnergyKcal": 74.8,
+    "type": "Swimming"
+   },
+   {
+    "activeEnergyKcal": 69.5,
+    "averageHeartRateBpm": 136,
+    "averagePaceSecPerKm": 1848,
+    "averageSpeedKmh": 1.95,
+    "basalEnergyKcal": 13.4,
+    "distanceKm": 0.25,
+    "durationSec": 462,
+    "end": "06-28 17:14:02",
+    "events": [
+     {
+      "end": "06-28 17:06:40",
+      "start": "06-28 17:06:32",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:06:54",
+      "start": "06-28 17:06:40",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:07:29",
+      "start": "06-28 17:07:00",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:08:35",
+      "start": "06-28 17:07:55",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:09:20",
+      "start": "06-28 17:08:52",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:10:37",
+      "start": "06-28 17:10:13",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:11:12",
+      "start": "06-28 17:10:55",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:11:35",
+      "start": "06-28 17:11:14",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:12:23",
+      "start": "06-28 17:11:54",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:13:41",
+      "start": "06-28 17:13:12",
+      "type": "lap"
+     },
+     {
+      "end": "06-28 17:14:02",
+      "start": "06-28 17:14:02",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 153,
+    "minHeartRateBpm": 112,
+    "perMinute": [
+     {
+      "avgHeartRateBpm": 116,
+      "minute": 1
+     },
+     {
+      "avgHeartRateBpm": 138,
+      "minute": 2
+     },
+     {
+      "avgHeartRateBpm": 139,
+      "minute": 3
+     },
+     {
+      "avgHeartRateBpm": 133,
+      "minute": 4
+     },
+     {
+      "avgHeartRateBpm": 135,
+      "minute": 5
+     },
+     {
+      "avgHeartRateBpm": 141,
+      "minute": 6
+     },
+     {
+      "avgHeartRateBpm": 135,
+      "minute": 7
+     },
+     {
+      "avgHeartRateBpm": 140,
+      "minute": 8
+     }
+    ],
+    "source": "Device",
+    "start": "06-28 17:06:20",
+    "totalEnergyKcal": 82.9,
+    "type": "Swimming"
+   },
+   {
+    "activeEnergyKcal": 54,
+    "averageHeartRateBpm": 117,
+    "averagePaceSecPerKm": 687,
+    "averageSpeedKmh": 5.24,
+    "basalEnergyKcal": 13.6,
+    "distanceKm": 0.678,
+    "durationSec": 466,
+    "elevationAscendedM": 9.7,
+    "end": "06-28 17:52:23",
+    "events": [
+     {
+      "end": "06-28 17:52:23",
+      "start": "06-28 17:52:23",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 139,
+    "minHeartRateBpm": 107,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 116,
+      "distanceMeters": 678,
+      "durationSec": 444,
+      "elapsedSec": 444,
+      "index": 1,
+      "maxHeartRateBpm": 139,
+      "paceSecPerKm": 655
+     }
+    ],
+    "start": "06-28 17:44:38",
+    "totalEnergyKcal": 67.6,
+    "type": "Walking",
+    "weatherHumidityPercent": 3500,
+    "weatherTemperatureC": 36.3
+   },
+   {
+    "activeEnergyKcal": 187.5,
+    "averageHeartRateBpm": 98,
+    "averagePaceSecPerKm": 797,
+    "averageSpeedKmh": 4.51,
+    "basalEnergyKcal": 78.9,
+    "distanceKm": 3.441,
+    "durationSec": 2743,
+    "elevationAscendedM": 3.6,
+    "end": "06-28 22:00:19",
+    "events": [
+     {
+      "end": "06-28 22:00:19",
+      "start": "06-28 22:00:19",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 105,
+    "minHeartRateBpm": 81,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 99,
+      "distanceMeters": 1000,
+      "durationSec": 724,
+      "elapsedSec": 724,
+      "index": 1,
+      "maxHeartRateBpm": 103,
+      "paceSecPerKm": 724
+     },
+     {
+      "avgHeartRateBpm": 99,
+      "distanceMeters": 1000,
+      "durationSec": 749,
+      "elapsedSec": 1473,
+      "index": 2,
+      "maxHeartRateBpm": 102,
+      "paceSecPerKm": 749
+     },
+     {
+      "avgHeartRateBpm": 97,
+      "distanceMeters": 1000,
+      "durationSec": 957,
+      "elapsedSec": 2430,
+      "index": 3,
+      "maxHeartRateBpm": 105,
+      "paceSecPerKm": 957
+     },
+     {
+      "avgHeartRateBpm": 97,
+      "distanceMeters": 441,
+      "durationSec": 308,
+      "elapsedSec": 2738,
+      "index": 4,
+      "maxHeartRateBpm": 101,
+      "paceSecPerKm": 699
+     }
+    ],
+    "start": "06-28 21:14:36",
+    "totalEnergyKcal": 266.4,
+    "type": "Walking",
+    "weatherHumidityPercent": 5500,
+    "weatherTemperatureC": 31.2
+   },
+   {
+    "activeEnergyKcal": 88.7,
+    "averageHeartRateBpm": 98,
+    "averagePaceSecPerKm": 695,
+    "averageSpeedKmh": 5.18,
+    "basalEnergyKcal": 27.9,
+    "distanceKm": 1.398,
+    "durationSec": 972,
+    "elevationAscendedM": 1.9,
+    "end": "06-28 22:17:53",
+    "events": [
+     {
+      "end": "06-28 22:17:53",
+      "start": "06-28 22:17:53",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 105,
+    "minHeartRateBpm": 88,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 98,
+      "distanceMeters": 1000,
+      "durationSec": 693,
+      "elapsedSec": 693,
+      "index": 1,
+      "maxHeartRateBpm": 105,
+      "paceSecPerKm": 693
+     },
+     {
+      "avgHeartRateBpm": 98,
+      "distanceMeters": 398,
+      "durationSec": 273,
+      "elapsedSec": 966,
+      "index": 2,
+      "maxHeartRateBpm": 102,
+      "paceSecPerKm": 685
+     }
+    ],
+    "start": "06-28 22:01:41",
+    "totalEnergyKcal": 116.6,
+    "type": "Walking",
+    "weatherHumidityPercent": 6300,
+    "weatherTemperatureC": 28.1
+   },
+   {
+    "activeEnergyKcal": 501.7,
+    "averageCadenceSPM": 168,
+    "averageHeartRateBpm": 147,
+    "averagePaceSecPerKm": 452,
+    "averageSpeedKmh": 7.96,
+    "basalEnergyKcal": 69.7,
+    "distanceKm": 5.393,
+    "durationSec": 2438,
+    "elevationAscendedM": 114.5,
+    "end": "07-24 08:45:32",
+    "events": [
+     {
+      "end": "07-24 08:45:32",
+      "start": "07-24 08:45:32",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": true,
+    "maxHeartRateBpm": 154,
+    "minHeartRateBpm": 115,
+    "source": "Device",
+    "splits": [
+     {
+      "avgCadenceSPM": 167,
+      "avgHeartRateBpm": 143,
+      "distanceMeters": 1000,
+      "durationSec": 452,
+      "elapsedSec": 452,
+      "index": 1,
+      "maxHeartRateBpm": 154,
+      "paceSecPerKm": 452
+     },
+     {
+      "avgCadenceSPM": 169,
+      "avgHeartRateBpm": 149,
+      "distanceMeters": 1000,
+      "durationSec": 451,
+      "elapsedSec": 902,
+      "index": 2,
+      "maxHeartRateBpm": 153,
+      "paceSecPerKm": 451
+     },
+     {
+      "avgCadenceSPM": 168,
+      "avgHeartRateBpm": 149,
+      "distanceMeters": 1000,
+      "durationSec": 450,
+      "elapsedSec": 1353,
+      "index": 3,
+      "maxHeartRateBpm": 152,
+      "paceSecPerKm": 450
+     },
+     {
+      "avgCadenceSPM": 170,
+      "avgHeartRateBpm": 148,
+      "distanceMeters": 1000,
+      "durationSec": 450,
+      "elapsedSec": 1803,
+      "index": 4,
+      "maxHeartRateBpm": 154,
+      "paceSecPerKm": 450
+     },
+     {
+      "avgCadenceSPM": 171,
+      "avgHeartRateBpm": 148,
+      "distanceMeters": 1000,
+      "durationSec": 450,
+      "elapsedSec": 2253,
+      "index": 5,
+      "maxHeartRateBpm": 152,
+      "paceSecPerKm": 450
+     },
+     {
+      "avgCadenceSPM": 167,
+      "avgHeartRateBpm": 149,
+      "distanceMeters": 393,
+      "durationSec": 177,
+      "elapsedSec": 2431,
+      "index": 6,
+      "maxHeartRateBpm": 151,
+      "paceSecPerKm": 451
+     }
+    ],
+    "start": "07-24 08:04:54",
+    "totalEnergyKcal": 571.4,
+    "totalStepsDuringWorkout": 6836,
+    "type": "Running",
+    "weatherHumidityPercent": 7900,
+    "weatherTemperatureC": 13.5
+   },
+   {
+    "activeEnergyKcal": 75.4,
+    "averageHeartRateBpm": 105,
+    "averagePaceSecPerKm": 659,
+    "averageSpeedKmh": 5.47,
+    "basalEnergyKcal": 21.6,
+    "distanceKm": 1.175,
+    "durationSec": 774,
+    "end": "07-25 12:11:15",
+    "events": [
+     {
+      "end": "07-25 12:11:15",
+      "start": "07-25 12:11:15",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 111,
+    "minHeartRateBpm": 87,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 105,
+      "distanceMeters": 1000,
+      "durationSec": 636,
+      "elapsedSec": 636,
+      "index": 1,
+      "maxHeartRateBpm": 111,
+      "paceSecPerKm": 636
+     },
+     {
+      "avgHeartRateBpm": 106,
+      "distanceMeters": 175,
+      "durationSec": 135,
+      "elapsedSec": 770,
+      "index": 2,
+      "maxHeartRateBpm": 111,
+      "paceSecPerKm": 770
+     }
+    ],
+    "start": "07-25 11:58:21",
+    "totalEnergyKcal": 97,
+    "type": "Walking"
+   },
+   {
+    "activeEnergyKcal": 126.7,
+    "averageHeartRateBpm": 128,
+    "averagePaceSecPerKm": 2280,
+    "averageSpeedKmh": 1.58,
+    "basalEnergyKcal": 24.4,
+    "distanceKm": 0.38,
+    "durationSec": 866,
+    "end": "07-25 12:45:12",
+    "events": [
+     {
+      "end": "07-25 12:31:02",
+      "start": "07-25 12:30:54",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:31:14",
+      "start": "07-25 12:31:02",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:31:49",
+      "start": "07-25 12:31:22",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:32:40",
+      "start": "07-25 12:32:15",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:33:24",
+      "start": "07-25 12:32:51",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:34:41",
+      "start": "07-25 12:33:58",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:35:30",
+      "start": "07-25 12:35:04",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:36:22",
+      "start": "07-25 12:36:02",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:37:52",
+      "start": "07-25 12:36:23",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:38:09",
+      "start": "07-25 12:37:54",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:38:49",
+      "start": "07-25 12:38:37",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:39:04",
+      "start": "07-25 12:38:49",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:40:16",
+      "start": "07-25 12:39:38",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:41:15",
+      "start": "07-25 12:40:51",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:42:01",
+      "start": "07-25 12:41:21",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:42:15",
+      "start": "07-25 12:42:01",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:43:28",
+      "start": "07-25 12:43:02",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:44:32",
+      "start": "07-25 12:44:20",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:44:45",
+      "start": "07-25 12:44:35",
+      "type": "lap"
+     },
+     {
+      "end": "07-25 12:45:12",
+      "start": "07-25 12:45:12",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 144,
+    "minHeartRateBpm": 108,
+    "perMinute": [
+     {
+      "avgHeartRateBpm": 121,
+      "minute": 2
+     },
+     {
+      "avgHeartRateBpm": 125,
+      "minute": 4
+     },
+     {
+      "avgHeartRateBpm": 124,
+      "minute": 5
+     },
+     {
+      "avgHeartRateBpm": 125,
+      "minute": 6
+     },
+     {
+      "avgHeartRateBpm": 116,
+      "minute": 7
+     },
+     {
+      "avgHeartRateBpm": 126,
+      "minute": 8
+     },
+     {
+      "avgHeartRateBpm": 129,
+      "minute": 9
+     },
+     {
+      "avgHeartRateBpm": 124,
+      "minute": 10
+     },
+     {
+      "avgHeartRateBpm": 126,
+      "minute": 11
+     },
+     {
+      "avgHeartRateBpm": 139,
+      "minute": 12
+     },
+     {
+      "avgHeartRateBpm": 132,
+      "minute": 13
+     },
+     {
+      "avgHeartRateBpm": 128,
+      "minute": 14
+     },
+     {
+      "avgHeartRateBpm": 136,
+      "minute": 15
+     }
+    ],
+    "source": "Device",
+    "start": "07-25 12:30:45",
+    "totalEnergyKcal": 151.1,
+    "type": "Swimming"
+   },
+   {
+    "activeEnergyKcal": 80.6,
+    "averageHeartRateBpm": 111,
+    "averagePaceSecPerKm": 635,
+    "averageSpeedKmh": 5.67,
+    "basalEnergyKcal": 24.4,
+    "distanceKm": 1.373,
+    "durationSec": 872,
+    "elevationAscendedM": 8.4,
+    "end": "07-25 13:44:39",
+    "events": [
+     {
+      "end": "07-25 13:44:39",
+      "start": "07-25 13:44:39",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 118,
+    "minHeartRateBpm": 93,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 111,
+      "distanceMeters": 1000,
+      "durationSec": 638,
+      "elapsedSec": 638,
+      "index": 1,
+      "maxHeartRateBpm": 118,
+      "paceSecPerKm": 638
+     },
+     {
+      "avgHeartRateBpm": 112,
+      "distanceMeters": 373,
+      "durationSec": 230,
+      "elapsedSec": 868,
+      "index": 2,
+      "maxHeartRateBpm": 115,
+      "paceSecPerKm": 618
+     }
+    ],
+    "start": "07-25 13:30:07",
+    "totalEnergyKcal": 105,
+    "type": "Walking",
+    "weatherHumidityPercent": 4000,
+    "weatherTemperatureC": 26.4
+   },
+   {
+    "activeEnergyKcal": 53.1,
+    "averageHeartRateBpm": 103,
+    "averagePaceSecPerKm": 723,
+    "averageSpeedKmh": 4.98,
+    "basalEnergyKcal": 16.6,
+    "distanceKm": 0.814,
+    "durationSec": 589,
+    "elevationAscendedM": 2.9,
+    "end": "07-25 14:39:55",
+    "events": [
+     {
+      "end": "07-25 14:39:55",
+      "start": "07-25 14:39:55",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 109,
+    "minHeartRateBpm": 88,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 104,
+      "distanceMeters": 814,
+      "durationSec": 573,
+      "elapsedSec": 573,
+      "index": 1,
+      "maxHeartRateBpm": 109,
+      "paceSecPerKm": 704
+     }
+    ],
+    "start": "07-25 14:30:06",
+    "totalEnergyKcal": 69.8,
+    "type": "Walking",
+    "weatherHumidityPercent": 3900,
+    "weatherTemperatureC": 27
+   },
+   {
+    "activeEnergyKcal": 29.7,
+    "averageHeartRateBpm": 98,
+    "averagePaceSecPerKm": 1043,
+    "averageSpeedKmh": 3.45,
+    "basalEnergyKcal": 13.1,
+    "distanceKm": 0.448,
+    "durationSec": 467,
+    "elevationAscendedM": 0.6,
+    "end": "07-25 20:47:36",
+    "events": [
+     {
+      "end": "07-25 20:47:36",
+      "start": "07-25 20:47:36",
+      "type": "pause"
+     }
+    ],
+    "isIndoor": false,
+    "maxHeartRateBpm": 103,
+    "minHeartRateBpm": 92,
+    "source": "Device",
+    "splits": [
+     {
+      "avgHeartRateBpm": 98,
+      "distanceMeters": 448,
+      "durationSec": 462,
+      "elapsedSec": 462,
+      "index": 1,
+      "maxHeartRateBpm": 103,
+      "paceSecPerKm": 1033
+     }
+    ],
+    "start": "07-25 20:39:49",
+    "totalEnergyKcal": 42.8,
+    "type": "Walking",
+    "weatherHumidityPercent": 4500,
+    "weatherTemperatureC": 25.6
+   }
+  ]
+ },
+ "additional": {
+  "body": {
+   "aggregation": {
+    "bodyMass": "latest",
+    "height": "latest",
+    "waist": "latest"
+   },
+   "daily": [
+    {
+     "date": "2026-06-27",
+     "values": {
+      "bodyMass": 80.6
+     }
+    },
+    {
+     "date": "2026-06-28",
+     "values": {
+      "bodyMass": 80.1
+     }
+    }
+   ],
+   "units": {
+    "bodyMass": "kg",
+    "height": "cm",
+    "waist": "cm"
+   }
+  },
+  "ecg": [
+   {
+    "averageHeartRateBpm": 76,
+    "classification": "sinusRhythm",
+    "source": "Device",
+    "symptoms": "notSet",
+    "time": "2026-03-28 18:07"
+   },
+   {
+    "averageHeartRateBpm": 69,
+    "classification": "sinusRhythm",
+    "source": "Device",
+    "symptoms": "notSet",
+    "time": "2026-03-29 00:41"
+   },
+   {
+    "averageHeartRateBpm": 75,
+    "classification": "sinusRhythm",
+    "source": "Device",
+    "symptoms": "notSet",
+    "time": "2026-03-29 18:39"
+   },
+   {
+    "averageHeartRateBpm": 66,
+    "classification": "sinusRhythm",
+    "source": "Device",
+    "symptoms": "notSet",
+    "time": "2026-06-28 09:15"
+   }
+  ],
+  "heart": {
+   "aggregation": {
+    "breathingDisturbances": "avg",
+    "hrRecovery": "avg",
+    "restingHR": "avg",
+    "spo2All": "avg",
+    "vo2max": "avg",
+    "walkingHR": "avg"
+   },
+   "daily": [
+    {
+     "date": "2026-03-28",
+     "values": {
+      "breathingDisturbances": 0,
+      "restingHR": 64,
+      "spo2All": 97.4,
+      "vo2max": 49.2,
+      "walkingHR": 110
+     }
+    },
+    {
+     "date": "2026-03-29",
+     "values": {
+      "breathingDisturbances": 1.2,
+      "hrRecovery": 41,
+      "restingHR": 63,
+      "spo2All": 97.2,
+      "vo2max": 49.2,
+      "walkingHR": 108
+     }
+    },
+    {
+     "date": "2026-06-27",
+     "values": {
+      "hrRecovery": 35,
+      "restingHR": 67,
+      "spo2All": 96.3,
+      "vo2max": 46.2,
+      "walkingHR": 99
+     }
+    },
+    {
+     "date": "2026-06-28",
+     "values": {
+      "breathingDisturbances": 0.8,
+      "hrRecovery": 36,
+      "restingHR": 70,
+      "spo2All": 96.9,
+      "vo2max": 46.1,
+      "walkingHR": 99
+     }
+    },
+    {
+     "date": "2026-07-25",
+     "values": {
+      "hrRecovery": 37,
+      "restingHR": 64,
+      "spo2All": 97.1,
+      "vo2max": 47.7,
+      "walkingHR": 105
+     }
+    }
+   ],
+   "units": {
+    "breathingDisturbances": "count",
+    "hrRecovery": "bpm",
+    "restingHR": "bpm",
+    "spo2All": "%",
+    "vo2max": "mL/kg·min",
+    "walkingHR": "bpm"
+   }
+  },
+  "mind": {
+   "aggregation": {
+    "daylight": "sum",
+    "mindful": "sum"
+   },
+   "daily": [
+    {
+     "date": "2026-03-28",
+     "values": {
+      "daylight": 96
+     }
+    },
+    {
+     "date": "2026-03-29",
+     "values": {
+      "daylight": 88
+     }
+    },
+    {
+     "date": "2026-06-27",
+     "values": {
+      "daylight": 122
+     }
+    },
+    {
+     "date": "2026-06-28",
+     "values": {
+      "daylight": 110
+     }
+    },
+    {
+     "date": "2026-07-25",
+     "values": {
+      "daylight": 289
+     }
+    }
+   ],
+   "units": {
+    "daylight": "min",
+    "mindful": "min"
+   }
+  },
+  "mobility": {
+   "aggregation": {
+    "doubleSupport": "avg",
+    "sixMinWalk": "latest",
+    "stairDown": "avg",
+    "stairUp": "avg",
+    "steadiness": "latest",
+    "stepLength": "avg",
+    "walkingAsymmetry": "avg",
+    "walkingSpeed": "avg"
+   },
+   "daily": [
+    {
+     "date": "2026-03-28",
+     "values": {
+      "doubleSupport": 27.2,
+      "stairDown": 0.42,
+      "stairUp": 0.34,
+      "stepLength": 69,
+      "walkingAsymmetry": 0.4,
+      "walkingSpeed": 4.9
+     }
+    },
+    {
+     "date": "2026-03-29",
+     "values": {
+      "doubleSupport": 25.9,
+      "sixMinWalk": 500,
+      "stairDown": 0.52,
+      "stairUp": 0.3,
+      "stepLength": 73,
+      "walkingAsymmetry": 0.3,
+      "walkingSpeed": 5.5
+     }
+    },
+    {
+     "date": "2026-06-27",
+     "values": {
+      "doubleSupport": 30.7,
+      "stairDown": 0.39,
+      "stairUp": 0.23,
+      "stepLength": 59,
+      "walkingAsymmetry": 0.4,
+      "walkingSpeed": 4.2
+     }
+    },
+    {
+     "date": "2026-06-28",
+     "values": {
+      "doubleSupport": 27.4,
+      "stairDown": 0.32,
+      "stairUp": 0.35,
+      "stepLength": 70,
+      "walkingAsymmetry": 0,
+      "walkingSpeed": 5.1
+     }
+    },
+    {
+     "date": "2026-07-25",
+     "values": {
+      "doubleSupport": 30,
+      "stairDown": 0.44,
+      "stairUp": 0.28,
+      "stepLength": 60,
+      "walkingAsymmetry": 1.1,
+      "walkingSpeed": 4.2
+     }
+    }
+   ],
+   "units": {
+    "doubleSupport": "%",
+    "sixMinWalk": "m",
+    "stairDown": "m/s",
+    "stairUp": "m/s",
+    "steadiness": "%",
+    "stepLength": "cm",
+    "walkingAsymmetry": "%",
+    "walkingSpeed": "km/h"
+   }
+  },
+  "stateOfMind": []
+ },
+ "meta": {
+  "app": "Health Export Kit",
+  "appVersion": "1.0.13",
+  "categories": [
+   "activity",
+   "body",
+   "heart",
+   "mind",
+   "mobility",
+   "nutrition",
+   "sleep"
+  ],
+  "exportedAt": "2026-08-30T07:25:07Z",
+  "mode": "json",
+  "notes": "All timestamps are local to timeZone; stage/stream/workout times use MM-dd HH:mm:ss format anchored at 2026-01-01 (Europe/Paris). Consecutive same-stage sleep intervals are merged. Vitals are summarized per session with min/avg/max/p50/p90 and per-stage averages; oxygenSaturation is percent. Streams are tuples ordered by tupleSchema with hoisted unit/source; dense streams carry downsampledTo and are avg/min/max bins (verbose exports keep full resolution). Workouts carry per-km splits and, in compact exports, a perMinute series (avg HR/power/cadence and distance per elapsed minute); verbose exports replace perMinute with raw streams. Activity daily summaries use local-time day buckets with source-deduplicated sums (matches the Health app; overlapping iPhone/Watch samples are not double-counted); distance is in kilometres. additional.* sections report one row per day; their aggregation map says whether each metric is a daily sum, average of readings, or the day's latest reading. Sleep sessions overlapping the range are included in full, so stages/streams may extend outside the range. Daily rows with no recorded data are omitted, and a range ending mid-day means the last day is partial.",
+  "rangeEnd": "2026-08-30T07:22:53Z",
+  "rangeStart": "2025-12-31T23:00:00Z",
+  "schemaVersion": 1,
+  "timeZone": "Europe/Paris"
+ },
+ "sleep": {
+  "sessions": [
+   {
+    "asleepSec": 22091,
+    "awakeSec": 391,
+    "durationSec": 22482,
+    "end": "03-28 06:38:22",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 722,
+      "end": "03-28 00:35:42",
+      "stage": "asleepCore",
+      "start": "03-28 00:23:39"
+     },
+     {
+      "durationSec": 1264,
+      "end": "03-28 00:56:46",
+      "stage": "asleepDeep",
+      "start": "03-28 00:35:42"
+     },
+     {
+      "durationSec": 90,
+      "end": "03-28 00:58:16",
+      "stage": "asleepCore",
+      "start": "03-28 00:56:46"
+     },
+     {
+      "durationSec": 1475,
+      "end": "03-28 01:22:51",
+      "stage": "asleepDeep",
+      "start": "03-28 00:58:16"
+     },
+     {
+      "durationSec": 301,
+      "end": "03-28 01:27:52",
+      "stage": "asleepCore",
+      "start": "03-28 01:22:51"
+     },
+     {
+      "durationSec": 692,
+      "end": "03-28 01:39:24",
+      "stage": "asleepREM",
+      "start": "03-28 01:27:52"
+     },
+     {
+      "durationSec": 1204,
+      "end": "03-28 01:59:28",
+      "stage": "asleepCore",
+      "start": "03-28 01:39:24"
+     },
+     {
+      "durationSec": 572,
+      "end": "03-28 02:09:00",
+      "stage": "asleepDeep",
+      "start": "03-28 01:59:28"
+     },
+     {
+      "durationSec": 572,
+      "end": "03-28 02:18:31",
+      "stage": "asleepCore",
+      "start": "03-28 02:09:00"
+     },
+     {
+      "durationSec": 843,
+      "end": "03-28 02:32:34",
+      "stage": "asleepDeep",
+      "start": "03-28 02:18:31"
+     },
+     {
+      "durationSec": 361,
+      "end": "03-28 02:38:35",
+      "stage": "asleepCore",
+      "start": "03-28 02:32:34"
+     },
+     {
+      "durationSec": 150,
+      "end": "03-28 02:41:06",
+      "stage": "awake",
+      "start": "03-28 02:38:35"
+     },
+     {
+      "durationSec": 1414,
+      "end": "03-28 03:04:40",
+      "stage": "asleepCore",
+      "start": "03-28 02:41:06"
+     },
+     {
+      "durationSec": 150,
+      "end": "03-28 03:07:11",
+      "stage": "asleepDeep",
+      "start": "03-28 03:04:40"
+     },
+     {
+      "durationSec": 692,
+      "end": "03-28 03:18:43",
+      "stage": "asleepCore",
+      "start": "03-28 03:07:11"
+     },
+     {
+      "durationSec": 1926,
+      "end": "03-28 03:50:49",
+      "stage": "asleepREM",
+      "start": "03-28 03:18:43"
+     },
+     {
+      "durationSec": 2167,
+      "end": "03-28 04:26:56",
+      "stage": "asleepCore",
+      "start": "03-28 03:50:49"
+     },
+     {
+      "durationSec": 1866,
+      "end": "03-28 04:58:02",
+      "stage": "asleepDeep",
+      "start": "03-28 04:26:56"
+     },
+     {
+      "durationSec": 60,
+      "end": "03-28 04:59:02",
+      "stage": "awake",
+      "start": "03-28 04:58:02"
+     },
+     {
+      "durationSec": 451,
+      "end": "03-28 05:06:34",
+      "stage": "asleepCore",
+      "start": "03-28 04:59:02"
+     },
+     {
+      "durationSec": 662,
+      "end": "03-28 05:17:36",
+      "stage": "asleepREM",
+      "start": "03-28 05:06:34"
+     },
+     {
+      "durationSec": 2588,
+      "end": "03-28 06:00:44",
+      "stage": "asleepCore",
+      "start": "03-28 05:17:36"
+     },
+     {
+      "durationSec": 1023,
+      "end": "03-28 06:17:48",
+      "stage": "asleepREM",
+      "start": "03-28 06:00:44"
+     },
+     {
+      "durationSec": 181,
+      "end": "03-28 06:20:48",
+      "stage": "awake",
+      "start": "03-28 06:17:48"
+     },
+     {
+      "durationSec": 1053,
+      "end": "03-28 06:38:22",
+      "stage": "asleepCore",
+      "start": "03-28 06:20:48"
+     }
+    ],
+    "start": "03-28 00:23:39",
+    "vitals": {
+     "heartRate": {
+      "avg": 54,
+      "byStage": {
+       "asleepCore": 53,
+       "asleepDeep": 53,
+       "asleepREM": 58,
+       "awake": 47
+      },
+      "count": 88,
+      "max": 65,
+      "min": 47,
+      "p50": 53,
+      "p90": 58,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 48.9,
+      "byStage": {
+       "asleepCore": 51.5,
+       "asleepDeep": 43.6
+      },
+      "count": 3,
+      "max": 66.8,
+      "min": 36.3,
+      "p50": 43.6,
+      "p90": 62.1,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 97.2,
+      "byStage": {
+       "asleepCore": 97.4,
+       "asleepREM": 97,
+       "awake": 96
+      },
+      "count": 9,
+      "max": 100,
+      "min": 96,
+      "p50": 97,
+      "p90": 98.4,
+      "unit": "%"
+     },
+     "respiratoryRate": {
+      "avg": 14.4,
+      "byStage": {
+       "asleepCore": 14,
+       "asleepDeep": 14.5,
+       "asleepREM": 15.1
+      },
+      "count": 37,
+      "max": 17.5,
+      "min": 12.5,
+      "p50": 14.5,
+      "p90": 15,
+      "unit": "brpm"
+     }
+    }
+   },
+   {
+    "asleepSec": 20767,
+    "awakeSec": 0,
+    "durationSec": 20767,
+    "end": "03-29 07:38:14",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 1565,
+      "end": "03-29 01:18:12",
+      "stage": "asleepCore",
+      "start": "03-29 00:52:07"
+     },
+     {
+      "durationSec": 512,
+      "end": "03-29 01:26:44",
+      "stage": "asleepDeep",
+      "start": "03-29 01:18:12"
+     },
+     {
+      "durationSec": 752,
+      "end": "03-29 01:39:17",
+      "stage": "asleepCore",
+      "start": "03-29 01:26:44"
+     },
+     {
+      "durationSec": 813,
+      "end": "03-29 01:52:49",
+      "stage": "asleepREM",
+      "start": "03-29 01:39:17"
+     },
+     {
+      "durationSec": 1234,
+      "end": "03-29 03:13:23",
+      "stage": "asleepCore",
+      "start": "03-29 01:52:49"
+     },
+     {
+      "durationSec": 1896,
+      "end": "03-29 03:44:59",
+      "stage": "asleepDeep",
+      "start": "03-29 03:13:23"
+     },
+     {
+      "durationSec": 843,
+      "end": "03-29 03:59:02",
+      "stage": "asleepCore",
+      "start": "03-29 03:44:59"
+     },
+     {
+      "durationSec": 150,
+      "end": "03-29 04:01:33",
+      "stage": "asleepDeep",
+      "start": "03-29 03:59:02"
+     },
+     {
+      "durationSec": 3010,
+      "end": "03-29 04:51:42",
+      "stage": "asleepCore",
+      "start": "03-29 04:01:33"
+     },
+     {
+      "durationSec": 2077,
+      "end": "03-29 05:26:19",
+      "stage": "asleepREM",
+      "start": "03-29 04:51:42"
+     },
+     {
+      "durationSec": 3431,
+      "end": "03-29 06:23:30",
+      "stage": "asleepCore",
+      "start": "03-29 05:26:19"
+     },
+     {
+      "durationSec": 1475,
+      "end": "03-29 06:48:05",
+      "stage": "asleepREM",
+      "start": "03-29 06:23:30"
+     },
+     {
+      "durationSec": 2227,
+      "end": "03-29 07:25:12",
+      "stage": "asleepCore",
+      "start": "03-29 06:48:05"
+     },
+     {
+      "durationSec": 482,
+      "end": "03-29 07:33:13",
+      "stage": "asleepDeep",
+      "start": "03-29 07:25:12"
+     },
+     {
+      "durationSec": 301,
+      "end": "03-29 07:38:14",
+      "stage": "asleepCore",
+      "start": "03-29 07:33:13"
+     }
+    ],
+    "start": "03-29 00:52:07",
+    "vitals": {
+     "heartRate": {
+      "avg": 57,
+      "byStage": {
+       "asleepCore": 56,
+       "asleepDeep": 58,
+       "asleepREM": 58
+      },
+      "count": 81,
+      "max": 63,
+      "min": 48,
+      "p50": 58,
+      "p90": 60,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 39.7,
+      "byStage": {
+       "asleepCore": 38.3,
+       "asleepDeep": 42.6
+      },
+      "count": 3,
+      "max": 43.7,
+      "min": 32.8,
+      "p50": 42.6,
+      "p90": 43.5,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 97.1,
+      "byStage": {
+       "asleepCore": 97.2,
+       "asleepDeep": 97,
+       "asleepREM": 97
+      },
+      "count": 8,
+      "max": 98,
+      "min": 97,
+      "p50": 97,
+      "p90": 97.3,
+      "unit": "%"
+     },
+     "respiratoryRate": {
+      "avg": 14.1,
+      "byStage": {
+       "asleepCore": 13.8,
+       "asleepDeep": 14.5,
+       "asleepREM": 14.9
+      },
+      "count": 34,
+      "max": 18.5,
+      "min": 12.5,
+      "p50": 14,
+      "p90": 15,
+      "unit": "brpm"
+     }
+    }
+   },
+   {
+    "asleepSec": 26545,
+    "awakeSec": 1023,
+    "durationSec": 27569,
+    "end": "03-30 06:46:29",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 632,
+      "end": "03-29 23:17:32",
+      "stage": "asleepCore",
+      "start": "03-29 23:07:00"
+     },
+     {
+      "durationSec": 2197,
+      "end": "03-29 23:54:10",
+      "stage": "asleepDeep",
+      "start": "03-29 23:17:32"
+     },
+     {
+      "durationSec": 1776,
+      "end": "03-30 00:23:45",
+      "stage": "asleepCore",
+      "start": "03-29 23:54:10"
+     },
+     {
+      "durationSec": 421,
+      "end": "03-30 00:30:47",
+      "stage": "asleepDeep",
+      "start": "03-30 00:23:45"
+     },
+     {
+      "durationSec": 2649,
+      "end": "03-30 01:14:55",
+      "stage": "asleepCore",
+      "start": "03-30 00:30:47"
+     },
+     {
+      "durationSec": 150,
+      "end": "03-30 01:17:26",
+      "stage": "awake",
+      "start": "03-30 01:14:55"
+     },
+     {
+      "durationSec": 993,
+      "end": "03-30 01:33:59",
+      "stage": "asleepCore",
+      "start": "03-30 01:17:26"
+     },
+     {
+      "durationSec": 963,
+      "end": "03-30 01:50:02",
+      "stage": "asleepREM",
+      "start": "03-30 01:33:59"
+     },
+     {
+      "durationSec": 512,
+      "end": "03-30 01:58:34",
+      "stage": "awake",
+      "start": "03-30 01:50:02"
+     },
+     {
+      "durationSec": 2950,
+      "end": "03-30 02:47:43",
+      "stage": "asleepCore",
+      "start": "03-30 01:58:34"
+     },
+     {
+      "durationSec": 752,
+      "end": "03-30 03:00:16",
+      "stage": "asleepDeep",
+      "start": "03-30 02:47:43"
+     },
+     {
+      "durationSec": 241,
+      "end": "03-30 03:04:16",
+      "stage": "asleepCore",
+      "start": "03-30 03:00:16"
+     },
+     {
+      "durationSec": 813,
+      "end": "03-30 03:17:49",
+      "stage": "asleepREM",
+      "start": "03-30 03:04:16"
+     },
+     {
+      "durationSec": 5628,
+      "end": "03-30 04:51:37",
+      "stage": "asleepCore",
+      "start": "03-30 03:17:49"
+     },
+     {
+      "durationSec": 181,
+      "end": "03-30 04:54:38",
+      "stage": "awake",
+      "start": "03-30 04:51:37"
+     },
+     {
+      "durationSec": 181,
+      "end": "03-30 04:57:38",
+      "stage": "asleepCore",
+      "start": "03-30 04:54:38"
+     },
+     {
+      "durationSec": 3612,
+      "end": "03-30 05:57:50",
+      "stage": "asleepREM",
+      "start": "03-30 04:57:38"
+     },
+     {
+      "durationSec": 2137,
+      "end": "03-30 06:33:27",
+      "stage": "asleepCore",
+      "start": "03-30 05:57:50"
+     },
+     {
+      "durationSec": 301,
+      "end": "03-30 06:38:28",
+      "stage": "asleepDeep",
+      "start": "03-30 06:33:27"
+     },
+     {
+      "durationSec": 181,
+      "end": "03-30 06:41:28",
+      "stage": "awake",
+      "start": "03-30 06:38:28"
+     },
+     {
+      "durationSec": 211,
+      "end": "03-30 06:44:59",
+      "stage": "asleepCore",
+      "start": "03-30 06:41:28"
+     },
+     {
+      "durationSec": 90,
+      "end": "03-30 06:46:29",
+      "stage": "asleepREM",
+      "start": "03-30 06:44:59"
+     }
+    ],
+    "start": "03-29 23:07:00",
+    "vitals": {
+     "heartRate": {
+      "avg": 58,
+      "byStage": {
+       "asleepCore": 57,
+       "asleepDeep": 58,
+       "asleepREM": 59,
+       "awake": 69
+      },
+      "count": 107,
+      "max": 84,
+      "min": 52,
+      "p50": 58,
+      "p90": 60,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 58.5,
+      "byStage": {
+       "asleepCore": 58.5
+      },
+      "count": 4,
+      "max": 69.4,
+      "min": 46,
+      "p50": 59.3,
+      "p90": 68.7,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 97.5,
+      "byStage": {
+       "asleepCore": 97.4,
+       "asleepDeep": 97.5,
+       "asleepREM": 98
+      },
+      "count": 11,
+      "max": 100,
+      "min": 96,
+      "p50": 97,
+      "p90": 98,
+      "unit": "%"
+     },
+     "respiratoryRate": {
+      "avg": 13.8,
+      "byStage": {
+       "asleepCore": 13.6,
+       "asleepDeep": 13.7,
+       "asleepREM": 14.3
+      },
+      "count": 45,
+      "max": 16.5,
+      "min": 12,
+      "p50": 13.5,
+      "p90": 14.5,
+      "unit": "brpm"
+     }
+    }
+   },
+   {
+    "asleepSec": 22331,
+    "awakeSec": 271,
+    "durationSec": 22602,
+    "end": "06-26 05:34:39",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 1776,
+      "end": "06-25 23:47:32",
+      "stage": "asleepDeep",
+      "start": "06-25 23:17:57"
+     },
+     {
+      "durationSec": 1806,
+      "end": "06-26 00:17:38",
+      "stage": "asleepCore",
+      "start": "06-25 23:47:32"
+     },
+     {
+      "durationSec": 361,
+      "end": "06-26 00:23:39",
+      "stage": "asleepREM",
+      "start": "06-26 00:17:38"
+     },
+     {
+      "durationSec": 4876,
+      "end": "06-26 01:44:55",
+      "stage": "asleepCore",
+      "start": "06-26 00:23:39"
+     },
+     {
+      "durationSec": 90,
+      "end": "06-26 01:46:25",
+      "stage": "asleepDeep",
+      "start": "06-26 01:44:55"
+     },
+     {
+      "durationSec": 271,
+      "end": "06-26 01:50:56",
+      "stage": "asleepCore",
+      "start": "06-26 01:46:25"
+     },
+     {
+      "durationSec": 1565,
+      "end": "06-26 02:17:01",
+      "stage": "asleepREM",
+      "start": "06-26 01:50:56"
+     },
+     {
+      "durationSec": 2648,
+      "end": "06-26 03:01:09",
+      "stage": "asleepCore",
+      "start": "06-26 02:17:01"
+     },
+     {
+      "durationSec": 783,
+      "end": "06-26 03:14:12",
+      "stage": "asleepDeep",
+      "start": "06-26 03:01:09"
+     },
+     {
+      "durationSec": 181,
+      "end": "06-26 03:17:13",
+      "stage": "awake",
+      "start": "06-26 03:14:12"
+     },
+     {
+      "durationSec": 3190,
+      "end": "06-26 04:10:23",
+      "stage": "asleepCore",
+      "start": "06-26 03:17:13"
+     },
+     {
+      "durationSec": 211,
+      "end": "06-26 04:13:53",
+      "stage": "asleepREM",
+      "start": "06-26 04:10:23"
+     },
+     {
+      "durationSec": 90,
+      "end": "06-26 04:15:24",
+      "stage": "awake",
+      "start": "06-26 04:13:53"
+     },
+     {
+      "durationSec": 1625,
+      "end": "06-26 04:42:29",
+      "stage": "asleepREM",
+      "start": "06-26 04:15:24"
+     },
+     {
+      "durationSec": 331,
+      "end": "06-26 04:48:00",
+      "stage": "asleepCore",
+      "start": "06-26 04:42:29"
+     },
+     {
+      "durationSec": 30,
+      "end": "06-26 04:48:30",
+      "stage": "asleepREM",
+      "start": "06-26 04:48:00"
+     },
+     {
+      "durationSec": 2649,
+      "end": "06-26 05:32:39",
+      "stage": "asleepCore",
+      "start": "06-26 04:48:30"
+     },
+     {
+      "durationSec": 120,
+      "end": "06-26 05:34:39",
+      "stage": "asleepREM",
+      "start": "06-26 05:32:39"
+     }
+    ],
+    "start": "06-25 23:17:57",
+    "vitals": {
+     "heartRate": {
+      "avg": 60,
+      "byStage": {
+       "asleepCore": 60,
+       "asleepDeep": 63,
+       "asleepREM": 63
+      },
+      "count": 87,
+      "max": 67,
+      "min": 55,
+      "p50": 60,
+      "p90": 64,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 51,
+      "byStage": {
+       "asleepCore": 65.1,
+       "asleepDeep": 22.9
+      },
+      "count": 3,
+      "max": 101.8,
+      "min": 22.9,
+      "p50": 28.4,
+      "p90": 87.1,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 96.6,
+      "byStage": {
+       "asleepCore": 96.2,
+       "asleepDeep": 96,
+       "asleepREM": 98
+      },
+      "count": 9,
+      "max": 98,
+      "min": 93,
+      "p50": 97,
+      "p90": 98,
+      "unit": "%"
+     },
+     "respiratoryRate": {
+      "avg": 14.1,
+      "byStage": {
+       "asleepCore": 13.9,
+       "asleepDeep": 13.6,
+       "asleepREM": 15.2
+      },
+      "count": 37,
+      "max": 18,
+      "min": 12.5,
+      "p50": 14,
+      "p90": 15.7,
+      "unit": "brpm"
+     }
+    }
+   },
+   {
+    "asleepSec": 25431,
+    "awakeSec": 602,
+    "durationSec": 26033,
+    "end": "06-27 07:04:01",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 1354,
+      "end": "06-27 00:12:42",
+      "stage": "asleepCore",
+      "start": "06-26 23:50:08"
+     },
+     {
+      "durationSec": 1204,
+      "end": "06-27 00:32:46",
+      "stage": "asleepDeep",
+      "start": "06-27 00:12:42"
+     },
+     {
+      "durationSec": 241,
+      "end": "06-27 00:36:47",
+      "stage": "awake",
+      "start": "06-27 00:32:46"
+     },
+     {
+      "durationSec": 150,
+      "end": "06-27 00:39:17",
+      "stage": "asleepCore",
+      "start": "06-27 00:36:47"
+     },
+     {
+      "durationSec": 903,
+      "end": "06-27 00:54:20",
+      "stage": "asleepREM",
+      "start": "06-27 00:39:17"
+     },
+     {
+      "durationSec": 1505,
+      "end": "06-27 01:19:25",
+      "stage": "asleepCore",
+      "start": "06-27 00:54:20"
+     },
+     {
+      "durationSec": 1294,
+      "end": "06-27 01:40:59",
+      "stage": "asleepDeep",
+      "start": "06-27 01:19:25"
+     },
+     {
+      "durationSec": 1896,
+      "end": "06-27 02:12:35",
+      "stage": "asleepCore",
+      "start": "06-27 01:40:59"
+     },
+     {
+      "durationSec": 1866,
+      "end": "06-27 02:43:41",
+      "stage": "asleepREM",
+      "start": "06-27 02:12:35"
+     },
+     {
+      "durationSec": 3220,
+      "end": "06-27 03:37:22",
+      "stage": "asleepCore",
+      "start": "06-27 02:43:41"
+     },
+     {
+      "durationSec": 813,
+      "end": "06-27 03:50:54",
+      "stage": "asleepDeep",
+      "start": "06-27 03:37:22"
+     },
+     {
+      "durationSec": 391,
+      "end": "06-27 03:57:25",
+      "stage": "asleepCore",
+      "start": "06-27 03:50:54"
+     },
+     {
+      "durationSec": 1926,
+      "end": "06-27 04:29:32",
+      "stage": "asleepREM",
+      "start": "06-27 03:57:25"
+     },
+     {
+      "durationSec": 120,
+      "end": "06-27 04:31:32",
+      "stage": "asleepCore",
+      "start": "06-27 04:29:32"
+     },
+     {
+      "durationSec": 150,
+      "end": "06-27 04:34:02",
+      "stage": "asleepREM",
+      "start": "06-27 04:31:32"
+     },
+     {
+      "durationSec": 662,
+      "end": "06-27 04:45:05",
+      "stage": "asleepCore",
+      "start": "06-27 04:34:02"
+     },
+     {
+      "durationSec": 90,
+      "end": "06-27 04:46:35",
+      "stage": "awake",
+      "start": "06-27 04:45:05"
+     },
+     {
+      "durationSec": 1956,
+      "end": "06-27 05:19:11",
+      "stage": "asleepCore",
+      "start": "06-27 04:46:35"
+     },
+     {
+      "durationSec": 1505,
+      "end": "06-27 05:44:16",
+      "stage": "asleepREM",
+      "start": "06-27 05:19:11"
+     },
+     {
+      "durationSec": 60,
+      "end": "06-27 05:45:16",
+      "stage": "awake",
+      "start": "06-27 05:44:16"
+     },
+     {
+      "durationSec": 3190,
+      "end": "06-27 06:38:26",
+      "stage": "asleepCore",
+      "start": "06-27 05:45:16"
+     },
+     {
+      "durationSec": 933,
+      "end": "06-27 06:53:59",
+      "stage": "asleepREM",
+      "start": "06-27 06:38:26"
+     },
+     {
+      "durationSec": 211,
+      "end": "06-27 06:57:30",
+      "stage": "awake",
+      "start": "06-27 06:53:59"
+     },
+     {
+      "durationSec": 391,
+      "end": "06-27 07:04:01",
+      "stage": "asleepCore",
+      "start": "06-27 06:57:30"
+     }
+    ],
+    "start": "06-26 23:50:08",
+    "vitals": {
+     "heartRate": {
+      "avg": 66,
+      "byStage": {
+       "asleepCore": 65,
+       "asleepDeep": 70,
+       "asleepREM": 68,
+       "awake": 60
+      },
+      "count": 101,
+      "max": 73,
+      "min": 55,
+      "p50": 68,
+      "p90": 71,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 43.4,
+      "byStage": {
+       "asleepCore": 34.3,
+       "asleepDeep": 20,
+       "asleepREM": 75.8
+      },
+      "count": 3,
+      "max": 75.8,
+      "min": 20,
+      "p50": 34.3,
+      "p90": 67.5,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 96.9,
+      "byStage": {
+       "asleepCore": 97.4,
+       "asleepDeep": 96,
+       "asleepREM": 95.5
+      },
+      "count": 10,
+      "max": 99,
+      "min": 95,
+      "p50": 96,
+      "p90": 99,
+      "unit": "%"
+     },
+     "respiratoryRate": {
+      "avg": 14.9,
+      "byStage": {
+       "asleepCore": 14.2,
+       "asleepDeep": 14.5,
+       "asleepREM": 17.2
+      },
+      "count": 42,
+      "max": 19,
+      "min": 13,
+      "p50": 14.5,
+      "p90": 17,
+      "unit": "brpm"
+     }
+    }
+   },
+   {
+    "asleepSec": 7013,
+    "awakeSec": 752,
+    "durationSec": 7765,
+    "end": "06-27 22:34:34",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 391,
+      "end": "06-27 20:31:40",
+      "stage": "asleepUnspecified",
+      "start": "06-27 20:25:09"
+     },
+     {
+      "durationSec": 150,
+      "end": "06-27 20:34:11",
+      "stage": "awake",
+      "start": "06-27 20:31:40"
+     },
+     {
+      "durationSec": 602,
+      "end": "06-27 20:44:13",
+      "stage": "asleepUnspecified",
+      "start": "06-27 20:34:11"
+     },
+     {
+      "durationSec": 150,
+      "end": "06-27 20:46:43",
+      "stage": "awake",
+      "start": "06-27 20:44:13"
+     },
+     {
+      "durationSec": 2017,
+      "end": "06-27 21:20:20",
+      "stage": "asleepUnspecified",
+      "start": "06-27 20:46:43"
+     },
+     {
+      "durationSec": 211,
+      "end": "06-27 21:23:50",
+      "stage": "awake",
+      "start": "06-27 21:20:20"
+     },
+     {
+      "durationSec": 3612,
+      "end": "06-27 22:24:02",
+      "stage": "asleepUnspecified",
+      "start": "06-27 21:23:50"
+     },
+     {
+      "durationSec": 241,
+      "end": "06-27 22:28:03",
+      "stage": "awake",
+      "start": "06-27 22:24:02"
+     },
+     {
+      "durationSec": 391,
+      "end": "06-27 22:34:34",
+      "stage": "asleepUnspecified",
+      "start": "06-27 22:28:03"
+     }
+    ],
+    "start": "06-27 20:25:09",
+    "vitals": {
+     "heartRate": {
+      "avg": 72,
+      "byStage": {
+       "asleepUnspecified": 72,
+       "awake": 71
+      },
+      "count": 29,
+      "max": 79,
+      "min": 63,
+      "p50": 73,
+      "p90": 74,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 104.2,
+      "byStage": {
+       "awake": 104.2
+      },
+      "count": 1,
+      "max": 104.2,
+      "min": 104.2,
+      "p50": 104.2,
+      "p90": 104.2,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 95.5,
+      "byStage": {
+       "asleepUnspecified": 95,
+       "awake": 96
+      },
+      "count": 2,
+      "max": 96,
+      "min": 95,
+      "p50": 95.5,
+      "p90": 95.9,
+      "unit": "%"
+     }
+    }
+   },
+   {
+    "asleepSec": 23957,
+    "awakeSec": 331,
+    "durationSec": 24288,
+    "end": "06-28 07:14:55",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 1023,
+      "end": "06-28 00:47:10",
+      "stage": "asleepREM",
+      "start": "06-28 00:30:07"
+     },
+     {
+      "durationSec": 1324,
+      "end": "06-28 01:09:15",
+      "stage": "asleepCore",
+      "start": "06-28 00:47:10"
+     },
+     {
+      "durationSec": 1234,
+      "end": "06-28 01:29:49",
+      "stage": "asleepDeep",
+      "start": "06-28 01:09:15"
+     },
+     {
+      "durationSec": 662,
+      "end": "06-28 01:40:51",
+      "stage": "asleepCore",
+      "start": "06-28 01:29:49"
+     },
+     {
+      "durationSec": 722,
+      "end": "06-28 01:52:53",
+      "stage": "asleepDeep",
+      "start": "06-28 01:40:51"
+     },
+     {
+      "durationSec": 241,
+      "end": "06-28 01:56:54",
+      "stage": "asleepCore",
+      "start": "06-28 01:52:53"
+     },
+     {
+      "durationSec": 662,
+      "end": "06-28 02:07:56",
+      "stage": "asleepDeep",
+      "start": "06-28 01:56:54"
+     },
+     {
+      "durationSec": 120,
+      "end": "06-28 02:09:56",
+      "stage": "awake",
+      "start": "06-28 02:07:56"
+     },
+     {
+      "durationSec": 241,
+      "end": "06-28 02:13:57",
+      "stage": "asleepCore",
+      "start": "06-28 02:09:56"
+     },
+     {
+      "durationSec": 60,
+      "end": "06-28 02:14:57",
+      "stage": "awake",
+      "start": "06-28 02:13:57"
+     },
+     {
+      "durationSec": 421,
+      "end": "06-28 02:21:59",
+      "stage": "asleepCore",
+      "start": "06-28 02:14:57"
+     },
+     {
+      "durationSec": 2257,
+      "end": "06-28 02:59:36",
+      "stage": "asleepREM",
+      "start": "06-28 02:21:59"
+     },
+     {
+      "durationSec": 1806,
+      "end": "06-28 03:29:42",
+      "stage": "asleepCore",
+      "start": "06-28 02:59:36"
+     },
+     {
+      "durationSec": 1776,
+      "end": "06-28 03:59:17",
+      "stage": "asleepDeep",
+      "start": "06-28 03:29:42"
+     },
+     {
+      "durationSec": 2528,
+      "end": "06-28 04:41:25",
+      "stage": "asleepCore",
+      "start": "06-28 03:59:17"
+     },
+     {
+      "durationSec": 1384,
+      "end": "06-28 05:04:30",
+      "stage": "asleepREM",
+      "start": "06-28 04:41:25"
+     },
+     {
+      "durationSec": 2889,
+      "end": "06-28 05:52:39",
+      "stage": "asleepCore",
+      "start": "06-28 05:04:30"
+     },
+     {
+      "durationSec": 150,
+      "end": "06-28 05:55:10",
+      "stage": "awake",
+      "start": "06-28 05:52:39"
+     },
+     {
+      "durationSec": 331,
+      "end": "06-28 06:00:41",
+      "stage": "asleepCore",
+      "start": "06-28 05:55:10"
+     },
+     {
+      "durationSec": 1234,
+      "end": "06-28 06:21:15",
+      "stage": "asleepREM",
+      "start": "06-28 06:00:41"
+     },
+     {
+      "durationSec": 3220,
+      "end": "06-28 07:14:55",
+      "stage": "asleepCore",
+      "start": "06-28 06:21:15"
+     }
+    ],
+    "start": "06-28 00:30:07",
+    "vitals": {
+     "heartRate": {
+      "avg": 61,
+      "byStage": {
+       "asleepCore": 60,
+       "asleepDeep": 61,
+       "asleepREM": 65,
+       "awake": 55
+      },
+      "count": 92,
+      "max": 68,
+      "min": 55,
+      "p50": 61,
+      "p90": 65,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 36,
+      "byStage": {
+       "asleepCore": 35.1,
+       "asleepDeep": 37.8
+      },
+      "count": 3,
+      "max": 41.2,
+      "min": 28.9,
+      "p50": 37.8,
+      "p90": 40.5,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 97,
+      "byStage": {
+       "asleepCore": 97,
+       "asleepDeep": 97.5,
+       "asleepREM": 96.5
+      },
+      "count": 12,
+      "max": 99,
+      "min": 96,
+      "p50": 97,
+      "p90": 98,
+      "unit": "%"
+     },
+     "respiratoryRate": {
+      "avg": 14.7,
+      "byStage": {
+       "asleepCore": 14.2,
+       "asleepDeep": 14.6,
+       "asleepREM": 16
+      },
+      "count": 36,
+      "max": 18,
+      "min": 13,
+      "p50": 14.5,
+      "p90": 16.8,
+      "unit": "brpm"
+     }
+    }
+   },
+   {
+    "asleepSec": 23836,
+    "awakeSec": 602,
+    "durationSec": 24438,
+    "end": "06-29 06:33:30",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 1053,
+      "end": "06-29 00:03:46",
+      "stage": "asleepCore",
+      "start": "06-28 23:46:12"
+     },
+     {
+      "durationSec": 331,
+      "end": "06-29 00:09:17",
+      "stage": "asleepDeep",
+      "start": "06-29 00:03:46"
+     },
+     {
+      "durationSec": 813,
+      "end": "06-29 00:22:49",
+      "stage": "asleepCore",
+      "start": "06-29 00:09:17"
+     },
+     {
+      "durationSec": 572,
+      "end": "06-29 00:32:21",
+      "stage": "asleepDeep",
+      "start": "06-29 00:22:49"
+     },
+     {
+      "durationSec": 30,
+      "end": "06-29 00:32:51",
+      "stage": "awake",
+      "start": "06-29 00:32:21"
+     },
+     {
+      "durationSec": 602,
+      "end": "06-29 00:42:53",
+      "stage": "asleepCore",
+      "start": "06-29 00:32:51"
+     },
+     {
+      "durationSec": 30,
+      "end": "06-29 00:43:23",
+      "stage": "asleepREM",
+      "start": "06-29 00:42:53"
+     },
+     {
+      "durationSec": 1475,
+      "end": "06-29 01:07:58",
+      "stage": "asleepCore",
+      "start": "06-29 00:43:23"
+     },
+     {
+      "durationSec": 301,
+      "end": "06-29 01:12:59",
+      "stage": "asleepDeep",
+      "start": "06-29 01:07:58"
+     },
+     {
+      "durationSec": 211,
+      "end": "06-29 01:16:30",
+      "stage": "asleepCore",
+      "start": "06-29 01:12:59"
+     },
+     {
+      "durationSec": 120,
+      "end": "06-29 01:18:30",
+      "stage": "asleepDeep",
+      "start": "06-29 01:16:30"
+     },
+     {
+      "durationSec": 451,
+      "end": "06-29 01:26:02",
+      "stage": "asleepCore",
+      "start": "06-29 01:18:30"
+     },
+     {
+      "durationSec": 451,
+      "end": "06-29 01:33:33",
+      "stage": "asleepDeep",
+      "start": "06-29 01:26:02"
+     },
+     {
+      "durationSec": 2077,
+      "end": "06-29 02:08:10",
+      "stage": "asleepCore",
+      "start": "06-29 01:33:33"
+     },
+     {
+      "durationSec": 150,
+      "end": "06-29 02:10:40",
+      "stage": "awake",
+      "start": "06-29 02:08:10"
+     },
+     {
+      "durationSec": 542,
+      "end": "06-29 02:19:42",
+      "stage": "asleepCore",
+      "start": "06-29 02:10:40"
+     },
+     {
+      "durationSec": 993,
+      "end": "06-29 02:36:15",
+      "stage": "asleepREM",
+      "start": "06-29 02:19:42"
+     },
+     {
+      "durationSec": 1956,
+      "end": "06-29 03:08:51",
+      "stage": "asleepCore",
+      "start": "06-29 02:36:15"
+     },
+     {
+      "durationSec": 150,
+      "end": "06-29 03:11:22",
+      "stage": "asleepDeep",
+      "start": "06-29 03:08:51"
+     },
+     {
+      "durationSec": 30,
+      "end": "06-29 03:11:52",
+      "stage": "asleepCore",
+      "start": "06-29 03:11:22"
+     },
+     {
+      "durationSec": 90,
+      "end": "06-29 03:13:22",
+      "stage": "asleepDeep",
+      "start": "06-29 03:11:52"
+     },
+     {
+      "durationSec": 120,
+      "end": "06-29 03:15:23",
+      "stage": "asleepCore",
+      "start": "06-29 03:13:22"
+     },
+     {
+      "durationSec": 150,
+      "end": "06-29 03:17:53",
+      "stage": "asleepDeep",
+      "start": "06-29 03:15:23"
+     },
+     {
+      "durationSec": 602,
+      "end": "06-29 03:27:55",
+      "stage": "asleepCore",
+      "start": "06-29 03:17:53"
+     },
+     {
+      "durationSec": 421,
+      "end": "06-29 03:34:56",
+      "stage": "awake",
+      "start": "06-29 03:27:55"
+     },
+     {
+      "durationSec": 3461,
+      "end": "06-29 04:32:37",
+      "stage": "asleepCore",
+      "start": "06-29 03:34:56"
+     },
+     {
+      "durationSec": 2648,
+      "end": "06-29 05:16:46",
+      "stage": "asleepREM",
+      "start": "06-29 04:32:37"
+     },
+     {
+      "durationSec": 2016,
+      "end": "06-29 05:50:22",
+      "stage": "asleepCore",
+      "start": "06-29 05:16:46"
+     },
+     {
+      "durationSec": 1174,
+      "end": "06-29 06:09:56",
+      "stage": "asleepDeep",
+      "start": "06-29 05:50:22"
+     },
+     {
+      "durationSec": 451,
+      "end": "06-29 06:17:27",
+      "stage": "asleepCore",
+      "start": "06-29 06:09:56"
+     },
+     {
+      "durationSec": 963,
+      "end": "06-29 06:33:30",
+      "stage": "asleepREM",
+      "start": "06-29 06:17:27"
+     }
+    ],
+    "start": "06-28 23:46:12",
+    "vitals": {
+     "heartRate": {
+      "avg": 62,
+      "byStage": {
+       "asleepCore": 61,
+       "asleepDeep": 62,
+       "asleepREM": 63,
+       "awake": 58
+      },
+      "count": 94,
+      "max": 98,
+      "min": 52,
+      "p50": 60,
+      "p90": 67,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 49.8,
+      "byStage": {
+       "asleepCore": 49.8
+      },
+      "count": 3,
+      "max": 93.7,
+      "min": 22.4,
+      "p50": 33.3,
+      "p90": 81.7,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 96.5,
+      "byStage": {
+       "asleepCore": 96.3,
+       "asleepDeep": 97,
+       "asleepREM": 97
+      },
+      "count": 10,
+      "max": 98,
+      "min": 94,
+      "p50": 97,
+      "p90": 98,
+      "unit": "%"
+     },
+     "respiratoryRate": {
+      "avg": 14.8,
+      "byStage": {
+       "asleepCore": 14.8,
+       "asleepDeep": 14.6,
+       "asleepREM": 15.3,
+       "awake": 14
+      },
+      "count": 40,
+      "max": 17,
+      "min": 13,
+      "p50": 15,
+      "p90": 16,
+      "unit": "brpm"
+     }
+    }
+   },
+   {
+    "asleepSec": 26575,
+    "awakeSec": 482,
+    "durationSec": 27057,
+    "end": "07-24 06:30:06",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 903,
+      "end": "07-23 23:14:12",
+      "stage": "asleepCore",
+      "start": "07-23 22:59:09"
+     },
+     {
+      "durationSec": 211,
+      "end": "07-23 23:17:43",
+      "stage": "asleepDeep",
+      "start": "07-23 23:14:12"
+     },
+     {
+      "durationSec": 752,
+      "end": "07-23 23:30:15",
+      "stage": "asleepCore",
+      "start": "07-23 23:17:43"
+     },
+     {
+      "durationSec": 1415,
+      "end": "07-23 23:53:50",
+      "stage": "asleepDeep",
+      "start": "07-23 23:30:15"
+     },
+     {
+      "durationSec": 30,
+      "end": "07-23 23:54:20",
+      "stage": "asleepCore",
+      "start": "07-23 23:53:50"
+     },
+     {
+      "durationSec": 30,
+      "end": "07-23 23:54:50",
+      "stage": "asleepREM",
+      "start": "07-23 23:54:20"
+     },
+     {
+      "durationSec": 90,
+      "end": "07-23 23:56:20",
+      "stage": "asleepCore",
+      "start": "07-23 23:54:50"
+     },
+     {
+      "durationSec": 451,
+      "end": "07-24 00:03:52",
+      "stage": "asleepREM",
+      "start": "07-23 23:56:20"
+     },
+     {
+      "durationSec": 1083,
+      "end": "07-24 00:21:55",
+      "stage": "asleepCore",
+      "start": "07-24 00:03:52"
+     },
+     {
+      "durationSec": 30,
+      "end": "07-24 00:22:25",
+      "stage": "asleepDeep",
+      "start": "07-24 00:21:55"
+     },
+     {
+      "durationSec": 1655,
+      "end": "07-24 00:50:01",
+      "stage": "asleepCore",
+      "start": "07-24 00:22:25"
+     },
+     {
+      "durationSec": 301,
+      "end": "07-24 00:55:02",
+      "stage": "asleepDeep",
+      "start": "07-24 00:50:01"
+     },
+     {
+      "durationSec": 30,
+      "end": "07-24 00:55:32",
+      "stage": "asleepCore",
+      "start": "07-24 00:55:02"
+     },
+     {
+      "durationSec": 1294,
+      "end": "07-24 01:17:06",
+      "stage": "asleepDeep",
+      "start": "07-24 00:55:32"
+     },
+     {
+      "durationSec": 271,
+      "end": "07-24 01:21:37",
+      "stage": "asleepCore",
+      "start": "07-24 01:17:06"
+     },
+     {
+      "durationSec": 30,
+      "end": "07-24 01:22:07",
+      "stage": "asleepREM",
+      "start": "07-24 01:21:37"
+     },
+     {
+      "durationSec": 2679,
+      "end": "07-24 02:06:46",
+      "stage": "asleepCore",
+      "start": "07-24 01:22:07"
+     },
+     {
+      "durationSec": 361,
+      "end": "07-24 02:12:47",
+      "stage": "asleepDeep",
+      "start": "07-24 02:06:46"
+     },
+     {
+      "durationSec": 30,
+      "end": "07-24 02:13:17",
+      "stage": "asleepCore",
+      "start": "07-24 02:12:47"
+     },
+     {
+      "durationSec": 60,
+      "end": "07-24 02:14:17",
+      "stage": "awake",
+      "start": "07-24 02:13:17"
+     },
+     {
+      "durationSec": 2408,
+      "end": "07-24 02:54:25",
+      "stage": "asleepCore",
+      "start": "07-24 02:14:17"
+     },
+     {
+      "durationSec": 120,
+      "end": "07-24 02:56:25",
+      "stage": "awake",
+      "start": "07-24 02:54:25"
+     },
+     {
+      "durationSec": 361,
+      "end": "07-24 03:02:26",
+      "stage": "asleepCore",
+      "start": "07-24 02:56:25"
+     },
+     {
+      "durationSec": 1114,
+      "end": "07-24 03:21:00",
+      "stage": "asleepREM",
+      "start": "07-24 03:02:26"
+     },
+     {
+      "durationSec": 30,
+      "end": "07-24 03:21:30",
+      "stage": "awake",
+      "start": "07-24 03:21:00"
+     },
+     {
+      "durationSec": 3822,
+      "end": "07-24 04:25:12",
+      "stage": "asleepCore",
+      "start": "07-24 03:21:30"
+     },
+     {
+      "durationSec": 90,
+      "end": "07-24 04:26:42",
+      "stage": "awake",
+      "start": "07-24 04:25:12"
+     },
+     {
+      "durationSec": 120,
+      "end": "07-24 04:28:43",
+      "stage": "asleepCore",
+      "start": "07-24 04:26:42"
+     },
+     {
+      "durationSec": 2438,
+      "end": "07-24 05:09:21",
+      "stage": "asleepREM",
+      "start": "07-24 04:28:43"
+     },
+     {
+      "durationSec": 2889,
+      "end": "07-24 05:57:30",
+      "stage": "asleepCore",
+      "start": "07-24 05:09:21"
+     },
+     {
+      "durationSec": 271,
+      "end": "07-24 06:02:01",
+      "stage": "asleepDeep",
+      "start": "07-24 05:57:30"
+     },
+     {
+      "durationSec": 331,
+      "end": "07-24 06:07:32",
+      "stage": "asleepCore",
+      "start": "07-24 06:02:01"
+     },
+     {
+      "durationSec": 30,
+      "end": "07-24 06:08:02",
+      "stage": "awake",
+      "start": "07-24 06:07:32"
+     },
+     {
+      "durationSec": 301,
+      "end": "07-24 06:13:03",
+      "stage": "asleepCore",
+      "start": "07-24 06:08:02"
+     },
+     {
+      "durationSec": 752,
+      "end": "07-24 06:25:35",
+      "stage": "asleepREM",
+      "start": "07-24 06:13:03"
+     },
+     {
+      "durationSec": 150,
+      "end": "07-24 06:28:06",
+      "stage": "awake",
+      "start": "07-24 06:25:35"
+     },
+     {
+      "durationSec": 120,
+      "end": "07-24 06:30:06",
+      "stage": "asleepREM",
+      "start": "07-24 06:28:06"
+     }
+    ],
+    "start": "07-23 22:59:09",
+    "vitals": {
+     "heartRate": {
+      "avg": 62,
+      "byStage": {
+       "asleepCore": 60,
+       "asleepDeep": 66,
+       "asleepREM": 66,
+       "awake": 58
+      },
+      "count": 106,
+      "max": 104,
+      "min": 50,
+      "p50": 62,
+      "p90": 69,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 59.6,
+      "byStage": {
+       "asleepCore": 64.8,
+       "asleepREM": 43.8
+      },
+      "count": 4,
+      "max": 128,
+      "min": 27.9,
+      "p50": 41.2,
+      "p90": 102.8,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 96.3,
+      "byStage": {
+       "asleepCore": 96,
+       "asleepDeep": 97,
+       "asleepREM": 96.5
+      },
+      "count": 12,
+      "max": 97,
+      "min": 95,
+      "p50": 96,
+      "p90": 97,
+      "unit": "%"
+     },
+     "respiratoryRate": {
+      "avg": 14.1,
+      "byStage": {
+       "asleepCore": 13.8,
+       "asleepDeep": 14.1,
+       "asleepREM": 14.7
+      },
+      "count": 45,
+      "max": 19,
+      "min": 12,
+      "p50": 14,
+      "p90": 15.5,
+      "unit": "brpm"
+     },
+     "wristTemperature": {
+      "avg": 35.9,
+      "byStage": {
+       "asleepCore": 35.9
+      },
+      "count": 1,
+      "max": 35.9,
+      "min": 35.9,
+      "p50": 35.9,
+      "p90": 35.9,
+      "unit": "C"
+     }
+    }
+   },
+   {
+    "asleepSec": 15620,
+    "awakeSec": 722,
+    "durationSec": 16342,
+    "end": "07-25 04:11:58",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 361,
+      "end": "07-24 23:45:37",
+      "stage": "asleepCore",
+      "start": "07-24 23:39:35"
+     },
+     {
+      "durationSec": 271,
+      "end": "07-24 23:50:07",
+      "stage": "awake",
+      "start": "07-24 23:45:37"
+     },
+     {
+      "durationSec": 662,
+      "end": "07-25 00:01:10",
+      "stage": "asleepCore",
+      "start": "07-24 23:50:07"
+     },
+     {
+      "durationSec": 1565,
+      "end": "07-25 00:27:15",
+      "stage": "asleepDeep",
+      "start": "07-25 00:01:10"
+     },
+     {
+      "durationSec": 1204,
+      "end": "07-25 00:47:19",
+      "stage": "asleepCore",
+      "start": "07-25 00:27:15"
+     },
+     {
+      "durationSec": 90,
+      "end": "07-25 00:48:49",
+      "stage": "asleepDeep",
+      "start": "07-25 00:47:19"
+     },
+     {
+      "durationSec": 271,
+      "end": "07-25 00:53:20",
+      "stage": "asleepCore",
+      "start": "07-25 00:48:49"
+     },
+     {
+      "durationSec": 783,
+      "end": "07-25 01:06:22",
+      "stage": "asleepDeep",
+      "start": "07-25 00:53:20"
+     },
+     {
+      "durationSec": 873,
+      "end": "07-25 01:20:55",
+      "stage": "asleepCore",
+      "start": "07-25 01:06:22"
+     },
+     {
+      "durationSec": 241,
+      "end": "07-25 01:24:56",
+      "stage": "asleepDeep",
+      "start": "07-25 01:20:55"
+     },
+     {
+      "durationSec": 1114,
+      "end": "07-25 01:43:29",
+      "stage": "asleepCore",
+      "start": "07-25 01:24:56"
+     },
+     {
+      "durationSec": 512,
+      "end": "07-25 01:52:01",
+      "stage": "asleepDeep",
+      "start": "07-25 01:43:29"
+     },
+     {
+      "durationSec": 933,
+      "end": "07-25 02:07:34",
+      "stage": "asleepCore",
+      "start": "07-25 01:52:01"
+     },
+     {
+      "durationSec": 1746,
+      "end": "07-25 02:36:39",
+      "stage": "asleepREM",
+      "start": "07-25 02:07:34"
+     },
+     {
+      "durationSec": 1625,
+      "end": "07-25 03:03:45",
+      "stage": "asleepCore",
+      "start": "07-25 02:36:39"
+     },
+     {
+      "durationSec": 1415,
+      "end": "07-25 03:27:19",
+      "stage": "asleepDeep",
+      "start": "07-25 03:03:45"
+     },
+     {
+      "durationSec": 60,
+      "end": "07-25 03:28:19",
+      "stage": "awake",
+      "start": "07-25 03:27:19"
+     },
+     {
+      "durationSec": 1264,
+      "end": "07-25 03:49:23",
+      "stage": "asleepCore",
+      "start": "07-25 03:28:19"
+     },
+     {
+      "durationSec": 391,
+      "end": "07-25 03:55:55",
+      "stage": "awake",
+      "start": "07-25 03:49:23"
+     },
+     {
+      "durationSec": 241,
+      "end": "07-25 03:59:56",
+      "stage": "asleepCore",
+      "start": "07-25 03:55:55"
+     },
+     {
+      "durationSec": 90,
+      "end": "07-25 04:01:26",
+      "stage": "asleepREM",
+      "start": "07-25 03:59:56"
+     },
+     {
+      "durationSec": 542,
+      "end": "07-25 04:10:28",
+      "stage": "asleepCore",
+      "start": "07-25 04:01:26"
+     },
+     {
+      "durationSec": 90,
+      "end": "07-25 04:11:58",
+      "stage": "asleepREM",
+      "start": "07-25 04:10:28"
+     }
+    ],
+    "start": "07-24 23:39:35",
+    "vitals": {
+     "heartRate": {
+      "avg": 59,
+      "byStage": {
+       "asleepCore": 58,
+       "asleepDeep": 62,
+       "asleepREM": 59,
+       "awake": 57
+      },
+      "count": 65,
+      "max": 101,
+      "min": 50,
+      "p50": 59,
+      "p90": 63,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 30.8,
+      "byStage": {
+       "asleepDeep": 30.8
+      },
+      "count": 2,
+      "max": 34.6,
+      "min": 26.9,
+      "p50": 30.8,
+      "p90": 33.9,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 97.1,
+      "byStage": {
+       "asleepCore": 97.3,
+       "asleepDeep": 96.7,
+       "asleepREM": 97,
+       "awake": 98
+      },
+      "count": 8,
+      "max": 99,
+      "min": 95,
+      "p50": 97,
+      "p90": 98.3,
+      "unit": "%"
+     },
+     "respiratoryRate": {
+      "avg": 14.3,
+      "byStage": {
+       "asleepCore": 14.2,
+       "asleepDeep": 14.5,
+       "asleepREM": 14.5,
+       "awake": 13.3
+      },
+      "count": 26,
+      "max": 15.5,
+      "min": 13,
+      "p50": 14.5,
+      "p90": 15,
+      "unit": "brpm"
+     }
+    }
+   },
+   {
+    "asleepSec": 6320,
+    "awakeSec": 0,
+    "durationSec": 6320,
+    "end": "07-25 07:01:34",
+    "source": "Device",
+    "stages": [
+     {
+      "durationSec": 6320,
+      "end": "07-25 07:01:34",
+      "stage": "asleepUnspecified",
+      "start": "07-25 05:16:13"
+     }
+    ],
+    "start": "07-25 05:16:13",
+    "vitals": {
+     "heartRate": {
+      "avg": 60,
+      "byStage": {
+       "asleepUnspecified": 60
+      },
+      "count": 24,
+      "max": 101,
+      "min": 53,
+      "p50": 59,
+      "p90": 63,
+      "unit": "bpm"
+     },
+     "hrvSDNN": {
+      "avg": 58.1,
+      "byStage": {
+       "asleepUnspecified": 58.1
+      },
+      "count": 1,
+      "max": 58.1,
+      "min": 58.1,
+      "p50": 58.1,
+      "p90": 58.1,
+      "unit": "ms"
+     },
+     "oxygenSaturation": {
+      "avg": 98.5,
+      "byStage": {
+       "asleepUnspecified": 98.5
+      },
+      "count": 2,
+      "max": 99,
+      "min": 98,
+      "p50": 98.5,
+      "p90": 98.9,
+      "unit": "%"
+     }
+    }
+   }
+  ],
+  "streams": {
+   "anchor": "2026-01-01 (Europe/Paris)",
+   "timeFormat": "MM-dd HH:mm:ss"
+  }
+ }
+}

@@ -392,7 +392,9 @@ The fixture must exercise every rule in the plan, so build it deliberately rathe
 
 - [ ] **Step 1: Generate the fixture from real data**
 
-Run this from the workout-tracker root, where `<person>-backfill.json` sits. It carves out a window that contains a split night, an evening nap, a lap-bearing swim, a strength workout and a pre-transition day, then strips the bulk series.
+Run this from the repository root with two absolute paths edited in: the real export as
+input, and `tests/fixtures/hek-export.json` as output. The `Skills/` prefix used elsewhere
+in this plan is dropped — the repo root is the Skills package root. It carves out a window that contains a split night, an evening nap, a lap-bearing swim, a strength workout and a pre-transition day, then strips the bulk series.
 
 ```bash
 python3 - <<'PY'
@@ -423,8 +425,9 @@ for w in src["activity"]["workouts"]:
     if not in_window(w["start"]):
         continue
     w = {k: v for k, v in w.items() if k not in ("route", "streams")}
-    # Keep perMinute only on one workout so the fixture stays small.
     out["activity"]["workouts"].append(w)
+# perMinute survives on swims only, so one task can test it without the
+# fixture carrying a per-minute series for all ~20 workouts in the window.
 keep_pm = {w["start"] for w in out["activity"]["workouts"] if w["type"] == "Swimming"}
 for w in out["activity"]["workouts"]:
     if w["start"] not in keep_pm:
@@ -451,7 +454,22 @@ out["activity"]["daily"][0].pop("exerciseMinutes", None)   # absent key, not nul
 out["activity"]["workouts"][0].pop("isIndoor", None)       # absent indoor flag
 out["meta"]["categories"] = sorted(set(out["meta"]["categories"]) | {"nutrition"})
 
-Path("Skills/tests/fixtures/hek-export.json").write_text(
+# --- PRIVACY SCRUB, mandatory ------------------------------------------
+# This fixture is committed to a public remote. The real export carries the
+# owner's first name in every `source` string and their city in FOUR places:
+# meta.timeZone, activity.timeZone, meta.notes, and sleep.streams.anchor.
+# Scrubbing the serialized blob catches all of them, including any field
+# added by a future app version. Europe/Paris shares the real zone's DST
+# rules exactly, so the clock tests stay meaningful without recording where
+# anyone lives. This matches the existing hae-json-export.json fixture,
+# whose every source already reads "Device".
+import re as _re
+blob = json.dumps(out)
+blob = _re.sub(r'"source":\s*"[^"]*"', '"source": "Device"', blob)
+blob = blob.replace(out["meta"]["timeZone"], "Europe/Paris")
+out = json.loads(blob)
+
+Path("tests/fixtures/hek-export.json").write_text(
     json.dumps(out, indent=1, sort_keys=True, ensure_ascii=False)
 )
 print("workouts", len(out["activity"]["workouts"]),
@@ -843,7 +861,7 @@ def build_health_payload(payload: dict,
 ```bash
 python3 -m unittest tests.test_hek_import -v
 ```
-Expected: PASS, 12 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -888,7 +906,7 @@ def _session(start, end, stages, asleep=None, awake=0, vitals=None) -> dict:
         "durationSec": total,
         "asleepSec": asleep_sec,
         "awakeSec": awake,
-        "source": "Apple Watch",
+        "source": "Apple\u00a0Watch",
         "stages": stages,
         "vitals": vitals or {},
     }
@@ -1241,7 +1259,7 @@ class WorkoutFieldTests(unittest.TestCase):
         "minHeartRateBpm": 85,
         "activeEnergyKcal": 388, "totalEnergyKcal": 525.5,
         "basalEnergyKcal": 137.5,
-        "source": "Apple Watch",
+        "source": "Apple\u00a0Watch",
         "weatherHumidityPercent": 4200, "weatherTemperatureC": 24.6,
     }
 
@@ -1398,7 +1416,12 @@ def normalize_source(value: str | None) -> str | None:
     """Apple writes "Apple Watch" with a non-breaking space. Flatten it."""
     if value is None:
         return None
-    return value.replace(" ", " ").strip()
+    # The escape, never the literal character. An invisible U+00A0 does not
+    # survive transcription and a reviewer cannot see it: a previous pass of
+    # this line silently became replace(" ", " ") and did nothing to 696 of
+    # 698 real rows, while its test passed because the test fixture had lost
+    # the character too.
+    return value.replace("\u00a0", " ").strip()
 
 
 def humidity_percent(raw: float | None) -> float | None:
@@ -1506,7 +1529,7 @@ class SwimTests(unittest.TestCase):
         "type": "Swimming", "isIndoor": False,
         "durationSec": 864, "distanceKm": 0.38,
         "averageHeartRateBpm": 128, "activeEnergyKcal": 127,
-        "source": "Apple Watch",
+        "source": "Apple\u00a0Watch",
         "events": ([{"type": "lap", "start": "07-25 12:31:00",
                      "end": "07-25 12:31:20"}] * 19)
                   + [{"type": "pause", "start": "07-25 12:45:12",
@@ -1529,22 +1552,26 @@ class SwimTests(unittest.TestCase):
                                  "end": "07-25 12:45:12"}])
         self.assertIsNone(row.get("laps"))
 
-    def test_outdoor_swims_are_open_water(self) -> None:
-        self.assertEqual(self._one(isIndoor=False)["location"], "Open Water")
-
-    def test_indoor_swims_are_pool(self) -> None:
-        self.assertEqual(self._one(isIndoor=True)["location"], "Pool")
-
-    def test_an_absent_indoor_flag_leaves_location_blank(self) -> None:
-        w = {k: v for k, v in self.SWIM.items() if k != "isIndoor"}
-        rows = hek.build_swim_payload(_payload(meta=self.META, workouts=[w]),
-                                      None, None)
-        self.assertIsNone(rows[0].get("location"))
+    def test_location_is_never_written_whatever_the_indoor_flag_says(self) -> None:
+        # isIndoor disagrees with stored history on 24 of 27 real swims, and
+        # every swim it marks indoor carries a GPS route, which a pool swim
+        # does not produce. The store sparse-merges, so writing this column
+        # would overwrite correct history with a guess.
+        for indoor in (True, False, "absent"):
+            with self.subTest(isIndoor=indoor):
+                w = dict(self.SWIM)
+                if indoor == "absent":
+                    w.pop("isIndoor", None)
+                else:
+                    w["isIndoor"] = indoor
+                rows = hek.build_swim_payload(
+                    _payload(meta=self.META, workouts=[w]), None, None)
+                self.assertNotIn("location", rows[0])
 
     def test_fields_with_no_source_are_left_unset(self) -> None:
         row = self._one()
-        for field in ("pool_length_m", "strokes", "spl",
-                      "avg_swolf", "stroke_mix", "water_temp_c"):
+        for field in ("pool_length_m", "strokes", "spl", "avg_swolf",
+                      "stroke_mix", "water_temp_c", "location"):
             self.assertNotIn(field, row)
 
     def test_only_swims_are_returned(self) -> None:
@@ -1585,9 +1612,13 @@ def build_swim_payload(payload: dict,
     have no source in this format and are left unset rather than guessed —
     sparse merge then preserves whatever history already holds.
 
-    ``Location`` is better than it was: the retired importer could only ever
-    write "Open Water", because HealthAutoExport's location field disagreed
-    with its own indoor flag. Here ``isIndoor`` decides it outright.
+    ``Location`` is deliberately NOT written. ``isIndoor`` looks like the
+    signal for it and is not: measured against stored history it disagrees on
+    24 of 27 swims, every swim it marks indoor carries a GPS route of 39 to
+    287 points (a pool swim produces none), and 18 of the disagreements are
+    stored as "Outdoor Pool", a third value a boolean cannot express. Since
+    the store sparse-merges, writing it would rewrite 24 correct values with
+    wrong ones. The retired importer refused to guess here too.
     """
     meta = payload["meta"]
     rows: list[dict] = []
@@ -1622,9 +1653,8 @@ def build_swim_payload(payload: dict,
         if laps:
             row["laps"] = laps
 
-        indoor = workout.get("isIndoor")
-        if indoor is not None:
-            row["location"] = "Pool" if indoor else "Open Water"
+        # No `location`. See the docstring: isIndoor is wrong on 24 of 27 real
+        # swims, and the store sparse-merges, so writing it destroys history.
 
         rows.append(row)
     rows.sort(key=lambda r: (r["date"], r["start"]))
@@ -1646,10 +1676,10 @@ git add shared/import_health_export_kit.py tests/test_hek_import.py
 git commit -m "feat: Health Export Kit swim reader
 
 Lap counts come from lap events and match the historical per-lap files
-exactly on all 17 swims that have them. Location is decided by the indoor
-flag, which is more than the retired importer could do. Pool length, stroke
-count, SPL and water temperature have no source and stay unset so sparse
-merge preserves history."
+exactly on all 17 swims that have them. Pool length, stroke count, SPL,
+water temperature and Location have no usable source and stay unset so
+sparse merge preserves history. Location in particular looks like it has
+one -- isIndoor -- which disagrees with stored history on 24 of 27 swims."
 ```
 
 ---

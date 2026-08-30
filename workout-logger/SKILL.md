@@ -19,7 +19,7 @@ Two trackers live in per-person folders inside the workout directory:
 - `<Person>/data/` (CSV store: monthly/ + dense + swimming/)
 - `<OtherPerson>/data/` (same shape)
 
-Both are HealthAutoExport-backed — there is one importer and one source.
+Both are Health Export Kit–backed — there is one importer and one source.
 Neither tracker has a per-lap swim store; see "Apple Health refresh" below.
 
 Resolve which person this log is for BEFORE running the script:
@@ -90,7 +90,7 @@ line. Don't search the filesystem.
      "css_test": {"date": "YYYY-MM-DD", "t400_sec": 450, "t200_sec": 210}
    }
    ```
-   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `sleep` entirely if the user didn't include a sleep line — **never prompt for sleep**. Omit `thermal` entirely if the user didn't include a `sauna` / `cold` line — **never prompt for thermal**. Omit `light_therapy` entirely if the user didn't include a light-therapy line — **never prompt for light therapy**. Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually, and no import supplies it either — HealthAutoExport carries no lap payload, so `swimming/*.laps.csv` is never written and `Avg SWOLF` / `Stroke Mix` stay blank. Per-night segment metadata also can't be entered manually: `first_segment_start` / `last_segment_end` come from the importer, and `n_segments` is permanently blank on every row.
+   Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `sleep` entirely if the user didn't include a sleep line — **never prompt for sleep**. Omit `thermal` entirely if the user didn't include a `sauna` / `cold` line — **never prompt for thermal**. Omit `light_therapy` entirely if the user didn't include a light-therapy line — **never prompt for light therapy**. Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually, and no import supplies it either — the export carries only a lap count, not per-lap detail, so `swimming/*.laps.csv` is never written and `Avg SWOLF` / `Stroke Mix` stay blank. Per-night segment metadata also can't be entered manually: `first_segment_start` / `last_segment_end` / `n_segments` come from the importer only, and stay blank on manually-entered nights.
 3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `<Person>` or `<OtherPerson>`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), dual-writes any sleep entries into both `<Person>/data/sleep/YYYY.MM.nights.csv` (rich per-night detail) and `<Person>/data/health_metrics.csv` (headline Total/Deep/REM/Time in Bed for the recovery score), writes any thermal entries to `<Person>/data/thermal/YYYY.MM.sessions.csv` (sparse-merge; `heat_total_min` auto-derived from the per-round durations), and writes any light-therapy entries to `<Person>/data/light_therapy/YYYY.MM.sessions.csv` (sparse-merge; `modality` auto-defaults to `cabin` when `ambient_temp_c ≥ 30`). Sleep Efficiency is auto-derived inside the upsert when both Total and Time in Bed are present.
 4. **Verify the write succeeded.** Capture the script's stdout and exit code:
    - If the exit code is non-zero, print the exact stderr output and stop. Do not report success.
@@ -102,14 +102,14 @@ line. Don't search the filesystem.
 6. **Apple Health refresh (automatic — no prompts at all).** After printing the summary line, ALWAYS run the importer for the resolved person. There is nothing to ask about: the user drops a fresh export every time they log, so the refresh is unconditional.
 
    ```
-   python3 Skills/shared/import_health_auto_export.py --person <Person>
+   python3 Skills/shared/import_health_export_kit.py --person <Person>
    ```
 
-   That is the only importer. It auto-resolves the export from the workout-tracker root (one above the per-person folders): `./HealthAutoExport*.zip`, **most recent by mtime wins**. There is no second file shape and no dispatch decision to make.
+   That is the only importer. It auto-resolves the export from the workout-tracker root (one above the per-person folders): `./health-export-json-*.json`, **most recent by mtime wins**. There is no second file shape and no dispatch decision to make.
 
-   If no zip is there, the importer prints `ERROR: HealthAutoExport ZIP not found: HealthAutoExport*.zip` and exits 1 — surface that one line to the user and finish. A missing export just means the user didn't drop one this time.
+   If no export is there, the importer prints `ERROR: Health Export Kit file not found: health-export-json-*.json` and exits 1 — surface that one line to the user and finish. A missing export just means the user didn't drop one this time.
 
-   It defaults to 6 months back, so `/log` passes `--person` and nothing else. The full flag set, for the rare hand-run: `--person`, `--zip`, `--since`, `--until`, `--allow-past-months`, `--replace-range`, `--dry-run`, `--keep-export`.
+   It imports whatever range the export itself covers, so `/log` passes `--person` and nothing else. The full flag set, for the rare hand-run: `--person`, `--export`, `--since`, `--until`, `--allow-past-months`, `--dry-run`, `--keep-export`.
 
    Capture stdout and append the importer's `Health Metrics: …`, `Sleep Nights: …`, `Swim Workouts: …`, and `Workout Sessions: …` summary lines (plus any `Auto-cardio: …` / `Strength clustering warnings:` / `Profile: …` / `Deleted source export: …` / `Committed <Person> data: …` lines) to the user-facing summary printed in step 5. Relay `manual-wins warnings`, skipped-negligible-swim lines, and nearby-swim notes too; those are user-facing data-quality decisions, not debug noise.
 
@@ -120,38 +120,35 @@ The tracker itself is the output. No markdown tables, no files presented, no nar
 ## Apple Health refresh
 
 The logger never imports Apple Health on its own — it shells out to
-`Skills/shared/import_health_auto_export.py`, which is **the only importer**.
-It takes `HealthAutoExport*.zip` and covers the full tracker surface: VO2max,
-RHR, HRV, walking HR, wrist temp, breathing disturbances, exercise minutes,
-steps, active / basal energy, sleep stages, per-workout HR, and per-workout
-swim aggregates. The native Apple XML importer is retired; `Export*.zip` is
-not a path any more.
-
-Inside the archive, the member selects the reader: a `HealthAutoExport-*.json`
-member picks the JSON reader (the supported format), and anything else falls
-back to the deprecated CSV reader with a warning on stderr. Route GPX files
-inside the archive are ignored.
+`Skills/shared/import_health_export_kit.py`, which is **the only importer**.
+It takes a single `health-export-json-*.json` file — no archive, no member
+selection, no CSV fallback — and covers most of the tracker surface: VO2max,
+RHR, walking HR, breathing disturbances, exercise minutes, steps, active /
+basal energy, sleep stages, per-workout HR, and per-workout swim aggregates
+(partial — see below). The native Apple XML importer is retired, and so is
+the older zip-based importer script for this path; that script stays on
+disk, unused, until a later plan removes it.
 
 It writes into the per-person CSV store under `<Person>/data/`:
 
 - `health_metrics.csv` — 22 columns of daily aggregates, including the headline sleep fields (Sleep Total / Deep / REM / Time in Bed) and, appended immediately before `Notes`, `Steps` / `Active Energy (kcal)` / `Basal Energy (kcal)`. Cells the export can't fill stay None; sparse-merge protects existing values.
 - `workout_sessions.csv` — one row per Apple `Workout`, HR columns populated.
-- `swimming/YYYY.MM.workouts.csv` — per-swim aggregates: Pool Length, Laps, Strokes, SPL, Location, Water Temp, distance. **No `swimming/YYYY.MM.laps.csv` is written.** HealthAutoExport carries no per-lap payload, so per-lap detail and SWOLF are permanently unavailable and `Avg SWOLF` / `Stroke Mix` stay blank on new rows. Any existing `laps.csv` is frozen XML-era history.
-- `sleep/YYYY.MM.nights.csv` — per-night sleep architecture: all stages the export exposes (Total, Core, Deep, REM, Unspecified, Awake) plus Time in Bed, Sleep Efficiency (derived), and First/Last Segment clock times (bedtime / wake-up schedule). `N Segments` is **permanently blank** — HealthAutoExport reports one aggregate row per night, with no segment breakdown to count.
+- `swimming/YYYY.MM.workouts.csv` — per-swim rows: distance, duration, average HR, active energy, and a lap count when the export logged lap events. Pool Length, Strokes, SPL, Location and Water Temp have no source in this format and are left unset — sparse-merge preserves whatever the store already has rather than guessing. **No `swimming/YYYY.MM.laps.csv` is written.** The export carries only a lap count, not per-lap detail, so `Avg SWOLF` / `Stroke Mix` stay blank on new rows. Any existing `laps.csv` is frozen XML-era history.
+- `sleep/YYYY.MM.nights.csv` — per-night sleep architecture: all stages the export exposes (Total, Core, Deep, REM, Unspecified, Awake) plus Time in Bed, Sleep Efficiency (derived), and First/Last Segment clock times (bedtime / wake-up schedule). `N Segments` is now populated — the count of sleep-stage entries recorded across the night's session(s); the retired importer always left it blank.
 
-It also creates / reads `<Person>/data/profile.csv`, a 2-column key/value file pinning the per-tracker `source` (`health_auto_export` is the only accepted value; the older source names were removed with the importers that wrote them), `auto_cardio` flag, `birthday`, and the swim CSS keys (`swim_css_sec_per_100m`, `swim_css_set_at`, `swim_pool_length_default`). The coach's `read_tracker.py` reads this to decide which sections of the report it can fill.
+It also creates / reads `<Person>/data/profile.csv`, a 2-column key/value file pinning the per-tracker `source` (`health_export_kit` is what this importer writes; older source names were removed with the importers that wrote them), `auto_cardio` flag, `birthday`, and the swim CSS keys (`swim_css_sec_per_100m`, `swim_css_set_at`, `swim_pool_length_default`). The coach's `read_tracker.py` reads this to decide which sections of the report it can fill.
 
-**What the import cannot see.** Apple's 1-10 per-workout effort score is gone permanently — `metadata` is empty on every JSON workout — so there is no RIR / RPE intake from the import path at all. Treat that as a permanent property of the source, not a provisional gap waiting on a better export. Per-lap swim detail and SWOLF are permanently out of reach for the same reason.
+**What the import cannot see.** Apple's 1-10 per-workout effort score is gone permanently — `metadata` is empty on every JSON workout — so there is no RIR / RPE intake from the import path at all. Treat that as a permanent property of the source, not a provisional gap waiting on a better export. Per-lap swim detail and SWOLF are permanently out of reach for the same reason. Daily HRV SDNN and Wrist Temp are also never written by this importer (a change from the retired zip importer, which wrote both): the export's only HRV signal is a two-to-four-reading sleep-window average with roughly four times the variance of the historical all-day series, and mixing the two would corrupt the recovery score's rolling baseline.
 
-**File naming.** Drop the app-generated `HealthAutoExport*.zip` into the workout tracker folder. Don't rename it — the resolver globs by pattern and picks the most recent by mtime.
+**File naming.** Drop the app-generated `health-export-json-*.json` file into the workout tracker folder. Don't rename it — the resolver globs by pattern and picks the most recent by mtime.
 
 **Idempotency.** Re-running with the same export is a no-op. Sparse-merge upserts protect existing values — incoming `None` never overwrites a populated cell, so a partial export (e.g. just last week) won't erase older history.
 
-**The consumed export is deleted, not archived.** On success the importer deletes the zip it just read; `--keep-export` is the escape hatch when someone wants the file kept. `<root>/.processed/` is **retired and empty** — it is no longer the safety net, so don't describe it as one. Rollback is git instead: each person's `data/` directory is its own git repository (`shared/data_git.py`), and both `append_workout.py` and the importer commit automatically after every confirmed write — one commit per operation, message `log: <N> rows, <dates>` or `import: <zip name>`.
+**The consumed export is deleted, not archived.** On success the importer deletes the export file it just read; `--keep-export` is the escape hatch when someone wants the file kept. `<root>/.processed/` is **retired and empty** — it is no longer the safety net, so don't describe it as one. Rollback is git instead: each person's `data/` directory is its own git repository (`shared/data_git.py`), and both `append_workout.py` and the importer commit automatically after every confirmed write — one commit per operation, message `log: <N> rows, <dates>` or `import: <export file name>`.
 
 **Auto-cardio.** When the importer ingests cardio workouts (Running, Hiking, Cycling, Swimming, HIIT) AND `auto_cardio` in `profile.csv` is True, those workouts also flow into the matching `<Person>/data/monthly/YYYY.MM.csv` as cardio rows carrying an `apple` / `gymkit:<Device>` value in the typed `Source` column. Manually-logged rows always win — the dedupe rule (date + exercise + duration ±1 min) skips Apple workouts that match an existing manual entry. Default: `auto_cardio = true`. Flip to `false` per-tracker by editing `profile.csv` if a user prefers manual-only logging.
 
-**Step 6 always refreshes, and never asks.** No watchers, no cron, and no prompt of any kind: run the importer for the resolved person, append its summary to the user-facing output, and finish. If no export is in the folder, surface the importer's one-line `ERROR: HealthAutoExport ZIP not found: …` and finish. With a single source there is no source decision left to put to the user — the health refresh is fully silent.
+**Step 6 always refreshes, and never asks.** No watchers, no cron, and no prompt of any kind: run the importer for the resolved person, append its summary to the user-facing output, and finish. If no export is in the folder, surface the importer's one-line `ERROR: Health Export Kit file not found: health-export-json-*.json` and finish. With a single source there is no source decision left to put to the user — the health refresh is fully silent.
 
 ## Bodyweight (opt-in)
 
@@ -169,7 +166,7 @@ Sleep is opt-in. Record it only when the user explicitly includes a sleep line i
 
 Sleep entries are dual-written by `append_workout.py`:
 
-- **Rich detail** → `<person>/data/sleep/YYYY.MM.nights.csv` via the sparse-merge `upsert_sleep_nights`. Captures all 6 stages Apple exposes (Total, Core, Deep, REM, Unspecified, Awake) plus Time in Bed, derived Sleep Efficiency, and first/last segment clock times. Manual entries leave the segment-metadata columns blank — only the importer populates those, and `N Segments` stays blank even then, because HealthAutoExport reports one aggregate row per night with nothing to count.
+- **Rich detail** → `<person>/data/sleep/YYYY.MM.nights.csv` via the sparse-merge `upsert_sleep_nights`. Captures all 6 stages Apple exposes (Total, Core, Deep, REM, Unspecified, Awake) plus Time in Bed, derived Sleep Efficiency, and first/last segment clock times. Manual entries leave the segment-metadata columns blank — only the importer populates those, including `N Segments`.
 - **Headline mirror** → `<person>/data/health_metrics.csv`, columns Sleep Total / Sleep Deep / Sleep REM / Time in Bed. Sparse-merge protects every other metric on the same date. This is the path the coach's `recovery_score` already reads, so a manual sleep entry flows into the recovery score on the next `/coach` run.
 
 If the user supplies only partial sleep info (e.g. just `sleep 7h30`), sparse-merge keeps the existing Apple-imported deep/REM/in-bed values on that date untouched and only updates the field(s) the user provided. The reverse is also true: a subsequent Apple import that fills in the missing fields won't overwrite the user's manual `total_h`.
@@ -180,7 +177,7 @@ Sleep Efficiency is auto-derived inside the upsert when both `total_h` and `time
 
 To back-fill many historical sleep nights at once, call `append_workout.py` with a payload of only sleep entries: `{"rows": [], "bodyweight": [], "sleep": [{"date": "...", "total_h": ..., ...}, ...]}`. The logger routes each entry to the right `sleep/YYYY.MM.nights.csv` and mirrors the headline fields into `health_metrics.csv`. Same dedupe-by-date semantics as bodyweight.
 
-The HealthAutoExport import populates the `sleep/` folder when sleep-stage data exists. Manual sleep entries still dual-write there on demand, and the coach's stage-aware report sections gate on capabilities plus data presence so the user-facing output stays coherent.
+The importer populates the `sleep/` folder when sleep-stage data exists. Manual sleep entries still dual-write there on demand, and the coach's stage-aware report sections gate on capabilities plus data presence so the user-facing output stays coherent.
 
 ## Sauna + cold exposure (opt-in)
 

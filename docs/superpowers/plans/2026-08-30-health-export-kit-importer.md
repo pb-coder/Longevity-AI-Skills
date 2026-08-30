@@ -1653,9 +1653,8 @@ def build_swim_payload(payload: dict,
         if laps:
             row["laps"] = laps
 
-        indoor = workout.get("isIndoor")
-        if indoor is not None:
-            row["location"] = "Pool" if indoor else "Open Water"
+        # No `location`. See the docstring: isIndoor is wrong on 24 of 27 real
+        # swims, and the store sparse-merges, so writing it destroys history.
 
         rows.append(row)
     rows.sort(key=lambda r: (r["date"], r["start"]))
@@ -1677,10 +1676,10 @@ git add shared/import_health_export_kit.py tests/test_hek_import.py
 git commit -m "feat: Health Export Kit swim reader
 
 Lap counts come from lap events and match the historical per-lap files
-exactly on all 17 swims that have them. Location is decided by the indoor
-flag, which is more than the retired importer could do. Pool length, stroke
-count, SPL and water temperature have no source and stay unset so sparse
-merge preserves history."
+exactly on all 17 swims that have them. Pool length, stroke count, SPL,
+water temperature and Location have no usable source and stay unset so
+sparse merge preserves history. Location in particular looks like it has
+one -- isIndoor -- which disagrees with stored history on 24 of 27 swims."
 ```
 
 ---

@@ -230,8 +230,8 @@ Walking-quality columns (all new, from `additional.mobility`, all `avg` unless n
 | Hiking | false / absent | `Hiking` | 6 |
 | Rowing | true | `Rowing` | 4 |
 
-`isIndoor` may be **absent** (1 of 698 workouts). Treat absent as `false` for mapping and
-as unknown for swim location.
+`isIndoor` may be **absent** (1 of 698 workouts). Treat absent as `false` for mapping. Do not
+use it for swim location at all — see §7.3.
 
 Unknown export types must fall through to `type.replace(" ", "")` and still be stored, the
 way the HAE importer handled unknown types.

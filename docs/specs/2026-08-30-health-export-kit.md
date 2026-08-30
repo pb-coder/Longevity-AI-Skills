@@ -550,5 +550,24 @@ No source, and already 0/54 populated. No practical loss.
 3. **`PROJECT.md` and `CLAUDE.md` claims to correct** once implemented: sleep segments
    are recoverable, ECG is available, `N Segments` is no longer permanently blank, and
    the source-capability flags need a new `health_export_kit` entry.
-4. **Two stray 2023 bodyweight rows** in the primary tracker's `health_metrics.csv` were entered by
+4. **Accepted and deliberately left**, after the final whole-branch review triaged them:
+   - `resolve_year`'s 29-February-in-a-non-leap-year branch has no test. Only reachable on garbage
+     input, where refusing is the correct behaviour.
+   - `SUM_METRICS` lists `distanceKm`, `flightsClimbed` and `workoutCount`, which `ACTIVITY_FIELDS`
+     does not map. Inert — the coverage gate only fires for mapped keys — and they document which
+     export fields are sums.
+   - `hek_canonical_type` tests `if mapped:` rather than `is not None`. No map value is falsy.
+   - Nothing refuses an export whose range lies in the future. A 2027 export writes future-dated
+     rows. Windowed coach reads ignore them; latest-of-day reads would not.
+5. **`Source` changes meaning, and it is a product decision.** The retired importer wrote the
+   constant `HealthAutoExport`; this one passes the device name through, so 661 of 663 rows differ
+   on that column alone. Worth settling before a backfill rewrites the history.
+6. **Two exports present at once is an unresolved contradiction.** `resolve_export` takes the newest
+   by modification time and deletes only that file, so a second export survives to be imported on
+   the next `/log`, under whatever `--person` that run resolves. `workout-logger/SKILL.md` step 6
+   says always run and never prompt; `workout-logger/references/common-mistakes.md` says stop and
+   ask when ownership is ambiguous, and notes a cross-person import is **not** self-healing because
+   sparse merge will not undo it. Those two instructions disagree. Resolve before the first import
+   with both people's exports in the folder.
+7. **Two stray 2023 bodyweight rows** in the primary tracker's `health_metrics.csv` were entered by
    hand and are out of every export range. Leave them alone.

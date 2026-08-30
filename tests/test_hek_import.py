@@ -342,6 +342,10 @@ class WorkoutFieldTests(unittest.TestCase):
                  range_end="2026-08-30T00:00:00Z",
                  exported_at="2026-08-30T00:05:00Z")
 
+    # "source" below uses the \u00a0 escape deliberately, matching the real
+    # export: Apple writes a non-breaking space in "Apple Watch". Do not
+    # replace it with the literal character -- an invisible character in
+    # source cannot be reviewed and does not survive copying reliably.
     WORKOUT = {
         "start": "08-02 15:54:27", "end": "08-02 17:15:42",
         "type": "Strength Training", "isIndoor": False,
@@ -350,7 +354,7 @@ class WorkoutFieldTests(unittest.TestCase):
         "minHeartRateBpm": 85,
         "activeEnergyKcal": 388, "totalEnergyKcal": 525.5,
         "basalEnergyKcal": 137.5,
-        "source": "Apple Watch",
+        "source": "Apple\u00a0Watch",
         "weatherHumidityPercent": 4200, "weatherTemperatureC": 24.6,
     }
 

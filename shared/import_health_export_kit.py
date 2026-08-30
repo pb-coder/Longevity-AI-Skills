@@ -273,10 +273,15 @@ from shared.apple_workout_types import hek_canonical_type  # noqa: E402
 
 
 def normalize_source(value: str | None) -> str | None:
-    """Apple writes "Apple Watch" with a non-breaking space. Flatten it."""
+    """Apple writes "Apple Watch" with a non-breaking space. Flatten it.
+
+    The escape below (U+00A0) is deliberate and must not be replaced by the
+    literal character: a literal non-breaking space in source is invisible
+    in review and does not reliably survive copy/paste or transcription.
+    """
     if value is None:
         return None
-    return value.replace(" ", " ").strip()
+    return value.replace("\u00a0", " ").strip()
 
 
 def humidity_percent(raw: float | None) -> float | None:
@@ -284,6 +289,11 @@ def humidity_percent(raw: float | None) -> float | None:
 
     Observed range across two people and 250 workouts: 2,600 to 8,700. The
     guard keeps the function correct if the app is ever fixed.
+
+    Deliberately not wired into ``build_workout_payload``: no CSV in this
+    repo has a humidity or weather column yet, so nothing calls this. It
+    exists so the basis-points-to-percent conversion is settled before one
+    does, rather than being worked out again from scratch at that point.
     """
     if raw is None:
         return None

@@ -291,3 +291,57 @@ class StorageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkoutHeartRatePreservationTests(unittest.TestCase):
+    """A re-import must not blank a heart rate it simply does not carry.
+
+    ``upsert_workout_sessions`` replaces a matched row entirely, so that a
+    corrected distance propagates. Heart rate is the exception: the retired
+    importer derived it by averaging a series across the workout's window,
+    and the current export reports only Apple's own per-workout statistic,
+    which is absent on some workouts. Without this, a routine refresh
+    silently strips readings the tracker already held.
+    """
+
+    def _round_trip(self, first: dict, second: dict) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            old = person_paths.WORKOUT_TRACKER_ROOT
+            person_paths.WORKOUT_TRACKER_ROOT = Path(tmp)
+            try:
+                csv_store.write_profile("T", source="health_export_kit")
+                csv_store.upsert_workout_sessions("T", [first])
+                csv_store.upsert_workout_sessions("T", [second])
+                return csv_store.read_workout_sessions("T")[0]
+            finally:
+                person_paths.WORKOUT_TRACKER_ROOT = old
+
+    BASE = {
+        "date": "2026-08-13", "start": "17:12:00", "end": "17:30:00",
+        "apple_type": "Walking", "duration_min": 18.0, "distance_km": 1.2,
+        "source": "Device",
+    }
+
+    def test_an_absent_heart_rate_does_not_blank_a_stored_one(self) -> None:
+        got = self._round_trip(
+            {**self.BASE, "avg_hr": 102.0, "max_hr": 128, "min_hr": 74},
+            dict(self.BASE),
+        )
+        self.assertEqual(got["avg_hr"], 102.0)
+        self.assertEqual(got["max_hr"], 128)
+        self.assertEqual(got["min_hr"], 74)
+
+    def test_a_supplied_heart_rate_still_replaces_the_stored_one(self) -> None:
+        got = self._round_trip(
+            {**self.BASE, "avg_hr": 102.0, "max_hr": 128, "min_hr": 74},
+            {**self.BASE, "avg_hr": 110.0, "max_hr": 140, "min_hr": 80},
+        )
+        self.assertEqual(got["avg_hr"], 110.0)
+        self.assertEqual(got["max_hr"], 140)
+
+    def test_other_fields_are_still_replaced_outright(self) -> None:
+        got = self._round_trip(
+            {**self.BASE, "distance_km": 550.0},
+            {**self.BASE, "distance_km": 0.55},
+        )
+        self.assertEqual(got["distance_km"], 0.55)

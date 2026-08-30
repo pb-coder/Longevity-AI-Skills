@@ -440,6 +440,18 @@ def upsert_workout_sessions(person: str, entries: Iterable[dict]) -> list[str]:
                 new_rec["notes"] = existing.get("notes")
             if existing.get("incidental") is not None and new_rec.get("incidental") in (None, False, ""):
                 new_rec["incidental"] = existing.get("incidental")
+            # Heart rate is preserved when the incoming row has none, unlike
+            # every other measurement here, which a re-import is allowed to
+            # correct. The retired importer derived per-workout HR by
+            # averaging a series across the workout's window; Health Export
+            # Kit reports only Apple's own per-workout statistic, which is
+            # absent on some workouts -- 34 of 663 in the reference history,
+            # 33 of them inside a single month, so a routine 30-day refresh
+            # would blank them on every run. Replacing a real reading with
+            # nothing is a loss, not a correction.
+            for _hr in ("avg_hr", "max_hr", "min_hr"):
+                if existing.get(_hr) is not None and new_rec.get(_hr) in (None, ""):
+                    new_rec[_hr] = existing.get(_hr)
             if by_key[key] != new_rec:
                 by_key[key] = new_rec
                 updated += 1

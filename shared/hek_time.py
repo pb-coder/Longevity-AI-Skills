@@ -19,9 +19,20 @@ tracker's stored history: 663 of 663 workouts and 224 of 224 sleep nights
 match once corrected, and none match before. The root cause inside the app is
 not known, so the correction below was fitted to the symptom and then
 validated, and it is bounded by a guard: anything that is not a whole number
-of hours within two hours of zero raises rather than shifting real data. A
-future app version that fixes the bug will fail loudly here instead of
-quietly double-correcting.
+of hours within two hours of zero raises rather than shifting real data.
+
+**What the guard does not do.** It bounds the correction; it does not detect
+an app that has been fixed. A version that stopped shifting timestamps would
+still produce exactly +1:00 for an export taken in summer over a winter
+range -- a whole number of hours, well within two -- so both checks pass and
+every pre-transition stamp is shifted an hour the wrong way, the same silent
+corruption inverted. A *changed* defect fails loudly here; a *fixed* one does
+not. This is a known limitation, not an oversight: distinguishing "the app is
+wrong by an hour" from "the app is right and we are wrong by an hour" needs a
+signal this format does not carry. The symptom to watch for is imported
+timestamps disagreeing with the tracker's stored history by an hour in the
+opposite direction from the original bug. The fix at that point is to remove
+the correction by hand, not to loosen the guard.
 """
 from __future__ import annotations
 

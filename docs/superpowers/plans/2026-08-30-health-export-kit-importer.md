@@ -466,7 +466,7 @@ out["meta"]["categories"] = sorted(set(out["meta"]["categories"]) | {"nutrition"
 import re as _re
 blob = json.dumps(out)
 blob = _re.sub(r'"source":\s*"[^"]*"', '"source": "Device"', blob)
-blob = blob.replace("Europe/Berlin", "Europe/Paris")
+blob = blob.replace(out["meta"]["timeZone"], "Europe/Paris")
 out = json.loads(blob)
 
 Path("tests/fixtures/hek-export.json").write_text(

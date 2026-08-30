@@ -289,6 +289,59 @@ class SleepHeadlineTests(unittest.TestCase):
         self.assertEqual(rows[0]["sleep_total_h"], 7.0)
         self.assertEqual(rows[0]["time_in_bed_h"], 7.0)
 
+    # A 6-hour night at 13.0 brpm and a 20-minute nap at 20.0 brpm, both
+    # filed on the 2026-06-06 row.
+    LONG_NIGHT = ("06-05 22:00:00", "06-06 04:00:00", 21600, 13.0)
+    SHORT_NAP = ("06-06 14:00:00", "06-06 14:20:00", 1200, 20.0)
+
+    def _two_session_night(self, asleep_override=None) -> dict:
+        sessions = []
+        for start, end, seconds, rate in (self.LONG_NIGHT, self.SHORT_NAP):
+            asleep = seconds if asleep_override is None else asleep_override
+            sessions.append(_session(
+                start, end,
+                [_stage("asleepCore", start, end, seconds)],
+                asleep=asleep,
+                vitals={"respiratoryRate": {"avg": rate, "unit": "brpm"}},
+            ))
+        return hek.sleep_headline_rows(
+            _payload(meta=self.META, sessions=sessions), None, None
+        )[0]
+
+    def test_respiratory_rate_is_weighted_by_time_asleep(self) -> None:
+        # An unweighted mean would read 16.5, letting a 20-minute nap count
+        # as much as the 6-hour night it is filed with.
+        row = self._two_session_night()
+        expected = (13.0 * 21600 + 20.0 * 1200) / (21600 + 1200)
+        self.assertEqual(row["resp_rate"], round(expected, 2))
+        self.assertLess(row["resp_rate"], 13.5)  # sits near the long night
+
+    def test_the_plain_mean_is_the_fallback_when_no_session_reports_sleep(self) -> None:
+        # No asleep seconds anywhere leaves no basis for a weight.
+        self.assertEqual(self._two_session_night(asleep_override=0)["resp_rate"], 16.5)
+
+
+class NightRolloverBoundaryTests(unittest.TestCase):
+    """The exact 18:00 boundary.
+
+    Right on all 224 stored nights already; pinned here so a one-character
+    edit cannot move a night by a day without a test noticing.
+    """
+
+    META = NightAssemblyTests.META
+
+    def _key(self, start, end) -> str:
+        p = _payload(meta=self.META, sessions=[
+            _session(start, end, [_stage("asleepCore", start, end, 3600)]),
+        ])
+        return sorted(hek.assemble_nights(p))[0]
+
+    def test_one_second_before_six_pm_keys_to_the_wake_date(self) -> None:
+        self.assertEqual(self._key("06-05 17:59:59", "06-05 19:30:00"), "2026-06-05")
+
+    def test_exactly_six_pm_keys_to_the_following_day(self) -> None:
+        self.assertEqual(self._key("06-05 18:00:00", "06-05 19:30:00"), "2026-06-06")
+
 
 class FixtureSleepTests(unittest.TestCase):
 
@@ -402,6 +455,109 @@ class WorkoutFieldTests(unittest.TestCase):
             None, None,
         )
         self.assertNotIn("distance_km", rows[0])
+
+
+class AutoCardioPassThroughTests(unittest.TestCase):
+    """Fields ``tracker/importing.build_auto_cardio_payload`` reads.
+
+    They are not Workout Sessions columns and are not stored on the session
+    row; they ride along so the monthly cardio row gets a Total Cal, an
+    Elevation and an Elapsed instead of three blanks.
+    """
+
+    META = WorkoutFieldTests.META
+    WORKOUT = WorkoutFieldTests.WORKOUT
+
+    def _one(self, **overrides) -> dict:
+        w = {**self.WORKOUT, **overrides}
+        return hek.build_workout_payload(
+            _payload(meta=self.META, workouts=[w]), None, None
+        )[0]
+
+    def _without(self, *keys) -> dict:
+        w = {k: v for k, v in self.WORKOUT.items() if k not in keys}
+        return hek.build_workout_payload(
+            _payload(meta=self.META, workouts=[w]), None, None
+        )[0]
+
+    def test_energy_and_elevation_come_straight_across(self) -> None:
+        row = self._one(elevationAscendedM=42.5)
+        self.assertEqual(row["total_cal"], 525.5)
+        self.assertEqual(row["basal_cal"], 137.5)
+        self.assertEqual(row["elevation_m"], 42.5)
+
+    def test_elapsed_is_the_wall_clock_span_not_the_duration(self) -> None:
+        # ``durationSec`` excludes paused time; the span does not. The two
+        # differ on 161 of the 698 workouts in the reference export, so
+        # elapsed has to be measured from the stamps rather than copied
+        # from duration the way the retired importer had to.
+        row = self._one(end="08-02 17:24:27")
+        self.assertEqual(row["duration_min"], 81.2)   # 4875 s
+        self.assertEqual(row["elapsed_min"], 90.0)    # 15:54:27 -> 17:24:27
+
+    def test_elapsed_is_unset_when_the_workout_has_no_end(self) -> None:
+        self.assertNotIn("elapsed_min", self._without("end"))
+
+    def test_absent_energy_stays_absent(self) -> None:
+        row = self._without("totalEnergyKcal", "basalEnergyKcal")
+        self.assertNotIn("total_cal", row)
+        self.assertNotIn("basal_cal", row)
+
+    def test_an_absent_elevation_stays_absent(self) -> None:
+        self.assertNotIn("elevation_m", self._one())
+
+    def test_zero_elevation_is_treated_as_absent(self) -> None:
+        # Same distinction distance_km makes: no climb recorded is not a
+        # measured zero.
+        self.assertNotIn("elevation_m", self._one(elevationAscendedM=0))
+
+    def test_negative_elevation_is_treated_as_absent(self) -> None:
+        self.assertNotIn("elevation_m", self._one(elevationAscendedM=-3.0))
+
+
+class IncidentalWalkTests(unittest.TestCase):
+    """A short walk is movement, not a training session.
+
+    ``workout-coach/lib/health_windowing.py`` drops rows flagged
+    ``incidental``. Without the flag, 322 of the 698 workouts in the
+    reference export enter the training window as real sessions and the
+    incidental-walk count reads zero.
+    """
+
+    META = WorkoutFieldTests.META
+
+    def _one(self, apple_type, duration_sec, indoor=False) -> dict:
+        w = {"start": "08-02 09:00:00", "end": "08-02 09:30:00",
+             "type": apple_type, "isIndoor": indoor}
+        if duration_sec is not None:
+            w["durationSec"] = duration_sec
+        return hek.build_workout_payload(
+            _payload(meta=self.META, workouts=[w]), None, None
+        )[0]
+
+    def test_a_short_walk_is_incidental(self) -> None:
+        self.assertTrue(self._one("Walking", 7 * 60)["incidental"])
+
+    def test_a_long_walk_is_not_incidental(self) -> None:
+        self.assertFalse(self._one("Walking", 40 * 60)["incidental"])
+
+    def test_a_short_indoor_walk_is_incidental(self) -> None:
+        # The type test is a substring, so IndoorWalking has to match too.
+        row = self._one("Walking", 7 * 60, indoor=True)
+        self.assertEqual(row["apple_type"], "IndoorWalking")
+        self.assertTrue(row["incidental"])
+
+    def test_a_short_run_is_not_incidental(self) -> None:
+        self.assertFalse(self._one("Running", 7 * 60)["incidental"])
+
+    def test_a_workout_with_no_duration_is_not_incidental(self) -> None:
+        self.assertFalse(self._one("Walking", None)["incidental"])
+
+    def test_every_fixture_row_carries_the_flag(self) -> None:
+        # Absent reads as "not incidental" downstream, which is exactly the
+        # bug: the flag has to be written on every row, not only True ones.
+        for row in hek.build_workout_payload(_load(), None, None):
+            self.assertIn("incidental", row)
 
 
 class HumidityTests(unittest.TestCase):
@@ -541,11 +697,30 @@ class SchemaGuardTests(unittest.TestCase):
         for row in rows:
             self.assertLessEqual(set(row), allowed, f"unknown key in {row}")
 
+    # The workout payload legitimately carries four keys that are not
+    # Workout Sessions columns. ``tracker/importing.build_auto_cardio_payload``
+    # reads them off the same rows to build monthly cardio rows, and
+    # ``upsert_workout_sessions`` ignores keys it does not recognise, so they
+    # are consumed rather than stored. The retired importer carried the same
+    # pass-throughs. Naming them explicitly keeps the test doing its real
+    # job: catching a typo'd column name, which would otherwise vanish
+    # silently at write time.
+    AUTO_CARDIO_PASS_THROUGH = frozenset({
+        "total_cal", "basal_cal", "elevation_m", "elapsed_min",
+    })
+
     def test_workout_payload_keys_are_all_real_columns(self) -> None:
         from shared.csv_store_dense import WORKOUT_SESSIONS_FIELDS
-        allowed = set(WORKOUT_SESSIONS_FIELDS) | {"date"}
+        allowed = (set(WORKOUT_SESSIONS_FIELDS) | {"date"}
+                   | self.AUTO_CARDIO_PASS_THROUGH)
         for row in hek.build_workout_payload(_load(), None, None):
             self.assertLessEqual(set(row), allowed, f"unknown key in {row}")
+
+    def test_the_guard_still_rejects_a_key_that_is_neither(self) -> None:
+        from shared.csv_store_dense import WORKOUT_SESSIONS_FIELDS
+        allowed = (set(WORKOUT_SESSIONS_FIELDS) | {"date"}
+                   | self.AUTO_CARDIO_PASS_THROUGH)
+        self.assertNotIn("duration_mins", allowed)  # a plausible typo
 
     def test_sleep_payload_keys_are_all_real_columns(self) -> None:
         from shared.csv_store_periodic import SLEEP_NIGHTS_FIELDS
@@ -621,6 +796,51 @@ class ImportExportTests(unittest.TestCase):
             finally:
                 person_paths.WORKOUT_TRACKER_ROOT = old_root
                 hek.WORKOUT_TRACKER_ROOT = old_hek_root
+
+
+class MetaValidationTests(unittest.TestCase):
+    """A malformed export must report one clear line, not a traceback.
+
+    ``main()`` catches ``ClockGuardError`` and ``ValueError``. A ``meta``
+    missing a key it needs used to raise ``KeyError`` deep inside the
+    timestamp code and escape as a traceback, which the ``/log`` flow has
+    no way to surface.
+    """
+
+    def _read(self, payload: dict):
+        with tempfile.TemporaryDirectory() as tmp:
+            export = Path(tmp) / "health-export-json-broken.json"
+            export.write_text(json.dumps(payload))
+            return hek.read_export(export)
+
+    def test_every_required_meta_key_is_checked_and_named(self) -> None:
+        for key in hek.REQUIRED_META_KEYS:
+            with self.subTest(key=key):
+                payload = _payload()
+                del payload["meta"][key]
+                with self.assertRaises(ValueError) as ctx:
+                    self._read(payload)
+                self.assertIn(key, str(ctx.exception))
+
+    def test_an_empty_value_counts_as_missing(self) -> None:
+        payload = _payload()
+        payload["meta"]["timeZone"] = ""
+        with self.assertRaises(ValueError):
+            self._read(payload)
+
+    def test_a_complete_meta_reads_normally(self) -> None:
+        self.assertEqual(self._read(_payload())["meta"]["schemaVersion"], 1)
+
+    def test_the_failure_reaches_the_caller_as_a_value_error(self) -> None:
+        # This is the type main() catches, so the CLI exits 3 with one line.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = _payload()
+            del payload["meta"]["rangeStart"]
+            export = root / "health-export-json-broken.json"
+            export.write_text(json.dumps(payload))
+            with self.assertRaises(ValueError):
+                hek.import_export("Test", export, None, None, keep_export=True)
 
 
 class CapabilityTests(unittest.TestCase):

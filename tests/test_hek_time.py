@@ -90,6 +90,26 @@ class YearReconstructionTests(unittest.TestCase):
         with self.assertRaises(hek_time.ClockGuardError):
             hek_time.resolve_year("06-15", m)
 
+    def test_a_day_that_fits_two_years_inside_a_legal_range_is_refused(self) -> None:
+        # 2025-12-31 00:00 -> 2026-12-30 00:00 local is 364 days, under
+        # MAX_RANGE_DAYS, so the length guard does not fire first. "12-31"
+        # still lands inside the range on both sides once RANGE_SLACK is
+        # added, and two candidates is a refusal, never a coin flip.
+        m = _meta(range_start="2025-12-30T23:00:00Z",
+                  range_end="2026-12-29T23:00:00Z",
+                  exported_at="2026-12-29T23:05:00Z")
+        with self.assertRaisesRegex(hek_time.ClockGuardError, "2 candidates"):
+            hek_time.resolve_year("12-31", m)
+
+    def test_a_day_outside_a_short_range_is_refused(self) -> None:
+        # No candidate year puts 07-15 inside a January range. Refusing beats
+        # inventing a year the export never covered.
+        m = _meta(range_start="2026-01-01T00:00:00Z",
+                  range_end="2026-02-01T00:00:00Z",
+                  exported_at="2026-02-01T00:05:00Z")
+        with self.assertRaisesRegex(hek_time.ClockGuardError, "0 candidates"):
+            hek_time.resolve_year("07-15", m)
+
     def test_a_sleep_session_starting_a_day_before_the_range_still_resolves(self) -> None:
         # Sessions overlapping the range are included in full, so a start
         # stamp can fall just outside it.

@@ -108,7 +108,7 @@ Source file: <Person>, compact, 2026-01-01 → 2026-08-30, 242 days, 698 workout
 
 | Field | Result |
 |---|---|
-| Workout identity (date + start + duration + type) | **663 / 663** stored rows matched, after the §5.1 clock correction |
+| Workout identity (date + start + type) | **663 / 663** stored rows matched, after the §5.1 clock correction |
 | Sleep nights, reassembled per §6.4 | Time in bed, first segment start, last segment end: **224 / 224 exact**. Awake time **222 / 222 exact**, segment count **216 / 216 exact** (the rest are blank in storage). Sleep total, core, deep and REM are exact on 215-220 of 224 and within **0.01 h on every night** — see §3.3. |
 | Resting HR | 225 / 225 |
 | Walking HR | 225 / 225 |
@@ -304,8 +304,15 @@ true_local = exported_naive + correction
 right date with exact start and end times, after applying it. Validated against one transition only (§3.4).
 
 **Guard:** the importer must assert that the correction resolves to a whole number of
-hours and is within ±2 hours, and refuse the import with a clear error otherwise. A future
-app version that fixes the bug would then fail loudly rather than shift good data.
+hours and is within ±2 hours, and refuse the import with a clear error otherwise. This
+bounds the correction; it does **not** detect an app that has been fixed. If a future
+version changes the defect into something that is not a whole number of hours, or larger
+than two, the import fails loudly. If a future version *fixes* it, the guard stays silent:
+an export taken in summer over a winter range still yields exactly +1:00, passes both
+checks, and shifts every pre-transition stamp an hour the wrong way — the same silent
+corruption, inverted. That is a known limitation of this design. The symptom is imported
+timestamps disagreeing with the tracker's stored history by an hour in the *opposite*
+direction from the original bug; the correction then has to be removed by hand.
 
 The shift also moves **daily totals**, not just timestamps — activity near local midnight
 lands on the wrong day. 7 of 78 pre-transition days show this in exercise minutes; the

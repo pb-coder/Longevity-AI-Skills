@@ -270,6 +270,12 @@ def sleep_headline_rows(payload: dict,
     retired importer sourced it from a metric it called daily, but Apple
     only measures respiration during sleep, and the two agreed to 0.1 on
     every overlapping day tested.
+
+    A night can be several sessions, so the per-session averages are
+    weighted by each session's ``asleepSec``: an unweighted mean lets a
+    20-minute nap pull the night's figure as hard as the 6-hour sleep it
+    is filed with. Falls back to the plain mean only when no session
+    reports asleep seconds, which leaves no basis for a weight.
     """
     nights = assemble_nights(payload)
     rows: list[dict] = []
@@ -293,17 +299,42 @@ def sleep_headline_rows(payload: dict,
             row["sleep_rem_h"] = _hours(stage_seconds["asleepREM"])
 
         resp = [
-            (s.get("vitals") or {}).get("respiratoryRate", {}).get("avg")
+            (((s.get("vitals") or {}).get("respiratoryRate") or {}).get("avg"),
+             s.get("asleepSec") or 0)
             for s in sessions
         ]
-        resp = [v for v in resp if v is not None]
+        resp = [(value, weight) for value, weight in resp if value is not None]
         if resp:
-            row["resp_rate"] = round(sum(resp) / len(resp), 2)
+            total_weight = sum(weight for _, weight in resp)
+            if total_weight:
+                row["resp_rate"] = round(
+                    sum(value * weight for value, weight in resp) / total_weight, 2
+                )
+            else:
+                row["resp_rate"] = round(
+                    sum(value for value, _ in resp) / len(resp), 2
+                )
         rows.append(row)
     return rows
 
 
 # --------------------------------------------------------------- workouts
+
+# A walk shorter than this is incidental movement -- a trip to the shops,
+# a walk to the station -- not a training session. The value matches the
+# retired importer (``import_health_auto_export.INCIDENTAL_WALK_MAX_MIN``)
+# so the flag means the same thing across the whole stored history rather
+# than changing meaning at the import cutover.
+#
+# The flag has to be written on every row, because
+# ``workout-coach/lib/health_windowing.py`` drops rows where it is True and
+# nothing else distinguishes a short walk from a session: without it, 322
+# of the 698 workouts in the reference export enter the training window as
+# real sessions and the incidental-walk count reads zero.
+#
+# The type test is a substring on purpose: it must catch ``IndoorWalking``
+# as well as ``Walking``.
+INCIDENTAL_WALK_MAX_MIN = 15.0
 
 
 def normalize_source(value: str | None) -> str | None:
@@ -374,7 +405,17 @@ def _session_identity_and_common(workout: dict,
 def build_workout_payload(payload: dict,
                           since: date | None,
                           until: date | None) -> list[dict]:
-    """Rows for ``upsert_workout_sessions``, one per workout."""
+    """Rows for ``upsert_workout_sessions``, one per workout.
+
+    Four keys here are deliberately not Workout Sessions columns:
+    ``total_cal``, ``basal_cal``, ``elevation_m`` and ``elapsed_min``.
+    ``tracker/importing.build_auto_cardio_payload`` reads them off these
+    same rows to build the monthly cardio rows, and
+    ``upsert_workout_sessions`` ignores keys it does not recognise. The
+    retired importer carried the same pass-throughs; dropping them left
+    every new monthly cardio row with a blank Total Cal, Elevation and
+    Elapsed.
+    """
     meta = payload["meta"]
     rows: list[dict] = []
     for workout in (payload.get("activity") or {}).get("workouts") or []:
@@ -390,9 +431,34 @@ def build_workout_payload(payload: dict,
             ("maxHeartRateBpm", "max_hr"),
             ("minHeartRateBpm", "min_hr"),
             ("activeEnergyKcal", "active_cal"),
+            ("totalEnergyKcal", "total_cal"),
+            ("basalEnergyKcal", "basal_cal"),
         ):
             if workout.get(key) is not None:
                 row[field] = workout[key]
+        # A zero or negative ascent means the export carried no elevation
+        # for this workout, not a measured flat route. Same distinction
+        # ``distance_km`` makes above.
+        elevation = workout.get("elevationAscendedM")
+        if elevation is not None and elevation > 0:
+            row["elevation_m"] = elevation
+        # Elapsed is the wall-clock span, which this export distinguishes
+        # from ``durationSec``: duration excludes paused time, the span
+        # does not. The retired importer had no second signal and set
+        # elapsed equal to duration; here the two differ on 161 of the 698
+        # workouts in the reference export, so this is a small improvement
+        # rather than a reproduction. Only written when both ends parsed --
+        # an end-less workout gets no span rather than a guessed one.
+        raw_start, raw_end = workout.get("start"), workout.get("end")
+        if raw_start and raw_end:
+            span = (hek_time.parse_stamp(raw_end, meta)
+                    - hek_time.parse_stamp(raw_start, meta))
+            row["elapsed_min"] = round(span.total_seconds() / 60.0, 1)
+        row["incidental"] = (
+            "Walking" in row["apple_type"]
+            and row.get("duration_min") is not None
+            and row["duration_min"] < INCIDENTAL_WALK_MAX_MIN
+        )
         rows.append(row)
     rows.sort(key=lambda r: (r["date"], r["start"]))
     return rows
@@ -461,6 +527,12 @@ class EmptyImportError(RuntimeError):
     """
 
 
+# Every year-less stamp in the file is resolved against these, and the
+# complete-day window is derived from them. A missing one used to escape
+# ``main()`` as a raw KeyError traceback; ``/log`` promises one clear line.
+REQUIRED_META_KEYS = ("timeZone", "rangeStart", "rangeEnd", "exportedAt")
+
+
 def read_export(path: Path) -> dict:
     payload = json.loads(path.read_text())
     meta = payload.get("meta") or {}
@@ -469,6 +541,12 @@ def read_export(path: Path) -> dict:
             f"{path.name}: unsupported schemaVersion "
             f"{meta.get('schemaVersion')!r}; this reader handles 1"
         )
+    for key in REQUIRED_META_KEYS:
+        if not meta.get(key):
+            raise ValueError(
+                f"{path.name}: meta is missing required key {key!r}; "
+                f"the export is incomplete and cannot be read safely"
+            )
     return payload
 
 

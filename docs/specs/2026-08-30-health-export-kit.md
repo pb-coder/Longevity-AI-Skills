@@ -374,6 +374,21 @@ within 60 seconds. Applies to the second tracker's history only; the primary tra
 Device names arrive with a U+00A0 non-breaking space between "Apple" and "Watch". Normalize
 U+00A0 to a plain space before comparing or storing.
 
+### 5.8 Basal energy goes missing on a long range
+
+On the 242-day backfill, 34 of 698 workouts carry **no `basalEnergyKcal` at all**, and their
+`totalEnergyKcal` is reported equal to `activeEnergyKcal`. On both 30-day exports of the same
+period, all 130 workouts carry it. The defect is range-dependent, and it was found only by running
+a real backfill.
+
+The consequence is a plausible wrong number: a three-hour hike's Total Cal reads 777 instead of
+roughly 1,030, about 25% low, written into a cell that had been blank, where nothing downstream
+would flag it.
+
+**Rule:** write `total_cal` only when the export also supplied `basalEnergyKcal`, or when the total
+genuinely exceeds active. Without basal, `totalEnergyKcal` is a duplicate of active, not a total.
+Report this to the app author with §5.1 and §5.4.
+
 ---
 
 ## 6. Rules the importer must carry
@@ -489,6 +504,13 @@ This matters more than 5% suggests. Average heart rate drives TRIMP, and
 `Skills/workout-coach/lib/cardio.py` skips any session missing it, so those sessions contribute
 zero training load rather than an approximate amount. 26 of the 38 are short walks, but 12 are
 real sessions: 5 strength, 3 swims, and one each of hiking, rowing, HIIT and cycling.
+
+**The store had to change for this.** `upsert_workout_sessions` replaces a matched row entirely,
+so that a corrected distance propagates. On the first real backfill that blanked the heart rate on
+all 34 affected rows, 33 of them inside a single month, meaning a routine 30-day refresh would have
+stripped them again on every run. `shared/csv_store_dense.py` now preserves an existing
+`avg_hr` / `max_hr` / `min_hr` when the incoming row carries none, the same exception `notes` and
+`incidental` already had. Replacing a real reading with nothing is a loss, not a correction.
 
 Recorded as a documented gap. The plausible mitigation — having the coach estimate from a
 session's own zone data rather than dropping it — is coach logic, not importer logic, and

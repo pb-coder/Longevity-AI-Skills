@@ -241,7 +241,7 @@ way the HAE importer handled unknown types.
 | Column | Source |
 |---|---|
 | `Laps` | count of `events[].type == "lap"` — **verified exact on 17 swims** |
-| `Location` | `isIndoor` true → `Pool`, false → `Open Water`, absent → blank |
+| `Location` | **no reliable source — do not write it.** See §7.3. |
 | `Duration`, `Distance`, `Avg HR`, `Active Cal` | workout summary fields |
 | `Pool Length (m)`, `Strokes`, `SPL`, `Water Temp (°C)` | **no source**, see §7.3 |
 | `Avg SWOLF`, `Stroke Mix` | no source, already permanently blank |
@@ -445,11 +445,28 @@ written. Existing values stay.
 The recovery score treats wrist temperature as an optional signal and renormalizes over
 whatever is present, so this degrades rather than breaks.
 
-### 7.3 Swim detail
+### 7.3 Swim detail, including location
 
 Pool length, stroke count, strokes-per-length and water temperature have no source.
-Populated on 17 of 27 historical swims. Lap **timings** are recovered; lap **stroke style**
-and SWOLF are not, and were already permanently gone.
+Populated on 17 of 27 historical swims. Lap **timings** are recovered, and lap counts match the
+historical per-lap files exactly on all 17 swims that have them; lap **stroke style** and SWOLF
+are not recovered, and were already permanently gone.
+
+**`Location` has no usable source either, and an earlier draft of this document was wrong to say
+otherwise.** It claimed `isIndoor` decides pool versus open water and called that an improvement.
+Measured against the stored history: `isIndoor` **disagrees on 24 of 27 swims** and agrees on 3.
+Every one of the six swims it marks indoor carries a GPS route of 39 to 287 points, and a pool
+swim does not produce a GPS track — the stored `Open Water` is right and the flag is wrong. The
+other 18 disagreements are stored as `Outdoor Pool`, a third value a two-way boolean cannot
+express at all.
+
+Because `upsert_swim_workouts` sparse-merges and a non-null incoming value overwrites the stored
+cell, writing this column would have rewritten 24 correct values with wrong ones on the first
+real import. The importer therefore leaves `Location` unset, which is what the retired importer
+did and for the same reason.
+
+`isIndoor` remains reliable for the workout **type** map (§4.3), where it was verified on 663
+workouts with every pair matching. It is unreliable specifically for swims.
 
 ### 7.4 Workout average heart rate, on about 5% of workouts
 

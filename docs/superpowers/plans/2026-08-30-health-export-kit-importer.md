@@ -1552,22 +1552,26 @@ class SwimTests(unittest.TestCase):
                                  "end": "07-25 12:45:12"}])
         self.assertIsNone(row.get("laps"))
 
-    def test_outdoor_swims_are_open_water(self) -> None:
-        self.assertEqual(self._one(isIndoor=False)["location"], "Open Water")
-
-    def test_indoor_swims_are_pool(self) -> None:
-        self.assertEqual(self._one(isIndoor=True)["location"], "Pool")
-
-    def test_an_absent_indoor_flag_leaves_location_blank(self) -> None:
-        w = {k: v for k, v in self.SWIM.items() if k != "isIndoor"}
-        rows = hek.build_swim_payload(_payload(meta=self.META, workouts=[w]),
-                                      None, None)
-        self.assertIsNone(rows[0].get("location"))
+    def test_location_is_never_written_whatever_the_indoor_flag_says(self) -> None:
+        # isIndoor disagrees with stored history on 24 of 27 real swims, and
+        # every swim it marks indoor carries a GPS route, which a pool swim
+        # does not produce. The store sparse-merges, so writing this column
+        # would overwrite correct history with a guess.
+        for indoor in (True, False, "absent"):
+            with self.subTest(isIndoor=indoor):
+                w = dict(self.SWIM)
+                if indoor == "absent":
+                    w.pop("isIndoor", None)
+                else:
+                    w["isIndoor"] = indoor
+                rows = hek.build_swim_payload(
+                    _payload(meta=self.META, workouts=[w]), None, None)
+                self.assertNotIn("location", rows[0])
 
     def test_fields_with_no_source_are_left_unset(self) -> None:
         row = self._one()
-        for field in ("pool_length_m", "strokes", "spl",
-                      "avg_swolf", "stroke_mix", "water_temp_c"):
+        for field in ("pool_length_m", "strokes", "spl", "avg_swolf",
+                      "stroke_mix", "water_temp_c", "location"):
             self.assertNotIn(field, row)
 
     def test_only_swims_are_returned(self) -> None:
@@ -1608,9 +1612,13 @@ def build_swim_payload(payload: dict,
     have no source in this format and are left unset rather than guessed —
     sparse merge then preserves whatever history already holds.
 
-    ``Location`` is better than it was: the retired importer could only ever
-    write "Open Water", because HealthAutoExport's location field disagreed
-    with its own indoor flag. Here ``isIndoor`` decides it outright.
+    ``Location`` is deliberately NOT written. ``isIndoor`` looks like the
+    signal for it and is not: measured against stored history it disagrees on
+    24 of 27 swims, every swim it marks indoor carries a GPS route of 39 to
+    287 points (a pool swim produces none), and 18 of the disagreements are
+    stored as "Outdoor Pool", a third value a boolean cannot express. Since
+    the store sparse-merges, writing it would rewrite 24 correct values with
+    wrong ones. The retired importer refused to guess here too.
     """
     meta = payload["meta"]
     rows: list[dict] = []

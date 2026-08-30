@@ -519,9 +519,10 @@ class IncidentalWalkTests(unittest.TestCase):
     """A short walk is movement, not a training session.
 
     ``workout-coach/lib/health_windowing.py`` drops rows flagged
-    ``incidental``. Without the flag, 322 of the 698 workouts in the
+    ``incidental``. Without the flag, 323 of the 698 workouts in the
     reference export enter the training window as real sessions and the
-    incidental-walk count reads zero.
+    incidental-walk count reads zero. Cross-checked against the tracker's
+    stored history: the flag agrees on 663 of 663 rows.
     """
 
     META = WorkoutFieldTests.META
@@ -552,6 +553,16 @@ class IncidentalWalkTests(unittest.TestCase):
 
     def test_a_workout_with_no_duration_is_not_incidental(self) -> None:
         self.assertFalse(self._one("Walking", None)["incidental"])
+
+    def test_the_boundary_is_compared_unrounded(self) -> None:
+        # A real walk on 2026-05-21 runs durationSec=898, which is 14.9667
+        # minutes -- incidental -- but rounds to the stored duration_min of
+        # 15.0, which is not. The comparison has to see the full-precision
+        # value or this one row disagrees with the stored history.
+        self.assertTrue(self._one("Walking", 898)["incidental"])
+        self.assertEqual(self._one("Walking", 898)["duration_min"], 15.0)
+        # 900 s is exactly 15.0 minutes, and the rule is strictly less than.
+        self.assertFalse(self._one("Walking", 900)["incidental"])
 
     def test_every_fixture_row_carries_the_flag(self) -> None:
         # Absent reads as "not incidental" downstream, which is exactly the

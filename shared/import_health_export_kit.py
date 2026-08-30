@@ -328,12 +328,17 @@ def sleep_headline_rows(payload: dict,
 #
 # The flag has to be written on every row, because
 # ``workout-coach/lib/health_windowing.py`` drops rows where it is True and
-# nothing else distinguishes a short walk from a session: without it, 322
+# nothing else distinguishes a short walk from a session: without it, 323
 # of the 698 workouts in the reference export enter the training window as
 # real sessions and the incidental-walk count reads zero.
 #
 # The type test is a substring on purpose: it must catch ``IndoorWalking``
 # as well as ``Walking``.
+#
+# The duration comparison deliberately uses the *unrounded* minutes, the way
+# the retired importer did: a 14.97-minute walk rounds to 15.0, and comparing
+# the rounded value would flip it to not-incidental and disagree with every
+# such row already in the store.
 INCIDENTAL_WALK_MAX_MIN = 15.0
 
 
@@ -454,10 +459,13 @@ def build_workout_payload(payload: dict,
             span = (hek_time.parse_stamp(raw_end, meta)
                     - hek_time.parse_stamp(raw_start, meta))
             row["elapsed_min"] = round(span.total_seconds() / 60.0, 1)
+        # Compared unrounded, from ``durationSec`` rather than from the
+        # already-rounded ``row["duration_min"]``. See the constant.
+        duration_sec = workout.get("durationSec")
         row["incidental"] = (
             "Walking" in row["apple_type"]
-            and row.get("duration_min") is not None
-            and row["duration_min"] < INCIDENTAL_WALK_MAX_MIN
+            and duration_sec is not None
+            and duration_sec / 60.0 < INCIDENTAL_WALK_MAX_MIN
         )
         rows.append(row)
     rows.sort(key=lambda r: (r["date"], r["start"]))

@@ -422,7 +422,7 @@ def compute_session_recommendation(*,
                 "kind": "rest",
                 "prescription": "20-min easy walk · hydration · sleep priority · no structured exercise",
                 "duration_min": 20,
-                "notes": "Re-evaluate tomorrow. Resume normal training only when wrist temp + RHR return to baseline and HRV is back in the 60-day band.",
+                "notes": "Re-evaluate tomorrow. Resume normal training only when RHR returns to baseline and the recovery score is back in its 60-day band.",
             },
             "rationale": rationale[:5],
             "override_allowed": True,
@@ -488,7 +488,7 @@ def compute_session_recommendation(*,
                 "kind": "reactive_deload_week",
                 "prescription": "deload week: cut working-set count to ~50%, hold loads, drop conditioning finishers, rotate over-MRV exercises to a different movement pattern",
                 "duration_min": None,
-                "notes": "Return to normal volume next week if recovery score ≥6 and HRV trend back in band.",
+                "notes": "Return to normal volume next week if the recovery score is 6 or better and TSB is back in band.",
             }
             headline = "Reactive deload this week."
         else:
@@ -498,7 +498,7 @@ def compute_session_recommendation(*,
                 "kind": "zone_2",
                 "prescription": f"Zone 2 cardio 45–60 min{zone2_hint} · mobility 15 min · sauna 15 min optional · no strength today",
                 "duration_min": 60,
-                "notes": "Re-evaluate tomorrow. If HRV recovers and TSB lifts, you can resume strength.",
+                "notes": "Re-evaluate tomorrow. Resume strength once the recovery score and TSB both lift.",
             }
             headline = "Zone 2 day, not strength."
         return {

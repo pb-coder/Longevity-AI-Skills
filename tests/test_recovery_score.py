@@ -60,3 +60,57 @@ class RecoverySampleSufficiencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+_RECOVERY_WITH_RHR = {
+    "drivers": [{"metric": "resting_hr", "component_score": 6.0}],
+}
+
+
+class HrvCapabilityCopyTests(unittest.TestCase):
+    """A source without HRV must not be asked to produce HRV.
+
+    Health Export Kit carries no all-day HRV. Before this, the dashboard
+    rendered "Needs ~7 consecutive nights of HRV (SDNN)" on the same page as
+    the copy explaining that HRV is gone for good, and the reactive-deload
+    prescription told the user to wait for HRV to recover.
+    """
+
+    def test_hrv_is_not_listed_as_a_missing_input_when_the_source_lacks_it(self) -> None:
+        from workout_coach.lib.health_longevity import compute_longevity_score
+        got = compute_longevity_score(
+            vo2_percentile=None, recovery=_RECOVERY_WITH_RHR, sleep_summary=None,
+            sleep_regularity=None, acwr=None, cardio_zones=None,
+            movement_consistency=None, bodyweight_trend_kg_per_week=None,
+            estimated_1rm=None,
+            capabilities={"hrv": False, "sleep_regularity": True},
+        )
+        names = [m.get("name") for m in (got or {}).get("missing_inputs") or []]
+        self.assertNotIn("hrv_trend", names)
+
+    def test_hrv_is_still_listed_when_the_source_provides_it(self) -> None:
+        from workout_coach.lib.health_longevity import compute_longevity_score
+        got = compute_longevity_score(
+            vo2_percentile=None, recovery=_RECOVERY_WITH_RHR, sleep_summary=None,
+            sleep_regularity=None, acwr=None, cardio_zones=None,
+            movement_consistency=None, bodyweight_trend_kg_per_week=None,
+            estimated_1rm=None,
+            capabilities={"hrv": True, "sleep_regularity": True},
+        )
+        names = [m.get("name") for m in (got or {}).get("missing_inputs") or []]
+        self.assertIn("hrv_trend", names)
+
+    def test_no_prescription_tells_the_user_to_wait_for_hrv(self) -> None:
+        """The ``notes`` strings are prescriptions the user reads and acts on.
+
+        Rationale strings elsewhere in the module may name HRV: those are
+        built from an HRV z-score and only appear when one exists. A
+        prescription is different — it renders whatever the source can do.
+        """
+        import re
+        from pathlib import Path
+        src = Path(__file__).resolve().parents[1] / "workout-coach" / "lib" / "health_session_rec.py"
+        notes = re.findall(r'"notes":\s*"([^"]*)"', src.read_text(encoding="utf-8"))
+        self.assertGreater(len(notes), 2, "expected several prescriptions to check")
+        for n in notes:
+            self.assertNotIn("HRV", n, f"prescription waits on HRV: {n!r}")

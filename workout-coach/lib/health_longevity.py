@@ -281,6 +281,11 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
     # unavailable, not "not yet populated".
     INPUT_CAPABILITY_REQ = {
         "sleep_regularity": "sleep_regularity",
+        # Health Export Kit carries no all-day HRV, so asking the user for
+        # "~7 consecutive nights of HRV" is asking for something the source
+        # structurally cannot emit. Without this the dashboard rendered that
+        # request on the same page as the copy explaining HRV is gone for good.
+        "hrv_trend": "hrv",
     }
     caps = capabilities or {}
     missing_inputs = []

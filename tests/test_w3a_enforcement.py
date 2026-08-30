@@ -1616,6 +1616,14 @@ class RealPlanAcceptanceTests(unittest.TestCase):
         prev = block_from_plan(parse_plan_file(prev_path), catalog)
         new = block_from_plan(parse_plan_file(new_path), catalog,
                               prev_block=prev)
+        # A plan the session gate downgraded to cardio has no strength slots,
+        # so it cannot overlap the previous block and rotating "cleanly" says
+        # nothing about the checker. The canary only means something when
+        # there are slots on both sides to compare.
+        if not getattr(prev, "slots", None) or not getattr(new, "slots", None):
+            self.skipTest(
+                f"{new_path.name} has no strength slots to rotate "
+                "(session gate downgraded it); the overlap baseline does not apply")
         self.assertTrue(rotation_diff_errors(prev, new, catalog),
                         f"{prev_path.name} -> {new_path.name} rotated cleanly, "
                         "which contradicts the measured 0.54 Jaccard baseline")

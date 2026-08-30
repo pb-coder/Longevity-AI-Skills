@@ -571,6 +571,41 @@ class IncidentalWalkTests(unittest.TestCase):
             self.assertIn("incidental", row)
 
 
+class TotalEnergyTests(unittest.TestCase):
+    """A total is only a total when the export supplied the parts."""
+
+    META = _meta(range_start="2026-08-01T00:00:00Z",
+                 range_end="2026-08-30T00:00:00Z",
+                 exported_at="2026-08-30T00:05:00Z")
+    BASE = {
+        "start": "08-07 18:11:07", "end": "08-07 18:33:01",
+        "type": "HIIT", "isIndoor": False, "durationSec": 1314,
+        "activeEnergyKcal": 304, "source": "Device",
+    }
+
+    def _one(self, **over) -> dict:
+        rows = hek.build_workout_payload(
+            _payload(meta=self.META, workouts=[{**self.BASE, **over}]), None, None)
+        return rows[0]
+
+    def test_total_is_written_when_basal_is_present(self) -> None:
+        row = self._one(basalEnergyKcal=37.4, totalEnergyKcal=341.4)
+        self.assertEqual(row["total_cal"], 341.4)
+        self.assertEqual(row["basal_cal"], 37.4)
+
+    def test_total_equal_to_active_with_no_basal_is_not_a_total(self) -> None:
+        # The long-range export bug: basal goes missing and total silently
+        # degrades to active. Writing it understated a hike by a quarter.
+        row = self._one(totalEnergyKcal=304)
+        self.assertNotIn("total_cal", row)
+        self.assertNotIn("basal_cal", row)
+        self.assertEqual(row["active_cal"], 304)
+
+    def test_a_real_total_without_basal_is_still_kept(self) -> None:
+        row = self._one(totalEnergyKcal=341.4)
+        self.assertEqual(row["total_cal"], 341.4)
+
+
 class HumidityTests(unittest.TestCase):
     """The field is named Percent but carries basis points. An app bug."""
 

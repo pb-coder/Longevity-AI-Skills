@@ -436,11 +436,23 @@ def build_workout_payload(payload: dict,
             ("maxHeartRateBpm", "max_hr"),
             ("minHeartRateBpm", "min_hr"),
             ("activeEnergyKcal", "active_cal"),
-            ("totalEnergyKcal", "total_cal"),
             ("basalEnergyKcal", "basal_cal"),
         ):
             if workout.get(key) is not None:
                 row[field] = workout[key]
+        # Total energy is only a total when the export also carried basal.
+        # On a long range this app drops ``basalEnergyKcal`` on some
+        # workouts -- 34 of 698 across eight months, none across thirty
+        # days -- and reports ``totalEnergyKcal`` equal to the active
+        # figure. Writing that would understate a three-hour hike by about
+        # a quarter, and it lands in a Total Cal cell that was blank, so
+        # nothing downstream would notice. Claim a total only when the
+        # export gives us the parts to justify one.
+        total = workout.get("totalEnergyKcal")
+        active = workout.get("activeEnergyKcal")
+        has_basal = workout.get("basalEnergyKcal") is not None
+        if total is not None and (has_basal or active is None or total > active):
+            row["total_cal"] = total
         # A zero or negative ascent means the export carried no elevation
         # for this workout, not a measured flat route. Same distinction
         # ``distance_km`` makes above.

@@ -392,7 +392,9 @@ The fixture must exercise every rule in the plan, so build it deliberately rathe
 
 - [ ] **Step 1: Generate the fixture from real data**
 
-Run this from the workout-tracker root, where `<person>-backfill.json` sits. It carves out a window that contains a split night, an evening nap, a lap-bearing swim, a strength workout and a pre-transition day, then strips the bulk series.
+Run this from the repository root with two absolute paths edited in: the real export as
+input, and `tests/fixtures/hek-export.json` as output. The `Skills/` prefix used elsewhere
+in this plan is dropped — the repo root is the Skills package root. It carves out a window that contains a split night, an evening nap, a lap-bearing swim, a strength workout and a pre-transition day, then strips the bulk series.
 
 ```bash
 python3 - <<'PY'
@@ -423,8 +425,9 @@ for w in src["activity"]["workouts"]:
     if not in_window(w["start"]):
         continue
     w = {k: v for k, v in w.items() if k not in ("route", "streams")}
-    # Keep perMinute only on one workout so the fixture stays small.
     out["activity"]["workouts"].append(w)
+# perMinute survives on swims only, so one task can test it without the
+# fixture carrying a per-minute series for all ~20 workouts in the window.
 keep_pm = {w["start"] for w in out["activity"]["workouts"] if w["type"] == "Swimming"}
 for w in out["activity"]["workouts"]:
     if w["start"] not in keep_pm:
@@ -451,7 +454,22 @@ out["activity"]["daily"][0].pop("exerciseMinutes", None)   # absent key, not nul
 out["activity"]["workouts"][0].pop("isIndoor", None)       # absent indoor flag
 out["meta"]["categories"] = sorted(set(out["meta"]["categories"]) | {"nutrition"})
 
-Path("Skills/tests/fixtures/hek-export.json").write_text(
+# --- PRIVACY SCRUB, mandatory ------------------------------------------
+# This fixture is committed to a public remote. The real export carries the
+# owner's first name in every `source` string and their city in FOUR places:
+# meta.timeZone, activity.timeZone, meta.notes, and sleep.streams.anchor.
+# Scrubbing the serialized blob catches all of them, including any field
+# added by a future app version. Europe/Paris shares the real zone's DST
+# rules exactly, so the clock tests stay meaningful without recording where
+# anyone lives. This matches the existing hae-json-export.json fixture,
+# whose every source already reads "Device".
+import re as _re
+blob = json.dumps(out)
+blob = _re.sub(r'"source":\s*"[^"]*"', '"source": "Device"', blob)
+blob = blob.replace("Europe/Berlin", "Europe/Paris")
+out = json.loads(blob)
+
+Path("tests/fixtures/hek-export.json").write_text(
     json.dumps(out, indent=1, sort_keys=True, ensure_ascii=False)
 )
 print("workouts", len(out["activity"]["workouts"]),

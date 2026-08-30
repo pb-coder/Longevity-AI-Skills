@@ -861,7 +861,7 @@ def build_health_payload(payload: dict,
 ```bash
 python3 -m unittest tests.test_hek_import -v
 ```
-Expected: PASS, 12 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
 

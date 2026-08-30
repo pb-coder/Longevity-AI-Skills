@@ -131,6 +131,9 @@ The energy mismatches are the two partial edge days (§5.2), not errors.
 | Exercise minutes | 216 / 225 match | 7 of the 9 mismatches sit in the pre-DST window and are day-boundary spill (§5.1). Two are genuine small aggregation differences. |
 | Workout average HR | differs by >2 bpm on 13 of 93 August workouts, max 13.4 | Export uses HealthKit's own workout average; HAE used a windowed series. Checked against the raw per-second HR stream: the export is **closer** (mean absolute error 0.70 bpm vs 1.40). No regression. |
 
+| Workout duration | 601 of 663 exact; the rest differ by exactly 0.10 min | Rounding path. |
+| Workout distance | 656 of 663 agree; 7 differ by real amounts | Genuine per-source measurement differences. |
+
 ### 3.3 The one residual difference
 
 Sleep total, core, deep and REM match the stored history exactly on 215 to 220 of 224 nights
@@ -205,7 +208,7 @@ Walking-quality columns (all new, from `additional.mobility`, all `avg` unless n
 | `Avg HR` / `Max HR` / `Min HR` | `averageHeartRateBpm` / `maxHeartRateBpm` / `minHeartRateBpm` |
 | `Active Cal (kcal)` | `activeEnergyKcal` |
 | `Distance (km)` | `distanceKm` |
-| `Source` | `source` — **contains U+00A0 non-breaking space** ("Apple Watch"). Normalize to a plain space. |
+| `Source` | `source`, normalized. **Two cautions.** The string carries a U+00A0 non-breaking space inside "Apple Watch" and must be normalized — write the `\u00a0` escape, never the literal character, which does not survive transcription and cannot be reviewed. Separately, the column changes meaning: the retired importer wrote the constant `HealthAutoExport`, this one passes the device name through, so 661 of 663 rows differ on this column alone. |
 | `Incidental` | existing tracker logic, unchanged |
 
 ### 4.3 Workout type map — verified on 663 rows, no unmapped combinations
@@ -361,7 +364,7 @@ within 60 seconds. Applies to the second tracker's history only; the primary tra
 
 ### 5.7 Non-breaking space in `source`
 
-`"Apple Watch"`, `"Apple Watch Ultra"`. Normalize
+Device names arrive with a U+00A0 non-breaking space between "Apple" and "Watch". Normalize
 U+00A0 to a plain space before comparing or storing.
 
 ---
@@ -448,7 +451,26 @@ Pool length, stroke count, strokes-per-length and water temperature have no sour
 Populated on 17 of 27 historical swims. Lap **timings** are recovered; lap **stroke style**
 and SWOLF are not, and were already permanently gone.
 
-### 7.4 Body fat and lean mass
+### 7.4 Workout average heart rate, on about 5% of workouts
+
+38 of 698 workouts in the reference export carry no `averageHeartRateBpm` at all, and 34 of
+those correspond to stored rows that had one. The retired importer filled them by averaging a
+top-level heart-rate series across the workout's window; this format exposes only Apple's own
+per-workout statistic, which is simply absent on those workouts.
+
+Recovery from `perMinute` does not work: only 2 of the 38 carry that series, and only 1 has
+usable values. No workout gains a heart rate in the other direction.
+
+This matters more than 5% suggests. Average heart rate drives TRIMP, and
+`Skills/workout-coach/lib/cardio.py` skips any session missing it, so those sessions contribute
+zero training load rather than an approximate amount. 26 of the 38 are short walks, but 12 are
+real sessions: 5 strength, 3 swims, and one each of hiking, rowing, HIIT and cycling.
+
+Recorded as a documented gap. The plausible mitigation — having the coach estimate from a
+session's own zone data rather than dropping it — is coach logic, not importer logic, and
+belongs to a later plan.
+
+### 7.5 Body fat and lean mass
 
 No source, and already 0/54 populated. No practical loss.
 

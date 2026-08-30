@@ -906,7 +906,7 @@ def _session(start, end, stages, asleep=None, awake=0, vitals=None) -> dict:
         "durationSec": total,
         "asleepSec": asleep_sec,
         "awakeSec": awake,
-        "source": "Apple Watch",
+        "source": "Apple\u00a0Watch",
         "stages": stages,
         "vitals": vitals or {},
     }
@@ -1259,7 +1259,7 @@ class WorkoutFieldTests(unittest.TestCase):
         "minHeartRateBpm": 85,
         "activeEnergyKcal": 388, "totalEnergyKcal": 525.5,
         "basalEnergyKcal": 137.5,
-        "source": "Apple Watch",
+        "source": "Apple\u00a0Watch",
         "weatherHumidityPercent": 4200, "weatherTemperatureC": 24.6,
     }
 
@@ -1416,7 +1416,12 @@ def normalize_source(value: str | None) -> str | None:
     """Apple writes "Apple Watch" with a non-breaking space. Flatten it."""
     if value is None:
         return None
-    return value.replace(" ", " ").strip()
+    # The escape, never the literal character. An invisible U+00A0 does not
+    # survive transcription and a reviewer cannot see it: a previous pass of
+    # this line silently became replace(" ", " ") and did nothing to 696 of
+    # 698 real rows, while its test passed because the test fixture had lost
+    # the character too.
+    return value.replace("\u00a0", " ").strip()
 
 
 def humidity_percent(raw: float | None) -> float | None:
@@ -1524,7 +1529,7 @@ class SwimTests(unittest.TestCase):
         "type": "Swimming", "isIndoor": False,
         "durationSec": 864, "distanceKm": 0.38,
         "averageHeartRateBpm": 128, "activeEnergyKcal": 127,
-        "source": "Apple Watch",
+        "source": "Apple\u00a0Watch",
         "events": ([{"type": "lap", "start": "07-25 12:31:00",
                      "end": "07-25 12:31:20"}] * 19)
                   + [{"type": "pause", "start": "07-25 12:45:12",

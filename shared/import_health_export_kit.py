@@ -116,6 +116,10 @@ def build_health_payload(payload: dict,
     """Roll the export's daily sections into ``upsert_health_metrics`` rows."""
     meta = payload["meta"]
     first_complete, last_complete = hek_time.complete_days(meta)
+    # The last local day the range touches at all, whole or partial. The
+    # night-onset shift is clamped to it; ``last_complete`` is one day
+    # earlier whenever the export stops mid-day, which is almost always.
+    last_covered = hek_time.local_range(meta)[1].date()
     rows: dict[str, dict] = {}
 
     def put(day: date, field: str, value) -> None:
@@ -150,6 +154,12 @@ def build_health_payload(payload: dict,
                 if aggregation.get(key) == "sum" and not covered:
                     continue
                 target = day + timedelta(days=1) if key in NIGHT_ONSET_METRICS else day
+                # The shift must not invent a day the export never reached.
+                # On the export's final day it otherwise lands on tomorrow:
+                # a real refresh produced a row dated 2026-08-31 carrying one
+                # value, for a night that had not happened yet.
+                if target > last_covered:
+                    continue
                 put(target, field, values[key])
 
     # A row holding nothing but a date is not a row. The retired importer

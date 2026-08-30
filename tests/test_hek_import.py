@@ -131,6 +131,28 @@ class BreathingDisturbanceShiftTests(unittest.TestCase):
         self.assertEqual(by_date["2026-01-03"]["sleep_breath_dist"], 0.9)
 
 
+    def test_the_shift_never_lands_past_the_export_range(self) -> None:
+        # On the final day of a range the +1 shift otherwise invents
+        # tomorrow. A real refresh produced a row dated 2026-08-31 holding
+        # a single breathing-disturbance value, for a night that had not
+        # happened when the export was taken.
+        meta = _meta(range_start="2026-08-23T08:11:18Z",
+                     range_end="2026-08-30T08:11:18Z",
+                     exported_at="2026-08-30T08:11:49Z")
+        rows = hek.build_health_payload(_payload(
+            meta=meta,
+            additional={"heart": {
+                "units": {"breathingDisturbances": "count"},
+                "aggregation": {"breathingDisturbances": "avg"},
+                "daily": [{"date": "2026-08-29", "values": {"breathingDisturbances": 3.2}},
+                          {"date": "2026-08-30", "values": {"breathingDisturbances": 6.3}}],
+            }},
+        ), None, None)
+        by_date = {r["date"]: r for r in rows}
+        self.assertNotIn("2026-08-31", by_date)
+        self.assertEqual(by_date["2026-08-30"]["sleep_breath_dist"], 3.2)
+
+
 class HrvTests(unittest.TestCase):
 
     def test_daily_hrv_is_never_written(self) -> None:

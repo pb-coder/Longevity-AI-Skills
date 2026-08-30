@@ -28,9 +28,45 @@ rather than an error when ignored:
 """
 from __future__ import annotations
 
+import argparse
+import glob
+import json
+import sys
 from datetime import date, timedelta
+from pathlib import Path
+
+# Lets this file run as a direct script (``python3 shared/import_health_export_kit.py``)
+# from the tracker root, mirroring the retired ``import_health_auto_export.py``: a
+# script invocation has no package context, so ``shared`` itself would not otherwise
+# be importable. A normal package import (``from shared import import_health_export_kit``)
+# already has ``__package__`` set, so the guard below is a no-op in that case.
+SKILLS_ROOT = Path(__file__).resolve().parents[1]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(SKILLS_ROOT))
 
 from shared import hek_time
+from shared.apple_workout_types import (
+    APPLE_TO_TRACKER_EXERCISE,
+    CARDIO_AUTOLOG_TYPES,
+    hek_canonical_type,
+)
+from shared.csv_store import (
+    ensure_profile,
+    read_profile,
+    upsert_health_metrics,
+    upsert_sleep_nights,
+    upsert_swim_workouts,
+    upsert_workout_sessions,
+    write_profile,
+)
+from shared.data_git import commit_data
+from shared.monthly_csv_upsert import (
+    upsert_monthly_cardio,
+    upsert_monthly_strength_session,
+)
+from shared.person_paths import WORKOUT_TRACKER_ROOT
+from shared.strength_sessions import cluster_strength_sessions
+from tracker.importing import build_auto_cardio_payload
 
 SOURCE_NAME = "health_export_kit"
 
@@ -269,8 +305,6 @@ def sleep_headline_rows(payload: dict,
 
 # --------------------------------------------------------------- workouts
 
-from shared.apple_workout_types import hek_canonical_type  # noqa: E402
-
 
 def normalize_source(value: str | None) -> str | None:
     """Apple writes "Apple Watch" with a non-breaking space. Flatten it.
@@ -412,3 +446,175 @@ def build_swim_payload(payload: dict,
         rows.append(row)
     rows.sort(key=lambda r: (r["date"], r["start"]))
     return rows
+
+
+# --------------------------------------------------------- orchestration
+
+EXPORT_GLOB = "health-export-json-*.json"
+
+
+class EmptyImportError(RuntimeError):
+    """The export parsed cleanly but produced nothing.
+
+    Almost always the wrong date window rather than a broken file, so it is
+    an error the caller surfaces rather than a silent no-op.
+    """
+
+
+def read_export(path: Path) -> dict:
+    payload = json.loads(path.read_text())
+    meta = payload.get("meta") or {}
+    if meta.get("schemaVersion") != 1:
+        raise ValueError(
+            f"{path.name}: unsupported schemaVersion "
+            f"{meta.get('schemaVersion')!r}; this reader handles 1"
+        )
+    return payload
+
+
+def resolve_export(pattern: str | None) -> Path | None:
+    """Newest matching export, by modification time."""
+    if pattern:
+        p = Path(pattern)
+        if p.exists():
+            return p
+        matches = sorted((Path(m) for m in glob.glob(pattern)),
+                         key=lambda x: x.stat().st_mtime, reverse=True)
+        return matches[0] if matches else None
+    matches = sorted(WORKOUT_TRACKER_ROOT.glob(EXPORT_GLOB),
+                     key=lambda x: x.stat().st_mtime, reverse=True)
+    return matches[0] if matches else None
+
+
+def import_export(person: str,
+                  export_path: Path,
+                  since: date | None,
+                  until: date | None,
+                  *,
+                  allow_past_months: bool = False,
+                  dry_run: bool = False,
+                  keep_export: bool = False) -> list[str]:
+    """Parse one export and write every store it feeds. One import, one commit."""
+    payload = read_export(export_path)
+
+    health = build_health_payload(payload, since, until)
+    headline = sleep_headline_rows(payload, since, until)
+    nights = build_sleep_payload(payload, since, until)
+    workouts = build_workout_payload(payload, since, until)
+    swims = build_swim_payload(payload, since, until)
+
+    if dry_run:
+        return [
+            f"Dry run: {export_path.name}",
+            f"  range {payload['meta']['rangeStart']} .. {payload['meta']['rangeEnd']}",
+            f"  health metric days: {len(health)}",
+            f"  sleep nights:       {len(nights)}",
+            f"  workouts:           {len(workouts)}",
+            f"  swim workouts:      {len(swims)}",
+            "  nothing written",
+        ]
+
+    if not health and not nights:
+        raise EmptyImportError(
+            f"{export_path.name} yielded 0 health metric dates and 0 sleep "
+            f"nights in the selected window; nothing was written"
+        )
+
+    out: list[str] = []
+    profile, created = ensure_profile(person, default_source=SOURCE_NAME,
+                                      default_auto_cardio=True)
+    if created:
+        out.append(f"Profile: created (source={SOURCE_NAME}, auto_cardio=true)")
+    if profile.get("source") != SOURCE_NAME:
+        write_profile(person, source=SOURCE_NAME)
+        out.append(f"Profile: source {profile.get('source') or 'unset'} -> {SOURCE_NAME}")
+        profile = read_profile(person)
+
+    out.extend(upsert_health_metrics(person, health))
+    out.extend(upsert_health_metrics(person, headline))
+    out.extend(upsert_sleep_nights(person, nights))
+    if swims:
+        out.extend(upsert_swim_workouts(person, swims))
+    out.extend(upsert_workout_sessions(person, workouts))
+
+    if profile.get("auto_cardio"):
+        out.extend(upsert_monthly_cardio(
+            person,
+            build_auto_cardio_payload(
+                workouts,
+                eligible_types=CARDIO_AUTOLOG_TYPES,
+                type_to_exercise=APPLE_TO_TRACKER_EXERCISE,
+            ),
+            allow_past_months=allow_past_months,
+        ))
+    else:
+        out.append("Auto-cardio: skipped (Profile.auto_cardio=false)")
+
+    sessions, warnings = cluster_strength_sessions(workouts)
+    if warnings:
+        out.append("Strength clustering warnings:")
+        out.extend(warnings)
+    out.extend(upsert_monthly_strength_session(
+        person, sessions, allow_past_months=allow_past_months,
+    ))
+
+    if not keep_export:
+        try:
+            export_path.unlink()
+            out.append(f"Deleted source export: {export_path.name}")
+        except OSError as e:
+            out.append(f"WARN: could not delete {export_path.name}: {e}")
+
+    sha = commit_data(person, f"import: {export_path.name}")
+    if sha:
+        out.append(f"Committed {person} data: {sha}")
+    return out
+
+
+def _parse_date(value: str) -> date:
+    return date.fromisoformat(value)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--person", required=True, help="Tracker owner, e.g. <Person>.")
+    ap.add_argument("--export", default=None,
+                    help=f"Export path or glob. Defaults to the newest {EXPORT_GLOB}.")
+    ap.add_argument("--since", default=None, type=_parse_date,
+                    help="Start date, YYYY-MM-DD. Default: the export's own range.")
+    ap.add_argument("--until", default=None, type=_parse_date,
+                    help="End date, YYYY-MM-DD. Default: the export's own range.")
+    ap.add_argument("--allow-past-months", action="store_true",
+                    help="Allow monthly backfill into past YYYY.MM files.")
+    ap.add_argument("--keep-export", action="store_true",
+                    help="Keep the file instead of deleting it after a successful import.")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Parse and summarize; do not write anything.")
+    args = ap.parse_args()
+
+    export_path = resolve_export(args.export)
+    if export_path is None or not export_path.exists():
+        print(f"ERROR: Health Export Kit file not found: {args.export or EXPORT_GLOB}",
+              file=sys.stderr)
+        return 1
+
+    try:
+        lines = import_export(
+            args.person, export_path, args.since, args.until,
+            allow_past_months=args.allow_past_months,
+            dry_run=args.dry_run, keep_export=args.keep_export,
+        )
+    except EmptyImportError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except (hek_time.ClockGuardError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 3
+    for line in lines:
+        print(line)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

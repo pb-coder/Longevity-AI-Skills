@@ -63,6 +63,28 @@ SOURCE_CAPABILITIES = {
         "thermal_log":        True,
         "light_therapy_log":  True,
     },
+    "health_export_kit": {
+        # No all-day HRV in this format at all. The sleep-window value is a
+        # different measurement (two to four readings a night, four times
+        # the variance) and lives in its own column, so the historical
+        # signal is off rather than silently rebased.
+        "hrv":                False,
+        # One reading in thirty nights across two people. Effectively gone.
+        "wrist_temp":         False,
+        "resting_hr_daily":   True,
+        "walking_hr":         True,
+        "sleep_stages":       True,
+        "sleep_breath_dist":  True,
+        # Per-night architecture is richer here than any prior source: the
+        # export carries every stage interval, so N Segments is populated
+        # again after HealthAutoExport stopped supplying it.
+        "sleep_nights":       True,
+        "sleep_regularity":   True,
+        "exercise_min_daily": True,
+        "per_workout_hr_strength": True,
+        "thermal_log":        True,
+        "light_therapy_log":  True,
+    },
 }
 
 # Applied when the profile is missing or unset.

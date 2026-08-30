@@ -524,5 +524,123 @@ class FixtureSwimTests(unittest.TestCase):
                 self.assertNotIn(field, row)
 
 
+import tempfile
+
+from shared import csv_store, person_paths
+
+
+class SchemaGuardTests(unittest.TestCase):
+    """Payload keys must exist in the store's field list, or they vanish."""
+
+    def test_health_payload_keys_are_all_real_columns(self) -> None:
+        from shared.csv_store_dense import HEALTH_METRICS_FIELDS
+        allowed = set(HEALTH_METRICS_FIELDS) | {"date"}
+        payload = _load()
+        rows = hek.build_health_payload(payload, None, None)
+        rows += hek.sleep_headline_rows(payload, None, None)
+        for row in rows:
+            self.assertLessEqual(set(row), allowed, f"unknown key in {row}")
+
+    def test_workout_payload_keys_are_all_real_columns(self) -> None:
+        from shared.csv_store_dense import WORKOUT_SESSIONS_FIELDS
+        allowed = set(WORKOUT_SESSIONS_FIELDS) | {"date"}
+        for row in hek.build_workout_payload(_load(), None, None):
+            self.assertLessEqual(set(row), allowed, f"unknown key in {row}")
+
+    def test_sleep_payload_keys_are_all_real_columns(self) -> None:
+        from shared.csv_store_periodic import SLEEP_NIGHTS_FIELDS
+        allowed = set(SLEEP_NIGHTS_FIELDS) | {"date"}
+        for row in hek.build_sleep_payload(_load(), None, None):
+            self.assertLessEqual(set(row), allowed, f"unknown key in {row}")
+
+    def test_swim_payload_keys_are_all_real_columns(self) -> None:
+        from shared.csv_store_periodic import SWIM_WORKOUTS_FIELDS
+        allowed = set(SWIM_WORKOUTS_FIELDS) | {"date"}
+        for row in hek.build_swim_payload(_load(), None, None):
+            self.assertLessEqual(set(row), allowed, f"unknown key in {row}")
+
+
+class ImportExportTests(unittest.TestCase):
+    """End to end against a temp tracker root, run twice for idempotency."""
+
+    def _run_twice(self, **kwargs) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_root = person_paths.WORKOUT_TRACKER_ROOT
+            old_hek_root = hek.WORKOUT_TRACKER_ROOT
+            person_paths.WORKOUT_TRACKER_ROOT = root
+            hek.WORKOUT_TRACKER_ROOT = root
+            try:
+                export = root / "health-export-json-2026-01-01-0000_to_2026-08-30-0000.json"
+                export.write_text(FIXTURE.read_text())
+                call = dict(person="Test", export_path=export,
+                            since=None, until=None,
+                            allow_past_months=True, dry_run=False,
+                            keep_export=True)
+                call.update(kwargs)
+                hek.import_export(**call)
+                hek.import_export(**call)
+                return {
+                    "profile": csv_store.read_profile("Test"),
+                    "health": csv_store.read_health_metrics("Test"),
+                    "sessions": csv_store.read_workout_sessions("Test"),
+                    "sleep": csv_store.read_sleep_nights("Test"),
+                }
+            finally:
+                person_paths.WORKOUT_TRACKER_ROOT = old_root
+                hek.WORKOUT_TRACKER_ROOT = old_hek_root
+
+    def test_a_second_identical_import_changes_nothing(self) -> None:
+        got = self._run_twice()
+        dates = [r["date"] for r in got["health"]]
+        self.assertEqual(len(dates), len(set(dates)))
+        keys = [(r["date"], r["start"]) for r in got["sessions"]]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_the_profile_source_is_pinned(self) -> None:
+        self.assertEqual(self._run_twice()["profile"]["source"], "health_export_kit")
+
+    def test_sleep_efficiency_is_derived_by_the_store(self) -> None:
+        for row in self._run_twice()["sleep"]:
+            if row.get("total_h") and row.get("time_in_bed_h"):
+                self.assertIsNotNone(row.get("efficiency_pct"))
+
+    def test_an_empty_export_raises_rather_than_writing_nothing_quietly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_root = person_paths.WORKOUT_TRACKER_ROOT
+            old_hek_root = hek.WORKOUT_TRACKER_ROOT
+            person_paths.WORKOUT_TRACKER_ROOT = root
+            hek.WORKOUT_TRACKER_ROOT = root
+            try:
+                export = root / "health-export-json-empty.json"
+                export.write_text(json.dumps(_payload()))
+                with self.assertRaises(hek.EmptyImportError):
+                    hek.import_export("Test", export, None, None,
+                                      keep_export=True)
+            finally:
+                person_paths.WORKOUT_TRACKER_ROOT = old_root
+                hek.WORKOUT_TRACKER_ROOT = old_hek_root
+
+
+class CapabilityTests(unittest.TestCase):
+
+    def test_the_new_source_declares_no_daily_hrv_and_no_wrist_temp(self) -> None:
+        from workout_coach.lib.constants import SOURCE_CAPABILITIES
+        caps = SOURCE_CAPABILITIES["health_export_kit"]
+        self.assertFalse(caps["hrv"])
+        self.assertFalse(caps["wrist_temp"])
+        self.assertTrue(caps["sleep_stages"])
+        self.assertTrue(caps["sleep_regularity"])
+        self.assertTrue(caps["sleep_nights"])
+
+    def test_it_declares_the_same_keys_as_the_retired_source(self) -> None:
+        from workout_coach.lib.constants import SOURCE_CAPABILITIES
+        self.assertEqual(
+            set(SOURCE_CAPABILITIES["health_export_kit"]),
+            set(SOURCE_CAPABILITIES["health_auto_export"]),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -468,17 +468,17 @@ class SwimTests(unittest.TestCase):
                                  "end": "07-25 12:45:12"}])
         self.assertIsNone(row.get("laps"))
 
-    def test_outdoor_swims_are_open_water(self) -> None:
-        self.assertEqual(self._one(isIndoor=False)["location"], "Open Water")
-
-    def test_indoor_swims_are_pool(self) -> None:
-        self.assertEqual(self._one(isIndoor=True)["location"], "Pool")
-
-    def test_an_absent_indoor_flag_leaves_location_blank(self) -> None:
-        w = {k: v for k, v in self.SWIM.items() if k != "isIndoor"}
-        rows = hek.build_swim_payload(_payload(meta=self.META, workouts=[w]),
-                                      None, None)
-        self.assertIsNone(rows[0].get("location"))
+    def test_location_is_never_written(self) -> None:
+        # isIndoor was measured against 27 real swims and disagreed with
+        # the stored Location on 24 of them, so it decides nothing here,
+        # true, false or missing alike.
+        for indoor in (True, False, None):
+            w = {k: v for k, v in self.SWIM.items() if k != "isIndoor"}
+            if indoor is not None:
+                w["isIndoor"] = indoor
+            rows = hek.build_swim_payload(
+                _payload(meta=self.META, workouts=[w]), None, None)
+            self.assertNotIn("location", rows[0])
 
     def test_fields_with_no_source_are_left_unset(self) -> None:
         row = self._one()
@@ -493,6 +493,35 @@ class SwimTests(unittest.TestCase):
              "type": "Walking", "isIndoor": False, "durationSec": 1800},
         ]), None, None)
         self.assertEqual(len(rows), 1)
+
+
+class FixtureSwimTests(unittest.TestCase):
+
+    def test_the_fixture_produces_exactly_three_swims(self) -> None:
+        rows = hek.build_swim_payload(_load(), None, None)
+        self.assertEqual(len(rows), 3)
+
+    def test_every_fixture_swim_has_a_date_and_a_start(self) -> None:
+        for row in hek.build_swim_payload(_load(), None, None):
+            self.assertTrue(row["date"])
+            self.assertTrue(row["start"])
+
+    def test_fixture_swim_starts_are_unique_per_date(self) -> None:
+        rows = hek.build_swim_payload(_load(), None, None)
+        keys = [(r["date"], r["start"]) for r in rows]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_every_fixture_swim_with_laps_has_a_positive_count(self) -> None:
+        for row in hek.build_swim_payload(_load(), None, None):
+            if "laps" in row:
+                self.assertIsInstance(row["laps"], int)
+                self.assertGreater(row["laps"], 0)
+
+    def test_no_fixture_swim_carries_an_unsourced_field(self) -> None:
+        for row in hek.build_swim_payload(_load(), None, None):
+            for field in ("location", "pool_length_m", "strokes", "spl",
+                          "avg_swolf", "stroke_mix", "water_temp_c"):
+                self.assertNotIn(field, row)
 
 
 if __name__ == "__main__":

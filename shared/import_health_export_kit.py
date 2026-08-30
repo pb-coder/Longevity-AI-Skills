@@ -300,6 +300,43 @@ def humidity_percent(raw: float | None) -> float | None:
     return round(raw / 100.0, 1) if raw > 100 else raw
 
 
+def _session_identity_and_common(workout: dict,
+                                 meta: dict,
+                                 since: date | None,
+                                 until: date | None) -> dict | None:
+    """The ``date``/``start`` identity plus the ``end``, ``duration_min``
+    and ``distance_km`` fields shared by every workout-shaped row.
+
+    Returns ``None`` when the workout has no usable start, or falls outside
+    the ``since``/``until`` window, and the caller should skip it entirely.
+    Shared by ``build_workout_payload`` and ``build_swim_payload``, which
+    walk the same event shape and diverge only in the fields specific to
+    each (workout type/source/heart-rate-range vs. laps).
+    """
+    raw_start = workout.get("start")
+    if not raw_start:
+        return None  # unusable without an identity
+    start = hek_time.parse_stamp(raw_start, meta)
+    if not _in_window(start.date(), since, until):
+        return None
+    row = {
+        "date": start.date().isoformat(),
+        "start": start.strftime("%H:%M:%S"),
+    }
+    raw_end = workout.get("end")
+    if raw_end:
+        row["end"] = hek_time.parse_stamp(raw_end, meta).strftime("%H:%M:%S")
+    duration = workout.get("durationSec")
+    if duration is not None:
+        row["duration_min"] = round(duration / 60.0, 1)
+    # Zero distance means the workout carried none, not that it covered
+    # no ground. The retired importer made the same distinction.
+    distance = workout.get("distanceKm")
+    if distance:
+        row["distance_km"] = distance
+    return row
+
+
 def build_workout_payload(payload: dict,
                           since: date | None,
                           until: date | None) -> list[dict]:
@@ -307,26 +344,13 @@ def build_workout_payload(payload: dict,
     meta = payload["meta"]
     rows: list[dict] = []
     for workout in (payload.get("activity") or {}).get("workouts") or []:
-        raw_start = workout.get("start")
-        if not raw_start:
-            continue  # unusable without an identity
-        start = hek_time.parse_stamp(raw_start, meta)
-        if not _in_window(start.date(), since, until):
+        row = _session_identity_and_common(workout, meta, since, until)
+        if row is None:
             continue
-        row = {
-            "date": start.date().isoformat(),
-            "start": start.strftime("%H:%M:%S"),
-            "apple_type": hek_canonical_type(
-                workout.get("type") or "", workout.get("isIndoor")
-            ),
-            "source": normalize_source(workout.get("source")),
-        }
-        raw_end = workout.get("end")
-        if raw_end:
-            row["end"] = hek_time.parse_stamp(raw_end, meta).strftime("%H:%M:%S")
-        duration = workout.get("durationSec")
-        if duration is not None:
-            row["duration_min"] = round(duration / 60.0, 1)
+        row["apple_type"] = hek_canonical_type(
+            workout.get("type") or "", workout.get("isIndoor")
+        )
+        row["source"] = normalize_source(workout.get("source"))
         for key, field in (
             ("averageHeartRateBpm", "avg_hr"),
             ("maxHeartRateBpm", "max_hr"),
@@ -335,11 +359,6 @@ def build_workout_payload(payload: dict,
         ):
             if workout.get(key) is not None:
                 row[field] = workout[key]
-        # Zero distance means the workout carried none, not that it covered
-        # no ground. The retired importer made the same distinction.
-        distance = workout.get("distanceKm")
-        if distance:
-            row["distance_km"] = distance
         rows.append(row)
     rows.sort(key=lambda r: (r["date"], r["start"]))
     return rows
@@ -362,34 +381,25 @@ def build_swim_payload(payload: dict,
     have no source in this format and are left unset rather than guessed —
     sparse merge then preserves whatever history already holds.
 
-    ``Location`` is better than it was: the retired importer could only ever
-    write "Open Water", because HealthAutoExport's location field disagreed
-    with its own indoor flag. Here ``isIndoor`` decides it outright.
+    ``Location`` is left unset too. ``isIndoor`` looks like it should decide
+    Pool vs. Open Water, but measured against 27 real swims it disagrees
+    with the stored Location on 24 of them: every swim it calls indoor
+    carries a GPS route (39 to 287 points), which a pool swim does not
+    produce, and the other disagreements are stored as ``Outdoor Pool``, a
+    third value a two-way flag cannot express at all. This format has no
+    reliable location signal, so the column is left unset and sparse merge
+    preserves whatever the store already has, rather than a real import
+    silently overwriting correct history with a wrong guess.
     """
     meta = payload["meta"]
     rows: list[dict] = []
     for workout in (payload.get("activity") or {}).get("workouts") or []:
         if (workout.get("type") or "") not in SWIM_TYPES:
             continue
-        raw_start = workout.get("start")
-        if not raw_start:
-            continue
-        start = hek_time.parse_stamp(raw_start, meta)
-        if not _in_window(start.date(), since, until):
+        row = _session_identity_and_common(workout, meta, since, until)
+        if row is None:
             continue
 
-        row = {
-            "date": start.date().isoformat(),
-            "start": start.strftime("%H:%M:%S"),
-        }
-        raw_end = workout.get("end")
-        if raw_end:
-            row["end"] = hek_time.parse_stamp(raw_end, meta).strftime("%H:%M:%S")
-        duration = workout.get("durationSec")
-        if duration is not None:
-            row["duration_min"] = round(duration / 60.0, 1)
-        if workout.get("distanceKm"):
-            row["distance_km"] = workout["distanceKm"]
         if workout.get("averageHeartRateBpm") is not None:
             row["avg_hr"] = workout["averageHeartRateBpm"]
         if workout.get("activeEnergyKcal") is not None:
@@ -398,10 +408,6 @@ def build_swim_payload(payload: dict,
         laps = sum(1 for e in workout.get("events") or [] if e.get("type") == "lap")
         if laps:
             row["laps"] = laps
-
-        indoor = workout.get("isIndoor")
-        if indoor is not None:
-            row["location"] = "Pool" if indoor else "Open Water"
 
         rows.append(row)
     rows.sort(key=lambda r: (r["date"], r["start"]))

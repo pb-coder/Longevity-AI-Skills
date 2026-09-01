@@ -1,7 +1,7 @@
 # Exercises Database
 
 Organized by primary muscle group > movement pattern. Tags:
-- `[BB]` Barbell `[DB]` Dumbbell `[Cable]` `[Machine]` `[BW]` Bodyweight `[Smith]` `[LM]` Landmine `[Band]` `[Plate]` loose weight plate
+- `[BB]` Barbell `[DB]` Dumbbell `[Cable]` `[Machine]` `[BW]` Bodyweight `[Smith]` `[LM]` Landmine `[Band]` `[Plate]` loose weight plate `[Furniture]` chair / table / bed / desk / step edge `[Towel]` towel or bedsheet, incl. floor slider `[Door]` closed latched solid-core door + towel or sheet
 - `+muscle` = synergist (coach counts as 0.5 set for that muscle)
 - `◆` = lengthened-position emphasis (prioritize per §5 of training science)
 
@@ -52,6 +52,12 @@ Organized by primary muscle group > movement pattern. Tags:
 - Push-Up [BW] — +front delt, +triceps
 - Dip [BW] — +front delt, +triceps ◆
 - Wide Chest Press Machine [Machine] — +front delt, +triceps
+- Incline Push-Up [Furniture] — +front delt, +triceps
+- Decline Push-Up [Furniture] — +front delt, +triceps
+- Deficit Push-Up [Furniture] — +front delt, +triceps ◆
+- Diamond Push-Up [BW] — +front delt, +triceps
+- Archer Push-Up [BW] — +front delt, +triceps
+- One-Arm Incline Push-Up [Furniture] — +front delt, +triceps
 
 ### Chest Isolation
 - Pec Deck [Machine]
@@ -79,6 +85,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Lat Pulldown Machine [Machine] — +biceps
 - Pullover Machine [Machine] — +chest ◆
 - Straight-Arm Pulldown [Cable]
+- Steep Sheet Door Row [Door] — +biceps, +rear delt ◆
 
 ### Horizontal Pull (Compound)
 - Barbell Row [BB] — +biceps, +rear delt
@@ -94,6 +101,11 @@ Organized by primary muscle group > movement pattern. Tags:
 - Seal Row [BW] — +biceps, +rear delt
 - Landmine Row [LM] — +biceps, +rear delt
 - Low Row Machine [Machine] — +biceps, +rear delt
+- Table Inverted Row [Furniture] — +biceps, +rear delt
+- Feet-Elevated Table Inverted Row [Furniture] — +biceps, +rear delt
+- Underhand Table Row [Furniture] — +biceps, +rear delt
+- Doorway Towel Row [Door] — +biceps, +rear delt
+- Single-Arm Doorway Towel Row [Door] — +biceps, +rear delt
 
 ### Back — Other
 - Conventional Deadlift [BB] — +glutes, +hamstrings, +erectors (primary: posterior chain)
@@ -103,6 +115,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - 45 Degree Back Extension [Machine] — +glutes, +hamstrings (primary: erectors/lower back)
 - Back Extension Machine [Machine] — +glutes, +hamstrings (primary: erectors/lower back)
 - Superman [BW]
+- Bed-Edge Back Extension [Furniture] — +glutes, +hamstrings (primary: erectors/lower back) ◆
 
 ---
 
@@ -116,6 +129,9 @@ Organized by primary muscle group > movement pattern. Tags:
 - Barbell Push Press [BB] — +triceps
 - Landmine Press [LM] — +triceps, +upper chest
 - Viking Press Machine [Machine] — +triceps, +upper chest
+- Pike Push-Up [BW] — +triceps, +upper chest
+- Elevated Pike Push-Up [Furniture] — +triceps, +upper chest
+- Deficit Elevated Pike Push-Up [Furniture] — +triceps, +upper chest ◆
 
 ### Lateral Delt (Isolation)
 - Dumbbell Lateral Raise [DB]
@@ -124,17 +140,22 @@ Organized by primary muscle group > movement pattern. Tags:
 - Cable Front Raise [Cable]
 - Dumbbell Front Raise [DB]
 - Cable Upright Row [Cable] — +traps
+- Wall-Lean Side Slide [BW]
+- Self-Resisted Lateral Raise [BW]
 
 ### Rear Delt (Isolation)
 - Rear Delt Fly Machine [Machine]
 - Dumbbell Rear Delt Fly [DB]
 - Cable Face Pull [Cable] — +external rotators
 - Cable Rear Delt Row [Cable]
+- Wide-Elbow Doorway Towel Row [Door] — +traps
 
 ### Traps
 - Dumbbell Shrug [DB]
 - Cable Shrug [Cable]
 - Incline Y-Raise [DB] — +rear delts
+- Prone Y-T-W Raise [BW] — +rear delts
+- Reverse Snow Angel [BW] — +rear delts
 
 ---
 
@@ -168,6 +189,8 @@ Organized by primary muscle group > movement pattern. Tags:
 - Close Grip Barbell Curl [BB]
 - Wide Grip Barbell Curl [BB]
 - Drag Curl [BB]
+- Self-Resisted Curl [BW]
+- Towel Isometric Curl [Towel]
 
 ### Isolation — Shortened Position
 - Spider Curl [DB]
@@ -192,6 +215,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Dumbbell Tricep Overhead Extension [DB] ◆
 - Cable Overhead Extension [Cable] ◆
 - Barbell Skull Crusher [BB] ◆
+- Bodyweight Skull Crusher [Furniture] ◆
 
 ### Isolation — Standard
 - Cable Tricep Pushdown [Cable]
@@ -199,6 +223,7 @@ Organized by primary muscle group > movement pattern. Tags:
 - Cable Kickback [Cable]
 - Tricep Extension Machine [Machine]
 - Tricep Dip Machine [Machine] — +chest, +front delt
+- Chair Bench Dip [Furniture] — +chest, +front delt
 
 ---
 
@@ -226,10 +251,19 @@ Organized by primary muscle group > movement pattern. Tags:
 - Cable Step-Up [Cable] — +glutes
 - Bulgarian Split Squat Jump [BW] — +glutes
 - Dumbbell Split Squat [DB] — +glutes
+- Bodyweight Split Squat [BW] — +glutes
+- Bodyweight Bulgarian Split Squat [Furniture] — +glutes ◆
+- ATG Split Squat [BW] — +glutes ◆
+- Step-Up [Furniture] — +glutes
+- Deep Step-Up [Furniture] — +glutes ◆
+- Shrimp Squat [BW] — +glutes ◆
+- Cossack Squat [BW] ◆
+- Wall Sit [BW]
 
 ### Quad Isolation
 - Leg Extension [Machine]
 - Leg Press [Machine] — +glutes (foot placement dependent)
+- Reverse Nordic Curl [BW] ◆
 
 ---
 
@@ -242,6 +276,9 @@ Organized by primary muscle group > movement pattern. Tags:
 - Cable Romanian Deadlift [Cable] — +glutes ◆
 - Smith Machine Romanian Deadlift [Smith] — +glutes ◆
 - Barbell Good Morning [BB] — +erectors ◆
+- Bodyweight Single-Leg Romanian Deadlift [BW] — +glutes ◆
+- Long-Lever Glute Bridge [BW] — +glutes
+- Single-Leg Long-Lever Glute Bridge [Furniture] — +glutes
 
 ### Hamstring Isolation
 - Leg Curl (Lying) [Machine]
@@ -249,6 +286,9 @@ Organized by primary muscle group > movement pattern. Tags:
 - Standing Leg Curl Machine [Machine]
 - Cable Standing Leg Curl [Cable]
 - Nordic Hamstring Curl [BW] ◆
+- Sliding Leg Curl [Towel] ◆
+- Single-Leg Sliding Leg Curl [Towel] ◆
+- Assisted Nordic Hamstring Curl [Furniture] ◆
 
 ---
 
@@ -262,6 +302,8 @@ Organized by primary muscle group > movement pattern. Tags:
 - Cable Hip Thrust [Cable]
 - Reverse Hyperextension Machine [Machine] — +hamstrings, +erectors
 - Dumbbell Hip Thrust [DB]
+- Elevated Single-Leg Hip Thrust [Furniture]
+- Bed Reverse Hyperextension [Furniture] — +hamstrings, +erectors
 
 (No hip-thrust variant credits +hamstrings, and that is deliberate — but read
 the next paragraph before treating it as settled. The knee stays flexed and
@@ -305,7 +347,33 @@ previous state.)
 ## ADDUCTORS
 - Hip Adductor Machine [Machine]
 - Cable Hip Adduction [Cable]
+- Copenhagen Plank (Short Lever) [Furniture]
+- Copenhagen Plank (Long Lever) [Furniture]
+- Copenhagen Adduction [Furniture]
 
+
+(Cossack Squat sits under QUADS and carries NO +adductors tag, deliberately.
+The adductors are loaded at long length in the bottom position, so the tag looks
+obviously right — and adding it broke
+`test_w4_specs.test_structurally_unsynergised_muscles_are_not_restated`, which is
+the guard that caught it. `adductors` is one of five muscles (with core,
+side_delts, calves, neck) that appear as a synergist NOWHERE in the catalog, and
+that is load-bearing: `SYNERGIST_CREDIT_OFFSET` omits them, so their direct-set
+landmark and their fractional landmark are the same number. One `+adductors` tag
+makes the two units diverge with no measured offset to convert between them, and
+the adductor target silently starts being read in the wrong unit. The tag is
+withheld until someone measures the conversion, exactly as the hip thrust's
++hamstrings tag is. Adductor volume comes from the three Copenhagen entries,
+which are direct.)
+
+(The three Copenhagen entries carry NO synergist credit, and that is deliberate.
+The obliques do work isometrically to hold the position — Ishøi et al., Scand J Med
+Sci Sports 2016 (DOI 10.1111/sms.12585) is an adductor-strength trial and measures
+no trunk EMG, so the magnitude is unmeasured. `MUSCLE_ALIASES` has no `obliques`
+token either; the nearest legal token is `core`, and spending it here would credit
+0.5 core sets per Copenhagen set on a judgement call. Same reasoning as the hip
+thrust's withheld +hamstrings tag under GLUTES. Overturn it with a study that
+measures trunk EMG in the Copenhagen, not with the mechanistic argument.)
 ---
 
 ## CALVES
@@ -315,6 +383,8 @@ previous state.)
 - Cable Standing Calf Raise [Cable]
 - Dumbbell Standing Calf Raise [DB] ◆
 - Rotary Calf Machine [Machine] ◆
+- Single-Leg Calf Raise on Edge [Furniture] ◆
+- Bent-Knee Single-Leg Calf Raise [Furniture]
 
 ---
 
@@ -341,6 +411,9 @@ muscle, and its absence is deliberate, not an oversight.)
 - V-Up [BW]
 - Flutter Kick [BW]
 - Mountain Climber [BW]
+- Reverse Crunch [BW]
+- Hollow Rocks [BW]
+- Tuck Dragon Flag [Furniture]
 
 (Hanging Knee Raise is the rung below Hanging Leg Raise, not a synonym for it —
 the knee-flexed version shortens the lever and is the entry point to hanging
@@ -355,6 +428,9 @@ for a movement with 11 logged sessions.)
 - Hollow Body Hold [BW]
 - Ab Wheel Rollout [BW]
 - L-Sit [BW]
+- Long-Lever Plank [BW]
+- Body Saw [Towel]
+- Towel Rollout (Kneeling) [Towel]
 
 (Ab Wheel Rollout is the only progressable rung in this subsection — every other
 entry is a fixed-position hold whose only overload knob is time. Escamilla et
@@ -379,6 +455,8 @@ rollout distance.)
 - Cable Pallof Press [Cable]
 - Bird Dog [BW]
 - Plate Around the World [Plate]
+- Plank Shoulder Taps [BW]
+- Single-Arm Plank [BW]
 
 (Plate Around the World carries NO peer-reviewed EMG or intervention data — it is
 the weakest-evidenced entry in this file. Its anti-rotation classification is a
@@ -389,6 +467,7 @@ never let it satisfy a flexion requirement.)
 ### Anti-Lateral-Flexion
 - Side Plank [BW]
 - Suitcase Carry [DB] — +traps, +forearms
+- Feet-Elevated Side Plank [Furniture]
 
 (Suitcase Carry is the loaded rung above Side Plank and the reason this
 subsection is not bodyweight-only. Ellestad et al., Int J Exerc Sci
@@ -413,6 +492,8 @@ stays under FULL BODY with no core credit for exactly this reason.)
 - Neck Flexion Machine [Machine]
 - Neck Extension Machine [Machine]
 - Neck Bridge [BW]
+- Self-Resisted Neck Isometric [BW]
+- Supine Neck Curl [Furniture]
 
 ---
 

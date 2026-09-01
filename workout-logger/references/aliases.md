@@ -56,8 +56,59 @@
 | Rotary Calf | Rotary Calf Machine | — |
 | Sotting Leg Curl | Leg Curl (Seated) | — |
 | cable Calf Raise | Cable Standing Calf Raise | — |
+| Cable Crunch | Kneeling Cable Crunch | — |
+| Pike Pushup, Pike Push Up | Pike Push-Up | — |
+| Elevated Pike Pushup, Elevated Pike Push Up, Feet Elevated Pike Push-Up | Elevated Pike Push-Up | — |
+| Deficit Pushup, Deficit Push Up | Deficit Push-Up | — |
+| Diamond Pushup, Diamond Push Up, Close Grip Push-Up, Triangle Push-Up | Diamond Push-Up | — |
+| Incline Pushup, Incline Push Up | Incline Push-Up | — |
+| Decline Pushup, Decline Push Up, Feet Elevated Push-Up | Decline Push-Up | — |
+| Archer Pushup, Archer Push Up | Archer Push-Up | — |
+| Table Row, Inverted Row, Desk Row, Under Table Row | Table Inverted Row | the improvised horizontal pull; load-test the table before using it |
+| Feet Elevated Table Row, Feet-Elevated Inverted Row | Feet-Elevated Table Inverted Row | — |
+| Doorway Row, Towel Door Row, Door Towel Row | Doorway Towel Row | — |
+| Sheet Door Row, Steep Door Row, Door Sheet Row | Steep Sheet Door Row | — |
+| Reverse Nordic | Reverse Nordic Curl | — |
+| Copenhagen, Copenhagen Plank | Copenhagen Plank (Short Lever) | AMBIGUOUS — defaults to the short-lever entry rung. Resolve to `Copenhagen Plank (Long Lever)` only when the input says foot or ankle on the support. Ask if unclear |
+| Sliding Curl, Towel Leg Curl, Slider Leg Curl | Sliding Leg Curl | needs a hard smooth floor; on carpet the movement does not work |
+| Hollow Rock | Hollow Rocks | — |
+| Dragon Flag | Tuck Dragon Flag | only the tuck rung is in the catalog. Revisit this row if the full Dragon Flag is ever added, or it will silently swallow the harder rung |
+| Shoulder Taps | Plank Shoulder Taps | — |
+| YTW, Y-T-W Raise, Y T W Raise, Prone YTW | Prone Y-T-W Raise | — |
+| Chair Dip, Bench Dip, Tricep Bench Dip | Chair Bench Dip | NOT the parallel-bar `Dip` — different loading, and a larger shoulder-extension range |
+| Long Lever Plank, RKC Plank | Long-Lever Plank | — |
+| Towel Rollout, Slider Rollout | Towel Rollout (Kneeling) | kneeling is the entry rung |
+| Single Arm Plank, One Arm Plank | Single-Arm Plank | — |
+| Cossack | Cossack Squat | — |
+| Step Up | Step-Up | — |
+| Deep Step Up | Deep Step-Up | — |
+| Wall Lean Lateral Raise, Wall Lean Side Slide | Wall-Lean Side Slide | do NOT collapse into `Wall Slide` — that is a WARMUP entry with no primary muscle and zero set credit |
+| Self Resisted Curl, Self-Resistance Curl | Self-Resisted Curl | — |
+| Self Resisted Lateral Raise | Self-Resisted Lateral Raise | — |
+| Bodyweight Skullcrusher, BW Skull Crusher, Bodyweight Skull Crushers | Bodyweight Skull Crusher | — |
+| Calf Raise on Edge, Single Leg Calf Raise, One Leg Calf Raise | Single-Leg Calf Raise on Edge | bodyweight off a step or book edge — NOT `Calf Raise Machine` |
+| Elevated Hip Thrust, Shoulder Elevated Hip Thrust | Elevated Single-Leg Hip Thrust | NOT `Single Leg Hip Thrust`, which is the barbell-loaded entry |
+| Assisted Nordic, Nordic Regression | Assisted Nordic Hamstring Curl | NOT `Nordic Hamstring Curl` — the assisted entry is the rung below it |
+| Bed Back Extension, Bed Edge Back Extension | Bed-Edge Back Extension | — |
+| Neck Isometrics, Self Resisted Neck | Self-Resisted Neck Isometric | — |
 
 ## Deliberately NOT aliased
+
+`Bulgarian Split Squat` (bare, with no equipment word) has no alias row and must
+not be given one. The catalog now carries four variants — `Dumbbell`, `Cable`,
+`Bodyweight` and the `Bulgarian Split Squat Jump` — so a bare input has no
+correct default. Guessing merges two different progression series: the gym
+dumbbell history and the bodyweight travel work would land on one exercise name,
+and `estimated_1rm` would read the bodyweight sets as a collapse to 0 kg on the
+loaded lift. Ask which one.
+
+The same rule covers three bare names whose easy rung must stay the default,
+because each now has a harder same-pattern sibling in the catalog:
+`Push-Up` stays the floor push-up and never resolves to a deficit or archer
+variant; `Plank` stays the standard plank and never resolves to `Long-Lever
+Plank`; `Side Plank` stays the floor version and never resolves to
+`Feet-Elevated Side Plank`. Aliasing any of them upward would silently rewrite
+logged history into a harder movement the user did not do.
 
 `Band Pull-Apart` (and `Band Pull Apart` / `Band Pullapart` / `Resistance Band
 Pull-Apart`) has no alias row, and must not be given one. A row mapping it to

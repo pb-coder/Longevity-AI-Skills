@@ -29,6 +29,8 @@
 | Vegan protein dose / leucine threshold | §23 Vegan Protein & Leucine |
 | Core / abdominal programming        | §24 Core Training |
 | Planning workouts / programming    | §1-§11, §14-§24 combined |
+| Break, layoff, illness or a deliberately reduced dose | `detraining-and-minimal-dose.md` |
+| No gym / bodyweight-only period, and what it cannot train | `no-equipment-training.md` |
 
 ---
 

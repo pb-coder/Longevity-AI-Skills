@@ -805,8 +805,10 @@ class PlanOpenerIsNumberCheckedTests(unittest.TestCase):
         self.assertEqual([e for e in errors if e.startswith("plan opener")], [])
 
     def test_the_renderer_passes_it(self) -> None:
+        # The call lives in the shared check sequence that both
+        # `render_dashboard.py` and `check_plan.py` run.
         source = (Path(__file__).resolve().parents[1] / "workout-coach"
-                  / "scripts" / "render_dashboard.py").read_text(encoding="utf-8")
+                  / "lib" / "plan_checks.py").read_text(encoding="utf-8")
         self.assertIn("payload=j,", source)
 
     def test_the_body_is_split_from_the_opener(self) -> None:

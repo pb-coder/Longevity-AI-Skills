@@ -1,16 +1,39 @@
-# Substitute protocols — what to write when the gate refuses strength
+# Substitute protocols — what to write when the gate restricts strength
 
-When `session_recommendation.tier` is **A**, **B**, or **C**, the coach does NOT write the planned strength session as-is. Instead, the workout markdown is filled from one of the templates below. The substitute's `kind` field tells you which template to use.
+When `session_recommendation.tier` is **A**, **B**, or **C**, the coach does NOT write the planned strength session as-is.
+
+- **Tier C** is automatic: fill the markdown from the Tier C template below.
+- **Tier A and B are never decided alone.** Stop after `read_tracker`, before writing `coach_reads.json` or the plan, and ask the user in chat (protocol below). Fill the markdown from the template for the option they choose.
 
 Reasoning behind the gate is in the Phase 2 preamble of `SKILL.md`. The thresholds and per-tier triggers are in `lib/constants.py:SESSION_GATE_THRESHOLDS`. The decision lives in `lib/health.py:compute_session_recommendation`.
 
-**The templates below are copy-me markdown and `validate_workout_md` runs over the result.** Its em-dash rule allows one only on the `# Workout plan — <date>` title line and on an indented `  — cue` sub-bullet. A `> Today's call:` or `> Why:` line is neither, so an em-dash there is a blocking error and the render exits 2. Use a period, comma, semicolon or colon when you fill these in.
+**No template contains cardio, and no plan does.** Cardio data feeds the gate and the assessment; it is never prescribed. The gate's `substitute.kind` can still read `zone_2`: that names the gate's own read of the signals, and it is one of the reasons you show the user when you ask, not a section to write.
+
+**The templates below are copy-me markdown and `validate_workout_md` runs over the result.** Its em-dash rule allows one only on the `# Workout plan — <date>` title line and on an indented `  — cue` sub-bullet. A `> Today's call:` or `> Why:` line is neither, so an em-dash there is a blocking error and `check_plan.py` exits 2. Use a period, comma, semicolon or colon when you fill these in.
+
+**The `Assessment: ./<date>-assessment.html` line** appears in every template below. Write it only on a run that renders the report; leave it out otherwise.
 
 ---
 
-## Tier A — `rest` (illness / acute under-recovery)
+## Tier A (`rest`) and Tier B (`reactive_deload`): ask first
 
-The data says rest. Refuse to write strength. The workout markdown is short.
+Tell the user, in one short message (or a structured question when the client offers one):
+
+- the tier and its `label`, plus `substitute.kind`;
+- the gate's `headline`;
+- the `rationale` notes that fired it.
+
+Then offer three options and wait for the answer:
+
+1. **Rest day.** Use the rest-day template below.
+2. **Lighter strength**: fewer sets, held weights. Use the lighter-strength template below, against the tracker JSON as it is. On `reactive_deload` the set budget is half the base, and `check_plan.py` judges each session against it. **On Tier A the set budget is 0, which the budget check reads as "no budget" and skips**, so nothing checks the set count: halve the sets yourself and say in the chat summary that the budget check did not run. On Tier A and on `reactive_deload` the core and arm VOLUME floors drop to warnings (it is a declared deload), while diversity and placement stay blocking.
+3. **Normal strength anyway**, for example planned for the following week. Regenerate the tracker JSON with `read_tracker.py --override-gate`, then follow "Override behavior" at the end of this file.
+
+Do not suggest a default beyond the gate's own call, and do not write any file until the user has answered.
+
+---
+
+## Option 1 — Rest day
 
 ```markdown
 # Workout plan — <date>
@@ -25,7 +48,6 @@ Assessment: ./<date>-assessment.html
 Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
-- 20-min easy walk (RPE 2–3, conversational pace)
 - Hydration: front-load fluids today
 - Sleep priority: 8h target tonight, no caffeine after noon
 
@@ -36,46 +58,17 @@ Date: ___
 - If wrist temp returns to baseline AND RHR drops AND HRV is back in the 60-day band, the next planned session is back on
 ```
 
-**Do not** add strength alternatives. **Do not** offer "if you feel better, do X". The user can override explicitly; the default is rest.
+**Do not** add strength alternatives or any cardio. **Do not** offer "if you feel better, do X". The user already chose rest.
 
 ---
 
-## Tier B — `zone_2` (HRV crash / TSB high fatigue / WoW spike)
+## Option 2 — Lighter strength (reactive-deload week)
 
-Zone 2 cardio + light mobility, no strength.
-
-```markdown
-# Workout plan — <date>
-> Today's call: Zone 2 day, not strength.
-> Why: <rationale[0].note>
->      <rationale[1].note>
-
-Assessment: ./<date>-assessment.html
-
-## Zone 2 cardio + mobility
-Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
-
-- Zone 2 cardio: 45–60 min at ~<estimated_max_hr × 0.65> bpm
-  — bike / outdoor walk-jog / rower — choose by what's accessible
-  — talk-test pace: full sentences without gasping
-- Mobility: 15 min
-  — hip 90/90, thoracic open-book, ankle dorsiflexion, shoulder CARs
-- Optional: sauna 15 min ≥80°C (if available)
-
-## Re-evaluate tomorrow
-- If HRV returns to baseline and TSB lifts, strength is back on
-```
-
----
-
-## Tier B — `reactive_deload_week` (MRV breach / stalled lifts / unmarked deload)
-
-A full week of deloading. The markdown lists the deload sessions for the whole week, not one day.
+Fewer sets, held weights. The markdown lists the lighter sessions for the whole week, not one day.
 
 ```markdown
 # Workout plan — <date>
-> Today's call: Reactive deload this week.
+> Today's call: Lighter strength this week. Fewer sets, held weights.
 > Why: <rationale[0].note>
 >      <rationale[1].note>
 
@@ -109,34 +102,7 @@ Recovery: sauna ___ / cold ___ / rlt ___
 - Return to normal volume next week if `recovery.score ≥ 6` and HRV trend back in band
 ```
 
-The user's session count for the week (the `/coach plan N sessions` arg) controls how many `## Deload Session N` blocks you write.
-
----
-
-## Tier B — `mobility_sauna` (variant, rare — used when HRV is crashed but TSB / load are fine)
-
-Lower stimulus than Zone 2, focused on parasympathetic recovery.
-
-```markdown
-# Workout plan — <date>
-> Today's call: Mobility + sauna only.
-> Why: <rationale[0].note>
-
-Assessment: ./<date>-assessment.html
-
-## Mobility + sauna
-Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
-
-- Mobility flow: 30 min
-  — hip 90/90, thoracic rotations, shoulder dislocates, ankle rocks, deep squat hold
-  — RPE 2–3, no breath-holds, no force
-- Sauna: 15–20 min at ≥80°C if available (heat-shock-protein band)
-- Sleep priority tonight, hydration through the day
-
-## Re-evaluate tomorrow
-- HRV recovery first, then strength can come back
-```
+The user's session count for the week (the `/coach plan N sessions` arg) controls how many `## Deload Session N` blocks you write. Every set is still its own `///` entry; the `<halved set count>` placeholder above means writing that many entries.
 
 ---
 
@@ -206,10 +172,15 @@ Assessment: ./<date>-assessment.html
 
 ## Override behavior
 
-If the user explicitly requests an override ("ignore the rest call, plan strength anyway"), the coach can generate the planned strength session BUT must:
+Two ways in, one path:
 
-1. Open the markdown with a visible note: `> OVERRIDE: gate recommended <tier label>; user requested strength anyway.`
-2. Apply the Tier C modifications (−25% volume on secondaries, hold loads, no finisher) **regardless** — the override is for the session type, not the load discipline.
-3. Cite the rationale signals in the note so the next session can reference them.
+- **Tier A or B**: the user picked option 3 ("normal strength anyway") when asked.
+- **Tier C**: the user explicitly asks to train normally after seeing the call ("ignore the downgrade, plan normally").
 
-Default behavior is to honor the recommendation. Never override on assumption.
+Either way:
+
+1. Regenerate the tracker JSON with `read_tracker.py --override-gate`. It rewrites the gate to Tier D (`green`, full set budget) and keeps the original call in `override_message` and the first `rationale` entry.
+2. Write `coach_reads.json` against that JSON, then plan a normal Tier D block with the full Phase 2 rules. Do not hand-strip a restriction from a JSON that still carries it: the checks would judge the plan against the old tier.
+3. Open the markdown with a visible note so the next session can see it: `> OVERRIDE: gate recommended Tier <X> (<label>); user chose normal strength.` followed by the original rationale notes.
+
+Default behavior is to honor the gate's call on Tier C and to ask on Tier A and B. Never override on assumption.

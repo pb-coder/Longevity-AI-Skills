@@ -54,6 +54,8 @@ from workout_coach.lib.render_validators import (
 
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
 RENDER_DASHBOARD = SKILLS_ROOT / "workout-coach" / "scripts" / "render_dashboard.py"
+# The check sequence both `render_dashboard.py` and `check_plan.py` run.
+PLAN_CHECKS = SKILLS_ROOT / "workout-coach" / "lib" / "plan_checks.py"
 
 
 def _load_render_dashboard():
@@ -347,7 +349,7 @@ class MalformedSpecTests(unittest.TestCase):
     def test_the_renderer_does_not_read_the_specs_out_of_the_payload(self) -> None:
         # Structural guard on the ownership decision. One keyword away
         # from silently reinstating the weakening vector.
-        code = [ln for ln in RENDER_DASHBOARD.read_text(encoding="utf-8")
+        code = [ln for ln in PLAN_CHECKS.read_text(encoding="utf-8")
                 .splitlines() if not ln.lstrip().startswith("#")]
         for gone in ("core_spec=", "arm_spec="):
             self.assertEqual([ln for ln in code if gone in ln], [],
@@ -766,7 +768,7 @@ class DeloadPrescribedHandshakeTests(unittest.TestCase):
                                        {"deload_prescribed": False}))
 
     def test_the_renderer_passes_the_block_in(self) -> None:
-        src = RENDER_DASHBOARD.read_text(encoding="utf-8")
+        src = PLAN_CHECKS.read_text(encoding="utf-8")
         self.assertIn("is_deload_week(session_rec, block)", src)
 
 

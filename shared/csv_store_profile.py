@@ -23,6 +23,7 @@ PROFILE_KEYS = (
     "light_therapy_target_per_week", "light_therapy_target_min_per_session",
     "sauna_target_per_week", "session_target_min", "min_per_working_set",
     "session_warmup_min", "strength_sessions_per_week",
+    "muscle_priority_tiers",
 )
 PROFILE_DEFAULTS = {
     "source":                              None,
@@ -61,6 +62,11 @@ PROFILE_DEFAULTS = {
     # target above real attendance silently under-delivers weekly volume
     # and reads as under-training rather than as absence.
     "strength_sessions_per_week":          None,
+    # Per-person priority override, kept as the raw `muscle:tier;...`
+    # string. Parsing and validation live in one place,
+    # ``workout_coach.lib.constants.muscle_priority_tiers``, which also
+    # reports unknown tokens. None means the built-in emphasis set.
+    "muscle_priority_tiers":               None,
 }
 
 
@@ -214,6 +220,10 @@ def _read_profile_cached(person: str) -> dict:
                 i = _coerce_int(v)
                 if i is not None and 1 <= i <= 14:
                     out["strength_sessions_per_week"] = i
+            elif k == "muscle_priority_tiers":
+                s = str(v or "").strip()
+                if s:
+                    out["muscle_priority_tiers"] = s
             else:
                 out["_unknown_rows"].append([row[0], v])
     return out

@@ -54,6 +54,7 @@ For known issues / planned cleanup, see
 | Trajectory-domain gauges and strips | [`lib/render_components_domain.py`](lib/render_components_domain.py) |
 | Coach/workout validation rules / em-dash check / length cap / catalog names | [`lib/render_validators.py`](lib/render_validators.py)::`validate_coach_reads` + `validate_workout_md` |
 | **Whether a plan is allowed to render** (core dose, weekly core distribution, direct-arm floor; block rotation and dose progression warn only, see `BLOCK_ROTATION_ENFORCED` / `DOSE_PROGRESSION_ENFORCED`) | [`lib/render_validators.py`](lib/render_validators.py)::`validate_workout_plan` |
+| **Which checks run, in what order, for every plan** (report or not) | [`lib/plan_checks.py`](lib/plan_checks.py)::`run_plan_checks` — the one sequence `check_plan.py` and `render_dashboard.py` both call. Add a check here, never in a script. |
 | Where this plan sits in its block, and what the dose actually did | [`lib/render_cards_today.py`](lib/render_cards_today.py)::`card_block_position` |
 | Planned-vs-performed ledger, the D5 bench list, dose staleness | [`lib/adherence.py`](lib/adherence.py) |
 | Block artifact, boundary rule, rotation diff, cold-start loads | [`lib/blocks.py`](lib/blocks.py) |
@@ -109,7 +110,8 @@ Skills/workout-coach/
 │   └── code-health-audit.md              snapshot of issues + improvement backlog
 ├── scripts/
 │   ├── read_tracker.py (1375 lines)      CLI: reads CSV store, emits compact tracker JSON
-│   └── render_dashboard.py (386 lines)   CLI: composes the final HTML (thin orchestrator)
+│   ├── check_plan.py                     CLI: runs every plan check, writes nothing (default /coach step 4)
+│   └── render_dashboard.py               CLI: same checks, then composes the opt-in HTML report (thin orchestrator)
 └── lib/
     │
     ├── # ---- Analytics modules (consumed by read_tracker.py) ----
@@ -135,6 +137,7 @@ Skills/workout-coach/
     └── # ---- Renderer modules (consumed by render_dashboard.py) ----
     ├── render_helpers.py (60)            esc, fmt, signed, parse_date — zero-dep helpers
     ├── render_validators.py (2694)       KNOWN_TERMS catalog, validate_coach_reads, validate_workout_md, validate_workout_plan, auto_wrap_terms
+    ├── plan_checks.py                    run_plan_checks: the ordered check sequence both CLIs run
     ├── render_components.py (23)         compatibility facade for component modules
     ├── render_components_load.py (135)   training-load chart + EWMA series
     ├── render_components_recovery.py (259)
@@ -358,7 +361,7 @@ Copy + schema: `validate_coach_reads(coach) -> (errors, warnings)`,
 Content: `validate_workout_plan(text, *, core_spec, arm_spec,
 target_working_sets, budget_by_index, prev_block, plan_date,
 deload_week) -> (errors, warnings)`. This is the blocking entry point
-and the one `render_dashboard.main` calls. It unions:
+and the one `plan_checks.run_plan_checks` calls (for both `check_plan.py` and `render_dashboard.py`). It unions:
 
 | Finding | Function | Axis | Severity |
 | --- | --- | --- | --- |
@@ -641,8 +644,9 @@ remain presentation-only: no disk I/O and no analytics imports.
                                  │
                                  ▼
             ┌───────────────────────────────────────────────────┐
-            │ scripts/render_dashboard.py                       │
-            │   imports from lib/render_*.py                    │
+            │ scripts/check_plan.py (always) and                │
+            │ scripts/render_dashboard.py (report only)         │
+            │   both run lib/plan_checks.run_plan_checks:       │
             │   validates coach_reads.json                      │
             │   validates the workout markdown's COPY, then     │
             │     its CONTENT (validate_workout_plan): core     │
@@ -652,13 +656,17 @@ remain presentation-only: no disk I/O and no analytics imports.
             │     floors demote to warnings; diversity does not.│
             │     Rotation warns only this release, see         │
             │     BLOCK_ROTATION_ENFORCED.                      │
-            │   composes plans/<Person>/<date>-assessment.html  │
+            │   check_plan.py also refuses a coach_reads.json   │
+            │     that is not older than the workout markdown.  │
+            │   render_dashboard.py then composes               │
+            │     plans/<Person>/<date>-assessment.html         │
             └───────────────────────────────────────────────────┘
 ```
 
-**The render is a gate, not a printer.** A plan that fails
-`validate_workout_plan` produces no HTML and exit code 2; the coach must
-fix the plan and re-run. Before 2026-08 every one of those findings was a
+**The checks are a gate, not a printer.** A plan that fails
+`validate_workout_plan` makes `check_plan.py` exit 2 (and the renderer
+produce no HTML); the coach must fix the plan and re-run. The HTML is
+opt-in, the checks are not. Before 2026-08 every one of those findings was a
 stderr line, and the plan that shipped on 2026-07-18 met every numeric
 target the system checked while training one core movement, in one
 pattern category, four times a week.

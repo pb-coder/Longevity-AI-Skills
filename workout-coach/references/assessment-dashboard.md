@@ -13,6 +13,8 @@ The dashboard is produced by **`Skills/workout-coach/scripts/render_dashboard.py
 
 The renderer reads both, validates the coach text, and writes the final HTML to `plans/<Person>/<date>-assessment.html`. Single-file output, no external resources.
 
+**The report is opt-in.** A plain `/coach` run writes `coach_reads.json` and the workout markdown, then runs `scripts/check_plan.py`, and stops. The renderer runs only when the user asks for the report (dashboard, assessment). Both scripts run the same checks through one function, `lib/plan_checks.run_plan_checks`, so a plan that passes one passes the other. `coach_reads.json` is still authored in full on every run: it is the assessment, and it is what lets the report be rendered later without redoing the analysis.
+
 ---
 
 ## Output anatomy
@@ -185,6 +187,8 @@ The tab strip sticks to the top of the viewport on scroll so the user can toggle
 
 ## Usage
 
+Only when the user asked for the report. The default `/coach` run stops after `check_plan.py` (same arguments minus `--out` and `--person`; see the Pipeline in `SKILL.md`).
+
 ```
 python3 Skills/workout-coach/scripts/render_dashboard.py \
   --tracker /tmp/tracker.json \
@@ -194,4 +198,4 @@ python3 Skills/workout-coach/scripts/render_dashboard.py \
   --person <Person>
 ```
 
-The renderer prints one line on success and exits 0; on validation failure it prints one line per error to stderr and exits 2. The HTML is written atomically (last; the file is replaced on success, untouched on failure).
+The renderer prints one line on success and exits 0; on validation failure it prints one line per error to stderr and exits 2, with exactly the same messages `check_plan.py` prints for the same inputs. The HTML is written atomically (last; the file is replaced on success, untouched on failure).

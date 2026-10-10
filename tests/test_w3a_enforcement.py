@@ -54,6 +54,8 @@ from workout_coach.lib.render_validators import (
 
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
 RENDER_DASHBOARD = SKILLS_ROOT / "workout-coach" / "scripts" / "render_dashboard.py"
+# The check sequence both `render_dashboard.py` and `check_plan.py` run.
+PLAN_CHECKS = SKILLS_ROOT / "workout-coach" / "lib" / "plan_checks.py"
 
 
 def _load_render_dashboard():
@@ -347,7 +349,7 @@ class MalformedSpecTests(unittest.TestCase):
     def test_the_renderer_does_not_read_the_specs_out_of_the_payload(self) -> None:
         # Structural guard on the ownership decision. One keyword away
         # from silently reinstating the weakening vector.
-        code = [ln for ln in RENDER_DASHBOARD.read_text(encoding="utf-8")
+        code = [ln for ln in PLAN_CHECKS.read_text(encoding="utf-8")
                 .splitlines() if not ln.lstrip().startswith("#")]
         for gone in ("core_spec=", "arm_spec="):
             self.assertEqual([ln for ln in code if gone in ln], [],
@@ -362,8 +364,12 @@ class TierBudgetTests(unittest.TestCase):
         self.assertIsNone(tier_budget_by_index({"tier": "D"}, None))
         self.assertIsNone(tier_budget_by_index(None, 0))
 
-    def test_tier_a_is_a_rest_day(self) -> None:
-        self.assertEqual(tier_budget_by_index({"tier": "A"}, 24)(0), 0)
+    def test_tier_a_lighter_strength_gets_half_the_budget(self) -> None:
+        # A Tier A rest-day plan has no workouts to judge; the budget only
+        # matters when the user chose lighter strength, and 0 used to
+        # switch the check off rather than enforce anything.
+        f = tier_budget_by_index({"tier": "A", "label": "rest"}, 24)
+        self.assertEqual([f(i) for i in range(4)], [12, 12, 12, 12])
 
     def test_a_reactive_deload_halves_the_whole_week(self) -> None:
         f = tier_budget_by_index({"tier": "C", "label": "reactive_deload"}, 24)
@@ -766,7 +772,7 @@ class DeloadPrescribedHandshakeTests(unittest.TestCase):
                                        {"deload_prescribed": False}))
 
     def test_the_renderer_passes_the_block_in(self) -> None:
-        src = RENDER_DASHBOARD.read_text(encoding="utf-8")
+        src = PLAN_CHECKS.read_text(encoding="utf-8")
         self.assertIn("is_deload_week(session_rec, block)", src)
 
 

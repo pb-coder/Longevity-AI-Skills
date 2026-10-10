@@ -76,8 +76,9 @@ write code or prose that offers to re-extract anything from it.
 ├── <OtherPerson>/                          # same shape (folders appear only when populated)
 ├── plans/                                 # /coach output — dated per generation; one folder per person
 │   ├── <Person>/
-│   │   ├── YYYY-MM-DD-assessment.html     # self-contained dashboard (inline CSS / SVG / JS, no CDN)
-│   │   ├── YYYY-MM-DD-workout.md          # lean exercise list — bullets only, no tables, sparse sub-bullet notes
+│   │   ├── YYYY-MM-DD-coach_reads.json    # the assessment (headline + card callouts); written every run
+│   │   ├── YYYY-MM-DD-workout.md          # lean strength-only exercise list — bullets only, no tables, sparse sub-bullet notes
+│   │   ├── YYYY-MM-DD-assessment.html     # self-contained dashboard (inline CSS / SVG / JS, no CDN); only when the report is asked for
 │   │   └── …
 │   └── <OtherPerson>/
 │       └── …
@@ -235,7 +236,7 @@ workout-logger/       # /log — append a parsed workout to the tracker.
                       # confirmed (`log: <N> rows, <dates>`).
   references/         # aliases.md, parsing-rules.md, common-mistakes.md
 
-workout-coach/        # /coach — read tracker, report, plan next workout.
+workout-coach/        # /coach — read tracker, assess, plan next workout (report on request).
   SKILL.md            # Report template includes a REQUIRED ### Swim
                       # subsection that fires when swim_summary is in the
                       # JSON; gated on data presence.
@@ -267,7 +268,20 @@ workout-coach/        # /coach — read tracker, report, plan next workout.
                       #                  gate — confidence drops one band
                       #                  when a high-weight z-scored driver
                       #                  has too few recent readings).
+                      #   plan_checks.py — run_plan_checks: the ONE plan
+                      #                  check sequence (tracker payload,
+                      #                  coach_reads cross-check, workout
+                      #                  copy, core / arm floors, set
+                      #                  budget, rotation, opener numbers).
+                      #                  check_plan.py and render_dashboard.py
+                      #                  both call it; neither keeps a copy.
   scripts/
+    check_plan.py     # Step 4 of every /coach run. Runs run_plan_checks plus
+                      # the coach_reads-older-than-workout.md order check,
+                      # writes nothing, exits 0 or 2.
+    render_dashboard.py
+                      # The opt-in HTML report. Same checks (run_plan_checks),
+                      # then renders plans/<Person>/<date>-assessment.html.
     read_tracker.py   # CLI + main(). Imports the lib/ modules and orchestrates
                       # the JSON output. Emits one JSON blob organised around
                       # session-level signals, not raw arrays. Top blocks:
@@ -504,21 +518,32 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   conflict-copy patterns (`* [0-9].*` and friends), so a `file 2.csv`
   sync artifact never lands in a commit and never becomes the file a
   later read picks up.
-- **Coach plan output is split into a dated HTML dashboard + a lean
-  workout markdown, both under `plans/<Person>/`.** Each `/coach` run
-  writes two paired files: `plans/<Person>/<YYYY-MM-DD>-assessment.html`
-  (self-contained: inline CSS / SVG / JS, no CDN, renders identically
-  offline) and `plans/<Person>/<YYYY-MM-DD>-workout.md` (bullets only,
-  no tables, sparse sub-bullet notes — 0-2 per workout, never rationale
-  or "last time X" history). The dashboard carries the full assessment
-  (recovery score + drivers, TSB curve over 90 days, per-muscle volume
-  bars, activity rings, sleep, strength progression, HRV / RHR / wrist
-  temp / VO2max / bodyweight sparklines, the `trajectory_energy` card
-  (measured TDEE with its active / basal split, gated on `energy_28d`),
-  recovery practices including cold-air outdoor temperature when
-  present, week-over-week comparison)
-  and per-card "coach's read" lines that absorb what the old `## Why
-  this plan` block used to do. Old root-level files (`workout_plan -
+- **Coach plan output is a dated assessment + a lean strength-only
+  workout markdown, both under `plans/<Person>/`; the HTML dashboard is
+  opt-in.** Every `/coach` run writes
+  `plans/<Person>/<YYYY-MM-DD>-coach_reads.json` (the assessment:
+  headline + per-card "coach's read" lines that absorb what the old
+  `## Why this plan` block used to do) and then
+  `plans/<Person>/<YYYY-MM-DD>-workout.md` (bullets only, no tables,
+  sparse sub-bullet notes — 0-2 per workout, never rationale or "last
+  time X" history), in that order, and runs
+  `workout-coach/scripts/check_plan.py`, which must exit 0. The plan
+  holds strength workouts only: cardio data feeds the analysis
+  (recovery, training load, fatigue, the cardio cards) and is never
+  prescribed. `plans/<Person>/<YYYY-MM-DD>-assessment.html` is rendered
+  only when the user asks for the report (self-contained: inline CSS /
+  SVG / JS, no CDN, renders identically offline). It carries the full
+  assessment (recovery score + drivers, TSB curve over 90 days,
+  per-muscle volume bars, activity rings, sleep, strength progression,
+  HRV / RHR / wrist temp / VO2max / bodyweight sparklines, the
+  `trajectory_energy` card (measured TDEE with its active / basal
+  split, gated on `energy_28d`), recovery practices including cold-air
+  outdoor temperature when present, week-over-week comparison). Both
+  scripts run the same checks through
+  `workout_coach.lib.plan_checks.run_plan_checks`. Recovery-gate Tier A
+  or B stops the run after `read_tracker` and asks the user (rest day,
+  lighter strength, or normal strength via `--override-gate`); Tier C
+  stays automatic. Old root-level files (`workout_plan -
   <Person>.md` / `workout_plan - <OtherPerson>.md`) are frozen history and never
   rewritten. Path resolvers in `shared/person_paths.py`:
   `plans_dir(person)`, `workout_plan_md(person, date)`,

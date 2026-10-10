@@ -2,9 +2,11 @@
 name: workout-coach
 description: >
   Reads the requested person's tracker (per-person CSVs under
-  <Person>/data/), analyzes recent training state, and writes a pair of
-  dated files to plans/<Person>/: a self-contained assessment HTML
-  dashboard and a lean workout-plan markdown. Invoked by the `/coach`
+  <Person>/data/), analyzes recent training state, and writes dated
+  files to plans/<Person>/: the structured assessment (coach_reads.json)
+  and a lean strength-only workout-plan markdown. The self-contained
+  assessment HTML dashboard is rendered only when the user asks for it
+  ("report", "dashboard", "assessment"). Invoked by the `/coach`
   slash command or when the user explicitly asks for coaching, analysis,
   or a new plan. Do NOT trigger on general fitness questions, training
   discussion, logging, or requests unrelated to the tracker.
@@ -27,7 +29,7 @@ Resolve which person this request is about BEFORE running the script:
 - If the user uses pronouns or context that clearly refer to one tracker, use that tracker.
 - Otherwise ask which tracker/person this is for before proceeding.
 
-Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at the workout-tracker root — one dated pair per generation: `plans/<Person>/<YYYY-MM-DD>-assessment.html` (the rich dashboard) and `plans/<Person>/<YYYY-MM-DD>-workout.md` (the lean workout list). Never write one person's plan over the other; never write to the repo root (where the old `./workout_plan - <Person>.md` lived — those files are frozen history). The path resolvers live in `Skills/shared/person_paths.py`: `plans_dir(person)`, `workout_plan_md(person, date)`, `assessment_html(person, date)`. Use them rather than hand-building the paths.
+Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at the workout-tracker root, dated per generation: `plans/<Person>/<YYYY-MM-DD>-coach_reads.json` (the assessment, always), `plans/<Person>/<YYYY-MM-DD>-workout.md` (the lean workout list, always) and `plans/<Person>/<YYYY-MM-DD>-assessment.html` (the rich dashboard, only when the user asks for the report). Never write one person's plan over the other; never write to the repo root (where the old `./workout_plan - <Person>.md` lived — those files are frozen history). The path resolvers live in `Skills/shared/person_paths.py`: `plans_dir(person)`, `workout_plan_md(person, date)`, `assessment_html(person, date)`. Use them rather than hand-building the paths.
 
 ## Setup
 
@@ -43,18 +45,21 @@ Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at
 
 ## Output target
 
-All user-facing output goes into **two dated files** under `plans/<Person>/`:
+Every run writes **two dated files** under `plans/<Person>/`, and a third only on request:
 
-- `plans/<Person>/<YYYY-MM-DD>-assessment.html` — the rich, visual assessment dashboard. Built from the JSON. Self-contained: inline CSS, inline SVG, inline JS where it helps. **No external requests** (no CDN, no web fonts, no remote images, no `<script src>`). Must render identically with Wi-Fi off.
-- `plans/<Person>/<YYYY-MM-DD>-workout.md` — the lean workout-plan markdown. Bullets only. No assessment section. Sub-bullet notes only when a remark is genuinely actionable (rules below).
+- `plans/<Person>/<YYYY-MM-DD>-coach_reads.json` — the assessment in structured form (headline + every card callout). **Always written**, before the plan, and checked against the tracker data on every run. Keeping it means the report can be rendered later without redoing the analysis.
+- `plans/<Person>/<YYYY-MM-DD>-workout.md` — the lean workout-plan markdown. **Strength workouts only**: no cardio sections, no Zone 2 or interval prescriptions, no cardio instructions in the intro. Bullets only. No assessment section. Sub-bullet notes only when a remark is genuinely actionable (rules below).
+- `plans/<Person>/<YYYY-MM-DD>-assessment.html` — the rich, visual assessment dashboard. **Opt-in: render it only when the user's `/coach` message asks for it** ("report", "dashboard", "assessment", or a clear equivalent). Otherwise do not create it. Self-contained: inline CSS, inline SVG, inline JS where it helps. **No external requests** (no CDN, no web fonts, no remote images, no `<script src>`). Must render identically with Wi-Fi off.
 
-`<YYYY-MM-DD>` is the date the coach generates the plan (today's date in the JSON's `today` field). Each generation writes a fresh dated pair; older pairs stay on disk for scrollback. No `latest-*` symlink — the user opens the newest dated file. **Plans dated before 2026-08-02 predate the current core spec and every one of them fails today's blocking gate** — read them for history, never as a structural template.
+**Cardio is analysis, never prescription.** Cardio data still feeds every read (recovery, training load, fatigue, the cardio and behavioural cards in `coach_reads.json`). It never becomes a section, bullet or instruction in the workout markdown.
 
-The chat gets one short block: a one-line verdict plus `Wrote dashboard to plans/<Person>/<date>-assessment.html and plan to plans/<Person>/<date>-workout.md (N sessions)`. Nothing else.
+`<YYYY-MM-DD>` is the date the coach generates the plan (today's date in the JSON's `today` field). Each generation writes a fresh dated set; older ones stay on disk for scrollback. No `latest-*` symlink — the user opens the newest dated file. **Plans dated before 2026-08-02 predate the current core spec and every one of them fails today's blocking gate** — read them for history, never as a structural template.
+
+The chat gets one short block: a one-line verdict plus `Wrote plan to plans/<Person>/<date>-workout.md (N sessions)`, followed by `check_plan.py`'s warning count (and the warnings themselves when there are any). When the report was asked for, add `Wrote dashboard to plans/<Person>/<date>-assessment.html`. Nothing else.
 
 ### Assessment HTML structure
 
-The dashboard is produced by **`scripts/render_dashboard.py`**. The script owns all HTML, CSS, SVG, and JavaScript. You do not hand-write HTML. You author two inputs and run the renderer.
+The dashboard is produced by **`scripts/render_dashboard.py`**, and only when the user asked for the report. The script owns all HTML, CSS, SVG, and JavaScript. You do not hand-write HTML. You author two inputs and run the renderer. It runs the same plan checks as `check_plan.py` (one shared function, `lib/plan_checks.run_plan_checks`) and renders nothing unless they pass.
 
 The dashboard is organised across **three tabs**: Today (operational, "should I train hard?"), Trajectory (longevity, "am I aging well?"), and Workout (the markdown plan, rendered in the same visual style).
 
@@ -72,7 +77,12 @@ Three things about the dashboard the planner needs and the spec does not say:
 
 ```
 # Workout plan — <YYYY-MM-DD>
-Assessment: ./<YYYY-MM-DD>-assessment.html
+> Today's call: <headline>
+> Why: <rationale notes>
+
+Assessment: ./<YYYY-MM-DD>-assessment.html   (this line only on a run that renders the report)
+
+<intro: block position, what changed, the food line>
 
 ## Workout 1: <TYPE>
 Date: ___\
@@ -91,17 +101,11 @@ Recovery: sauna ___ / cold ___ / rlt ___
 
 - <general warm-up> + <activation>
 - …
-
-## Cardio 1: Zone 2 (optional, only if behind §10 target)
-- HR target, duration, brief format
-
-## Cardio 2: Intervals (optional)
-- Work/rest structure
 ```
 
-**No `## Report` section, no tables, no rationale block.** The `Date:` / `Recovery:` placeholder rules are spelled out once, under "Per-workout format in the file".
+**No `## Report` section, no tables, no rationale block, no `## Cardio` section.** The plan ends after the last strength workout. Write the `Assessment:` link line only on a run that renders the report; without the report it points at a file that does not exist. The `Date:` / `Recovery:` placeholder rules are spelled out once, under "Per-workout format in the file".
 
-Write both files in one pass at the end. Don't stream sections to chat while thinking.
+Write each file in one pass. Don't stream sections to chat while thinking.
 
 ## Data Reading Strategy
 
@@ -247,7 +251,7 @@ What the JSON contains:
 
 ❌ "Cardio: 60 min Z2, target 600. Add a session."
    → Misses the daily-activity context.
-✅ "Cardio 60 min Z2 vs 600 target. But daily activity 11,400 steps/day (high), so base aerobic load is fine. Add 1 interval session for the VO2max stimulus, not 4 Z2."
+✅ "Cardio 60 min Z2 vs 600 target. But daily activity 11,400 steps/day (high), so base aerobic load is fine. The real gap is intervals, 0 of 4, which is the VO2max stimulus."
 
 ❌ "TSB is fine, push hard."
    → Numbers, not adjectives. And "fine" misses bands.
@@ -275,18 +279,28 @@ Print the filtered values you actually use; never dump the full `rows` list into
 - Say "is" instead of "serves as", "functions as", "represents".
 - Be specific. "Your back volume is 12 sets/week, which is enough" not "Your back volume is adequate."
 
-## Phase 1: Assessment HTML dashboard
+## Phase 1: Assessment (coach_reads.json) and plan checks
 
-Goals are fixed: hypertrophy + longevity. Never ask about goals. Your job is to author the renderer's **two inputs** and run it.
+Goals are fixed: hypertrophy + longevity. Never ask about goals. Your job is to author the assessment (`coach_reads.json`) and the workout markdown, then run the checks. The HTML report is an optional last step.
 
 ### Pipeline (5 steps — STRICT ORDER)
 
-Three stages: **A** (Python insights), **B** (LLM authorship), **C** (HTML render). Stage B is split in two with a HARD CHECKPOINT between, so the workout plan is always built on top of a finalized assessment and never in parallel with it.
+Three stages: **A** (Python insights), **B** (LLM authorship), **C** (checks, then the report only if asked). Stage B is split in two with a HARD CHECKPOINT between, so the workout plan is always built on top of a finalized assessment and never in parallel with it. Steps 1 to 4 run on every `/coach`; the analysis and every check are the same whether or not a report is made.
 
 1. **(Stage A) Read tracker data, 6 months back:** `python3 Skills/workout-coach/scripts/read_tracker.py --person <Name> --months 6 > /tmp/tracker.json`. Six months is required so the 90-day training-load chart's 42-day CTL EWMA is properly warmed up before the visible window begins (anything less and the chart shows a cold-start ramp that is not real fitness movement). The Python stage produces every metric, the 5-tier `session_recommendation` gate, `nutrition_phase`, and `swim_summary` — the LLM does not re-derive any of this.
-2. **(Stage B1 — assessment FIRST) Author and save `coach_reads.json`.** Read `/tmp/tracker.json`. Draft `headline` + every `cards.*` callout (including `swim_trajectory_callout` when `swim_summary` is present, `trajectory_energy` when `energy_28d` is present, and `nutrition_phase_callout` when `nutrition_phase` is present). Validate copy rules locally as you write — no em-dashes, ≤ 280 chars per card string, ≤ 560 for the headline. Write the file to `plans/<Person>/<date>-coach_reads.json`. **HARD CHECKPOINT: this file MUST exist on disk before step 3 starts.** The file IS the assessment in structured form; the workout step consumes it as input.
-3. **(Stage B2 — workout SECOND, built on top) Author `plans/<Person>/<date>-workout.md`.** Re-open `coach_reads.json` from disk (do NOT skip the re-read — it forces the workout plan to honor the saved assessment, not paraphrase it from memory). Quote the `headline` and `cards.session_recommendation_callout` as load-bearing references in the workout opener. Then draft the lean exercise bullets honoring the binding 5-tier `session_recommendation` gate from the tracker JSON. Rules in "Per-workout format in the file" below. **DO NOT draft `workout.md` before `coach_reads.json` is saved.**
-4. **(Stage C) Render:**
+
+   **Tier A or B: stop here and ask.** If `session_recommendation.tier` is `A` or `B`, do not write anything yet. Tell the user the tier, its `label`, the `headline` and the top `rationale` notes, and ask which they want (see "Recovery gate" in Phase 2 for the three options). Continue with step 2 only after they answer, because the answer decides which tracker JSON the assessment is written against. Tier C, D and E continue automatically.
+2. **(Stage B1 — assessment FIRST) Author and save `coach_reads.json`.** Read `/tmp/tracker.json`. Draft `headline` + every `cards.*` callout (including `swim_trajectory_callout` when `swim_summary` is present, `trajectory_energy` when `energy_28d` is present, and `nutrition_phase_callout` when `nutrition_phase` is present). Validate copy rules locally as you write — no em-dashes, ≤ 280 chars per card string, ≤ 560 for the headline. Write the file to `plans/<Person>/<date>-coach_reads.json`. This step runs on every `/coach`, report or not. **HARD CHECKPOINT: this file MUST exist on disk before step 3 starts.** The file IS the assessment in structured form; the workout step consumes it as input.
+3. **(Stage B2 — workout SECOND, built on top) Author `plans/<Person>/<date>-workout.md`.** Re-open `coach_reads.json` from disk (do NOT skip the re-read — it forces the workout plan to honor the saved assessment, not paraphrase it from memory). Quote the `headline` and `cards.session_recommendation_callout` as load-bearing references in the workout opener. Then draft the lean exercise bullets honoring the binding 5-tier `session_recommendation` gate from the tracker JSON. Strength workouts only. Rules in "Per-workout format in the file" below. **DO NOT draft `workout.md` before `coach_reads.json` is saved.**
+4. **(Stage C1) Check the plan. Always. Must exit 0.**
+   ```
+   python3 Skills/workout-coach/scripts/check_plan.py \
+     --tracker /tmp/tracker.json \
+     --coach plans/<Person>/<date>-coach_reads.json \
+     --workout-md plans/<Person>/<date>-workout.md
+   ```
+   It runs every check the report renderer runs, through the same function (`lib/plan_checks.run_plan_checks`): the tracker payload, `coach_reads.json` cross-checked against the tracker numbers, the workout copy rules and catalog names, the core and arm weekly minimums (blocking), the per-workout set budget, block rotation and dose progression (advisory), and the number check on the plan opener. It also confirms `coach_reads.json` is strictly older on disk than `workout.md`. It writes nothing. **Exit 2 means fix the plan (or `coach_reads.json`) and rerun until it exits 0.** If the order check fails, the workout was drafted before the assessment was saved: redo step 3 properly. Relay any warnings it prints in the chat summary; do not hide them.
+5. **(Stage C2, only when the user asked for the report) Render:**
    ```
    python3 Skills/workout-coach/scripts/render_dashboard.py \
      --tracker /tmp/tracker.json \
@@ -295,9 +309,11 @@ Three stages: **A** (Python insights), **B** (LLM authorship), **C** (HTML rende
      --out plans/<Person>/<date>-assessment.html \
      --person <Person>
    ```
-5. **(Verification) Confirm ordering on disk.** `stat -f "%m %N" plans/<Person>/<date>-{coach_reads.json,workout.md}` — the coach_reads.json mtime must be strictly earlier than the workout.md mtime. If they're inverted, the workout was drafted before the assessment was saved; redo step 3 properly.
+   On a report run, add the `Assessment: ./<date>-assessment.html` line to the plan intro before step 4, so the checks run on the final file. Skip this step entirely when the report was not asked for.
 
-If only the coach text needs editing, edit `coach_reads.json` and re-run step 4; the tracker JSON and workout markdown stay valid as long as the payload shape hasn't changed. The renderer is idempotent and fails fast on copy-rule violations, so the loop is edit, re-run, reload the tab. Build every path with the resolvers in `shared/person_paths.py` (`plans_dir`, `workout_plan_md`, `assessment_html`). Never hand-assemble one, never write to the repo root.
+**Report later.** If the user asks for the report after a plan was already written, run step 5 on that day's saved `coach_reads.json` and `workout.md` with a freshly read tracker JSON for the same date; the analysis does not need to be redone. Adding the `Assessment:` line to the plan at that point is fine.
+
+If only the coach text needs editing, edit `coach_reads.json` and re-run step 5 (or step 4 when no report is wanted); the tracker JSON and workout markdown stay valid as long as the payload shape hasn't changed. The renderer is idempotent and fails fast on copy-rule violations, so the loop is edit, re-run, reload the tab. Build every path with the resolvers in `shared/person_paths.py` (`plans_dir`, `workout_plan_md`, `assessment_html`). Never hand-assemble one, never write to the repo root.
 
 ### Coach-reads schema
 
@@ -482,11 +498,13 @@ Sleep consistency: 0.58h stdev (threshold 1.5, component 5.0/10)
 When `recovery.confidence == "low"`, **do not** ask the user to "track HRV better" — that's usually a source limitation or a sample-size gap, not a tracking gap. Skip the gap explanation unless it is actionable; just print the drivers the source provides and note the contributor count in the headline.
 
 ### Cardio check
+**Analysis only.** This check feeds the cardio and behavioural cards in `coach_reads.json` and the fatigue reads behind the strength plan. It never produces a plan section, bullet or instruction: the workout markdown is strength only.
+
 Compare cardio against §10 targets (150 min Zone 2 + ~20 min intervals per week, so roughly 600 min Zone 2 + 4 interval sessions over 28 days). Flag shortfall in plain numbers: "Zone 2: 60 min logged, target ~600 min. Intervals: 0 sessions, target 4."
 
 Take the Zone-2 number from `cardio_hr_zones_28d.z2` and the interval count from `cardio_last_28d.interval_sessions`. Use `z2_by_activity` to qualify the dose when the mix matters: short swim Z2 minutes are real HR-zone exposure but not a substitute for a dedicated 30-45 min run or ride.
 
-**REQUIRED daily-activity gate.** Cross-check the shortfall against `daily_activity_28d.assessment` before prescribing anything, and state the call with the basis value and its band: "Daily activity 11,400 steps/day (high). Cardio prescription: hold Z2, add 1 interval session for VO2max." `high` plus a rising VO2max means keep the prescription minimal, the aerobic load is already arriving passively. `low` means add a Zone 2 session even when the 28d targets are met, because the base dose is too low. `moderate` takes the standard rule, and `null` says so out loud and falls through to it.
+**REQUIRED daily-activity gate.** Cross-check the shortfall against `daily_activity_28d.assessment` before calling it a gap on the card, and state the read with the basis value and its band: "Daily activity 11,400 steps/day (high). The Z2 shortfall is covered passively; intervals are the real gap." `high` plus a rising VO2max means the shortfall is mostly on paper, the aerobic load is already arriving passively. `low` means the base dose is too low even when the 28d targets are met, so say so. `moderate` takes the standard read, and `null` says so out loud and falls through to it.
 
 Call out distribution problems when `cardio_hr_zones_28d` is populated: `z3_pct > 40` is the grey-zone trap (go easier or harder, the middle is the least productive ratio), `z2_pct + z4_z5_pct > 60` is healthy polarization, and z1 dominating with little Z2 means the long hikes are activity but not the Z2 stimulus.
 
@@ -608,27 +626,35 @@ Example `nutrition_phase_callout` with energy present:
 
 | Tier | label | What the markdown contains |
 |---|---|---|
-| **A** | `rest` | A rest day (walk + sleep priority). **No strength.** No "modified" strength either — the plan is the rest. |
-| **B** | `reactive_deload` | Either a reactive-deload week (cut sets to ~50%, hold loads, rotate the over-MRV muscles), OR a Zone 2 / mobility day (per `substitute.kind`). **No on-top strength session.** |
+| **A** | `rest` | **Ask the user first** (below). Then whichever option they chose. |
+| **B** | `reactive_deload` | **Ask the user first** (below). `substitute.kind` says whether the gate wants a reactive-deload week or a recovery day; either way, then whichever option they chose. |
 | **C** | `downgrade` | Planned strength, but pre-modified through `expected_rebound_by_session`: −25% volume on secondary lifts, hold loads, drop the conditioning finisher, no PR attempts. Compound lifts stay at planned volume; isolations halve. Later workout slots may return to normal only if recovery rebounds. |
 | **D** | `green` | Normal plan. The rules below (split rotation, double progression, exercise variation) apply unchanged. |
 | **E** | `over_recovered` | Normal plan + one-line warning that fitness is bleeding off (TSB has been too positive too long). |
 
-**Step 2: the substitute is BINDING.** Quote the gate's `headline` and the top 3 `rationale` entries in the workout markdown's opening lines so the user sees the signals that drove the call:
+**Step 1b: Tier A or B: stop and ask in chat. Never decide alone.** Do this right after `read_tracker`, before writing `coach_reads.json` or the plan. Flag the tier, its `label`, the gate's `headline` and the `rationale` notes behind it, then offer these three options and wait for the answer:
+
+1. **Rest day.** A short plan with the rest-day template in `references/substitute-protocols.md`: hydration, sleep, and the re-check for the next morning. No strength, no cardio.
+2. **Lighter strength.** Strength workouts with fewer sets and held weights (no load increases, no max attempts), using the reactive-deload template in `references/substitute-protocols.md`. Keep the tracker JSON as it is: the tier's reduced set budget and deload rules are what `check_plan.py` judges against.
+3. **Normal strength anyway**, for example planned for the following week. Regenerate the tracker JSON with `read_tracker.py --override-gate` (override protocol below), then plan a normal Tier D block.
+
+Use a structured question when the client offers one; otherwise ask in one short message. Tier C, D and E never ask: they continue automatically.
+
+**Step 2: the gate's call is quoted in the plan.** Quote the gate's `headline` and the top 3 `rationale` entries in the workout markdown's opening lines so the user sees the signals that drove the call:
 
 ```markdown
 # Workout plan — 2026-05-24
 > Today's call: <headline>
 > Why: <rationale[0].note> · <rationale[1].note> · <rationale[2].note>
-
-Assessment: ./2026-05-24-assessment.html
 ```
 
-**Step 3: build the body from the substitute template.** See `references/substitute-protocols.md` for the canonical content of each tier's markdown (rest day, Zone 2 day, reactive-deload week, modified strength, normal strength).
+(Add the `Assessment: ./2026-05-24-assessment.html` line below it only on a run that renders the report.)
 
-**Step 4: only Tier D / E use the existing programming rules below.** For Tier A and B the rest of this Phase 2 spec is not consulted — the substitute IS the plan. For Tier C the rules below apply but with the modifications spelled out above.
+**Step 3: build the body from the template for the chosen option.** See `references/substitute-protocols.md` for the canonical content of each (rest day, lighter strength / reactive-deload week, modified strength, normal strength). None of them contains cardio.
 
-**Override protocol.** Overrides are allowed only when the user **explicitly** asks to override after seeing the gate's call (e.g. "ignore the rest call, plan strength anyway", "I want to train normally"). Default behavior is to honor the recommendation. Never generate strength on a Tier A or B day on assumption.
+**Step 4: only Tier D / E (and an overridden A / B / C) use the existing programming rules below in full.** For a Tier A or B rest day the rest of this Phase 2 spec is not consulted. For Tier A or B lighter strength, and for Tier C, the rules below apply with the modifications spelled out above and in the template.
+
+**Override protocol.** Overrides are allowed only when the user **explicitly** asks for it: on Tier A or B by choosing option 3 when asked, on Tier C by asking to train normally after seeing the call (e.g. "ignore the downgrade", "I want to train normally"). Never generate normal strength on a Tier A or B day on assumption.
 
 When the user explicitly overrides, regenerate the tracker JSON with `read_tracker.py --override-gate`. That normalizes a restrictive A/B/C tier to green/full-volume so the dashboard's "Today's call" card and the per-workout set budget both reflect a normal session, while keeping the original gate rationale visible in `override_message` for honesty. Then author the plan as a normal Tier D block (full budget every session). Do NOT hand-strip the downgrade from a JSON that still says Tier C — that desyncs the dashboard from the plan; use the flag so both agree.
 
@@ -658,7 +684,7 @@ Budget to `target_working_sets` from the tracker JSON (derived from the per-pers
 - **Route spare sets by priority tier, not by MEV.** Read `muscle_volume_targets`: `emphasis` muscles are programmed to mid-MAV, `grow` to MEV, `maintain` to MV. A maintain-tier muscle sitting at its target is finished, not neglected, and does not get the leftover budget.
 - Default main lifts to 3-4 working sets, isolation/accessory to 2-3. Hitting `target_working_sets` with ~6-8 exercises at 3-ish sets each is the normal shape; do not drop main lifts to 2 sets just to fit more movements.
 - Warm-up prep movements and `(warmup)` ramp sets do NOT count toward `target_working_sets`.
-- **Tier scaling is per workout index, and the validator applies it — the payload does not.** `downgrade` scales the budget to **0.6 of the base for the whole session**, for workouts `1..expected_rebound_by_session` **inclusive** (rebound 2 → workouts 1 and 2; same span as the Tier C rules above, and as the gate's own `override_message`, which reads "through workout N"); later workouts keep the full budget. `reactive_deload` scales the whole week to 0.5, Tier A to 0. **There is no scaled number in the JSON to read:** `target_working_sets` is a single unscaled scalar, so multiply it yourself for the trimmed workouts and budget the rest at the bare figure. Note it is a whole-session scale, not "25% off the secondaries": the isolation block absorbs the cut because core and arms cannot.
+- **Tier scaling is per workout index, and the validator applies it — the payload does not.** `downgrade` scales the budget to **0.6 of the base for the whole session**, for workouts `1..expected_rebound_by_session` **inclusive** (rebound 2 → workouts 1 and 2; same span as the Tier C rules above, and as the gate's own `override_message`, which reads "through workout N"); later workouts keep the full budget. `reactive_deload` and Tier A scale the whole week to 0.5 (Tier A only has workouts to judge when the user chose lighter strength). **There is no scaled number in the JSON to read:** `target_working_sets` is a single unscaled scalar, so multiply it yourself for the trimmed workouts and budget the rest at the bare figure. Note it is a whole-session scale, not "25% off the secondaries": the isolation block absorbs the cut because core and arms cannot.
 - **When the budget and the volume floors cannot both be met, the budget loses.** On a downgraded week for someone with several emphasis muscles, the credited-volume targets can genuinely exceed 0.6 of the budget, and no honest layout satisfies both. Priority order: the blocking floors first (core spec, arm spec), then emphasis-tier targets, then the budget. Go over budget, take the advisory warning, and say in the opener that the session runs long because the week is downgraded and the floors are not. Never short core or arms to land on a budget number — that trade is what the specs exist to prevent.
 - `workout_set_budget_warnings` is **always** non-binding: an intentional deload legitimately undershoots the budget, so it surfaces as a warning and the render proceeds. Outside a deload or downgrade tier, treat it as a defect and fix it before writing. It is not the only non-binding check, though — block rotation is advisory this release, and **on a deload week the volume-axis floors demote to warnings too**: the per-session core dose, the loaded-flexion-movement requirement, the absolute flexion set floor, and both direct-arm set floors. Everything on the structure axis — placement, distinct exercises, categories, the flexion share, dose progression — blocks on every week, deload included.
 
@@ -695,12 +721,12 @@ Use Layer 1 analysis plus the training science reference. The reference contains
 
   **Partial-source caveat:** When `capabilities.per_workout_hr_strength` is False, CTL/ATL/TSB are computed only from cardio TRIMPs — strength load is invisible to this metric. Do **not** apply the TSB-band prescription unilaterally on these trackers; cross-check with `recovery.score` and prefer `recovery.score` as the primary fatigue signal. A negative TSB driven by hike load alone is not a deload trigger — a 200-min hike will always look like fatigue to TSB even if the user is well-rested otherwise. Cite the cross-check when overriding the band.
 - **Per-muscle volume actions (REQUIRED).** Compare `weekly_volume_per_muscle.current[muscle]` against `muscle_volume_targets[muscle].target_sets`, not against MEV. The tier sets the target: `emphasis` runs at mid-MAV, `grow` at MEV, `maintain` at MV. Under-target muscles get the spare budget; a muscle at its tier target is finished. Name the muscle on the relevant card whenever you move its volume.
-  - **Above MRV:** cut at least one working set from that muscle's primary movement next block. If `recovery.score < 6.5` as well, replace the next scheduled session targeting that group with a Z2 block or a rest day. This overrides any "add a set" reflex elsewhere in the planning logic.
+  - **Above MRV:** cut at least one working set from that muscle's primary movement next block. If `recovery.score < 6.5` as well, take that group out of its next scheduled session (rest for that muscle; no cardio is prescribed in its place). This overrides any "add a set" reflex elsewhere in the planning logic.
   - **Under target:** add one working set to its primary movement, unless the TSB band is `fatigued` or `high fatigue`. **If the muscle has no movement in the week at all, add the movement** — adding a set to a movement that isn't there is a no-op, and that is exactly how a muscle stays at zero.
   - **When several muscles are under target, spend the budget in this order:** emphasis tier first, then muscles with no movement anywhere in the week, then the largest shortfall as a fraction of target. A flat "route to the laggards" with ten claimants routes to none of them.
   - **Core does not take spare sets.** Its dose is `core_week_spec`, enforced per session. Do not add a fifth core set because core reads under target; fix the distribution instead, which is what the weekly axes of the spec are for.
   - When a muscle is both under target and flagged by the HR-creep rule, **hold or cut wins**. Prefer reducing load over adding it.
-- **Cardio (§10):** read the Cardio check numbers from the Report. If behind target, add cardio sessions to the plan after the strength sessions. Default weekly target: 3× Zone 2 @ 30-45min + 1× intervals @ 20min. Cap total cardio additions at 4 sessions per `/coach` run — if the user is very behind, note the shortfall and prescribe the max. User can override with `/coach no-cardio` to skip this entirely.
+- **Cardio (§10): never prescribed.** The plan contains strength workouts only. The Cardio check numbers belong on the cardio and behavioural cards in `coach_reads.json` (and in the report when one is rendered), and cardio load still shapes the strength plan through recovery, training load and fatigue. Do not add cardio sections, Zone 2 or interval sessions, or cardio instructions to the plan, even when the person is behind the §10 target.
 
 **Stale exercise reintroduction.** Pick 1-2 entries from `stale_exercises` and restart them per the conservative-reintroduction rule in §17. The workout markdown may carry only a short action cue such as `first time back; ease in`; the reasoning goes in the dashboard coach text.
 
@@ -757,11 +783,11 @@ Inside a block, a split day that recurs in the week (two Upper days, two Lower d
 
 ### Per-workout format in the file
 
-The workout markdown is a **lean exercise list**, nothing more. No tables. No rationale paragraphs. The "why" lives in the assessment dashboard (and only there). The user trains from this file on their phone in the gym — every line they don't need slows them down.
+The workout markdown is a **lean exercise list** of strength workouts, nothing more. No tables. No rationale paragraphs. No cardio. The "why" lives in the assessment (`coach_reads.json`, and the dashboard when one is rendered). The user trains from this file on their phone in the gym — every line they don't need slows them down.
 
 No em-dashes in workout markdown prose. The only allowed em-dashes are the title separator (`# Workout plan — <date>`) and the indented sub-bullet marker (`  — cue`). In `> Today's call:` / `> Why:` blockquote lines, use a period, comma, semicolon, or colon instead; a prose em-dash will fail the renderer.
 
-Every strength workout heading is followed by `Date: ___\` then `Recovery: sauna ___ / cold ___ / rlt ___`, each on its own line, then a blank line, then the bullets. The trailing backslash is a Markdown hard break and keeps the two placeholders from collapsing into one paragraph. The user fills the date in when they actually train, and replaces only the recovery blanks for modalities they did (`sauna 12+8min 85C dry / cold 30s shower / rlt ___`, or `skipped`, or nothing). `/log` parses each modality independently per `workout-logger/references/parsing-rules.md`. Cardio sections need neither line.
+Every strength workout heading is followed by `Date: ___\` then `Recovery: sauna ___ / cold ___ / rlt ___`, each on its own line, then a blank line, then the bullets. The trailing backslash is a Markdown hard break and keeps the two placeholders from collapsing into one paragraph. The user fills the date in when they actually train, and replaces only the recovery blanks for modalities they did (`sauna 12+8min 85C dry / cold 30s shower / rlt ___`, or `skipped`, or nothing). `/log` parses each modality independently per `workout-logger/references/parsing-rules.md`.
 
 **Exercise bullets** — one line per exercise. No code fences. **There is one set format and it is `///`. Every set is its own `///` entry, always, whatever the unit.** 4 sets = 4 entries.
 - Weighted: `Dumbbell Flat Bench Press: 52kgx10 /// 52kgx10 /// 52kgx10`
@@ -819,30 +845,9 @@ Two warm-up prep movements + two ramp sets on the first heavy compound, one sub-
 
 **Count the sets in that example: 24 working sets** (4 bench + 4 shoulder press + 4 fly + 4 lateral raise + 2 core + 4 triceps + 2 rear delt; the two ramp sets and the two prep movements don't count). That is not decoration — it lands exactly on a 24-set budget, and the example is written to be copied. An example that models 18 sets teaches an 18-set session. This is an UPPER day, so its core allocation is 2 sets; a LOWER day carries 4. Note where core and arms sit: inside the cable block as straight sets, neither of them on the last line — the face pull closes the session precisely because it is neither, and both block in the terminal slot. One session cannot show the weekly core distribution — read `core_week_spec` for that — **and the same caveat covers arms.** Validated on its own, this example returns four WEEK-level blocking errors: the flexion set floor, both direct-arm set floors, and the distinct-triceps-exercise axis. That is the example being a legal SESSION shape and not a legal WEEK, not a bug in it. `core_week_spec` and `arm_week_spec` are satisfied across the plan's sessions; do not copy this one session N times and expect it to render.
 
-### Cardio sessions (only when prescribed)
-
-Written as their own sections after the strength workouts, not mixed in. Two shapes, both `## Cardio N: <kind> (<duration>)` followed by plain bullets. **The heading is `##`, the same level as `## Workout N`** — at `###` the parser keeps these bullets inside the preceding workout and then rejects `Warmup` / `Work` / `Cooldown` / `Notes` as off-catalog exercise names, which points at the wrong repair entirely:
-
-```
-## Cardio 1: Zone 2 (30-45 min)
-
-- Treadmill run or outdoor, HR 140-150bpm (65-75% max)
-- Target duration: 35 min
-- Notes: pair with an off day or separate from leg work by 6-24h (§10 interference)
-
-## Cardio 2: Intervals (20 min total)
-
-- Warmup: 5 min easy
-- Work: 5 × 3 min @ HR 165-175bpm (Zone 4-5), 2 min easy between
-- Cooldown: 5 min easy
-- Notes: not within 24h of a heavy leg session
-```
-
-If the user is on target (`Cardio check` in the report shows no shortfall), don't add cardio sessions to the plan. Don't over-prescribe — cap at 4 cardio sessions total per `/coach` run.
-
 ### Where the rationale goes
 
-The workout markdown carries no rationale at all: it links to the dashboard at the top, and the "why" lives on the card showing the data. TSB band citation on the training-load card, dominant driver on the recovery-drivers card, HR-at-volume on the strength-progression and per-muscle-volume cards. Omit the HR-at-volume call entirely when `hr_at_volume_divergence` is empty rather than fabricating one, always pick a dominant recovery driver because there is always one, and treat the TSB citation as mandatory on both sources.
+The workout markdown carries no rationale beyond its short intro: the "why" lives on the card showing the data, in `coach_reads.json` and in the report when one is rendered. TSB band citation on the training-load card, dominant driver on the recovery-drivers card, HR-at-volume on the strength-progression and per-muscle-volume cards. Omit the HR-at-volume call entirely when `hr_at_volume_divergence` is empty rather than fabricating one, always pick a dominant recovery driver because there is always one, and treat the TSB citation as mandatory on both sources.
 
 ## Common Mistakes
 

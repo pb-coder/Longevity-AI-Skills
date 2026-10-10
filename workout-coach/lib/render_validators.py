@@ -2472,9 +2472,13 @@ def tier_budget_by_index(session_recommendation: "dict | None",
     rebound = sr.get("expected_rebound_by_session") or 1
 
     def _budget_for(idx: int) -> int:
-        if tier == "A":                       # rest day — no strength budget
-            return 0
-        if label == "reactive_deload":        # whole-week deload
+        # Tier A is a rest call, but the user may choose lighter strength
+        # when asked (`substitute-protocols.md`, option 2). A rest-day plan
+        # has no workout headings, so this budget is only ever read on
+        # that lighter plan. It used to be 0, which the budget check
+        # reads as "no budget" and skips, so a lighter Tier A week had
+        # no set ceiling at all. Same half-volume as a reactive deload.
+        if tier == "A" or label == "reactive_deload":   # whole-week deload
             return round(base_budget * 0.5)
         if label == "downgrade":              # only first `rebound` trim
             return round(base_budget * 0.6) if idx < rebound else base_budget

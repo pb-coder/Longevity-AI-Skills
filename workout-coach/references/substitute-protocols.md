@@ -26,7 +26,7 @@ Tell the user, in one short message (or a structured question when the client of
 Then offer three options and wait for the answer:
 
 1. **Rest day.** Use the rest-day template below.
-2. **Lighter strength**: fewer sets, held weights. Use the lighter-strength template below, against the tracker JSON as it is. On `reactive_deload` the set budget is half the base, and `check_plan.py` judges each session against it. **On Tier A the set budget is 0, which the budget check reads as "no budget" and skips**, so nothing checks the set count: halve the sets yourself and say in the chat summary that the budget check did not run. On Tier A and on `reactive_deload` the core and arm VOLUME floors drop to warnings (it is a declared deload), while diversity and placement stay blocking.
+2. **Lighter strength**: fewer sets, held weights. Use the lighter-strength template below, against the tracker JSON as it is. On Tier A and on `reactive_deload` the set budget is half the base, and `check_plan.py` judges each session against it (advisory, like every budget finding). On Tier A and on `reactive_deload` the core and arm VOLUME floors drop to warnings (it is a declared deload), while diversity and placement stay blocking.
 3. **Normal strength anyway**, for example planned for the following week. Regenerate the tracker JSON with `read_tracker.py --override-gate`, then follow "Override behavior" at the end of this file.
 
 Do not suggest a default beyond the gate's own call, and do not write any file until the user has answered.

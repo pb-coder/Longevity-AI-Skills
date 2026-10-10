@@ -184,12 +184,12 @@ class TierAbLighterStrengthTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("vs budget 12", proc.stderr)
 
-    def test_tier_a_runs_no_budget_check_as_the_protocol_says(self) -> None:
-        # Pinned so the doc's "the budget check did not run" stays true:
-        # Tier A's budget is 0, and a 0 budget is skipped, not enforced.
+    def test_tier_a_judges_sessions_against_the_halved_budget(self) -> None:
+        # It used to be 0, which the budget check skips, so lighter
+        # strength on a Tier A day had no set ceiling at all.
         proc = self._run({"tier": "A", "label": "rest"})
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertNotIn("vs budget", proc.stderr)
+        self.assertIn("vs budget 12", proc.stderr)
 
 
 class NoCardioInPlanDocsTests(unittest.TestCase):

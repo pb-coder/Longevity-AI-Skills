@@ -364,8 +364,12 @@ class TierBudgetTests(unittest.TestCase):
         self.assertIsNone(tier_budget_by_index({"tier": "D"}, None))
         self.assertIsNone(tier_budget_by_index(None, 0))
 
-    def test_tier_a_is_a_rest_day(self) -> None:
-        self.assertEqual(tier_budget_by_index({"tier": "A"}, 24)(0), 0)
+    def test_tier_a_lighter_strength_gets_half_the_budget(self) -> None:
+        # A Tier A rest-day plan has no workouts to judge; the budget only
+        # matters when the user chose lighter strength, and 0 used to
+        # switch the check off rather than enforce anything.
+        f = tier_budget_by_index({"tier": "A", "label": "rest"}, 24)
+        self.assertEqual([f(i) for i in range(4)], [12, 12, 12, 12])
 
     def test_a_reactive_deload_halves_the_whole_week(self) -> None:
         f = tier_budget_by_index({"tier": "C", "label": "reactive_deload"}, 24)

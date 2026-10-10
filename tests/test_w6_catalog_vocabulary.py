@@ -61,7 +61,8 @@ class HeadingParseTests(unittest.TestCase):
         neck = db["muscles"]["NECK"]["sections"]["_default"]
         self.assertEqual(
             [exdb.entry_canonical_name(e) for e in neck],
-            ["Neck Flexion Machine", "Neck Extension Machine", "Neck Bridge"],
+            ["Neck Flexion Machine", "Neck Extension Machine", "Neck Bridge",
+             "Self-Resisted Neck Isometric", "Supine Neck Curl"],
         )
 
     def test_every_level_2_heading_in_the_real_catalog_parses(self) -> None:
@@ -119,8 +120,15 @@ class HeadingParseTests(unittest.TestCase):
             db_copy = Path(tmp) / "exercises-database.md"
             shutil.copy(_DB_PATH, db_copy)
             with _patched_db(db_copy):
+                # Deliberately synthetic name. This fixture used to say
+                # "Copenhagen Plank", which became a real alias input on
+                # 2026-09-01 (three Copenhagen entries entered ADDUCTORS),
+                # so `propose_exercise` correctly returned `noop` and the
+                # test failed for a reason that had nothing to do with the
+                # insertion walk it exists to cover. A name no catalog will
+                # ever hold keeps the regression honest.
                 result = exdb.propose_exercise(
-                    name="Copenhagen Plank", primary_muscle="CORE",
+                    name="Fixture Anti-Lateral Hold", primary_muscle="CORE",
                     section="Anti-Lateral-Flexion", tags=["[BW]"],
                 )
                 self.assertEqual(result["action"], "added", result)
@@ -128,7 +136,8 @@ class HeadingParseTests(unittest.TestCase):
                            ["sections"]["Anti-Lateral-Flexion"])
             self.assertEqual(
                 [exdb.entry_canonical_name(e) for e in section],
-                ["Side Plank", "Suitcase Carry", "Copenhagen Plank"],
+                ["Side Plank", "Suitcase Carry", "Feet-Elevated Side Plank",
+                 "Fixture Anti-Lateral Hold"],
             )
 
     def test_propose_exercise_appends_to_a_mid_file_default_section(self) -> None:
@@ -258,19 +267,35 @@ class NewCatalogEntryTests(unittest.TestCase):
     # from a real logged session is the one path spec §6 does not close: the
     # alternative is silently counting those sets as zero volume.
     CATALOG_ADDED_LOGGED_2026_08 = 1
+    # 58 bodyweight and improvised-equipment entries, added 2026-09-01 for a
+    # no-equipment training period, with `references/no-equipment-training.md`
+    # as the reasoning and a design doc under `docs/specs/`. Spec §6 closed
+    # catalog growth for W6a's scope; this is a later scope of its own, so the
+    # growth is a deliberate decision rather than a leak.
+    #
+    # WHY THE NUMBER IS LARGE. The entries follow the entry-per-rung rule the
+    # Hanging Leg Raise / Hanging Knee Raise pair already sets: a leverage
+    # ladder is N catalog entries, not one entry with a difficulty field. With
+    # no external load, leverage IS the load axis, so Push-Up, Deficit Push-Up
+    # and Archer Push-Up have to be three names for `progression_summary` to
+    # see a progression at all. Three equipment tags come with them —
+    # `[Furniture]`, `[Towel]`, `[Door]` — all documented in the catalog legend.
+    CATALOG_ADDED_NO_EQUIPMENT_2026_09 = 58
 
     def test_catalog_grew_by_exactly_four(self) -> None:
         expected = (self.CATALOG_BASELINE + self.CATALOG_ADDED_HIP_THRUST
                     + self.CATALOG_ADDED_W6A
                     + self.CATALOG_ADDED_TRAPS_ROTATION
-                    + self.CATALOG_ADDED_LOGGED_2026_08)
+                    + self.CATALOG_ADDED_LOGGED_2026_08
+                    + self.CATALOG_ADDED_NO_EQUIPMENT_2026_09)
         actual = len(exdb._all_canonical_names())
         self.assertEqual(
             actual, expected,
             f"catalog holds {actual} canonical names; expected {expected} = "
             f"{self.CATALOG_BASELINE} at the spec baseline (67b2d03) "
             f"+ {self.CATALOG_ADDED_HIP_THRUST} (Dumbbell Hip Thrust) "
-            f"+ {self.CATALOG_ADDED_W6A} (W6a). "
+            f"+ {self.CATALOG_ADDED_W6A} (W6a) "
+            f"+ {self.CATALOG_ADDED_NO_EQUIPMENT_2026_09} (no-equipment 2026-09). "
             f"A different number means an entry was added or removed outside "
             f"W6a's scope (spec §6 closes catalog growth) — or that Parser A "
             f"started counting something that is not an exercise. Decide "

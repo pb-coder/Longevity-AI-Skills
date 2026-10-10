@@ -53,7 +53,6 @@ Recovery: sauna ___ / cold ___ / rlt ___
 - Leg Curl (Seated): 55kgx10-12 /// 55kgx10-12 /// 55kgx10-12 /// 55kgx10-12
 - Dumbbell Standing Calf Raise: 50kgx12-15 /// 50kgx12-15 /// 50kgx12-15 /// 50kgx12-15
 - Ab Crunch Machine: 30kgx12-15 /// 30kgx12-15
-  — superset with the calf raise above
 - Hip Abductor Machine: 25kgx12-15 /// 25kgx12-15 /// 25kgx12-15
 - Hip Adductor Machine: 50kgx10-12 /// 50kgx10-12 /// 50kgx10-12
 
@@ -68,7 +67,6 @@ Recovery: sauna ___ / cold ___ / rlt ___
 - Dumbbell Shrug: 68kgx10-12 /// 68kgx10-12 /// 68kgx10-12
 - Cable Lateral Raise: 6.25kgx10-12 /// 6.25kgx10-12 /// 6.25kgx10-12 /// 6.25kgx10-12
 - Ab Crunch Machine: 35kgx10-12 /// 35kgx10-12
-  — superset with the lateral raise above
 - Incline Dumbbell Curl: 14kgx8-10 /// 14kgx8-10 /// 14kgx8-10 /// 14kgx8-10
 - Cable Overhead Tricep Extension: 29kgx8-10 /// 29kgx8-10 /// 29kgx8-10 /// 29kgx8-10
 - Cable Face Pull: 25kgx12-15 /// 25kgx12-15 /// 25kgx12-15
@@ -86,7 +84,6 @@ Recovery: sauna ___ / cold ___ / rlt ___
 - 45 Degree Back Extension: 12-15 /// 12-15 /// 12-15
 - Seated Calf Raise: 85kgx12-15 /// 85kgx12-15 /// 85kgx12-15 /// 85kgx12-15
 - Cable Reverse Crunch: 15kgx12-15 /// 15kgx12-15
-  — superset with the calf raise above
 - Hip Abductor Machine: 25kgx12-15 /// 25kgx12-15 /// 25kgx12-15
 
 ## Workout 4: UPPER B + CORE
@@ -100,7 +97,6 @@ Recovery: sauna ___ / cold ___ / rlt ___
 - Dumbbell Row: 20kgx10-12 /// 20kgx10-12 /// 20kgx10-12
 - Cable Shrug: 60kgx12-15 /// 60kgx12-15 /// 60kgx12-15
 - Ab Crunch Machine: 35kgx10-12 /// 35kgx10-12
-  — superset with the shrug above
 - Rear Delt Fly Machine: 20kgx12-15 /// 20kgx12-15 /// 20kgx12-15
 - Cable Rope Hammer Curl: 20kgx10-12 /// 20kgx10-12 /// 20kgx10-12
 - Cable Tricep Pushdown: 34kgx8-10 /// 34kgx8-10 /// 34kgx8-10
@@ -191,10 +187,11 @@ class PlanParsingTests(unittest.TestCase):
         self.assertEqual(rowing["exercise"], "Rowing Machine")
         self.assertEqual(rowing["prescribed_sets"], 0)
 
-    def test_the_superset_note_is_captured(self) -> None:
-        crunch = [s for s in self.plan["workouts"][0]["slots"]
-                  if s["exercise"] == "Ab Crunch Machine"][0]
-        self.assertEqual(crunch["superset_hint"], "calf raise")
+    def test_a_sub_bullet_note_is_captured(self) -> None:
+        rdl = [s for s in self.plan["workouts"][0]["slots"]
+               if s["exercise"] == "Romanian Deadlift"][0]
+        self.assertEqual(rdl["notes"],
+                         ["rep range up, load has been flat three sessions"])
 
     def test_a_timed_carry_multiplies_out(self) -> None:
         plan = parse_plan(

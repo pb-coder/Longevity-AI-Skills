@@ -75,6 +75,21 @@ class StorageTests(unittest.TestCase):
         csv_store.write_profile("Test", session_target_min=5)
         self.assertEqual(csv_store.read_profile("Test")["session_target_min"], 60)
 
+    def test_muscle_priority_tiers_reach_the_coach(self) -> None:
+        # The documented per-person override was parsed into the unknown
+        # rows and dropped, so every tracker silently ran on the built-in
+        # emphasis set whatever its profile said.
+        from workout_coach.lib.constants import muscle_priority_tiers
+        self.assertIsNone(csv_store.read_profile("Test")["muscle_priority_tiers"])
+        csv_store.write_profile("Test",
+                                muscle_priority_tiers="chest:emphasis;calves:maintain")
+        profile = csv_store.read_profile("Test")
+        self.assertEqual(profile["muscle_priority_tiers"],
+                         "chest:emphasis;calves:maintain")
+        tiers, unknown = muscle_priority_tiers(profile)
+        self.assertEqual((tiers["chest"], tiers["calves"], unknown),
+                         ("emphasis", "maintain", []))
+
     def test_sleep_efficiency_and_notes_are_manual_wins(self) -> None:
         csv_store.upsert_sleep_nights(
             "Test",

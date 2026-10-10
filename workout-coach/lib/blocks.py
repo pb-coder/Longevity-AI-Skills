@@ -123,13 +123,6 @@ COACH_DECLARABLE_ANCHOR_CHANGE_REASONS = ("stall_3_sessions", "injury",
 # travels inside the previous block.
 ROTATION_HISTORY_DEPTH = 3
 
-# How many accessory slots one compound can host. A compound's value as a
-# host is its long rest period, and a 4-set compound has four of those.
-# An accessory wants three sets, so two accessories per compound is the
-# practical ceiling — declaring six accessories supersetted onto one
-# squat is not a superset, it is a way of writing "supersetted" six times.
-SUPERSET_HOST_CAPACITY = 2
-
 # Consecutive sessions at the same load and reps before an anchor may be
 # swapped without a human saying so. Same number SKILL.md's stall-response
 # rule uses, and it is the number that makes ``stall_3_sessions`` a
@@ -183,9 +176,9 @@ def load_pattern_catalog(db: dict | None = None) -> dict[str, dict]:
     least one synergist", which is the same operational definition the
     volume model uses.
 
-    CORE IS EXEMPT FROM THAT FALLBACK. ``is_compound`` decides two
-    things here — whether a slot is inferred as an ``anchor``, and
-    whether it may HOST a superset — and neither is true of trunk work.
+    CORE IS EXEMPT FROM THAT FALLBACK. ``is_compound`` decides whether a
+    slot is inferred as an ``anchor``, and that is never true of trunk
+    work.
     The catalog's own CORE preamble defines the section as "the
     abdominal wall", so a synergist list on a core entry names grip or
     postural involvement, not a second trained region. Exactly one entry
@@ -299,9 +292,8 @@ def new_block(start_date: str, sessions: dict[str, list[dict]] | None = None,
                 "blocks_held": held + 1,
                 "history":     history,
             }
-            for opt in ("pattern", "superset_with", "superset_hint_unresolved",
-                        "anchor_change_reason", "dose",
-                        "substituted_from", "at_risk", "stalled_sessions",
+            for opt in ("pattern", "anchor_change_reason", "dose",
+                        "substituted_from", "stalled_sessions",
                         "performed_instead"):
                 if s.get(opt) is not None:
                     entry[opt] = s[opt]
@@ -321,95 +313,6 @@ def new_block(start_date: str, sessions: dict[str, list[dict]] | None = None,
     }
 
 
-def _catalog_identity_vocabulary(catalog: dict | None) -> frozenset[str]:
-    """Every identity word that appears in any canonical exercise name.
-
-    The discriminator `_match_superset_host` uses to tell a truncated
-    exercise name from trailing prose. ``press`` and ``calf`` are in here;
-    ``above``, ``leave`` and ``tank`` are not.
-    """
-    out: set[str] = set()
-    for name in (catalog or {}):
-        out |= _identity_words(name)
-    return frozenset(out)
-
-
-def _match_superset_host(hint: str, slots: list[dict],
-                         vocabulary: frozenset[str] | None = None) -> str | None:
-    """Resolve a prose superset hint to a slot name in the same session.
-
-    The plan writes "superset with the calf raise above"; the slot is
-    called "Dumbbell Standing Calf Raise". Match on word containment,
-    which is exact enough for the plan's own vocabulary and refuses to
-    guess when two slots would both match.
-
-    TRAILING PROSE IS TOLERATED. ``adherence._SUPERSET_RE`` strips a bare
-    trailing direction word because it anchors on end-of-line, so
-    ``— superset with the cable lat pulldown above`` arrives as
-    ``cable lat pulldown`` and resolved, while
-    ``— superset with the cable lat pulldown above, leave 2-3 in the
-    tank`` arrived whole and resolved to nothing. The pairing WAS written;
-    only the parse failed, and the resulting error then told the coach the
-    slot had been "left standalone", which was false. Splitting the note
-    in two was the documented remedy and it inflated the sub-bullet count,
-    so one warning manufactured another.
-
-    The fix is a prefix backoff: try the longest run of leading identity
-    words that resolves to exactly one slot, shortening one word at a
-    time.
-
-    THE GUARD, and the wrong question the first version answered. Its
-    docstring argued the backoff "cannot resolve an ambiguity either —
-    dropping a word can only ever ADD candidates", which is true and
-    beside the point. The failure is not an ambiguity resolved wrongly;
-    it is a hint whose intended host is ABSENT, where a generic leading
-    word then manufactures a unique hit. Three confirmed on real
-    vocabulary: ``the leg press above`` resolved to ``Leg Extension``
-    (dropping ``press`` and matching on ``leg``), ``the seated calf raise
-    above`` to ``Seated Cable Row``, ``the chest press above`` to ``Chest
-    Supported Row Machine``. All three answered ``None`` before the
-    backoff was added, so the backoff made them worse than the bug it
-    fixed: a wrong pairing is asserted onto the block artifact and travels
-    into the next generation's rotation diff.
-
-    So the winning prefix may only have dropped PROSE. The word
-    immediately after it is checked against the catalog's identity
-    vocabulary: ``above`` / ``leave`` / ``tank`` are not exercise words
-    and the match stands; ``press`` / ``calf`` / ``raise`` are, which
-    means the referent's own name was truncated to force the hit, and the
-    answer is ``None``. Under-specified references still resolve —
-    ``the squat above`` finds ``Barbell Back Squat``, ``the bench press
-    above`` finds ``Dumbbell Flat Bench Press`` — because what follows
-    them is prose, not a dropped name word.
-
-    ``vocabulary`` falls back to the session's own slot words when no
-    catalog is supplied. That is weaker (it cannot see that ``press`` is
-    an exercise word when no press is in this session) and it is the
-    caller's job to pass the catalog it already has.
-    """
-    words = [w for w in _WORD_RE.findall((hint or "").lower())
-             if w not in _EQUIP_WORDS]
-    if not words:
-        return None
-    names = [(s.get("exercise") or "", _identity_words(s.get("exercise") or ""))
-             for s in slots]
-    if vocabulary is None:
-        vocabulary = frozenset().union(*(have for _n, have in names)) \
-            if names else frozenset()
-    for n in range(len(words), 0, -1):
-        want = frozenset(words[:n])
-        hits = [name for name, have in names if want <= have]
-        if len(hits) != 1:
-            continue
-        if n < len(words) and words[n] in vocabulary:
-            # The prefix won by truncating the exercise name it was
-            # referring to, not by shedding prose. The referent is not in
-            # this session; say so instead of guessing a neighbour.
-            return None
-        return hits[0]
-    return None
-
-
 def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
                     prev_block: dict | None = None) -> dict:
     """Bootstrap a block artifact from a parsed plan.
@@ -425,9 +328,6 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
     inference only has to be a defensible starting point.
     """
     plan_date = start_date or plan.get("plan_date")
-    # Once per plan, not once per workout: `_match_superset_host` needs it
-    # for every hint and it is a full pass over the catalog.
-    vocabulary = _catalog_identity_vocabulary(catalog)
     sessions: dict[str, list[dict]] = {}
     for w in plan.get("workouts") or []:
         key = session_key(w.get("title") or "", w.get("index") or 0)
@@ -443,7 +343,6 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
                 "tag":      "anchor" if meta.get("is_compound") else "rotating",
                 "pattern":  meta.get("pattern"),
                 "position": len(slots) + 1,
-                "superset_hint": s.get("superset_hint"),
                 # WHAT THIS SLOT WAS PRESCRIBED, carried on the artifact so
                 # generation N+1 can tell "carried forward and progressed"
                 # from "carried forward and re-copied". The block already
@@ -482,35 +381,16 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
             if s.get("anchor_change_hint") in COACH_DECLARABLE_ANCHOR_CHANGE_REASONS:
                 entry["anchor_change_reason"] = s["anchor_change_hint"]
             slots.append(entry)
-        for s in slots:
-            hint = s.pop("superset_hint", None)
-            if hint:
-                host = _match_superset_host(hint, slots, vocabulary)
-                if host and host != s["exercise"]:
-                    s["superset_with"] = host
-                else:
-                    # The pairing WAS written and could not be resolved to
-                    # a slot in this session. Kept so rule 6 can say that
-                    # instead of "left standalone", which is a different
-                    # defect with a different remedy — see
-                    # `_superset_errors`.
-                    s["superset_hint_unresolved"] = hint
         if slots:
             sessions[key] = slots
 
-    # ADHERENCE AND STALL FACTS TRAVEL BY EXERCISE NAME (W5 F3).
+    # STALL FACTS TRAVEL BY EXERCISE NAME (W5 F3).
     #
     # The proposed block always comes from the plan markdown, which
-    # cannot state either. ``at_risk`` was read off the NEW block by rule
-    # 6 and the new block never had it: 23 slots carried the flag on the
-    # previous artifact and 0 on the proposal, so the adherence-driven
-    # half of the superset rule was dead code — mutating
-    # ``AT_RISK_COMPLETION`` from 0.5 to 0.0 survived the whole suite.
-    #
-    # By NAME, not by position or by session: the fact is about the
-    # movement ("this one keeps not getting done", "this one has not moved in
-    # four sessions"), so it must follow the movement wherever the next
-    # plan puts it.
+    # cannot state a stall count, so it is carried over from the previous
+    # artifact. By NAME, not by position or by session: the fact is about
+    # the movement ("this one has not moved in four sessions"), so it must
+    # follow the movement wherever the next plan puts it.
     carried: dict[str, dict] = {}
     for slots in ((prev_block or {}).get("sessions") or {}).values():
         for s in slots:
@@ -520,9 +400,9 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
     for slots in sessions.values():
         for s in slots:
             prev = carried.get(s["exercise"].strip().lower()) or {}
-            for field in ("at_risk", "stalled_sessions"):
-                if prev.get(field) is not None and s.get(field) is None:
-                    s[field] = prev[field]
+            if prev.get("stalled_sessions") is not None \
+                    and s.get("stalled_sessions") is None:
+                s["stalled_sessions"] = prev["stalled_sessions"]
 
     block = new_block(plan_date, sessions, prev_block=prev_block)
     block["derived_from_plan"] = plan.get("plan_date")
@@ -918,27 +798,22 @@ def rotation_diff_report(prev_block: dict | None, new_block: dict | None,
     error, so it is reported instead of either blocking a legal plan or
     vanishing.
 
-    WHICH RULES BIND WHEN. Rotation is a boundary rule; adherence and
-    structure are not.
+    WHICH RULES BIND WHEN. Rotation is a boundary rule; structure is not.
 
     Boundary only (rules 1, 1b, 2, 3, 4). Mid-block the correct
     behaviour for a rotating slot is to STAY PUT — that is what makes it
     a block — so demanding that it change every week is not a stricter
     reading of the spec, it is a different and incompatible one.
 
-    Always (the catalog precondition, rule 5, rule 6, host capacity):
+    Always (the catalog precondition, rule 5):
 
       * an off-catalog name has no verifiable pattern on any week;
       * an anchor is meant to persist two to three BLOCKS, so swapping
         one mid-block is a strictly larger deviation than swapping one at
         a boundary and the exemptions (stall, injury, age) are exactly
-        the mid-block reasons;
-      * rule 6 is driven by adherence, not by the calendar. Gating it on
-        the boundary would switch off the chronically-skipped-isolation
-        protection for five weeks in six, which is the whole reason it
-        exists.
+        the mid-block reasons.
 
-    Six rules, in the order a reader would ask about them:
+    Five rules, in the order a reader would ask about them:
 
     1. **A rotating slot must actually change.** An exercise that is
        rotating in this session and was in this session last block has
@@ -972,23 +847,6 @@ def rotation_diff_report(prev_block: dict | None, new_block: dict | None,
        ``_anchor_change_excuse``). Anchors exist so progression has
        something to accumulate on; silently swapping one converts the
        block model back into "a different plan every week".
-    6. **Rotated-in and at-risk accessory work is supersetted onto a
-       compound.** Not "placed earlier" — placement was tried on
-       2026-07-25 and the moved movements were still dropped at positions
-       4 and 5 of 8. Isolation is what gets truncated (28% against 11%
-       for compounds), so the fix has to remove it from the session's
-       marginal-time budget: the slot must name a ``superset_with`` that
-       is a compound appearing EARLIER in the same session, so the set
-       happens inside that exercise's rest period.
-
-       Two scopes: **rotated into this session** (not "into the block" —
-       an accessory moved across from Tuesday is new work for Thursday,
-       and scoping it to the block was half of the shuffling loophole),
-       and any slot marked ``at_risk``. Compounds are exempt: a compound
-       is the host, not the guest. A host may absorb at most
-       ``SUPERSET_HOST_CAPACITY`` accessories; its value is its rest
-       windows and it only has so many.
-
     IDENTITY, NOT POSITION. Every rule above compares exercise NAMES
     within a session, never slot ordinals. Positions come from counting
     non-warmup bullets, so inserting one accessory shifted every
@@ -1123,22 +981,6 @@ def rotation_diff_report(prev_block: dict | None, new_block: dict | None,
                 if pg_new is not None and pg_new not in prev_patterns:
                     pattern_gained = True
 
-            # Rule 6 — rotated-in and at-risk accessory work rides a
-            # compound's rest. A compound is exempt: it is the host, not
-            # the guest, and a newly introduced anchor press has nothing
-            # to ride. "Rotated in" is scoped to THIS session when the
-            # session has a counterpart, and falls back to the whole
-            # block when it does not.
-            rotated_in = bool(name) and (
-                key not in prev_names if matched else key not in prev_all)
-            is_compound = bool((catalog.get(key) or {}).get("is_compound"))
-            if name and not is_compound and (rotated_in or slot.get("at_risk")):
-                errors.extend(_superset_errors(stype, slot, pos, name,
-                                               new_slots, catalog, label,
-                                               rotated_in))
-
-        errors.extend(_host_capacity_errors(stype, new_slots, catalog))
-
         # Rule 5 — anchors, matched by identity. An anchor that was here
         # last block and is not here now is the change; which ordinal it
         # used to sit at is not a fact about the program.
@@ -1207,8 +1049,8 @@ def rotation_diff_report(prev_block: dict | None, new_block: dict | None,
     elif new_unmatched:
         notes.append(
             f"block: session(s) {', '.join(new_unmatched)} are new — no "
-            f"previous session to rotate away from, so only the superset and "
-            f"catalog rules bind there.")
+            f"previous session to rotate away from, so only the catalog rule "
+            f"binds there.")
     elif prev_unmatched:
         notes.append(
             f"block: session(s) {', '.join(prev_unmatched)} were dropped from "
@@ -1242,75 +1084,6 @@ def rotation_diff_errors(prev_block: dict | None, new_block: dict | None,
     predecessor) rather than only that it is.
     """
     return rotation_diff_report(prev_block, new_block, catalog)["errors"]
-
-
-def _host_capacity_errors(stype, slots, catalog):
-    """No compound may be declared the host of more accessories than it
-    has rest windows for. Otherwise the superset rule is satisfiable by
-    naming one squat on every accessory bullet in the session."""
-    counts: dict[str, int] = {}
-    for s in slots:
-        host = (s.get("superset_with") or "").strip().lower()
-        if host:
-            counts[host] = counts.get(host, 0) + 1
-    out = []
-    for host, n in sorted(counts.items()):
-        if n > SUPERSET_HOST_CAPACITY:
-            name = (catalog.get(host) or {}).get("name", host)
-            out.append(
-                f"block {stype}: {n} accessories are supersetted onto {name}, "
-                f"which has room for {SUPERSET_HOST_CAPACITY}. Spread them "
-                f"across the session's compounds or cut a slot.")
-    return out
-
-
-def _superset_errors(stype, slot, pos, name, new_slots, catalog, label,
-                     rotated_in=True):
-    """Rule 6's body: non-compound work must ride a compound's rest.
-
-    Not a position rule. Moving the laggards out of the tail was tried on
-    2026-07-25 and they were dropped at positions 4 and 5 of 8 anyway;
-    what gets dropped is isolation work, wherever it sits. A set that
-    happens inside another exercise's rest period costs no extra session
-    minutes, which is the only lever that has not been pulled yet.
-    """
-    host_name = (slot.get("superset_with") or "").strip()
-    if not host_name:
-        # An unresolved hint is NOT a missing pairing. Saying "left
-        # standalone" when the plan wrote the pairing sends the coach to
-        # add a note that is already there; the actionable fact is that
-        # the words did not name a slot in this session.
-        unresolved = (slot.get("superset_hint_unresolved") or "").strip()
-        if unresolved:
-            return [f"{label}: a superset host was written ({unresolved!r}) "
-                    f"but it does not resolve to any exercise in this "
-                    f"session. Name the host's catalog exercise, e.g. "
-                    f"'superset with the barbell back squat above'."]
-        why = ("rotated in this block but left standalone"
-               if rotated_in else
-               "keeps going unperformed and is still standalone")
-        return [f"{label}: {why}. Superset it onto a compound earlier in the "
-                f"session (set superset_with) so the set happens inside that "
-                f"exercise's rest period."]
-    host = None
-    for other in new_slots:
-        if (other.get("exercise") or "").strip().lower() == host_name.lower():
-            host = other
-            break
-    if host is None:
-        return [f"{label}: superset_with names {host_name}, which is not in "
-                f"this session."]
-    meta = (catalog or {}).get(host_name.lower()) or {}
-    out = []
-    if not meta.get("is_compound"):
-        out.append(f"{label}: superset host {host_name} is not a compound. "
-                   f"Pair rotated-in work with a compound, whose rest period "
-                   f"is long enough to absorb it.")
-    if int(host.get("position") or 0) >= pos:
-        out.append(f"{label}: superset host {host_name} is at position "
-                   f"{host.get('position')}, not earlier in the session. The "
-                   f"host has to come first for the rest period to exist.")
-    return out
 
 
 # ------------------------------------------- the artifact against the spec
@@ -2204,14 +1977,6 @@ def rotation_candidates(rows: list[dict], db: dict, catalog: dict,
 
 
 # ---------------------------------------------------------- the payload
-# A slot is at risk when the last reconciled window says the user does
-# not actually do it: half its prescribed sets or fewer, or a whole
-# prescription skipped. Those are the slots the superset rule has to
-# protect, and the only ones a pure diff function cannot identify on its
-# own.
-AT_RISK_COMPLETION = 0.5
-
-
 def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
                   today_d: date, deloads: list[str] | None = None,
                   adherence: dict | None = None,
@@ -2299,25 +2064,6 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
             _, changes = reconcile_block_with_logs(
                 stored, rows, db, catalog, start, today_d + timedelta(days=1))
 
-    # Which slots the user demonstrably does not do. This is the seam
-    # ``rotation_diff_errors`` cannot reach on its own: it is a pure
-    # function of two blocks and a catalog, and "does the user actually
-    # do this" lives in the ledger.
-    #
-    # ``closed_completion_rate`` is used, not ``completion_rate``.
-    # The newest window opens the day the plan is written, so on the
-    # generation that writes it every completion rate is 0 and every slot
-    # reads at risk — which made the finding count depend on whether the
-    # plan file happened to be on disk yet (17 against 23 on the same
-    # inputs). ``consecutive_unperformed`` is computed over closed
-    # windows only and stands whatever the newest one is doing.
-    at_risk: set[str] = set()
-    for e in (adherence or {}).get("per_exercise") or []:
-        rate = e.get("closed_completion_rate")
-        if (e.get("consecutive_unperformed") or 0) >= 1 or (
-                rate is not None and rate <= AT_RISK_COMPLETION):
-            at_risk.add((e.get("name") or "").strip().lower())
-
     # Stall counts, so ``stall_3_sessions`` is a reason the diff can
     # derive. SKILL.md marks the stall response REQUIRED and the only
     # sanctioned responses are a variation swap, a rep-range shift or a
@@ -2332,8 +2078,6 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
     for stype, slots in sorted((stored or {}).get("sessions", {}).items()):
         for s in slots:
             key = (s.get("exercise") or "").strip().lower()
-            if key in at_risk:
-                s["at_risk"] = True
             if stalls.get(key):
                 s["stalled_sessions"] = stalls[key]
             performed = substituted.get((stype, key))
@@ -2348,12 +2092,10 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
                     s.get("exercise"), catalog),
                 "blocks_held":  s.get("blocks_held"),
                 "history":      s.get("history") or None,
-                "superset_with": s.get("superset_with"),
                 # The prescription this slot carried, so the next
                 # generation's validator can tell a progressed carry-over
                 # from a re-copied one. See `block_from_plan`.
                 "dose":         s.get("dose"),
-                "at_risk":      s.get("at_risk") or None,
                 "stalled_sessions": s.get("stalled_sessions"),
                 "performed_instead": s.get("performed_instead"),
                 "must_rotate":  (s.get("tag") == "rotating"
@@ -2380,9 +2122,9 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
         # ``sessions`` is the shape ``rotation_diff_errors`` and the
         # on-disk artifact use. One source (``stored``), two projections
         # rendered here in one place — and the artifact shape is what
-        # carries the per-slot provenance (``at_risk``,
-        # ``stalled_sessions``, ``performed_instead``) that a rotation
-        # check needs and a flattening drops.
+        # carries the per-slot provenance (``stalled_sessions``,
+        # ``performed_instead``) that a rotation check needs and a
+        # flattening drops.
         "sessions":                (stored or {}).get("sessions") or None,
         # R-05. Whether this block's core slots may be carried forward,
         # and if not, exactly which `core_week_spec` axes copying them

@@ -1017,8 +1017,7 @@ class BlockRotationWiringTests(unittest.TestCase):
         plan = _HEAD + _workout(
             "1: LOWER A + CORE",
             "Barbell Back Squat: 90kgx8 /// 90kgx8 /// 90kgx8",
-            "Cable Pallof Press: 15kgx10 /// 15kgx10\n"
-            "  — superset with the squat above")
+            "Cable Pallof Press: 15kgx10 /// 15kgx10")
         self.assertEqual(
             block_rotation_errors(plan, prev, plan_date="2026-08-02"), [])
 

@@ -841,12 +841,10 @@ def main() -> int:
                                 priority_tiers=priority_tiers)
     plans_parsed = load_plans(person, today_d, limit=8)
     dose_stale = dose_staleness(plans_parsed, db)
-    # ``adherence`` feeds the block so each slot can be marked ``at_risk``:
-    # the rotation validator is a pure function of two blocks and cannot
-    # know which movements the user demonstrably does not do. ``e1rm``
-    # feeds it ``stalled_sessions``, which is what lets the same validator
-    # DERIVE ``stall_3_sessions`` instead of demanding a field the plan
-    # markdown cannot express.
+    # ``adherence`` feeds the block so benched slots are withdrawn from it.
+    # ``e1rm`` feeds it ``stalled_sessions``, which is what lets the
+    # rotation validator DERIVE ``stall_3_sessions`` instead of demanding
+    # a field the plan markdown cannot express.
     block = block_payload(person, rows, db, catalog, today_d, deloads,
                           adherence=adherence, e1rm=e1rm)
     # Starting loads for movements with no history. Until this existed the
@@ -1201,8 +1199,8 @@ def main() -> int:
         session_warmup_min = SESSION_WARMUP_MIN_DEFAULT
     session_target_min = profile.get("session_target_min") or 60
     # Per-person pace (min per working set incl. rest). Default 3.3 was the
-    # old one-size constant and is too slow for trainees who rest short or
-    # superset accessories, which silently capped their sessions and their
+    # old one-size constant and is too slow for trainees who rest short,
+    # which silently capped their sessions and their
     # weekly per-muscle volume. Read from profile.csv (key
     # ``min_per_working_set``); falls back to 3.3.
     try:

@@ -19,7 +19,7 @@
 | Data gaps in the tracker           | §13 Tracker Blind Spots |
 | Choosing a training split           | §14 Split Selection |
 | Week-to-week progression within a block | §15 Mesocycle Structure |
-| Pairing exercises / supersets      | §16 Exercise Pairing |
+| Set structure                      | §16 Straight Sets |
 | Regional coverage within a muscle  | §17 Exercise Variation |
 | Recovery / HRV / wrist temp / sleep | §18 Recovery Signals |
 | Per-session HR interpretation       | §19 Per-Session HR |
@@ -237,26 +237,11 @@ Optionally add 1 set to key exercises in weeks 3-4 of a block if recovery is goo
 
 When planning workouts, tell the user where they are in the mesocycle and what the target for each exercise is that week. Don't give them a static plan with no week-to-week direction. If performance is improving, the current stimulus is working. If a lift stalls for 2+ sessions, that's the signal to intervene (adjust load, volume, or exercise selection).
 
-## §16 Exercise Pairing
+## §16 Straight Sets
 
-Straight sets (finish all sets of exercise A before starting exercise B) are the default for compounds. They allow full recovery and maximum force output.
+Every exercise is trained as straight sets: finish all sets of exercise A, with its full rest, before starting exercise B. No pairing, alternating or circuits, for compounds and isolation alike. This is a standing user preference, not an evidence call.
 
-**Key evidence:** Zhang et al. (2025, meta-analysis, 19 studies, 313 participants) found supersets produce equivalent chronic adaptations in strength, hypertrophy, and endurance compared to traditional sets, while reducing session duration significantly. However, supersets increase RPE, blood lactate, and metabolic stress acutely. Agonist-antagonist supersets maintain training volume; same-muscle supersets (compound sets) reduce volume load. Robbins et al. (2010) confirmed no performance cost in the agonist exercise during antagonist-paired sets; Zhang et al. (2025)'s agonist-antagonist subgroup corroborates this at the volume level — total repetitions SMD 0.68 (95% CI 0.20-1.17), p=0.01 — volume is maintained, not compromised, in non-overlapping pairs.
-
-**When to superset:**
-- Antagonist pairs: e.g., bicep curl + tricep pushdown, chest fly + rear delt fly. No performance cost to either exercise. Saves time.
-- Isolation + core: pairing a low-fatigue isolation movement with a core exercise is efficient and doesn't compromise either.
-- Any two exercises that don't share stabilizers or fatigue pathways.
-
-**When not to superset:**
-- Two compounds that share stabilizers (e.g., bench press + overhead press). Fatigue crossover reduces performance.
-- Any exercise where form breakdown under fatigue creates injury risk (heavy squats, deadlifts, barbell rows).
-- If the gym is full and supersetting requires holding two stations.
-- Same-muscle supersets (e.g., two chest exercises back-to-back) reduce volume load and are not recommended for hypertrophy unless intentionally used for metabolic stress.
-
-**RPE trade-off:** Supersets feel harder. The user should expect higher perceived effort. This doesn't reduce gains, but it affects adherence. Don't superset everything in a session.
-
-**Practical rule:** Supersets are a time-saving tool. Use them for isolation and accessory work. Keep compounds on straight sets. If the session is already within the 70-85 minute window without supersets, don't force them.
+Straight sets allow full recovery between sets and maximum force output on each one. When a session runs long, cut a set or an exercise; do not compress rest by pairing movements.
 
 ## §17 Exercise Variation
 
@@ -462,8 +447,8 @@ tier: **Thin** — this inference has no outcome data behind it, for any muscle.
 
 ### §24.2 Timing — when in the session
 
-**The rule: core goes inside the isolation/accessory block, supersetted with an unrelated
-isolation movement. Never before the compounds. Never the final bullet of the workout.**
+**The rule: core goes inside the isolation/accessory block, as straight sets. Never before
+the compounds. Never the final bullet of the workout.**
 
 **Why not first.** Exercise order has **no effect on hypertrophy** — ES 0.03, p=0.862
 (Nunes et al. 2021, Eur J Sport Sci, 11 studies). There is therefore no hypertrophy upside
@@ -502,28 +487,6 @@ carry"** — `Suitcase Carry` is core (anti-lateral-flexion; see the slot-B tabl
 and the D4 note in §24.8), so closing on it trips the core placement error rather than
 avoiding it. The only non-core carry is `Dumbbell Farmer Walk`, which is a finisher
 budgeted outside the core allocation and earns no core credit wherever it sits.
-
-**Why supersetting is the answer.** Zhang et al. 2025 (Sports Med, 19 studies, 313
-participants): supersets produce **equivalent hypertrophy** (CSA SMD −0.05, 95% CI −0.63 to
-0.54, p=0.87) and **equivalent 1RM strength** (SMD 0.10, p=0.36) while cutting session
-duration **~37%** (efficiency SMD 1.74, 95% CI 0.46-3.01, p=0.01). Critically, the subgroup
-split is decisive:
-
-- **Agonist-antagonist / non-overlapping pairs: total repetitions SMD 0.68 (95% CI
-  0.20-1.17), p=0.01 — superior.** Volume is maintained.
-- **Same-muscle pairs: volume load SMD −1.08 (95% CI −1.72 to −0.44), p<0.01 —
-  compromised.**
-
-Pairing core with an unrelated isolation movement (curls, lateral raises, calves, triceps)
-is structurally the first case. Evidence tier: **Established** for the efficiency and
-equivalence; **Moderate** for core specifically, since **no study has supersetted a core
-exercise with anything** — this is a sound inference, not a tested finding. Note also that
-the chronic-adaptation nulls rest on only 3 of the 19 studies, so "equivalent adaptations"
-is likely underpowered; the efficiency finding is far better supported than the equivalence.
-
-The cost is real but small: supersets raise RPE (SMD 0.77, 95% CI 0.15-1.40, p=0.02) and
-blood lactate. Sessions feel harder. **Never superset core with another core exercise** —
-that is the same-muscle case above.
 
 **Separate core sessions are not supported.** No study has compared training a muscle in a
 separate session vs appended to another at equated volume, and frequency effects are
@@ -826,8 +789,6 @@ otherwise-equal movements — not a reason to prescribe.
 - **Do not prescribe a movement <Person> has never performed and place it in the last slot.**
   If the log shows a prescription repeatedly unperformed, the prescription is the problem, not
   the athlete. Change the movement or change its position.
-- **Do not superset core with another core exercise** — same-muscle pairing compromises volume
-  load (SMD −1.08, Zhang 2025).
 - **Do not mark a core set "if you can make it".** Prescribe it or don't.
 - **Do not count squats or deadlifts as ab volume.** Their abdominal EMG findings are null;
   the contribution belongs to `erectors` and is already counted there.

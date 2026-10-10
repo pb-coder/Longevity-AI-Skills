@@ -1,4 +1,4 @@
-"""The gate gaps found by the 2026-08-02 blind-coach eval (G-05..G-09).
+"""The gate gaps found by the 2026-08-02 blind-coach eval (G-05..G-07).
 
 One file per finding-set rather than edits spread across the four suites
 that already touch these modules, because every test here answers the
@@ -11,7 +11,6 @@ The findings, and what each class pins:
   G-05  the session set budget allowed +5 while SKILL.md asked for +-2.
   G-06  dose staleness and the stall response were never checked at all.
   G-07  a fabricated recovery score rendered at exit 0 beside the real one.
-  G-09  a superset sub-bullet parsed only when it was the whole sub-bullet.
   ----  the sub-bullet counter counted structure as rationale creep.
   ----  `anchor_change_reason` had no honest token for a logged
         gym-floor substitution.
@@ -33,8 +32,6 @@ same reason as the first round: the evidence belongs next to the fix.
   F5    the plan markdown's own opener was never number-checked.
   F6    the stall response was laundered by one token bullet in another
         workout.
-  F7    G-09's prefix backoff resolved hints to the WRONG host when the
-        intended host was absent.
   F8    the structural-sub-bullet exemption was a `.search()` and so a
         smuggling channel.
   F9    G-06 crashed (exit 1) on a malformed dose dict.
@@ -422,84 +419,13 @@ class CoachNumberCrossCheckTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-class SupersetHintParseTests(unittest.TestCase):
-    """G-09 — the pairing was written; only the parse failed.
-
-    The resulting error then told the coach the slot was "left
-    standalone", which was false, and the documented remedy (split the
-    note in two) inflated the sub-bullet-count warning. One bad warning
-    manufactured another.
-    """
-
-    def _hosts(self, note: str) -> dict:
-        text = _plan("2026-08-02", (
-            "- Cable Lat Pulldown: 65kgx6-8 /// 65kgx6-8 /// 65kgx6-8\n"
-            "- Dumbbell Lateral Raise: 16kgx10 /// 16kgx10\n"
-            f"  {note}\n"))
-        block = block_from_plan(parse_plan(text, "2026-08-02"), _CATALOG)
-        return {s["exercise"]: s.get("superset_with")
-                for s in block["sessions"]["lower_a"]}
-
-    def test_the_bare_form_still_resolves(self) -> None:
-        hosts = self._hosts("— superset with the cable lat pulldown above")
-        self.assertEqual(hosts["Dumbbell Lateral Raise"], "Cable Lat Pulldown")
-
-    def test_a_trailing_clause_no_longer_defeats_it(self) -> None:
-        hosts = self._hosts("— superset with the cable lat pulldown above, "
-                            "leave 2-3 in the tank")
-        self.assertEqual(hosts["Dumbbell Lateral Raise"], "Cable Lat Pulldown")
-
-    def test_an_ambiguous_hint_still_refuses_to_guess(self) -> None:
-        """Backing off a word can only ADD candidates, never resolve a tie."""
-        text = _plan("2026-08-02", (
-            "- Cable Standing Calf Raise: 50kgx10 /// 50kgx10\n"
-            "- Calf Raise Machine: 55kgx10 /// 55kgx10\n"
-            "- Dumbbell Lateral Raise: 16kgx10 /// 16kgx10\n"
-            "  — superset with the calf raise above, keep it tight\n"))
-        block = block_from_plan(parse_plan(text, "2026-08-02"), _CATALOG)
-        slot = [s for s in block["sessions"]["lower_a"]
-                if s["exercise"] == "Dumbbell Lateral Raise"][0]
-        self.assertIsNone(slot.get("superset_with"))
-
-    def test_an_unresolvable_hint_gets_an_honest_message(self) -> None:
-        """Not "left standalone" — the pairing was written."""
-        text = _plan("2026-08-02", (
-            "- Barbell Back Squat: 100kgx8 /// 100kgx8 /// 100kgx8\n"
-            "- Dumbbell Lateral Raise: 16kgx10 /// 16kgx10\n"
-            "  — superset with the overhead press, keep 2 in reserve\n"))
-        new = block_from_plan(parse_plan(text, "2026-08-02"), _CATALOG)
-        errors = rotation_diff_errors(None, new, _CATALOG)
-        pairing = [e for e in errors if "Dumbbell Lateral Raise" in e]
-        self.assertTrue(any("does not resolve to any exercise" in e
-                            for e in pairing), pairing)
-        self.assertEqual([e for e in pairing if "left standalone" in e], [])
-
-
-# ---------------------------------------------------------------------------
 class SubBulletCounterTests(unittest.TestCase):
     """The counter fired on every compliant plan.
 
-    It counted structural routing lines against a cap meant for rationale
-    creep, so satisfying the block rules on two slots spent the entire
-    annotation budget and SKILL.md had to tell the coach to ignore the
-    warning. A warning that is always wrong trains a reader to skip the
-    ones that are right.
+    It counted structural lines against a cap meant for rationale creep,
+    so declaring a required field spent the annotation budget. A warning
+    that is always wrong trains a reader to skip the ones that are right.
     """
-
-    def test_superset_routing_does_not_count(self) -> None:
-        # The verified shape: four sub-bullets, two of them superset
-        # routing, so the real annotation count is 2 — at the limit.
-        _errors, warnings = validate_workout_md(_plan("2026-08-02", (
-            "- Barbell Back Squat: 100kgx8 /// 100kgx8\n"
-            "- Cable Standing Calf Raise: 50kgx10 /// 50kgx10\n"
-            "  — superset with the back squat above\n"
-            "- Romanian Deadlift: 85kgx8 /// 85kgx8\n"
-            "  — load cut, four sessions flat\n"
-            "- Ab Crunch Machine: 35kgx12 /// 35kgx12\n"
-            "  — superset with the back squat above\n"
-            "- Suitcase Carry: 24kgx30m /// 24kgx30m\n"
-            "  — both sides every set\n")))
-        self.assertEqual([w for w in warnings if "sub-bullets" in w], [])
 
     def test_three_rationale_sub_bullets_still_warn(self) -> None:
         _errors, warnings = validate_workout_md(_plan("2026-08-02", (
@@ -522,12 +448,11 @@ class SubBulletCounterTests(unittest.TestCase):
             "  — anchor change: age_3_blocks\n")))
         self.assertEqual([w for w in warnings if "sub-bullets" in w], [])
 
-    def test_rationale_bolted_onto_a_superset_line_still_warns(self) -> None:
+    def test_rationale_bolted_onto_an_anchor_change_line_still_warns(self) -> None:
         """The exemption is for structure, not for a smuggling channel."""
         _errors, warnings = validate_workout_md(_plan("2026-08-02", (
             "- Barbell Back Squat: 100kgx8 /// 100kgx8\n"
-            "- Cable Standing Calf Raise: 50kgx10 /// 50kgx10\n"
-            "  — superset with the back squat above because you have been "
+            "  — anchor change: injury because you have been "
             "stuck at 50kg\n")))
         self.assertTrue(any("comparative-history" in w for w in warnings),
                         warnings)
@@ -548,15 +473,13 @@ class UserSubstitutionReasonTests(unittest.TestCase):
         return new_block("2026-06-01", {"lower_a": [
             dict(position=1, exercise="Barbell Hip Thrust", tag="anchor",
                  **slot_kw),
-            dict(position=2, exercise="Leg Extension", tag="rotating",
-                 superset_with="Barbell Hip Thrust"),
+            dict(position=2, exercise="Leg Extension", tag="rotating"),
         ]})
 
     def _new(self, prev, replacement="Dumbbell Hip Thrust", **anchor_kw):
         return new_block("2026-07-13", {"lower_a": [
             dict(position=1, exercise=replacement, tag="anchor", **anchor_kw),
-            dict(position=2, exercise="Cable Pallof Press", tag="rotating",
-                 superset_with=replacement),
+            dict(position=2, exercise="Cable Pallof Press", tag="rotating"),
         ]}, prev_block=prev)
 
     def test_the_token_exists(self) -> None:
@@ -1058,95 +981,23 @@ class StallLaunderingTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-class SupersetBackoffGuardTests(unittest.TestCase):
-    """F7 — the backoff resolved hints to the WRONG host.
-
-    The old docstring proved the backoff "cannot resolve an ambiguity",
-    which was the wrong question. The failure is a hint whose intended
-    host is ABSENT, where a generic leading word manufactures a unique
-    hit. All three cases below answered `None` before the backoff existed,
-    so the fix for G-09 made them worse than the bug it closed.
-    """
-
-    def _host(self, body: str, of: str = "Dumbbell Lateral Raise") -> "str | None":
-        text = _plan("2026-08-02", body)
-        block = block_from_plan(parse_plan(text, "2026-08-02"), _CATALOG)
-        slot = [s for s in block["sessions"]["lower_a"] if s["exercise"] == of]
-        return slot[0].get("superset_with") if slot else None
-
-    def test_an_absent_host_resolves_to_nothing(self) -> None:
-        cases = [
-            ("- Leg Extension: 55kgx10 /// 55kgx10\n"
-             "- Dumbbell Lateral Raise: 16kgx10 /// 16kgx10\n"
-             "  — superset with the leg press above\n"),
-            ("- Seated Cable Row: 60kgx10 /// 60kgx10\n"
-             "- Dumbbell Lateral Raise: 16kgx10 /// 16kgx10\n"
-             "  — superset with the seated calf raise above\n"),
-            ("- Chest Supported Row Machine: 70kgx10 /// 70kgx10\n"
-             "- Dumbbell Lateral Raise: 16kgx10 /// 16kgx10\n"
-             "  — superset with the chest press above\n"),
-        ]
-        for body in cases:
-            self.assertIsNone(self._host(body), body)
-
-    def test_an_under_specified_reference_still_resolves(self) -> None:
-        """The whole point of the backoff, kept.
-
-        What follows the winning prefix here is prose, not a dropped name
-        word, so nothing was truncated to force the hit.
-        """
-        self.assertEqual(
-            self._host("- Dumbbell Flat Bench Press: 52kgx8 /// 52kgx8\n"
-                       "- Dumbbell Lateral Raise: 16kgx10 /// 16kgx10\n"
-                       "  — superset with the bench press above\n"),
-            "Dumbbell Flat Bench Press")
-        self.assertEqual(
-            self._host("- Barbell Back Squat: 100kgx8 /// 100kgx8\n"
-                       "- Dumbbell Lateral Raise: 16kgx10 /// 16kgx10\n"
-                       "  — superset with the squat above\n"),
-            "Barbell Back Squat")
-        self.assertEqual(
-            self._host("- Dumbbell Bulgarian Split Squat: 16kgx10 /// 16kgx10\n"
-                       "- Dumbbell Lateral Raise: 16kgx10 /// 16kgx10\n"
-                       "  — superset with the split squat above, keep it tight\n"),
-            "Dumbbell Bulgarian Split Squat")
-
-    def test_the_guard_reads_the_catalog_not_the_session(self) -> None:
-        """The session's own words cannot see that "press" is an exercise.
-
-        A caller that supplies no vocabulary gets the weaker session-word
-        fallback; `block_from_plan` supplies the catalog, which is why the
-        leg-press case above resolves to nothing.
-        """
-        from workout_coach.lib.blocks import (_catalog_identity_vocabulary,
-                                              _match_superset_host)
-        slots = [{"exercise": "Leg Extension"}]
-        self.assertEqual(_match_superset_host("leg press above", slots),
-                         "Leg Extension")
-        self.assertIsNone(_match_superset_host(
-            "leg press above", slots, _catalog_identity_vocabulary(_CATALOG)))
-
-
-# ---------------------------------------------------------------------------
 class SubBulletSmugglingTests(unittest.TestCase):
     """F8 — the structural exemption was a `.search()` over the whole line.
 
-    Any sub-bullet CONTAINING "superset with" anywhere became uncountable,
-    so the exemption for a routing line was also an exemption for a
-    paragraph of rationale with the token buried in it. Measured on the
-    2026-08-02 corpus: 24 of 28 sub-bullets invisible, three of eight
-    workouts counting zero.
+    Any sub-bullet CONTAINING the structural token anywhere became
+    uncountable, so the exemption for a structural line was also an
+    exemption for a paragraph of rationale with the token buried in it.
     """
 
     def test_a_buried_token_no_longer_buys_silence(self) -> None:
         _errors, warnings = validate_workout_md(_plan("2026-08-02", (
             "- Barbell Back Squat: 100kgx8 /// 100kgx8\n"
-            "  — knees track over toes, and this pairs as a superset with "
-            "the calf raise later so the rest period is not wasted\n"
+            "  — knees track over toes, and this is no anchor change: injury "
+            "talk belongs on the dashboard\n"
             "- Leg Extension: 55kgx10 /// 55kgx10\n"
-            "  — squeeze at the top, the machine is a superset with nothing\n"
+            "  — squeeze at the top, nothing here is an anchor change: none\n"
             "- Calf Raise Machine: 55kgx12 /// 55kgx12\n"
-            "  — pause at the bottom; superset with is a phrase that buys "
+            "  — pause at the bottom; anchor change: is a phrase that buys "
             "silence\n")))
         self.assertTrue(any("3 rationale sub-bullets" in w for w in warnings),
                         warnings)
@@ -1154,10 +1005,9 @@ class SubBulletSmugglingTests(unittest.TestCase):
     def test_the_leading_form_is_still_exempt(self) -> None:
         _errors, warnings = validate_workout_md(_plan("2026-08-02", (
             "- Barbell Back Squat: 100kgx8 /// 100kgx8\n"
-            "- Cable Standing Calf Raise: 50kgx10 /// 50kgx10\n"
-            "  — superset with the back squat above\n"
-            "- Ab Crunch Machine: 35kgx12 /// 35kgx12\n"
-            "  — superset with the back squat above\n"
+            "  — anchor change: injury\n"
+            "- Romanian Deadlift: 85kgx8 /// 85kgx8\n"
+            "  — anchor change: stall_3_sessions\n"
             "- Leg Extension: 55kgx10 /// 55kgx10\n"
             "  — anchor change: injury\n")))
         self.assertEqual([w for w in warnings if "sub-bullets" in w], [])

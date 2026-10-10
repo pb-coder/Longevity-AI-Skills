@@ -41,7 +41,7 @@ PROFILE_DEFAULTS = {
     "session_target_min":                  60,
     # Average minutes per working set, including inter-set rest, for THIS
     # person. The working-set budget is (session_target_min - warmup) /
-    # min_per_working_set, so a faster trainee (shorter rests, supersets)
+    # min_per_working_set, so a faster trainee (shorter rests)
     # gets MORE sets in the same wall-clock window. Default 3.3 (the old
     # one-size constant); lower it for people who train dense. Sane band
     # 1.5-6.0 enforced on read.

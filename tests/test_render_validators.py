@@ -47,9 +47,8 @@ _PLAN_CORE_COMPLIANT = """# Workout plan — 2026-06-14
 - Shoulder Press Machine: 45kgx8-10 /// 45kgx8-10 /// 45kgx8-10
   — leave 1-2 in tank
 - Dumbbell Fly: 18kgx10 /// 18kgx10 /// 18kgx10
-- Kneeling Cable Crunch: 20kgx12-15 /// 20kgx12-15
 - Cable Lateral Raise: 15kgx10 /// 15kgx10 /// 15kgx10
-  — superset with the cable crunch above
+- Kneeling Cable Crunch: 20kgx12-15 /// 20kgx12-15
 - Cable Overhead Tricep Extension: 35kgx8-10 /// 35kgx8-10 /// 35kgx8-10
 """
 
@@ -282,15 +281,15 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertEqual(errors, [])
         # Pinned string updated 2026-08-02: the counter now says
         # "rationale sub-bullets", because it counts only those. All three
-        # sub-bullets here ARE rationale (none is a superset or
-        # anchor-change routing line), so the COUNT is unchanged at 3 and
+        # sub-bullets here ARE rationale (none is an anchor-change
+        # line), so the COUNT is unchanged at 3 and
         # this test still measures what it always measured.
         self.assertTrue(any("3 rationale sub-bullets" in w for w in warnings))
         self.assertTrue(any("comparative-history" in w for w in warnings))
 
     def test_core_warnings_silent_on_compliant_workout(self) -> None:
-        # The SKILL.md worked example (fixed by Task D): core is
-        # supersetted inside the isolation block, 2 sets, a flexion
+        # The SKILL.md worked example (fixed by Task D): core sits
+        # inside the isolation block, 2 sets, a flexion
         # movement, not the final bullet, no optional qualifier.
         self.assertEqual(workout_core_warnings(_PLAN_CORE_COMPLIANT), [])
 

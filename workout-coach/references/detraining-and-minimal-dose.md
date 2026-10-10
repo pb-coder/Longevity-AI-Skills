@@ -117,8 +117,8 @@ one set of 6-12 reps at 70-85% 1RM taken with high effort, two to three times a
 week, still produces significant if suboptimal 1RM gains in trained men
 (Androulakis-Korakakis et al., Sports Med 2020;50(4):751-765). Roughly four
 weekly sets per muscle is a pragmatic floor for continued progress, and
-supersets, drop sets and rest-pause halve session time at equated volume
-(Iversen et al., Sports Med 2021;51(10):2079-2095).
+drop sets and rest-pause halve session time at equated volume (Iversen et
+al., Sports Med 2021;51(10):2079-2095).
 
 **The caveat that governs every number above, and it is not a small one.** Every
 maintenance trial reduced *volume and frequency* while holding *load* constant.

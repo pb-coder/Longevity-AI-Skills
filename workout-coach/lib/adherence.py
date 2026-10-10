@@ -118,13 +118,9 @@ def workout_heading_title(line: str) -> str | None:
 _ANY_H2_RE = re.compile(r"^##\s+(.+?)\s*$")
 _BULLET_RE = re.compile(r"^-\s+([^:]+?)\s*:\s*(.+?)\s*$")
 # The indented em-dash continuation under a bullet: the plan's sparse
-# per-slot note. It carries the superset pairing ("superset with the calf
-# raise above"), which is the only place the plan states its own
-# placement, so it is kept rather than skipped.
+# per-slot note. It can carry an anchor-change declaration (below), so it
+# is kept rather than skipped.
 _NOTE_RE = re.compile(r"^\s+[—–-]\s*(.+?)\s*$")
-_SUPERSET_RE = re.compile(
-    r"superset(?:ted)?\s+(?:with|onto|into)\s+(?:the\s+)?(.+?)"
-    r"(?:\s+(?:above|below|before|after))?\s*$", re.IGNORECASE)
 # The plan's channel for the one anchor-change reason nothing can derive.
 # ``stall_3_sessions`` comes off the e1RM stall counter and
 # ``age_3_blocks`` off the block artifact, but only the user knows about
@@ -600,7 +596,6 @@ def _slot_from_bullet(exercise: str, spec: str, position: int) -> dict:
         "metres":          _mode([i["metres"] for i in working
                                   if i["metres"] is not None]),
         "notes":           [],
-        "superset_hint":   None,
         "anchor_change_hint": None,
         "unparsed":        unparsed,
         "raw":             spec.strip(),
@@ -685,9 +680,6 @@ def parse_plan(text: str, plan_date: str, db: dict | None = None) -> dict:
             if n and current["slots"]:
                 slot = current["slots"][-1]
                 slot["notes"].append(n.group(1))
-                sup = _SUPERSET_RE.search(n.group(1))
-                if sup and not slot["superset_hint"]:
-                    slot["superset_hint"] = sup.group(1).strip()
                 anc = _ANCHOR_CHANGE_RE.search(n.group(1))
                 if anc and not slot["anchor_change_hint"]:
                     slot["anchor_change_hint"] = anc.group(1).lower()

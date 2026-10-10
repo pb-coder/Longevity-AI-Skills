@@ -127,20 +127,16 @@ class RotationDiffTests(unittest.TestCase):
     def _prev(self):
         return _block([
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Lateral Raise", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Ab Crunch Machine", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Cable Lateral Raise", "rotating"),
+            _slot(3, "Ab Crunch Machine", "rotating"),
         ])
 
     def test_a_clean_rotation_passes(self) -> None:
         prev = self._prev()
         new = _block([
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Face Pull", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Cable Pallof Press", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Cable Face Pull", "rotating"),
+            _slot(3, "Cable Pallof Press", "rotating"),
         ], started="2026-07-13", prev=prev)
         self.assertEqual(rotation_diff_errors(prev, new, _CATALOG), [])
 
@@ -148,10 +144,8 @@ class RotationDiffTests(unittest.TestCase):
         prev = self._prev()
         new = _block([
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Dumbbell Lateral Raise", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Cable Pallof Press", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Dumbbell Lateral Raise", "rotating"),
+            _slot(3, "Cable Pallof Press", "rotating"),
         ], started="2026-07-13", prev=prev)
         errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
         self.assertIn("differs only by equipment", errs)
@@ -162,8 +156,7 @@ class RotationDiffTests(unittest.TestCase):
         prev = self._prev()
         new = _block([
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Face Pull", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Cable Face Pull", "rotating"),
             _slot(3, "Ab Crunch Machine", "rotating"),
         ], started="2026-07-13", prev=prev)
         errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
@@ -173,16 +166,13 @@ class RotationDiffTests(unittest.TestCase):
         # Alternating two movements changes the exercise every block and
         # rotates nothing. The slot's own history is what catches it.
         b1 = _block([_slot(1, "Dumbbell Flat Bench Press", "anchor"),
-                     _slot(2, "Cable Lateral Raise", "rotating",
-                           superset_with="Dumbbell Flat Bench Press")])
+                     _slot(2, "Cable Lateral Raise", "rotating")])
         b2 = _block([_slot(1, "Dumbbell Flat Bench Press", "anchor"),
-                     _slot(2, "Cable Face Pull", "rotating",
-                           superset_with="Dumbbell Flat Bench Press")],
+                     _slot(2, "Cable Face Pull", "rotating")],
                     started="2026-07-13", prev=b1)
         self.assertEqual(rotation_diff_errors(b1, b2, _CATALOG), [])
         b3 = _block([_slot(1, "Dumbbell Flat Bench Press", "anchor"),
-                     _slot(2, "Cable Lateral Raise", "rotating",
-                           superset_with="Dumbbell Flat Bench Press")],
+                     _slot(2, "Cable Lateral Raise", "rotating")],
                     started="2026-08-24", prev=b2)
         errs = "\n".join(rotation_diff_errors(b2, b3, _CATALOG))
         self.assertIn("within the last", errs)
@@ -194,17 +184,13 @@ class RotationDiffTests(unittest.TestCase):
         # long as the session gains a pattern somewhere.
         prev = _block([
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Plank", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Ab Crunch Machine", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Plank", "rotating"),
+            _slot(3, "Ab Crunch Machine", "rotating"),
         ])
         new = _block([
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Hollow Body Hold", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Cable Pallof Press", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Hollow Body Hold", "rotating"),
+            _slot(3, "Cable Pallof Press", "rotating"),
         ], started="2026-07-13", prev=prev)
         self.assertEqual(rotation_diff_errors(prev, new, _CATALOG), [])
 
@@ -213,17 +199,13 @@ class RotationDiffTests(unittest.TestCase):
         # categories that are missing stay missing forever.
         prev = _block([
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Plank", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Ab Crunch Machine", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Plank", "rotating"),
+            _slot(3, "Ab Crunch Machine", "rotating"),
         ])
         new = _block([
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Hollow Body Hold", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Kneeling Cable Crunch", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Hollow Body Hold", "rotating"),
+            _slot(3, "Kneeling Cable Crunch", "rotating"),
         ], started="2026-07-13", prev=prev)
         errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
         self.assertIn("no rotating slot moved to a movement pattern", errs)
@@ -232,10 +214,8 @@ class RotationDiffTests(unittest.TestCase):
         prev = self._prev()
         swapped = _block([
             _slot(1, "Flat Barbell Bench Press", "anchor"),
-            _slot(2, "Cable Face Pull", "rotating",
-                  superset_with="Flat Barbell Bench Press"),
-            _slot(3, "Cable Pallof Press", "rotating",
-                  superset_with="Flat Barbell Bench Press"),
+            _slot(2, "Cable Face Pull", "rotating"),
+            _slot(3, "Cable Pallof Press", "rotating"),
         ], started="2026-07-13", prev=prev)
         errs = "\n".join(rotation_diff_errors(prev, swapped, _CATALOG))
         self.assertIn("anchor changed", errs)
@@ -243,119 +223,14 @@ class RotationDiffTests(unittest.TestCase):
         swapped["sessions"]["upper_a"][0]["anchor_change_reason"] = "stall_3_sessions"
         self.assertEqual(rotation_diff_errors(prev, swapped, _CATALOG), [])
 
-    def test_rotated_in_movement_left_standalone_fails(self) -> None:
-        prev = self._prev()
-        new = _block([
-            _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Face Pull", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Cable Pallof Press", "rotating"),
-        ], started="2026-07-13", prev=prev)
-        errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
-        self.assertIn("left standalone", errs)
-
-    def test_superset_host_must_be_a_compound_and_come_first(self) -> None:
-        prev = self._prev()
-        new = _block([
-            _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Face Pull", "rotating",
-                  superset_with="Cable Pallof Press"),
-            _slot(3, "Cable Pallof Press", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-        ], started="2026-07-13", prev=prev)
-        errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
-        self.assertIn("is not a compound", errs)
-        self.assertIn("not earlier in the session", errs)
-
-    def test_a_newly_introduced_compound_needs_no_superset_host(self) -> None:
-        # A compound is the host, not the guest.
-        prev = self._prev()
-        new = _block([
-            _slot(1, "Cable Lat Pulldown", "anchor",
-                  anchor_change_reason="stall_3_sessions"),
-            _slot(2, "Cable Face Pull", "rotating",
-                  superset_with="Cable Lat Pulldown"),
-            _slot(3, "Cable Pallof Press", "rotating",
-                  superset_with="Cable Lat Pulldown"),
-        ], started="2026-07-13", prev=prev)
-        self.assertEqual(rotation_diff_errors(prev, new, _CATALOG), [])
-
-    def test_an_at_risk_carried_slot_must_be_supersetted(self) -> None:
-        # The 28%-vs-11% drop rate is a property of isolation work, not of
-        # novelty. `at_risk` is the seam for adherence data: this function
-        # cannot see which movements keep going unperformed, so the caller
-        # marks them and the rule then applies to a CARRIED slot too — one
-        # that is in the same session it was in last block, so nothing
-        # about novelty brings it under rule 6.
-        #
-        # Mid-block on purpose. Rule 6 is driven by adherence, not by the
-        # calendar: gating it on the boundary would switch the protection
-        # off for five weeks in six.
-        prev = new_block("2026-07-01", {
-            "upper_a": [
-                _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-                _slot(2, "Cable Face Pull", "rotating",
-                      superset_with="Dumbbell Flat Bench Press"),
-            ],
-        })
-        new = new_block("2026-07-13", {
-            "upper_a": [
-                _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-                _slot(2, "Cable Face Pull", "rotating", at_risk=True),
-            ],
-        }, prev_block=prev)
-        report = rotation_diff_report(prev, new, _CATALOG)
-        self.assertFalse(report["boundary"], "1.7 weeks in is not a boundary")
-        self.assertIn("keeps going unperformed", "\n".join(report["errors"]))
-
-    def test_a_carried_slot_that_is_not_at_risk_may_stand_alone(self) -> None:
-        # A blanket rule is not physical: a lower day has two compounds and
-        # six accessories, and six accessories cannot all ride two hosts.
-        prev = _block([
-            _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Face Pull", "rotating"),
-            _slot(3, "Cable Pallof Press", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-        ])
-        new = _block([
-            _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Face Pull", "rotating"),
-            _slot(3, "Rear Delt Fly Machine", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-        ], started="2026-07-13", prev=prev)
-        errs = rotation_diff_errors(prev, new, _CATALOG)
-        self.assertEqual(
-            [e for e in errs if "Superset it onto a compound" in e], [])
-
-    def test_one_compound_cannot_host_the_whole_session(self) -> None:
-        prev = _block([
-            _slot(1, "Barbell Back Squat", "anchor"),
-            _slot(2, "Leg Extension", "rotating"),
-            _slot(3, "Leg Curl (Seated)", "rotating"),
-            _slot(4, "Seated Calf Raise", "rotating"),
-        ])
-        new = _block([
-            _slot(1, "Barbell Back Squat", "anchor"),
-            _slot(2, "Hack Squat", "rotating",
-                  superset_with="Barbell Back Squat"),
-            _slot(3, "Leg Curl (Lying)", "rotating",
-                  superset_with="Barbell Back Squat"),
-            _slot(4, "Dumbbell Standing Calf Raise", "rotating",
-                  superset_with="Barbell Back Squat"),
-        ], started="2026-07-13", prev=prev)
-        errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
-        self.assertIn("which has room for 2", errs)
-
     def test_off_catalog_name_is_a_blocking_error(self) -> None:
         # Otherwise "invent a name" is the cheapest way past every rule
         # above, because an unknown name has no pattern to compare.
         prev = self._prev()
         new = _block([
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Super Delt Blaster 3000", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Cable Pallof Press", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Super Delt Blaster 3000", "rotating"),
+            _slot(3, "Cable Pallof Press", "rotating"),
         ], started="2026-07-13", prev=prev)
         errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
         self.assertIn("not in the exercises catalog", errs)
@@ -552,7 +427,6 @@ Date: ___\\
 - Barbell Back Squat: 45kgx5 (warmup) /// 90kgx8-10 /// 90kgx8-10
 - Dumbbell Standing Calf Raise: 50kgx12-15 /// 50kgx12-15
 - Ab Crunch Machine: 30kgx12-15 /// 30kgx12-15
-  — superset with the calf raise above
 
 ## Workout 2: UPPER A + CORE
 Date: ___\\
@@ -581,14 +455,6 @@ Date: ___\\
         tags = {s["exercise"]: s["tag"] for s in b["sessions"]["lower_a"]}
         self.assertEqual(tags["Barbell Back Squat"], "anchor")
         self.assertEqual(tags["Ab Crunch Machine"], "rotating")
-
-    def test_the_superset_note_becomes_a_slot_link(self) -> None:
-        # The plan's own prose is the only place the pairing is stated.
-        b = block_from_plan(self.plan, _CATALOG)
-        crunch = [s for s in b["sessions"]["lower_a"]
-                  if s["exercise"] == "Ab Crunch Machine"][0]
-        self.assertEqual(crunch["superset_with"], "Dumbbell Standing Calf Raise")
-
 
 # ---------------------------------------------------------------------------
 class ReconcileBlockTests(unittest.TestCase):
@@ -719,18 +585,14 @@ class BoundaryGatingTests(unittest.TestCase):
     def _pair(self, prev_started, new_started, **prev_kw):
         prev = new_block(prev_started, {"upper_a": [
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Lateral Raise", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Ab Crunch Machine", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Cable Lateral Raise", "rotating"),
+            _slot(3, "Ab Crunch Machine", "rotating"),
         ]})
         prev.update(prev_kw)
         new = new_block(new_started, {"upper_a": [
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Lateral Raise", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
-            _slot(3, "Ab Crunch Machine", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Cable Lateral Raise", "rotating"),
+            _slot(3, "Ab Crunch Machine", "rotating"),
         ]}, prev_block=prev)
         return prev, new
 
@@ -781,8 +643,7 @@ class BoundaryGatingTests(unittest.TestCase):
         # still not host the whole session.
         prev = new_block("2026-07-25", {"upper_a": [
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Lateral Raise", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Cable Lateral Raise", "rotating"),
         ]})
         new = new_block("2026-08-02", {"upper_a": [
             _slot(1, "Flat Barbell Bench Press", "anchor"),
@@ -801,8 +662,7 @@ class SelfDiffTests(unittest.TestCase):
     def test_a_block_diffed_against_itself_is_reported_not_passed(self) -> None:
         block = new_block("2026-08-02", {"upper_a": [
             _slot(1, "Dumbbell Flat Bench Press", "anchor"),
-            _slot(2, "Cable Lateral Raise", "rotating",
-                  superset_with="Dumbbell Flat Bench Press"),
+            _slot(2, "Cable Lateral Raise", "rotating"),
         ]})
         block["source"] = "derived_from_plan"
         report = rotation_diff_report(block, block, _CATALOG)
@@ -830,10 +690,8 @@ class SessionMatchingTests(unittest.TestCase):
     PREV = {
         "lower_a": [
             dict(position=1, exercise="Barbell Back Squat", tag="anchor"),
-            dict(position=2, exercise="Leg Extension", tag="rotating",
-                 superset_with="Barbell Back Squat"),
-            dict(position=3, exercise="Ab Crunch Machine", tag="rotating",
-                 superset_with="Barbell Back Squat"),
+            dict(position=2, exercise="Leg Extension", tag="rotating"),
+            dict(position=3, exercise="Ab Crunch Machine", tag="rotating"),
         ],
     }
 
@@ -841,10 +699,8 @@ class SessionMatchingTests(unittest.TestCase):
         prev = new_block("2026-06-01", self.PREV)
         new = new_block("2026-07-13", {new_key: [
             _slot(1, "Barbell Back Squat", "anchor"),
-            _slot(2, "Leg Extension", "rotating",
-                  superset_with="Barbell Back Squat"),
-            _slot(3, "Ab Crunch Machine", "rotating",
-                  superset_with="Barbell Back Squat"),
+            _slot(2, "Leg Extension", "rotating"),
+            _slot(3, "Ab Crunch Machine", "rotating"),
         ]}, prev_block=prev)
         return rotation_diff_report(prev, new, _CATALOG)
 
@@ -863,8 +719,7 @@ class SessionMatchingTests(unittest.TestCase):
         prev = new_block("2026-06-01", self.PREV)
         new = new_block("2026-07-13", {"upper_z": [
             _slot(1, "Cable Lat Pulldown", "anchor"),
-            _slot(2, "Cable Face Pull", "rotating",
-                  superset_with="Cable Lat Pulldown"),
+            _slot(2, "Cable Face Pull", "rotating"),
         ]}, prev_block=prev)
         errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
         self.assertIn("do not continue any session", errs)
@@ -877,15 +732,12 @@ class SessionMatchingTests(unittest.TestCase):
         new = new_block("2026-07-13", {
             "lower_a": [
                 _slot(1, "Barbell Back Squat", "anchor"),
-                _slot(2, "Hack Squat", "rotating",
-                      superset_with="Barbell Back Squat"),
-                _slot(3, "Cable Pallof Press", "rotating",
-                      superset_with="Barbell Back Squat"),
+                _slot(2, "Hack Squat", "rotating"),
+                _slot(3, "Cable Pallof Press", "rotating"),
             ],
             "upper_z": [
                 _slot(1, "Cable Lat Pulldown", "anchor"),
-                _slot(2, "Cable Face Pull", "rotating",
-                      superset_with="Cable Lat Pulldown"),
+                _slot(2, "Cable Face Pull", "rotating"),
             ],
         }, prev_block=prev)
         report = rotation_diff_report(prev, new, _CATALOG)
@@ -904,19 +756,16 @@ class AnchorIdentityTests(unittest.TestCase):
     PREV = {"lower_a": [
         dict(position=1, exercise="Barbell Back Squat", tag="anchor"),
         dict(position=2, exercise="Romanian Deadlift", tag="anchor"),
-        dict(position=3, exercise="Leg Extension", tag="rotating",
-             superset_with="Barbell Back Squat"),
+        dict(position=3, exercise="Leg Extension", tag="rotating"),
     ]}
 
     def test_inserting_an_accessory_does_not_invent_an_anchor_change(self) -> None:
         prev = new_block("2026-06-01", self.PREV)
         new = new_block("2026-07-13", {"lower_a": [
             _slot(1, "Barbell Back Squat", "anchor"),
-            _slot(2, "Cable Pallof Press", "rotating",
-                  superset_with="Barbell Back Squat"),
+            _slot(2, "Cable Pallof Press", "rotating"),
             _slot(3, "Romanian Deadlift", "anchor"),
-            _slot(4, "Hack Squat", "rotating",
-                  superset_with="Barbell Back Squat"),
+            _slot(4, "Hack Squat", "rotating"),
         ]}, prev_block=prev)
         errs = rotation_diff_errors(prev, new, _CATALOG)
         self.assertEqual([e for e in errs if "anchor changed" in e], [],
@@ -927,8 +776,7 @@ class AnchorIdentityTests(unittest.TestCase):
         new = new_block("2026-07-13", {"lower_a": [
             _slot(1, "Barbell Back Squat", "anchor"),
             _slot(2, "Hack Squat", "anchor"),
-            _slot(3, "Cable Pallof Press", "rotating",
-                  superset_with="Barbell Back Squat"),
+            _slot(3, "Cable Pallof Press", "rotating"),
         ]}, prev_block=prev)
         errs = [e for e in rotation_diff_errors(prev, new, _CATALOG)
                 if "anchor changed" in e]
@@ -944,13 +792,12 @@ class AnchorIdentityTests(unittest.TestCase):
         new = new_block("2026-07-13", {"lower_a": [
             _slot(1, "Barbell Back Squat", "anchor"),
             _slot(2, "Romanian Deadlift", "anchor"),
-            _slot(3, "Leg Extension", "rotating",
-                  superset_with="Barbell Back Squat"),
-            _slot(9, "Suitcase Carry", "rotating"),
+            _slot(3, "Hack Squat", "rotating"),
+            _slot(9, "Leg Extension", "rotating"),
         ]}, prev_block=prev)
         errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
-        self.assertIn("Suitcase Carry", errs)
-        self.assertIn("left standalone", errs)
+        self.assertIn("slot 9 (Leg Extension)", errs)
+        self.assertIn("unchanged from the previous block", errs)
 
 
 # ---------------------------------------------------------------------------
@@ -963,16 +810,14 @@ class AnchorChangeReasonTests(unittest.TestCase):
         return new_block("2026-06-01", {"lower_a": [
             dict(position=1, exercise="Romanian Deadlift", tag="anchor",
                  **slot_kw),
-            dict(position=2, exercise="Leg Extension", tag="rotating",
-                 superset_with="Romanian Deadlift"),
+            dict(position=2, exercise="Leg Extension", tag="rotating"),
         ]})
 
     def _new(self, prev, **anchor_kw):
         return new_block("2026-07-13", {"lower_a": [
             dict(position=1, exercise="Barbell Good Morning", tag="anchor",
                  **anchor_kw),
-            _slot(2, "Cable Pallof Press", "rotating",
-                  superset_with="Barbell Good Morning"),
+            _slot(2, "Cable Pallof Press", "rotating"),
         ]}, prev_block=prev)
 
     def test_a_stall_on_the_dropped_anchor_qualifies_the_change(self) -> None:
@@ -997,15 +842,14 @@ class AnchorChangeReasonTests(unittest.TestCase):
         self.assertTrue(any("age_3_blocks" in n for n in report["notes"]))
 
     def test_injury_comes_from_the_plans_own_sub_bullet(self) -> None:
-        # The one reason nothing can derive. Parsed alongside the
-        # superset hint, so a human channel exists at all.
+        # The one reason nothing can derive. Parsed from the plan's own
+        # sub-bullet, so a human channel exists at all.
         from workout_coach.lib.adherence import parse_plan
         plan = parse_plan(
             "## Workout 1: LOWER A\n"
             "- Barbell Good Morning: 40kgx10 /// 40kgx10\n"
             "  — anchor change: injury\n"
-            "- Cable Pallof Press: 15kgx12 /// 15kgx12\n"
-            "  — superset with the good morning above\n",
+            "- Cable Pallof Press: 15kgx12 /// 15kgx12\n",
             "2026-07-13")
         prev = self._prev()
         new = block_from_plan(plan, _CATALOG, start_date="2026-07-13",
@@ -1018,55 +862,6 @@ class AnchorChangeReasonTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-class AtRiskPropagationTests(unittest.TestCase):
-    """Rule 6's adherence half was dead code: it read `at_risk` off the
-    NEW block, and the new block always comes from `block_from_plan`,
-    which never set it. 23 slots carried the flag on the previous
-    artifact and 0 on the proposal."""
-
-    def test_at_risk_travels_from_the_previous_block_by_name(self) -> None:
-        from workout_coach.lib.adherence import parse_plan
-        prev = new_block("2026-07-01", {"lower_a": [
-            dict(position=1, exercise="Barbell Back Squat", tag="anchor"),
-            dict(position=2, exercise="Leg Extension", tag="rotating",
-                 at_risk=True, superset_with="Barbell Back Squat"),
-        ]})
-        # A DIFFERENT session, so nothing but the name can carry it.
-        plan = parse_plan(
-            "## Workout 1: LOWER B\n"
-            "- Barbell Back Squat: 90kgx8 /// 90kgx8\n"
-            "- Leg Extension: 55kgx12 /// 55kgx12\n",
-            "2026-07-13")
-        new = block_from_plan(plan, _CATALOG, start_date="2026-07-13",
-                              prev_block=prev)
-        slot = [s for s in new["sessions"]["lower_b"]
-                if s["exercise"] == "Leg Extension"][0]
-        self.assertTrue(slot.get("at_risk"),
-                        "a movement the user keeps skipping stays flagged "
-                        "when it is re-prescribed")
-
-    def test_the_flag_is_what_makes_rule_6_fire_on_a_carried_slot(self) -> None:
-        # Mutating AT_RISK_COMPLETION from 0.5 to 0.0 survived all 630
-        # tests. This is the assertion that would have caught it: the
-        # only difference between the two blocks below is the flag.
-        def run(at_risk):
-            prev = new_block("2026-07-01", {"lower_a": [
-                dict(position=1, exercise="Barbell Back Squat", tag="anchor"),
-                dict(position=2, exercise="Leg Extension", tag="rotating",
-                     superset_with="Barbell Back Squat"),
-            ]})
-            slots = [_slot(1, "Barbell Back Squat", "anchor"),
-                     _slot(2, "Leg Extension", "rotating")]
-            if at_risk:
-                slots[1]["at_risk"] = True
-            new = new_block("2026-07-13", {"lower_a": slots}, prev_block=prev)
-            return rotation_diff_errors(prev, new, _CATALOG)
-
-        self.assertEqual(run(False), [])
-        self.assertTrue(any("keeps going unperformed" in e for e in run(True)))
-
-
-# ---------------------------------------------------------------------------
 class ShufflingTests(unittest.TestCase):
     """Moving an exercise between days satisfied every rule while the
     block trained exactly what it trained before — the cheapest possible
@@ -1076,30 +871,22 @@ class ShufflingTests(unittest.TestCase):
     def _prev(self):
         return new_block("2026-06-01", {
             "lower_a": [_slot(1, "Barbell Back Squat", "anchor"),
-                        _slot(2, "Leg Extension", "rotating",
-                              superset_with="Barbell Back Squat"),
-                        _slot(3, "Ab Crunch Machine", "rotating",
-                              superset_with="Barbell Back Squat")],
+                        _slot(2, "Leg Extension", "rotating"),
+                        _slot(3, "Ab Crunch Machine", "rotating")],
             "lower_b": [_slot(1, "Romanian Deadlift", "anchor"),
-                        _slot(2, "Leg Curl (Seated)", "rotating",
-                              superset_with="Romanian Deadlift"),
-                        _slot(3, "Plank", "rotating",
-                              superset_with="Romanian Deadlift")],
+                        _slot(2, "Leg Curl (Seated)", "rotating"),
+                        _slot(3, "Plank", "rotating")],
         })
 
     def test_swapping_two_days_worth_of_accessories_is_rejected(self) -> None:
         prev = self._prev()
         new = new_block("2026-07-13", {
             "lower_a": [_slot(1, "Barbell Back Squat", "anchor"),
-                        _slot(2, "Leg Curl (Seated)", "rotating",
-                              superset_with="Barbell Back Squat"),
-                        _slot(3, "Plank", "rotating",
-                              superset_with="Barbell Back Squat")],
+                        _slot(2, "Leg Curl (Seated)", "rotating"),
+                        _slot(3, "Plank", "rotating")],
             "lower_b": [_slot(1, "Romanian Deadlift", "anchor"),
-                        _slot(2, "Leg Extension", "rotating",
-                              superset_with="Romanian Deadlift"),
-                        _slot(3, "Ab Crunch Machine", "rotating",
-                              superset_with="Romanian Deadlift")],
+                        _slot(2, "Leg Extension", "rotating"),
+                        _slot(3, "Ab Crunch Machine", "rotating")],
         }, prev_block=prev)
         errs = rotation_diff_errors(prev, new, _CATALOG)
         moved = [e for e in errs if "Moving a movement between sessions" in e]
@@ -1109,15 +896,11 @@ class ShufflingTests(unittest.TestCase):
         prev = self._prev()
         new = new_block("2026-07-13", {
             "lower_a": [_slot(1, "Barbell Back Squat", "anchor"),
-                        _slot(2, "Hack Squat", "rotating",
-                              superset_with="Barbell Back Squat"),
-                        _slot(3, "Cable Pallof Press", "rotating",
-                              superset_with="Barbell Back Squat")],
+                        _slot(2, "Hack Squat", "rotating"),
+                        _slot(3, "Cable Pallof Press", "rotating")],
             "lower_b": [_slot(1, "Romanian Deadlift", "anchor"),
-                        _slot(2, "Cable Standing Leg Curl", "rotating",
-                              superset_with="Romanian Deadlift"),
-                        _slot(3, "Suitcase Carry", "rotating",
-                              superset_with="Romanian Deadlift")],
+                        _slot(2, "Cable Standing Leg Curl", "rotating"),
+                        _slot(3, "Suitcase Carry", "rotating")],
         }, prev_block=prev)
         report = rotation_diff_report(prev, new, _CATALOG)
         self.assertEqual(report["errors"], [])
@@ -1131,13 +914,11 @@ class ShufflingTests(unittest.TestCase):
         prev = new_block("2026-06-01", {"upper_b": [
             dict(position=1, exercise="Cable Lat Pulldown", tag="anchor"),
             dict(position=2, exercise="Rear Delt Fly Machine", tag="rotating",
-                 superset_with="Cable Lat Pulldown",
                  performed_instead="Dumbbell Rear Delt Fly"),
         ]})
         new = new_block("2026-07-13", {"upper_b": [
             _slot(1, "Cable Lat Pulldown", "anchor"),
-            _slot(2, "Dumbbell Rear Delt Fly", "rotating",
-                  superset_with="Cable Lat Pulldown"),
+            _slot(2, "Dumbbell Rear Delt Fly", "rotating"),
         ]}, prev_block=prev)
         errs = rotation_diff_errors(prev, new, _CATALOG)
         self.assertEqual([e for e in errs if "differs only by equipment" in e],
@@ -1146,13 +927,11 @@ class ShufflingTests(unittest.TestCase):
     def test_without_that_record_the_flavour_swap_is_still_rejected(self) -> None:
         prev = new_block("2026-06-01", {"upper_b": [
             _slot(1, "Cable Lat Pulldown", "anchor"),
-            _slot(2, "Rear Delt Fly Machine", "rotating",
-                  superset_with="Cable Lat Pulldown"),
+            _slot(2, "Rear Delt Fly Machine", "rotating"),
         ]})
         new = new_block("2026-07-13", {"upper_b": [
             _slot(1, "Cable Lat Pulldown", "anchor"),
-            _slot(2, "Dumbbell Rear Delt Fly", "rotating",
-                  superset_with="Cable Lat Pulldown"),
+            _slot(2, "Dumbbell Rear Delt Fly", "rotating"),
         ]}, prev_block=prev)
         errs = "\n".join(rotation_diff_errors(prev, new, _CATALOG))
         self.assertIn("differs only by equipment", errs)
@@ -1163,8 +942,8 @@ class CatalogClassificationTests(unittest.TestCase):
     def test_a_loaded_carry_is_not_a_compound(self) -> None:
         # `Suitcase Carry` carries `+traps, +forearms` under a heading
         # that says neither "compound" nor "isolation", so the synergist
-        # fallback made it an anchor — exempt from the superset rule, and
-        # it left Anti-Lateral-Flexion with a one-member rotating pool.
+        # fallback made it an anchor, and it left Anti-Lateral-Flexion
+        # with a one-member rotating pool.
         self.assertIsNone(_CATALOG["suitcase carry"]["is_compound"])
         self.assertEqual(_CATALOG["suitcase carry"]["pattern"],
                          "CORE/Anti-Lateral-Flexion")
@@ -1282,12 +1061,10 @@ class TrapsRotationPoolTests(unittest.TestCase):
     def _diff(self, first: str, second: str) -> str:
         prev = new_block("2026-06-01", {"upper_a": [
             _slot(1, "Cable Lat Pulldown", "anchor"),
-            _slot(2, first, "rotating",
-                  superset_with="Cable Lat Pulldown")]})
+            _slot(2, first, "rotating")]})
         new = new_block("2026-07-13", {"upper_a": [
             _slot(1, "Cable Lat Pulldown", "anchor"),
-            _slot(2, second, "rotating",
-                  superset_with="Cable Lat Pulldown")]}, prev_block=prev)
+            _slot(2, second, "rotating")]}, prev_block=prev)
         return "\n".join(rotation_diff_errors(prev, new, _CATALOG))
 
     def test_the_pool_holds_more_than_one_movement_pattern(self) -> None:

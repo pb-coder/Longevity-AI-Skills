@@ -252,34 +252,17 @@ WORKOUT_SUB_BULLET_RE = re.compile(r"^\s{2,}" + re.escape(EM_DASH) + r"\s+")
 #
 # The limit exists to stop rationale creep — "last time you did X",
 # "we're holding here because…" — in a file the user reads mid-workout.
-# It was counting every sub-bullet, including the superset routing hints
-# the block rules REQUIRE, so a compliant plan warned on every workout and
-# the prompt had to tell the coach to ignore the warning. A warning that
-# is always wrong trains a reader to skip the ones that are right, and it
-# collided head-on with the rotation rules: satisfying rule 6 on two slots
-# spent the whole annotation budget.
+# An anchor-change declaration is not that: it is the plan's only channel
+# for a required field, not prose the coach chose to add.
 #
-# Verified against the shipped 2026-08-02 plans: <Person>'s Workout 1 has
-# four sub-bullets, two of them superset routing, so the real annotation
-# count is 2 — exactly at the limit and not a defect.
-#
-# Anchor-change declarations are here for the same reason: they are the
-# plan's only channel for a required field, not prose the coach chose to
-# add.
-#
-# ANCHORED AT THE START OF THE SUB-BULLET, and that is not cosmetic. This
-# was a `.search()` over the whole line, so any sub-bullet CONTAINING the
-# phrase "superset with" anywhere in it became uncountable — the exemption
-# for a structural routing line was also an exemption for ~900 characters
-# of rationale with the token buried in the middle. Measured on the
-# 2026-08-02 corpus under the old `.search()`: 24 of 28 sub-bullets were
-# invisible to the counter and three of eight workouts counted zero. The
-# structural line the exemption exists for is written as `— superset with
-# the back squat above`, so requiring the token to LEAD costs a compliant
-# plan nothing and closes the channel. Matched against the sub-bullet's
-# body — the text after the `  — ` marker — not the raw line.
+# ANCHORED AT THE START OF THE SUB-BULLET, and that is not cosmetic. A
+# `.search()` over the whole line would make any sub-bullet CONTAINING
+# the phrase uncountable, so the exemption for a structural line would
+# also exempt a paragraph of rationale with the token buried in the
+# middle. Matched against the sub-bullet's body — the text after the
+# `  — ` marker — not the raw line.
 WORKOUT_STRUCTURAL_SUB_BULLET_RE = re.compile(
-    r"^\s*(?:superset(?:ted)?\s+(?:with|onto|into)\b|anchor\s+change\s*:)",
+    r"^\s*anchor\s+change\s*:",
     re.IGNORECASE,
 )
 # NOTE: the plan's workout-heading grammar lives in `adherence` and is
@@ -806,7 +789,7 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
             warnings.append(
                 f"{workout_title}: {sub_bullet_count} rationale sub-bullets; "
                 f"recommended max is {WORKOUT_SUB_BULLET_LIMIT} "
-                f"(superset and anchor-change routing lines do not count)"
+                f"(anchor-change lines do not count)"
             )
 
     for lineno, raw_line in enumerate(text.splitlines(), start=1):
@@ -837,14 +820,14 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
 
         marker = WORKOUT_SUB_BULLET_RE.match(line)
         if marker:
-            # Structural routing lines are not rationale; see
+            # Structural lines are not rationale; see
             # WORKOUT_STRUCTURAL_SUB_BULLET_RE. The exemption is decided on
             # the sub-bullet's BODY and must match at its start, so a line
-            # that merely mentions "superset with" halfway through a
+            # that merely mentions "anchor change:" halfway through a
             # paragraph of rationale is counted like any other. They are
             # still scanned for banned rationale phrasing below, so
-            # appending a "because …" to a superset hint does not buy an
-            # exemption either.
+            # appending a "because …" to one does not buy an exemption
+            # either.
             if not WORKOUT_STRUCTURAL_SUB_BULLET_RE.match(line[marker.end():]):
                 sub_bullet_count += 1
             if WORKOUT_BANNED_SUB_BULLET_RE.search(line):
@@ -997,7 +980,7 @@ def _plan_workout_heading_re() -> "re.Pattern[str]":
     return LEDGER_HEADING_RE
 
 
-# The validator recognises a deliberate SUPERSET of the ledger's grammar.
+# The validator recognises a deliberately broader grammar than the ledger's.
 #
 # The ledger needs kind + index + title to build a stable slot identity,
 # so it insists on the colon. The validator only needs to know "a workout
@@ -2048,9 +2031,8 @@ def _artifact_from_payload_block(block: "dict | None") -> "dict | None":
         entry = {"exercise": exercise,
                  "tag": s.get("tag") or "rotating",
                  "position": s.get("position") or len(rebuilt.get(stype, [])) + 1}
-        for opt in ("pattern", "blocks_held", "history", "superset_with",
-                    "superset_hint_unresolved", "dose", "stalled_sessions",
-                    "performed_instead", "at_risk"):
+        for opt in ("pattern", "blocks_held", "history", "dose",
+                    "stalled_sessions", "performed_instead"):
             if s.get(opt) is not None:
                 entry[opt] = s[opt]
         rebuilt.setdefault(stype, []).append(entry)

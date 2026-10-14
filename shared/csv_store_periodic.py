@@ -252,16 +252,17 @@ def upsert_swim_laps(person: str, entries: Iterable[dict]) -> list[str]:
 # per-month-CSV pattern of ``monthly/YYYY.MM.csv`` and
 # ``swimming/YYYY.MM.workouts.csv`` for scalability.
 #
-# Segment-level detail is NOT stored here, and is no longer recoverable:
-# the per-night row captured fragmentation via N Segments and schedule
-# via First/Last Segment Start, but HealthAutoExport reports one
-# aggregate row per night with no segment breakdown, so **N Segments is
-# permanently blank on every row written from now on**. The schedule
-# fields survive — ``sleepStart`` / ``sleepEnd`` are what the Sleep
-# Regularity Index reads — while ``sleep_summary``'s fragmentation
-# reader must degrade to null rather than report a fabricated zero. A
-# night that stops carrying a segment count did not become less
-# fragmented.
+# Segment-level detail (the individual stage intervals) is NOT stored here,
+# and is no longer recoverable. The per-night row does carry the count
+# (N Segments) and the schedule (First/Last Segment Start): the Health
+# Export Kit importer fills both (``n_segments`` = stage entries across the
+# night's sessions; ``sleepStart`` / ``sleepEnd`` are what the Sleep
+# Regularity Index reads). N Segments was blank on rows written by the
+# retired HealthAutoExport (one aggregate row per night) and stays blank on
+# manual ``/log`` nights, so ``sleep_summary``'s fragmentation reader
+# degrades to null when no night in the window has a count rather than
+# report a fabricated zero. A night that has no segment count did not
+# become less fragmented.
 SLEEP_NIGHTS_HEADERS = [
     "Date",
     "Sleep Total (h)", "Sleep Core (h)", "Sleep Deep (h)",

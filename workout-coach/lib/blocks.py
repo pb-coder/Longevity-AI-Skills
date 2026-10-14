@@ -64,7 +64,10 @@ from .adherence import (
     session_type_from_content,
     session_type_from_title,
 )
-from .constants import CORE_WEEK_SPEC
+from .constants import (
+    CORE_WEEK_SPEC,
+    equipment_increment_kg,
+)
 from .parsing import _parse_iso_date
 from .sessions import _is_working_set
 
@@ -351,9 +354,8 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
                 # started from ("every plan is the same plan"), because an
                 # identical prescription and a progressed one look the
                 # same. Field names match `adherence._slot_from_bullet`
-                # exactly so `adherence._dose_delta` — the one definition
-                # of "did the dose materially move" — reads this dict
-                # directly instead of a translated copy.
+                # exactly; `progression.next_dose` falls back to this dose's
+                # rep range for a lift no recent plan prescribes.
                 "dose": {
                     "load_kg":         s.get("load_kg"),
                     "rep_lo":          s.get("rep_lo"),
@@ -571,8 +573,9 @@ def deload_cadence(deloads: list[str] | None, today_d: date,
     silently lowers them.
 
     This covers the PLANNED path only. A REACTIVE deload comes from the
-    recovery gate (``render_validators.is_deload_week``); a caller that
-    wants "is this a deload week at all" takes the OR of the two.
+    recovery gate (``render_validators.is_deload_week``, a full-block cut);
+    a caller that wants "is this a deload week at all" takes the OR of the
+    two, but only the reactive one makes the volume floors advisory.
     """
     past = [d for d in (deloads or [])
             if (_parse_iso_date(d) or date.max) <= today_d]
@@ -782,6 +785,34 @@ def _anchor_change_excuse(prev_slot: dict,
     if performed and (new_names is None or performed in new_names):
         return "user_substitution"
     return None
+
+
+def withhold_owed_stalls(block: dict | None, owed: "set[str]") -> int:
+    """Drop ``stalled_sessions`` from the slots of lifts that are owed weight.
+
+    ``block_payload`` stamps every slot with its lift's stall count, and
+    ``_anchor_change_excuse`` reads that count as the ``stall_3_sessions``
+    reason to swap an anchor. A lift whose last session put every set at the
+    top of the range (``next_dose`` ``add_load``) is waiting for its bump,
+    not stuck: SKILL.md says it is bumped, never swapped. Whether a lift is
+    owed weight is known only after the block is built (``next_dose`` reads
+    the block for its rep ranges), so the read path calls this once ``owed``
+    (lower-cased names) is known. Mutates ``block`` in place, both the flat
+    ``slots`` and the artifact-shaped ``sessions``; returns how many slots
+    it cleared.
+    """
+    if not block or not owed:
+        return 0
+    cleared = 0
+    groups = [block.get("slots") or []]
+    groups += (block.get("sessions") or {}).values()
+    for slots in groups:
+        for s in slots:
+            if (s.get("exercise") or "").strip().lower() in owed \
+                    and s.get("stalled_sessions") is not None:
+                s["stalled_sessions"] = None
+                cleared += 1
+    return cleared
 
 
 def rotation_diff_report(prev_block: dict | None, new_block: dict | None,
@@ -1534,11 +1565,9 @@ _AXIAL_TOKENS = frozenset({"hinge", "squat", "deadlift"})
 # coefficient above 1.0 moves the load UP on a movement the person has
 # never performed, which is exactly when a ceiling should bite.
 
-# Load granularity per equipment class, in kg. Rounding to the increment
-# the gym actually has is what stops the coach writing "43.7kg".
-_INCREMENT = {"BB": 2.5, "DB": 2.0, "Machine": 5.0, "Cable": 2.5,
-              "Smith": 2.5, "Plate": 1.25, "LM": 2.5}
-_DEFAULT_INCREMENT = 2.5
+# Load granularity lives in `constants.equipment_increment_kg` (equipment
+# class, and one dumbbell versus two), shared with `progression.next_dose`. Rounding to the increment the gym
+# actually has is what stops the coach writing "43.7kg".
 
 # You cannot load a barbell below its own mass. Not a coefficient — a
 # physical floor — so it is applied after the arithmetic and labelled as
@@ -1594,7 +1623,10 @@ def derived_starting_load(exercise: str, e1rm: dict, catalog: dict,
     2. **Reference** — of those siblings, the one with logged history and
        the most recent ``last_date``; ties break on the higher e1RM. Most
        recent, because that is the load the person is currently adapted
-       to, not the one they were strongest at.
+       to, not the one they were strongest at. The candidate is its own
+       sibling: a movement the person has logged before is priced from its
+       own history (``rotation_candidates`` offers those for a main
+       pattern that has gone untrained).
     3. **Rep-matched base** — invert Epley at the target rep count:
        ``base = e1RM / (1 + reps/30)``. Comparing at matched reps is the
        point; comparing e1RMs across a rep-range change is how a 15-rep
@@ -1671,7 +1703,7 @@ def derived_starting_load(exercise: str, e1rm: dict, catalog: dict,
     e1rm_lower = {k.strip().lower(): (k, v) for k, v in (e1rm or {}).items()}
     best = None
     for sib_key, sib in (catalog or {}).items():
-        if sib_key == key or sib["pattern"] != pg:
+        if sib["pattern"] != pg:
             continue
         hit = e1rm_lower.get(sib_key)
         if not hit:
@@ -1735,7 +1767,7 @@ def derived_starting_load(exercise: str, e1rm: dict, catalog: dict,
 
     base = ref_e1rm / (1.0 + target_reps / 30.0)
     raw = base * equip_transfer * lateral * cap * NOVELTY_DISCOUNT
-    load = _round_to(raw, _INCREMENT.get(equip, _DEFAULT_INCREMENT))
+    load = _round_to(raw, equipment_increment_kg(equip, key))
     bar = _BAR_MASS_KG.get(equip)
     if bar is not None and load < bar:
         load, basis = bar, "bar_mass_floor"
@@ -1764,6 +1796,16 @@ ROTATION_CANDIDATES_PER_PATTERN = 3
 # Deriving a bench-press weight from a squat the person last did in
 # February is not a derivation, it is a guess with arithmetic on top.
 ROTATION_CANDIDATE_WINDOW_DAYS = 56
+# The four patterns every week must contain. One missing from the
+# window is offered even though the gates above would drop it: a pattern
+# at zero is the gap, and the window gate is what kept Nihad's Vertical
+# Push out of the payload for three months after his last shoulder press.
+MAIN_PATTERNS = (
+    "CHEST/Horizontal Push (Compound)",
+    "SHOULDERS/Vertical Push (Compound)",
+    "BACK/Horizontal Pull (Compound)",
+    "BACK/Vertical Pull (Compound)",
+)
 # The rep count every candidate load is derived AT. Ten is the middle of
 # the hypertrophy range this coach prescribes in and the rep count a
 # first exposure should be learned at — heavy triples on an unfamiliar
@@ -1873,7 +1915,10 @@ def rotation_candidates(rows: list[dict], db: dict, catalog: dict,
     Scoped to pattern groups the person trained in the last
     ``window_days`` — those have a reference load to derive from —
     **plus** every pattern belonging to a muscle the priority tiers mark
-    ``emphasis``, whether or not it has been trained.
+    ``emphasis``, whether or not it has been trained, **plus** each of
+    `MAIN_PATTERNS` with no working set in the window. For that last group
+    the "never-performed" filter is lifted too, so the movement the
+    person did last year is offered, priced from their own history.
 
     That second clause is the point. The window gate excluded exactly the
     categories the weekly spec forces the coach to add: for both people
@@ -1889,7 +1934,8 @@ def rotation_candidates(rows: list[dict], db: dict, catalog: dict,
     invent a dose for.
 
     ``exclude`` drops movements the coach must not prescribe — the D5
-    bench list. Without it the payload contradicted itself, naming
+    bench list and the retired movements (`adherence.retired_movements`),
+    which read_tracker passes in. Without it the payload contradicted itself, naming
     ``Leg Curl (Lying)`` in ``adherence.benched`` ("must not
     re-prescribe") and offering it here at a derived 45.0 kg.
 
@@ -1904,6 +1950,8 @@ def rotation_candidates(rows: list[dict], db: dict, catalog: dict,
     active: set[str] = set()
     ever_logged: set[str] = set()
     logged_by_pattern: dict[str, set[str]] = {}
+    last_trained: dict[str, date] = {}
+    earliest: "date | None" = None
     for r in rows:
         if not _is_working_set(r):
             continue
@@ -1914,7 +1962,13 @@ def rotation_candidates(rows: list[dict], db: dict, catalog: dict,
         ever_logged.add(key)
         logged_by_pattern.setdefault(meta["pattern"], set()).add(meta["name"])
         d = _parse_iso_date(r.get("date"))
-        if d is None or d > today_d or d < cutoff:
+        if d is None or d > today_d:
+            continue
+        if earliest is None or d < earliest:
+            earliest = d
+        if d > last_trained.get(meta["pattern"], date.min):
+            last_trained[meta["pattern"]] = d
+        if d < cutoff:
             continue
         active.add(meta["pattern"])
 
@@ -1924,11 +1978,13 @@ def rotation_candidates(rows: list[dict], db: dict, catalog: dict,
         meta["pattern"] for meta in catalog.values()
         if meta.get("primary") in emphasis
         and not meta.get("is_warmup") and not meta.get("is_cardio")}
-    reachable = active | emphasis_patterns
+    gap_patterns = set(MAIN_PATTERNS) - active
+    reachable = active | emphasis_patterns | gap_patterns
 
     by_pattern: dict[str, list[dict]] = {}
     for key, meta in sorted(catalog.items()):
-        if key in ever_logged or key in banned:
+        if key in banned or (key in ever_logged
+                             and meta["pattern"] not in gap_patterns):
             continue
         if meta["pattern"] not in reachable:
             continue
@@ -1941,7 +1997,18 @@ def rotation_candidates(rows: list[dict], db: dict, catalog: dict,
         # target_reps is stated once in the block header.
         derived.pop("target_reps", None)
         if meta["pattern"] not in active:
-            derived["pattern_untrained_days"] = window_days
+            # The real gap, not the window: "untrained for 56 days" and
+            # "untrained for 90" size a comeback load differently. A
+            # pattern never logged in the loaded history has no last
+            # session, so the gap is a lower bound (the span of the history
+            # that WAS loaded) and ``pattern_never_logged`` says so.
+            last = last_trained.get(meta["pattern"])
+            if last is not None:
+                derived["pattern_untrained_days"] = (today_d - last).days
+            else:
+                derived["pattern_untrained_days"] = max(
+                    window_days, (today_d - earliest).days if earliest else 0)
+                derived["pattern_never_logged"] = True
         by_pattern.setdefault(meta["pattern"], []).append(derived)
 
     out: list[dict] = []
@@ -1955,7 +2022,8 @@ def rotation_candidates(rows: list[dict], db: dict, catalog: dict,
             "load_kg = ref_e1rm / (1 + target_reps/30) x transfer x "
             f"{NOVELTY_DISCOUNT}, rounded to the equipment's increment. "
             "ref is the same-pattern sibling with the most recent logged "
-            "history. transfer folds the equipment-class coefficient, the "
+            "history, which is the movement itself when you have logged it "
+            "before. transfer folds the equipment-class coefficient, the "
             "single-limb share where the reference is two-limb, and the "
             f"{NOVEL_COMPOUND_CAP} first-exposure cap on compounds; "
             f"{NOVELTY_DISCOUNT} is the first-exposure discount (2-3 RIR on "
@@ -2066,8 +2134,8 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
 
     # Stall counts, so ``stall_3_sessions`` is a reason the diff can
     # derive. SKILL.md marks the stall response REQUIRED and the only
-    # sanctioned responses are a variation swap, a rep-range shift or a
-    # deload of that lift; the swap was unreachable because the field
+    # sanctioned responses are a variation swap or a deload of that lift
+    # (never a wider rep range); the swap was unreachable because the field
     # naming it could not be set from anywhere in the pipeline.
     stalls = {(n or "").strip().lower(): (v or {}).get("stalled_sessions")
               for n, v in (e1rm or {}).items()}

@@ -29,9 +29,10 @@ __all__ = [
 ]
 
 # ============================================================ Schema (HM + WS)
-# HealthAutoExport is the only source. The ``*_BY_SOURCE`` mappings are
-# retained as the public names every caller already imports, but they now
-# hold a single canonical entry rather than a per-source variant.
+# One canonical schema, whichever importer wrote the rows. The
+# ``*_BY_SOURCE`` mappings are retained as the public names every caller
+# already imports, but they now hold a single canonical entry rather than a
+# per-source variant.
 
 # Schema migration 2026-08: ``Waist (cm)`` / ``Body Fat %`` /
 # ``Lean Mass (kg)`` were appended immediately before ``Notes``, matching
@@ -41,6 +42,9 @@ __all__ = [
 # still carrying the old header keeps parsing and the missing fields read
 # as None. Nothing reads this CSV positionally outside this module.
 
+# The key of the single canonical schema, not the live data source: the
+# importer in use is recorded in profile.csv (``health_export_kit``). The
+# string predates that importer and is deliberately left unchanged.
 DATA_SOURCE = "health_auto_export"
 
 # Schema migration 2026-08 (energy + steps): ``Steps`` /

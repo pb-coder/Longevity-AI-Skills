@@ -86,7 +86,6 @@ from .csv_store_profile import (  # noqa: F401
 
 # Back-compat private re-exports for existing scripts:
 # - ``shared/maintain.py`` imports ``_resolve_source``.
-# - ``shared/import_health_auto_export.py`` imports ``_write_csv``.
 from .csv_store_dense import _resolve_source  # noqa: F401,E402
 
 __all__ = [

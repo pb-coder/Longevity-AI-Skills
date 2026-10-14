@@ -922,6 +922,16 @@ class CapabilityTests(unittest.TestCase):
         self.assertTrue(caps["sleep_regularity"])
         self.assertTrue(caps["sleep_nights"])
 
+    def test_a_tracker_with_no_profile_defaults_to_the_live_source(self) -> None:
+        from workout_coach.lib.constants import (
+            DEFAULT_DATA_SOURCE,
+            SOURCE_CAPABILITIES,
+        )
+        self.assertEqual(DEFAULT_DATA_SOURCE, "health_export_kit")
+        self.assertIn(DEFAULT_DATA_SOURCE, SOURCE_CAPABILITIES)
+        # So an unprofiled tracker is not credited with HRV it cannot have.
+        self.assertFalse(SOURCE_CAPABILITIES[DEFAULT_DATA_SOURCE]["hrv"])
+
     def test_it_declares_the_same_keys_as_the_retired_source(self) -> None:
         from workout_coach.lib.constants import SOURCE_CAPABILITIES
         self.assertEqual(

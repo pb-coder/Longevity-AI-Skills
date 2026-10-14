@@ -31,6 +31,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 
+from .health_session_rec import _genuinely_stalled_lifts
 from .parsing import _parse_iso_date
 from .sessions import smoothed_rate_per_week
 
@@ -237,12 +238,15 @@ def _detect_stop_signals(phase_type: str | None,
                 "fat-partitioning threshold for 3 consecutive weekly windows "
                 "(cite bulking-science.md)"
             )
-        # Lifts stalled 2+ weeks: count exercises with stalled_sessions >= 2.
+        # Lifts stalled 2+ sessions. `stalled_sessions` counts sessions at one
+        # LOAD without a rep gain, which includes a lift parked at the top of
+        # its range waiting for weight; that is a programming fault, not
+        # evidence the surplus has stopped paying. The signal this stop
+        # condition quotes is strength that is not climbing, so it counts
+        # only the lifts the gate itself calls genuinely stalled: flat, at
+        # or near their best, and with no positive e1RM trend.
         if estimated_1rm:
-            stalled_two_plus = sum(
-                1 for v in estimated_1rm.values()
-                if isinstance(v, dict) and (v.get("stalled_sessions") or 0) >= 2
-            )
+            stalled_two_plus = _genuinely_stalled_lifts(estimated_1rm)
             if stalled_two_plus >= 3 and weeks_in_phase >= 3:
                 triggered.append(
                     f"{stalled_two_plus} compound lifts stalled 2+ sessions while "

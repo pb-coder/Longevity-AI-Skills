@@ -36,9 +36,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 # Lets this file run as a direct script (``python3 shared/import_health_export_kit.py``)
-# from the tracker root, mirroring the retired ``import_health_auto_export.py``: a
-# script invocation has no package context, so ``shared`` itself would not otherwise
-# be importable. A normal package import (``from shared import import_health_export_kit``)
+# from the tracker root: a script invocation has no package context, so ``shared``
+# itself would not otherwise be importable. A normal package import (``from shared import import_health_export_kit``)
 # already has ``__package__`` set, so the guard below is a no-op in that case.
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
 if __package__ in (None, ""):
@@ -332,7 +331,7 @@ def sleep_headline_rows(payload: dict,
 
 # A walk shorter than this is incidental movement -- a trip to the shops,
 # a walk to the station -- not a training session. The value matches the
-# retired importer (``import_health_auto_export.INCIDENTAL_WALK_MAX_MIN``)
+# retired Health Auto Export importer's threshold
 # so the flag means the same thing across the whole stored history rather
 # than changing meaning at the import cutover.
 #

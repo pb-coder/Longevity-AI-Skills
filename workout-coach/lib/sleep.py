@@ -60,15 +60,6 @@ def _mean(vals: list[float]) -> float | None:
     return round(sum(vals) / len(vals), 2)
 
 
-def _stdev(vals: list[float]) -> float | None:
-    """Population stdev (matches sleep consistency in health.py)."""
-    if len(vals) < 2:
-        return None
-    m = sum(vals) / len(vals)
-    var = sum((v - m) ** 2 for v in vals) / len(vals)
-    return round(var ** 0.5, 2)
-
-
 def _slope_per_week(points: list[tuple[date, float]]) -> float | None:
     """Linear-regression slope in units per week. None if <3 points or
     zero variance in dates. Mirrors the swim.py helper to keep the

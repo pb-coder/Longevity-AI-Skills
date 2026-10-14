@@ -41,7 +41,9 @@ from workout_coach.lib.render_validators import (
     arm_week_errors,
     block_rotation_errors,
     core_week_errors,
+    is_cadence_deload_week,
     is_deload_week,
+    muscle_floor_errors,
     tier_budget_by_index,
     validate_workout_plan,
     _dose_aware_distinct_floor,
@@ -72,6 +74,12 @@ def _workout(title: str, *bullets: str) -> str:
 
 
 _HEAD = "# Workout plan — 2026-08-02\n\n"
+
+
+def _tiers(**tiers: str) -> dict:
+    """A payload carrying only ``muscle_volume_targets``: muscle -> tier."""
+    return {"muscle_volume_targets": {m: {"tier": t}
+                                      for m, t in tiers.items()}}
 
 # The 2026-07-18 shape: one machine crunch, two sets, every session.
 # Fails the weekly core spec on three axes at once.
@@ -205,14 +213,18 @@ class ValidationIsBlockingTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
     def test_a_real_plan_with_no_arm_work_still_errors(self) -> None:
-        # The fail-open above must not become a way past the arm floor.
+        # The fail-open above must not become a way past the arm floor,
+        # which is now two rows of the per-muscle floor.
         plan = _HEAD + _workout(
             "1: UPPER A + CORE",
             "Dumbbell Flat Bench Press: 50kgx8 /// 50kgx8",
             "Cable Lateral Raise: 14kgx10 /// 14kgx10")
-        errors = arm_week_errors(plan)
+        errors = muscle_floor_errors(plan, _tiers(biceps="maintain",
+                                                  triceps="maintain"))
         self.assertTrue(any("0 direct biceps sets" in e for e in errors))
         self.assertTrue(any("0 direct triceps sets" in e for e in errors))
+        self.assertEqual(muscle_floor_errors(_NOT_A_PLAN, _tiers(
+            biceps="maintain")), [])
 
 
 class MalformedSpecTests(unittest.TestCase):
@@ -242,7 +254,7 @@ class MalformedSpecTests(unittest.TestCase):
     """
 
     _PARTIAL_CORE = {"min_distinct_exercises_per_week": 3}
-    _PARTIAL_ARM = {"min_direct_sets_per_week": 6}
+    _PARTIAL_ARM = {"min_distinct_exercises_per_week": 2}
 
     def test_a_partial_spec_fills_in_from_the_constant(self) -> None:
         merged = render_validators._resolved_spec(
@@ -484,9 +496,14 @@ class DeloadVolumeReliefTests(unittest.TestCase):
         errors, _ = self._run(_PLAN_HALF_VOLUME_ONE_CORE,
                               deload_week=is_deload_week(tier_c))
         self.assertTrue(any("under-allocated" in e for e in errors))
-        self.assertTrue(any("direct biceps sets" in e and "floor is 6" in e
+        # Under Tier C the per-muscle floor also stays blocking.
+        errors, _ = self._run(_PLAN_HALF_VOLUME_ONE_CORE,
+                              deload_week=is_deload_week(tier_c),
+                              payload=_tiers(biceps="maintain",
+                                             triceps="maintain"))
+        self.assertTrue(any("direct biceps sets" in e and "floor is 5" in e
                             for e in errors))
-        self.assertTrue(any("direct triceps sets" in e and "floor is 6" in e
+        self.assertTrue(any("direct triceps sets" in e and "floor is 4" in e
                             for e in errors))
 
     def test_tier_c_still_scales_the_set_budget(self) -> None:
@@ -507,18 +524,29 @@ class DeloadVolumeReliefTests(unittest.TestCase):
             ({"tier": "C", "label": "hold_load"},       False),
             ({"tier": "D", "label": "green"},           False),
             ({"tier": "E", "label": "over_recovered"},  False),
+            # A load policy of `reduce` (Tier A/B, or strength TSB in the
+            # high-fatigue band) is a full-block cut whatever the label.
+            ({"tier": "D", "label": "green",
+              "load_policy": {"policy": "reduce"}},     True),
+            ({"tier": "C", "label": "downgrade",
+              "load_policy": {"policy": "reduce"}},     True),
+            ({"tier": "D", "label": "green",
+              "load_policy": {"policy": "progress"}},   False),
             ({},                                        False),
             (None,                                      False),
         ):
             with self.subTest(sr=sr):
                 self.assertEqual(is_deload_week(sr), expected)
 
-    def test_a_cadence_deload_is_not_visible_to_the_gate(self) -> None:
-        # Documented limitation, pinned so it cannot be forgotten. A
-        # deload driven by block age ships with `label: green`, so
-        # `is_deload_week` says False and the caller must pass
-        # `deload_week=True` itself. read_tracker owes us a flag.
-        self.assertFalse(is_deload_week({"tier": "D", "label": "green"}))
+    def test_a_cadence_deload_is_not_a_full_block_deload(self) -> None:
+        # A deload driven by block age ships with `label: green` and halves
+        # ONE session. `is_deload_week` is the full-block question and says
+        # False; the cadence question is `is_cadence_deload_week`, and its
+        # answer does NOT demote the floors (see CadenceDeloadFloorTests).
+        green = {"tier": "D", "label": "green"}
+        self.assertFalse(is_deload_week(green))
+        self.assertTrue(is_cadence_deload_week(green,
+                                               {"deload_prescribed": True}))
 
     def test_the_docstring_quotes_the_measured_split(self) -> None:
         """The numbers in the docstring are a measurement, so they rot.
@@ -526,7 +554,7 @@ class DeloadVolumeReliefTests(unittest.TestCase):
         They already had. The docstring claimed the reference deload
         collected "nine blocking errors, six of them for having less work
         in it" and implied the relief made it renderable. Measured on the
-        real 2026-07-13 plan on both trackers: 8 strict, splitting 3 + 5,
+        real 2026-07-13 plan on both trackers: 6 strict, splitting 3 + 3,
         and the three that survive are core-PLACEMENT findings, so the
         plan still exits 2 with the relief applied. Pinned so the next
         spec change has to re-measure rather than re-assert.
@@ -535,7 +563,7 @@ class DeloadVolumeReliefTests(unittest.TestCase):
         when it is present; this half runs on a bare checkout.
         """
         doc = validate_workout_plan.__doc__
-        self.assertIn("8 blocking errors  ->  3 errors + 5 advisory", doc)
+        self.assertIn("6 blocking errors  ->  3 errors + 3 advisory", doc)
         self.assertNotIn("nine blocking errors", doc)
         self.assertIn("does not make that plan renderable", doc)
 
@@ -611,7 +639,8 @@ class DoseAwareDistinctFloorTests(unittest.TestCase):
         errors = arm_week_errors(plan)
         self.assertFalse(any("distinct direct biceps" in e for e in errors),
                          errors)
-        self.assertTrue(any("2 direct biceps sets" in e for e in errors))
+        self.assertTrue(any("2 direct biceps sets" in e for e in
+                            muscle_floor_errors(plan, _tiers(biceps="maintain"))))
 
     def test_enough_arm_volume_re_arms_the_distinct_axis(self) -> None:
         # 6 sets on one movement is the case the axis exists for.
@@ -713,7 +742,7 @@ class DoseAwareDistinctFloorTests(unittest.TestCase):
 
 
 class DeloadPrescribedHandshakeTests(unittest.TestCase):
-    """`is_deload_week` reads `block.deload_prescribed`, and it is there.
+    """`is_cadence_deload_week` reads `block.deload_prescribed`, and it is there.
 
     The handshake is complete: `blocks.block_payload` writes
     ``deload_prescribed`` and ``deload_source`` on every read, so a
@@ -757,23 +786,157 @@ class DeloadPrescribedHandshakeTests(unittest.TestCase):
 
     def test_the_block_flag_is_read_when_present(self) -> None:
         green = {"tier": "D", "label": "green"}
-        self.assertTrue(is_deload_week(green, {"deload_prescribed": True}))
+        self.assertTrue(is_cadence_deload_week(green,
+                                               {"deload_prescribed": True}))
+        # ...and it is not the full-block question.
+        self.assertFalse(is_deload_week(green))
 
     def test_absent_or_false_is_not_a_deload(self) -> None:
         green = {"tier": "D", "label": "green"}
         for block in (None, {}, {"deload_prescribed": False},
                       {"boundary_due": True}):
             with self.subTest(block=block):
-                self.assertFalse(is_deload_week(green, block))
+                self.assertFalse(is_cadence_deload_week(green, block))
+                self.assertFalse(is_deload_week(green))
 
     def test_the_gate_alone_still_decides_a_reactive_deload(self) -> None:
-        self.assertTrue(is_deload_week({"label": "reactive_deload"}, None))
-        self.assertTrue(is_deload_week({"label": "reactive_deload"},
-                                       {"deload_prescribed": False}))
+        self.assertTrue(is_deload_week({"label": "reactive_deload"}))
+        # A full-block deload subsumes the cadence one: nothing is scaled
+        # twice, and the floors are advisory, not scaled.
+        self.assertFalse(is_cadence_deload_week(
+            {"label": "reactive_deload"}, {"deload_prescribed": True}))
 
     def test_the_renderer_passes_the_block_in(self) -> None:
         src = PLAN_CHECKS.read_text(encoding="utf-8")
-        self.assertIn("is_deload_week(session_rec, block)", src)
+        self.assertIn("is_deload_week(session_rec)", src)
+        self.assertIn("is_cadence_deload_week(session_rec, block)", src)
+
+
+class CadenceDeloadFloorTests(unittest.TestCase):
+    """A cadence deload is ONE halved session, not a week without floors.
+
+    `block.deload_prescribed` used to be folded into `is_deload_week`, which
+    demoted EVERY volume floor to an advisory for the whole week although
+    three of the four sessions were normal. Now only a full-block deload
+    (the gate's Tier A/B, i.e. `load_policy: reduce`) does that. On a
+    cadence week the floors stay blocking and are scaled by (n - 0.5) / n,
+    rounded down, so the halved session does not fail its own week. The
+    floors are also scaled by min(1, sessions / 4) for a short week.
+    """
+
+    # Biceps is emphasis (MEV 8 direct sets in a four-session week).
+    @staticmethod
+    def _plan(sets: int) -> str:
+        first, second = min(sets, 4), max(sets - 4, 0)
+        out = _HEAD + _workout(
+            "1: UPPER A + CORE",
+            "Incline Dumbbell Curl: " + " /// ".join(["14kgx10"] * first),
+            "Cable Lateral Raise: 14kgx10 /// 14kgx10")
+        if second:
+            out += _workout(
+                "2: UPPER B + CORE",
+                "Dumbbell Hammer Curl: " + " /// ".join(["14kgx10"] * second),
+                "Cable Lateral Raise: 14kgx10 /// 14kgx10")
+        return out
+
+    @staticmethod
+    def _payload(n=4) -> dict:
+        p = _tiers(biceps="emphasis")
+        if n is not None:
+            p["strength_sessions_per_week"] = n
+        return p
+
+    def _biceps(self, errors):
+        return [e for e in errors if "direct biceps sets" in e]
+
+    def test_floor_scale_table(self) -> None:
+        from fractions import Fraction
+        from workout_coach.lib.constants import floor_scale
+        for n, cadence, expected in (
+            (None, False, Fraction(1)), (4, False, Fraction(1)),
+            (6, False, Fraction(1)), (3, False, Fraction(3, 4)),
+            (2, False, Fraction(1, 2)), (4, True, Fraction(7, 8)),
+            (2, True, Fraction(3, 8)), (None, True, Fraction(7, 8)),
+            (0, False, Fraction(1)), (True, False, Fraction(1)),
+        ):
+            with self.subTest(n=n, cadence=cadence):
+                self.assertEqual(floor_scale(n, cadence), expected)
+
+    def test_the_floor_is_scaled_and_rounded_down(self) -> None:
+        from workout_coach.lib.constants import muscle_floors
+        tiers = {"biceps": "emphasis", "traps": "maintain",
+                 "chest": "emphasis"}
+        self.assertEqual(muscle_floors(tiers), {"biceps": 8, "traps": 2,
+                                                "chest": 8})
+        self.assertEqual(muscle_floors(tiers, sessions_per_week=3),
+                         {"biceps": 6, "traps": 1, "chest": 6})
+        self.assertEqual(muscle_floors(tiers, sessions_per_week=2),
+                         {"biceps": 4, "traps": 1, "chest": 4})
+        self.assertEqual(muscle_floors(tiers, sessions_per_week=4,
+                                       cadence_deload=True),
+                         {"biceps": 7, "traps": 1, "chest": 7})
+        # A floor scaled to nothing drops out; it is never 0.
+        self.assertNotIn("traps", muscle_floors(tiers, sessions_per_week=1))
+
+    def test_a_cadence_week_keeps_the_floor_blocking_but_scaled(self) -> None:
+        # 7 direct biceps sets: under the full floor of 8, at the cadence
+        # floor of 7 (8 x 7/8).
+        plan = self._plan(7)
+        normal = muscle_floor_errors(plan, self._payload())
+        self.assertTrue(self._biceps(normal), normal)
+        cadence = muscle_floor_errors(plan, self._payload(),
+                                      cadence_deload=True)
+        self.assertEqual(self._biceps(cadence), [])
+        # 6 is under the scaled floor and BLOCKS: the week is not exempt.
+        short = muscle_floor_errors(self._plan(6), self._payload(),
+                                    cadence_deload=True)
+        self.assertEqual(len(self._biceps(short)), 1)
+        self.assertIn("floor is 7", short[0])
+        self.assertIn("cadence deload", short[0])
+
+    def test_validate_workout_plan_blocks_on_a_cadence_week(self) -> None:
+        errors, warnings = validate_workout_plan(
+            self._plan(6), core_spec=CORE_WEEK_SPEC, arm_spec=ARM_WEEK_SPEC,
+            cadence_deload=True, payload=self._payload())
+        self.assertTrue(self._biceps(errors), "floor demoted on a cadence week")
+        self.assertFalse([w for w in warnings if "direct biceps" in w])
+
+    def test_a_full_block_deload_still_demotes_the_floor(self) -> None:
+        errors, warnings = validate_workout_plan(
+            self._plan(6), core_spec=CORE_WEEK_SPEC, arm_spec=ARM_WEEK_SPEC,
+            deload_week=True, payload=self._payload())
+        self.assertEqual(self._biceps(errors), [])
+        self.assertTrue([w for w in warnings if "direct biceps" in w
+                         and "[advisory: deload week]" in w])
+
+    def test_a_short_week_asks_for_a_short_weeks_floor(self) -> None:
+        plan = self._plan(4)
+        self.assertTrue(self._biceps(muscle_floor_errors(plan,
+                                                         self._payload(4))))
+        self.assertEqual(self._biceps(muscle_floor_errors(plan,
+                                                          self._payload(2))), [])
+        # A payload from before the field is a four-session week.
+        self.assertTrue(self._biceps(muscle_floor_errors(plan,
+                                                         self._payload(None))))
+
+    def test_the_session_count_is_the_payloads_not_the_plans(self) -> None:
+        # One session of work is not an excuse for a one-session floor: the
+        # count comes from the payload (profile / the user's request).
+        one_session = _HEAD + _workout(
+            "1: UPPER A + CORE",
+            "Incline Dumbbell Curl: 14kgx10 /// 14kgx10",
+            "Cable Lateral Raise: 14kgx10 /// 14kgx10")
+        self.assertTrue(self._biceps(muscle_floor_errors(one_session,
+                                                         self._payload(4))))
+
+    def test_core_is_not_scaled_on_a_cadence_week(self) -> None:
+        # Core is exempt from the halving (SKILL.md), so the per-session
+        # core dose keeps blocking at the spec's numbers.
+        errors, warnings = validate_workout_plan(
+            _PLAN_HALF_VOLUME_ONE_CORE, core_spec=CORE_WEEK_SPEC,
+            arm_spec=ARM_WEEK_SPEC, cadence_deload=True)
+        self.assertTrue(any("under-allocated" in e for e in errors))
+        self.assertFalse([w for w in warnings if "[advisory: deload" in w])
 
 
 # ------------------------------------------------------- heading grammar
@@ -1077,7 +1240,8 @@ class RotationIsAdvisoryTests(unittest.TestCase):
                      "Cable Pallof Press: 15kgx10 /// 15kgx10",
                      "Cable Lateral Raise: 14kgx10 /// 14kgx10"),
         ])
-        proc = _run_render(dict(self._BASE, block=_ROTATION_PREV_BLOCK), plan)
+        proc = _run_render(dict(self._BASE, block=_ROTATION_PREV_BLOCK,
+                                **_tiers(biceps="maintain")), plan)
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("direct biceps sets", proc.stderr)
 
@@ -1364,23 +1528,18 @@ class BlockPositionCardTests(unittest.TestCase):
                   "started": "2026-07-25"}
 
     _DOSE = {
-        "from_plan": "2026-07-18", "to_plan": "2026-07-25",
-        "carried_count": 4, "unchanged_count": 1, "unchanged_pct": 0.25,
-        "target_max_pct": 0.40, "meets_target": True, "oscillating_count": 0,
-        "carried": [
-            {"exercise": "Barbell Back Squat", "dose_changed": True,
-             "change_kind": "load_up", "generations_static": 0},
-            {"exercise": "Leg Press", "dose_changed": True,
-             "change_kind": "reps_up", "generations_static": 0},
-            {"exercise": "Cable Lat Pulldown", "dose_changed": True,
-             "change_kind": "load_up", "generations_static": 0},
-            {"exercise": "Hip Adductor Machine", "dose_changed": False,
-             "change_kind": "none", "generations_static": 3},
+        "load_policy": "progress",
+        "exercises": [
+            {"exercise": "Barbell Back Squat", "action": "add_load"},
+            {"exercise": "Cable Lat Pulldown", "action": "add_load"},
+            {"exercise": "Leg Press", "action": "add_reps"},
+            {"exercise": "Hip Adductor Machine", "action": "hold"},
+            {"exercise": "Dead Bug", "action": "no_history"},
         ],
     }
 
     def _card(self, block, dose=None, coach=None) -> str:
-        j = {"today": "2026-08-02", "block": block, "dose_staleness": dose,
+        j = {"today": "2026-08-02", "block": block, "next_dose": dose,
              "health_metrics_weekly": [{"hrv_sdnn": 55}]}
         cards = {"block_position": coach} if coach else {}
         html = self.rd.render(j, {"headline": "h", "cards": cards},
@@ -1417,14 +1576,12 @@ class BlockPositionCardTests(unittest.TestCase):
     def test_it_renders_on_a_week_where_nothing_changed(self) -> None:
         # The whole point. A card that only appears when there is news
         # cannot disclose that the absence of news is deliberate.
-        stale = dict(self._DOSE, unchanged_count=4, unchanged_pct=1.0,
-                     meets_target=False,
-                     carried=[dict(c, dose_changed=False, change_kind="none")
-                              for c in self._DOSE["carried"]])
+        stale = {"load_policy": "reduce", "exercises": [
+            dict(e, action="reduce") for e in self._DOSE["exercises"][:4]]}
         text = self._text(self._card(self._MID_BLOCK, stale))
         self.assertIn("Week 2 of 6 in this block", text)
-        self.assertIn("Held at the same dose", text)
-        self.assertIn("0 of 4 carried lifts", text)
+        self.assertIn("Held at the same weight", text)
+        self.assertIn("0 of 4 lifts", text)
 
     def test_boundary_due_replaces_the_countdown(self) -> None:
         block = dict(self._MID_BLOCK, boundary_due=True, age_weeks=6.0,
@@ -1466,18 +1623,31 @@ class BlockPositionCardTests(unittest.TestCase):
     def test_the_dose_delta_says_what_actually_moved(self) -> None:
         # Without this, "selection is stable by design" reads as
         # "nothing changed", which is the opposite of true inside a
-        # block.
+        # block. Read off `next_dose`, the verdicts the plan copies.
         text = self._text(self._card(self._MID_BLOCK, self._DOSE))
-        self.assertIn("3 of 4 carried lifts", text)
-        self.assertIn("2 took weight", text)
-        self.assertIn("1 took reps", text)
-        self.assertIn("Held at the same dose", text)
+        self.assertIn("2 of 4 lifts", text)          # no_history not counted
+        self.assertIn("Barbell Back Squat, Cable Lat Pulldown", text)
+        self.assertIn("1 chase reps at the same weight", text)
+        self.assertIn("Held at the same weight", text)
         self.assertIn("Hip Adductor Machine", text)
-        self.assertIn("Longest hold: 3 generations", text)
+
+    def test_the_load_policy_is_named_when_it_holds_lifts(self) -> None:
+        held = {"load_policy": "reduce", "exercises": [
+            {"exercise": "Leg Press", "action": "reduce"}]}
+        self.assertIn("Load policy: reduce",
+                      self._text(self._card(self._MID_BLOCK, held)))
+
+    def test_a_lift_held_on_its_own_is_not_blamed_on_the_policy(self) -> None:
+        # A re-entry or a gym change holds one lift; the gate said progress.
+        held = {"load_policy": "progress", "exercises": [
+            {"exercise": "Leg Press", "action": "hold"}]}
+        text = self._text(self._card(self._MID_BLOCK, held))
+        self.assertIn("Held at the same weight", text)
+        self.assertNotIn("Load policy", text)
 
     def test_no_dose_history_is_stated_not_omitted(self) -> None:
         text = self._text(self._card(self._MID_BLOCK, None))
-        self.assertIn("no earlier plan to compare", text)
+        self.assertIn("no logged lifts to progress", text)
 
     def test_the_coach_callout_key_is_wired(self) -> None:
         self.assertIn("block_position", render_validators.COACH_CARD_KEYS)
@@ -1502,7 +1672,7 @@ class BlockPositionCardTests(unittest.TestCase):
                 if "card_block_position(" in ln and "import" not in ln]
         self.assertEqual(len(hits), 1, hits)
         self.assertIn('j.get("block")', hits[0])
-        self.assertIn('j.get("dose_staleness")', hits[0])
+        self.assertIn('j.get("next_dose")', hits[0])
 
 
 # ---------------------------------------------------- real-data acceptance
@@ -1596,9 +1766,9 @@ class RealPlanAcceptanceTests(unittest.TestCase):
             relaxed, warnings = validate_workout_plan(text, deload_week=True)
             advisory = [w for w in warnings if "[advisory: deload week]" in w]
             with self.subTest(plan=path.name):
-                self.assertEqual(len(strict), 8)
+                self.assertEqual(len(strict), 6)
                 self.assertEqual(len(relaxed), 3)
-                self.assertEqual(len(advisory), 5)
+                self.assertEqual(len(advisory), 3)
                 # And the relief does NOT make it renderable: what
                 # survives is core placement, which costs no fatigue.
                 for e in relaxed:

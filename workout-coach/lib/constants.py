@@ -26,17 +26,25 @@ Five groups:
   plus ``muscle_priority_tiers`` and ``muscle_volume_targets`` — the
   emphasis / grow / maintain model (mid-MAV / MEV / MV).
 - **Prescription specs**: ``CORE_WEEK_SPEC`` and ``ARM_WEEK_SPEC``, the
-  distribution-shaped weekly targets the render validators enforce, and
-  ``DOSE_PROGRESSION_SPEC``, the across-generations counterpart that
-  stops the same plan shipping twice.
+  distribution-shaped weekly targets the render validators enforce.
+- **Load progression**: ``LOAD_INCREMENT_KG`` and ``REP_CEILING_RANGE``
+  (what ``next_dose`` adds and resets to) and ``LOAD_REDUCE_TIERS`` /
+  ``LOAD_REDUCE_TSB_BANDS`` (the one mapping from the recovery gate to
+  "may the weight go up").
 """
 from __future__ import annotations
 
+from fractions import Fraction
+
 # Per-source capability map. The coach reads this to decide which sections of
-# the report to write. HealthAutoExport's JSON export is the only source; the
-# map keeps its per-source shape because the coach payload publishes
-# ``capabilities`` as a contract, and a second source may return.
+# the report to write. ``health_export_kit`` is the live source (both trackers'
+# profile.csv carry it). ``health_auto_export`` is the retired HealthAutoExport
+# format, kept only so an old stored profile still resolves; the importer
+# rewrites it to ``health_export_kit`` on its next run. The map keeps its
+# per-source shape because the coach payload publishes ``capabilities`` as a
+# contract.
 SOURCE_CAPABILITIES = {
+    # Retired format (stored profiles only). See the note above.
     "health_auto_export": {
         "hrv":                True,
         "wrist_temp":         True,
@@ -87,8 +95,10 @@ SOURCE_CAPABILITIES = {
     },
 }
 
-# Applied when the profile is missing or unset.
-DEFAULT_DATA_SOURCE = "health_auto_export"
+# Applied when the profile is missing or unset: the live source, so a tracker
+# with no profile is not credited with HRV and wrist temperature the importer
+# cannot supply.
+DEFAULT_DATA_SOURCE = "health_export_kit"
 
 # Deload marker now lives on the TOTAL row's Notes column (col 9). The
 # marker text is canonical "Deload Workout"; matching is case-insensitive.
@@ -492,50 +502,16 @@ CORE_WEEK_SPEC = {
     "min_flexion_sets_per_week": 3,
 }
 
-# Same shape, one muscle each side of the elbow. The >=6 direct sets/week
-# floor is unchanged; the distinct-exercise axis is new and exists for the
-# same reason core's does - 6 sets of one pushdown is a quantity target met
-# and a training target missed.
+# Same shape, one muscle each side of the elbow. Only the distinct-exercise
+# axis lives here, for the same reason core's does: 6 sets of one pushdown
+# is a quantity target met and a training target missed. The arm SET floor
+# is two rows of `muscle_floors`, not a key of this spec; it used to be
+# `min_direct_sets_per_week` here and a copy left in the payload would read
+# as a floor of 6 beside the real one.
 ARM_WEEK_SPEC = {
-    "min_direct_sets_per_week": 6,
     "min_distinct_exercises_per_week": 2,
 }
 
-
-# =============================================================================
-# Dose progression — the spec for "is this the same plan again?"
-# =============================================================================
-#
-# The complaint the whole workstream started from was "every plan is the
-# same plan", and until 2026-08 nothing checked it: `dose_staleness` was
-# computed into the payload for the coach to READ and no validator looked
-# at it, so a coach could re-prescribe every load and rep target
-# identically and render clean. The three axes above stop a plan being
-# degenerate WITHIN one week; this one stops it being degenerate ACROSS
-# weeks, which is a different failure and was the one the user actually
-# reported.
-#
-# What "carried forward" and "moved" mean is NOT defined here. Both live
-# in `adherence` — `dose_staleness` decides which exercises count as
-# carried, and `_dose_delta` decides whether a change is material (2% of
-# load, one whole rep of range midpoint, or a set count). Restating either
-# would give the payload's report and the gate two different definitions
-# of the same word, and they would drift.
-DOSE_PROGRESSION_SPEC = {
-    # SKILL.md's own stated target, and the same number
-    # `adherence.dose_staleness` reports as ``target_max_pct``. The
-    # measured baseline was 70% of carried exercises returning with an
-    # unchanged dose. A test pins these two equal; they are one number
-    # seen from the report side and the gate side.
-    "max_unchanged_share": 0.40,
-    # Below this many carried exercises the share is noise, not a
-    # measurement: at 3 carried lifts one re-copy is already 33% and two
-    # is 67%, so the check would fire on the arithmetic rather than on the
-    # behaviour. Deload and comeback weeks are exactly where the carried
-    # count collapses, and they are the weeks least deserving of a
-    # spurious block. The real corpus runs 11-22 carried in a normal week.
-    "min_carried_for_share": 5,
-}
 
 # Canonicalise the muscle tokens that appear in exercises-database.md to the
 # snake_case keys used everywhere else (and in VOLUME_LANDMARKS).
@@ -577,6 +553,7 @@ SECTION_PRIMARY = {
 SUBSECTION_PRIMARY_HINTS = [
     ("lateral delt", "side_delts"),
     ("rear delt",    "rear_delts"),
+    ("front delt",   "front_delts"),
     ("vertical push","front_delts"),  # overhead press etc. primarily hit front delts
     ("traps",        "traps"),
     ("forearms",     "forearms"),
@@ -831,7 +808,14 @@ SESSION_GATE_THRESHOLDS = {
     "tier_c_sri_floor":                71.0,   # UK Biobank bottom quintile
     "tier_c_rhr_z_floor":              0.50,
     "tier_c_muscles_over_mrv_count":   1,
-    "tier_c_downgrade_volume_pct":     25.0,   # -25% volume on secondaries
+    # Fraction of the base working-set budget a downgraded session keeps.
+    # A WHOLE-SESSION scale on workouts 1..expected_rebound_by_session, not
+    # "-25% on secondaries": `render_validators.tier_budget_by_index`
+    # enforces exactly this number, and the payload text reads it from here,
+    # so the call and the check cannot describe two different cuts. The
+    # per-muscle floors (`muscle_floors`) are not scaled, so the isolation
+    # block absorbs it.
+    "tier_c_session_budget_scale":     0.6,
     # Corroboration guard for the SOFT recovery/HRV Tier-C triggers. HRV is
     # the dominant input to recovery_score, so "moderate recovery" and
     # "mildly-low HRV" are the SAME signal, not two. A single soft dip
@@ -851,6 +835,178 @@ SESSION_GATE_THRESHOLDS = {
     # ---- Tier E: over-recovered / taper warning ----
     "tier_e_tsb_high":                 10.0,
 }
+
+
+# =============================================================================
+# Load policy — the ONE mapping from the recovery gate to "may the weight go up"
+# =============================================================================
+#
+# The gate (`health_session_rec.compute_session_recommendation`) emits a
+# ``load_policy`` built from the two sets below, and ``progression.next_dose``
+# applies it. Nothing else decides whether a load may rise: the old prose
+# rules (recovery.score >= 6.5, "balanced TSB holds loads") lived only in
+# SKILL.md, and 6.5 exists in no gate threshold. Recovery is scored so that 5
+# is the person's own average, which made a normal day read as "hold" forever.
+# A trainee who trains consistently sits in negative TSB most weeks, so a
+# freshness or Tier C veto froze a bench at 44 kg for twelve weeks while every
+# set hit the top of its range.
+#
+#   progress   the default. A lift that earned a bump (every working set at the
+#              top of its rep range) gets one; the double-progression rule is
+#              the readiness check, not the gate.
+#   reduce     deload: loads held, working sets cut. Only the red flags: gate
+#              Tier A (illness / rest), Tier B (reactive deload), or strength
+#              TSB in the high_fatigue band.
+#
+# Tier C (downgrade / hold_load) and the carrying_load / fatigued TSB bands are
+# deliberately NOT here. Tier C still scales the session's SET BUDGET
+# (``tier_c_session_budget_scale``); that is volume, not load. There is no
+# policy-level "hold": a lift is held per exercise (a re-entry after a layoff,
+# a gym-flagged machine or cable lift, no rep range on record), which
+# ``progression.next_dose`` decides from the log.
+#
+# Recovery score reaches the policy THROUGH the tier (its 4.0 / 5.0 lines are
+# gate thresholds); it is not a second vote here.
+LOAD_REDUCE_TIERS = frozenset({"A", "B"})
+
+# Strength-TSB bands, edges taken from the gate thresholds above so a moved
+# threshold moves the policy with it. The band is always reported in the
+# payload; only ``high_fatigue`` (tsb <= tier_b_tsb_high_fatigue, -15) reduces.
+LOAD_REDUCE_TSB_BANDS = frozenset({"high_fatigue"})
+
+
+def strength_tsb_band(tsb: float | None) -> str | None:
+    """Name the strength-TSB band ``tsb`` falls in; ``None`` when unknown."""
+    if tsb is None:
+        return None
+    t = SESSION_GATE_THRESHOLDS
+    if tsb <= t["tier_b_tsb_high_fatigue"]:
+        return "high_fatigue"
+    if tsb <= t["tier_d_tsb_lo"]:
+        return "fatigued"
+    if tsb < t["tier_c_soft_tsb_floor"]:
+        return "carrying_load"
+    if tsb >= t["tier_e_tsb_high"]:
+        return "over_recovered"
+    return "balanced"
+
+
+# =============================================================================
+# Double progression — what `progression.next_dose` adds and resets to
+# =============================================================================
+#
+# Fallback load step per equipment class, in kg (the bracket tag in
+# exercises-database.md). It applies only to a lift with fewer than
+# `MIN_OBSERVED_JUMPS` positive load jumps in the person's own log: with two or
+# more, `progression` uses their most common jump instead. Dumbbells are logged
+# as the TOTAL across both hands for a two-dumbbell lift, and gyms step those
+# 2 kg a hand (36 -> 40 -> 44), so "DB" is 4.0; a lift worked with ONE dumbbell
+# steps at `SINGLE_DUMBBELL_INCREMENT_KG`; `equipment_increment_kg` picks
+# between the two, and also rounds the derived starting loads in
+# `blocks.derived_starting_load`.
+LOAD_INCREMENT_KG = {"BB": 2.5, "DB": 4.0, "Machine": 5.0, "Cable": 2.5,
+                     "Smith": 2.5, "Plate": 1.25, "LM": 2.5}
+DEFAULT_LOAD_INCREMENT_KG = 2.5
+
+# The catalog tags a dumbbell lift `[DB]` and does not say how many dumbbells
+# it takes, so the one-dumbbell lifts are named here (lower-cased catalog
+# names). Deliberately short: only movements that cannot be done with two
+# (goblet, pullover and overhead extension hold one dumbbell in both hands;
+# row, concentration and preacher curl are one arm at a time). Anything not
+# listed is a two-dumbbell lift (kickback is one arm at a time, a suitcase
+# carry is one dumbbell by definition). A lift with history never needs this:
+# its own jumps decide.
+SINGLE_DUMBBELL_LIFTS = frozenset({
+    "dumbbell row", "dumbbell goblet squat", "dumbbell pullover",
+    "dumbbell hip thrust", "concentration curl", "preacher curl (dumbbell)",
+    "dumbbell tricep overhead extension", "dumbbell kickback",
+    "suitcase carry",
+})
+SINGLE_DUMBBELL_INCREMENT_KG = 2.0
+
+# How the increment is learned from the log: the most common positive load
+# jump between consecutive comparable sessions, provided that jump has been
+# seen at least this many times (and at least this many jumps were usable).
+# Jumps that are all different sizes have no most common one. A jump above ``MAX_PLAUSIBLE_JUMP_FRACTION`` of the load it
+# started from AND above ``MAX_PLAUSIBLE_JUMP_STEPS`` fallback steps is a
+# missed stretch of sessions or a change of convention (one dumbbell to two),
+# not a step, and is ignored.
+MIN_OBSERVED_JUMPS = 2
+MAX_PLAUSIBLE_JUMP_FRACTION = 0.25
+MAX_PLAUSIBLE_JUMP_STEPS = 2
+
+
+def is_two_dumbbell_lift(equipment: str | None, key: str | None = None) -> bool:
+    """A dumbbell lift logged as the total of both hands (see above)."""
+    return (equipment == "DB"
+            and (key or "").strip().lower() not in SINGLE_DUMBBELL_LIFTS)
+
+
+def equipment_increment_kg(equipment: str | None, key: str | None = None) -> float:
+    """The fallback load step for a lift with no usable jump history."""
+    if equipment == "DB" and not is_two_dumbbell_lift(equipment, key):
+        return SINGLE_DUMBBELL_INCREMENT_KG
+    return LOAD_INCREMENT_KG.get(equipment, DEFAULT_LOAD_INCREMENT_KG)
+
+
+# The smallest load change that is a real step rather than a re-weigh, per
+# lift. A two-dumbbell lift is logged as the total of both hands and the
+# smallest real step there is 1 kg a hand, 2 kg in the log; a one-dumbbell
+# lift steps 1 kg; anything else 1 kg (a bar, stack or machine really can
+# step that finely at a light load: 4 -> 5 kg on a cable is a step).
+SMALLEST_TWO_DUMBBELL_STEP_KG = 2.0
+SMALLEST_SINGLE_DUMBBELL_STEP_KG = 1.0
+SMALLEST_OTHER_STEP_KG = 1.0
+
+# A jump is re-weighing noise (a 64 <-> 65 kg dumbbell total, 55 -> 56 kg on a
+# stack: the same load logged a little differently) only when it is BOTH
+# no bigger than the smallest real step AND under this fraction of the load it
+# started from. The fraction is what keeps a 1 kg step at 4 kg (25%) real and
+# rejects it at 55 kg (1.8%).
+NOISE_JUMP_FRACTION = 0.05
+
+
+def smallest_real_step_kg(equipment: str | None, key: str | None = None) -> float:
+    """The smallest real load step of a lift (see above)."""
+    if equipment == "DB":
+        return (SMALLEST_TWO_DUMBBELL_STEP_KG
+                if is_two_dumbbell_lift(equipment, key)
+                else SMALLEST_SINGLE_DUMBBELL_STEP_KG)
+    return SMALLEST_OTHER_STEP_KG
+
+
+def is_reweigh_jump(jump: float, start: float, equipment: str | None,
+                    key: str | None = None) -> bool:
+    """Whether a positive load change of ``jump`` kg from ``start`` kg is
+    noise rather than a step. A dumbbell total EQUAL to the smallest step is
+    real (1 kg a hand; one 1 kg dumbbell), so for dumbbells noise is strictly
+    under it; for every other lift a change of exactly the smallest step is
+    noise once it is under `NOISE_JUMP_FRACTION` of the load."""
+    if jump >= NOISE_JUMP_FRACTION * start:
+        return False
+    floor = smallest_real_step_kg(equipment, key)
+    return jump < floor if equipment == "DB" else jump <= floor
+
+
+# The rep range a lift lands in when its prescribed range outgrows the
+# ceiling: compounds top out at 12, isolation at 20. Past that, more reps are
+# more endurance rather than more load, and the lift is owed weight. Keyed by
+# `strength.exercise_class`; the pair is (bottom, top).
+REP_CEILING_RANGE = {"compound": (10, 12), "isolation": (15, 20)}
+
+# An exercise last worked this many days ago or more is "stale"
+# (`strength.stale_exercises`, the reintroduction pool) and a re-entry, not a
+# basis to progress on (`progression.build_next_dose`). One number, used by
+# both, so a lift is never stale in one list and not-yet-stale in the other.
+STALE_EXERCISE_DAYS = 28
+
+# Two loads count as the same load inside this many kg. Absolute, and smaller
+# than the smallest real step (a 1.25 kg plate, a 1 kg-a-hand dumbbell pair
+# is 2 kg in the log), so 100 -> 101.25 is a step and never "the same load".
+# It only absorbs float noise and a half-kilo rounding of a logged total. A
+# fraction (it was 2%) swallowed a 1.25 kg step on a 60+ kg lift, so no
+# increment was learned from it and the lift read as stalled.
+LOAD_EQUAL_TOLERANCE_KG = 0.5
 
 
 def muscle_priority_tiers(profile: dict | None = None) -> tuple[dict, list[str]]:
@@ -917,6 +1073,122 @@ def muscle_volume_targets(tiers: dict | None = None,
             target = float(bands[band])
         out[muscle] = {"tier": tier, "band": band,
                        "target_sets": round(target, 1)}
+    return out
+
+
+# Muscles `muscle_floors` asks nothing of, besides the ones whose direct-set
+# landmark is already zero:
+#   erectors, forearms  hinges load the erectors and every pull and carry
+#                       loads the forearms; the synergist-credit notes above
+#                       flag both as having no measured direct supply, and
+#                       floored they failed every plan on disk.
+#   core                its weekly dose is `CORE_WEEK_SPEC` (4 sets on a lower
+#                       day, 2 on an upper, so 12 on a two-and-two week, plus
+#                       the flexion floor), enforced per session. That is
+#                       what the weekly core floor was before the generic
+#                       floor existed and it is higher than the generic number
+#                       (MEV 4); a second, lower core number in the payload
+#                       would sit beside the real one and read as permission.
+FLOOR_EXEMPT_MUSCLES = frozenset({"erectors", "forearms", "core"})
+
+
+# Reference week for the floors: `RP_DIRECT_SET_LANDMARKS` MEV/MV are weekly
+# numbers for a four-session week (two upper, two lower), the split the
+# program is built on. A person who trains fewer sessions has fewer sets to
+# place, and a two-session week cannot carry a four-session week's floors.
+FLOOR_REFERENCE_SESSIONS = 4
+
+# Recovery-gate labels that mean "this whole week is a prescribed volume
+# reduction" (`render_validators.is_deload_week`). Tier C ``downgrade`` is
+# deliberately NOT here: see the comment there.
+DELOAD_WEEK_LABELS = frozenset({"reactive_deload", "rest"})
+
+
+def full_block_deload(session_recommendation: "dict | None") -> bool:
+    """A whole-block volume cut called by the recovery gate.
+
+    Gate Tier A, a ``DELOAD_WEEK_LABELS`` label, or a load policy of
+    ``reduce`` (Tier A/B or strength TSB in the high-fatigue band). Only
+    then are the weekly volume floors advisory.
+    """
+    sr = session_recommendation or {}
+    return bool(sr.get("tier") == "A"
+                or sr.get("label") in DELOAD_WEEK_LABELS
+                or (sr.get("load_policy") or {}).get("policy") == "reduce")
+
+
+def cadence_deload_week(session_recommendation: "dict | None",
+                        block: "dict | None") -> bool:
+    """The block's cadence deload: ONE halved session in an otherwise normal
+    week (`blocks.deload_cadence`). False when a full-block deload already
+    applies, which subsumes it."""
+    return (not full_block_deload(session_recommendation)
+            and bool((block or {}).get("deload_prescribed")))
+
+
+def floor_scale(sessions_per_week: "int | None" = None,
+                cadence_deload: bool = False) -> "Fraction":
+    """The factor the weekly floors are scaled by, as an exact fraction.
+
+    * ``min(1, n / 4)`` for a week of ``n`` strength sessions: the floors are
+      a four-session week's (`FLOOR_REFERENCE_SESSIONS`).
+    * times ``(n - 0.5) / n`` on a cadence deload week: one of the ``n``
+      sessions is halved, so the week holds ``n - 0.5`` sessions' worth of
+      work and must not fail its own floors.
+
+    ``None`` or a non-positive ``n`` (a payload that predates the field)
+    means the reference week, so nothing is scaled; a cadence deload with no
+    ``n`` assumes the reference week too. Exact arithmetic, because the
+    result is rounded DOWN and a float can land a hair under a whole number.
+    """
+    n = (sessions_per_week if isinstance(sessions_per_week, int)
+         and not isinstance(sessions_per_week, bool) and sessions_per_week > 0
+         else FLOOR_REFERENCE_SESSIONS)
+    scale = Fraction(min(n, FLOOR_REFERENCE_SESSIONS), FLOOR_REFERENCE_SESSIONS)
+    if cadence_deload:
+        scale *= Fraction(2 * n - 1, 2 * n)
+    return scale
+
+
+def muscle_floors(tiers: dict, servable=None,
+                  sessions_per_week: "int | None" = None,
+                  cadence_deload: bool = False) -> "dict[str, int]":
+    """Weekly DIRECT-set floor per muscle: ``{muscle: sets per week}``.
+
+    THE one number the coach reads (``payload["muscle_floors"]``) and the
+    validator enforces (`render_validators.muscle_floor_errors`).
+
+      * ``emphasis`` tier -> the muscle's MEV
+      * any other tier    -> its MV
+
+    both from `RP_DIRECT_SET_LANDMARKS`, so the unit is direct sets (bullets
+    whose catalog primary is that muscle). Not `muscle_volume_targets`, whose
+    ``target_sets`` is the fractional unit and a tier higher: those targets
+    stay the aim for spare sets, this is the bar a muscle must clear.
+
+    The landmarks are a four-session week's. The floor is scaled by
+    `floor_scale` (``min(1, sessions_per_week / 4)``, and ``(n - 0.5) / n``
+    more on a cadence deload week) and rounded DOWN, so a two-session week
+    asks for half. A floor that rounds to 0 drops out.
+
+    A muscle with no floor is ABSENT from the result, never 0: the exempt
+    set above, a muscle whose landmark is 0 at that band (glutes, front
+    delts, adductors, neck and external rotators at MV), a floor scaled to
+    nothing, and, when ``servable`` (the set of muscles the catalog has a
+    primary entry for) is given, a muscle no exercise can serve directly
+    (external rotators).
+    """
+    scale = floor_scale(sessions_per_week, cadence_deload)
+    out: "dict[str, int]" = {}
+    for muscle, tier in tiers.items():
+        bands = RP_DIRECT_SET_LANDMARKS.get(muscle)
+        if (bands is None or muscle in FLOOR_EXEMPT_MUSCLES
+                or (servable is not None and muscle not in servable)):
+            continue
+        floor = bands["mev" if tier == "emphasis" else "mv"]
+        floor = int(floor * scale)          # Fraction * int, truncated: down
+        if floor > 0:
+            out[muscle] = floor
     return out
 
 

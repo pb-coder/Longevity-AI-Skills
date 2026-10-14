@@ -25,8 +25,13 @@ Emits one JSON blob on stdout organised around session-level signals
   - adherence: the previous plan reconciled against the logs — sets
     prescribed vs performed, split isolation / compound, the per-exercise
     ledger, substitutions, and the D5 bench list with its one question.
-  - dose_staleness: per carried-forward exercise, whether the dose
-    actually moved and for how many generations it has not.
+  - next_dose: per exercise worked in the last 120 days, the next load and
+    rep range, derived from the log by double progression (the step is the
+    lift's own most common load jump, else the equipment's; a machine or
+    cable lift is judged on the usual gym, the other gym's load rides as
+    other_gym_load_kg). ``session_recommendation.load_policy`` only turns it
+    into a deload on a red-flag day. The coach copies it; it does not pick
+    weights itself.
   - block: the current training block, its slots tagged anchor /
     rotating, and whether the boundary has fired (deload or 6 weeks,
     whichever first).
@@ -36,6 +41,16 @@ Emits one JSON blob on stdout organised around session-level signals
   Prescription specs + priority tiers:
   - core_week_spec / arm_week_spec, muscle_priority_tiers,
     muscle_volume_targets, volume_landmark_unit, synergist_credit_offset
+  - muscle_floors: {muscle: direct sets per week}, the bar the plan check
+    enforces (emphasis tier = MEV, every other tier = MV, direct sets, not
+    the fractional unit of muscle_volume_targets), scaled by
+    min(1, strength_sessions_per_week / 4) and, on a cadence deload week, by
+    (n - 0.5) / n, rounded down. A muscle with no floor is
+    ABSENT: core (its dose is core_week_spec), erectors, forearms, MV-0
+    muscles and muscles the catalog has no direct exercise for.
+  - strength_sessions_per_week (--sessions N, else profile.csv) and
+    last_session_type ({type, title, date, plan_date} of the newest strength
+    session; absent with last_session_type_reason when it cannot be told).
 
   Cardio rollup:
   - cardio_last_28d (sessions, minutes, distance, kcal)
@@ -137,7 +152,10 @@ from workout_coach.lib.constants import (  # noqa: E402
     CORE_WEEK_SPEC,
     DEFAULT_DATA_SOURCE,
     SOURCE_CAPABILITIES,
+    STALE_EXERCISE_DAYS,
     SYNERGIST_CREDIT_OFFSET,
+    cadence_deload_week,
+    muscle_floors,
     muscle_priority_tiers,
     muscle_volume_targets,
 )
@@ -158,10 +176,7 @@ from workout_coach.lib.extract import (  # noqa: E402
     read_thermal_sessions,
     read_workout_sessions,
 )
-# Direct submodule imports bypass the ``workout_coach.lib.health``
-# re-export facade. The four focused modules below are loaded the same
-# way the facade would load them; skipping the facade itself avoids one
-# extra module-level execution on the cold path.
+# The health analytics live in four focused modules, imported directly.
 from workout_coach.lib.health_windowing import (  # noqa: E402
     _mean_or_none,
     _values_in_window,
@@ -176,8 +191,13 @@ from workout_coach.lib.health_longevity import (  # noqa: E402
     vo2_percentile_age_sex,
 )
 from workout_coach.lib.health_session_rec import (  # noqa: E402
+    apply_user_override,
     compute_session_recommendation,
     compute_tier_history,
+)
+from workout_coach.lib.progression import (  # noqa: E402
+    INCREMENT_HISTORY_MONTHS,
+    build_next_dose,
 )
 from workout_coach.lib.sessions import (  # noqa: E402
     _is_working_set,
@@ -197,13 +217,15 @@ from workout_coach.lib.strength import (  # noqa: E402
 )
 from workout_coach.lib.adherence import (  # noqa: E402
     build_adherence,
-    dose_staleness,
+    last_strength_session_type,
     load_plans,
+    retired_movements,
 )
 from workout_coach.lib.blocks import (  # noqa: E402
     block_payload,
     load_pattern_catalog,
     rotation_candidates,
+    withhold_owed_stalls,
 )
 from workout_coach.lib.cardio import (  # noqa: E402
     auto_deload_candidates,
@@ -653,6 +675,11 @@ class _Args:
     # normalized to a green/full-volume session, keeping the original
     # rationale visible for transparency. Only the user may request this.
     override_gate: bool = False
+    # The number of strength sessions to plan this week, when the user asked
+    # for a count in the /coach message. Overrides profile.csv's
+    # ``strength_sessions_per_week`` for the payload field of that name, and
+    # through it the weekly floors (`constants.floor_scale`).
+    sessions: int | None = None
 
 
 def _parse_args(argv: list[str]) -> _Args:
@@ -676,6 +703,7 @@ def _parse_args(argv: list[str]) -> _Args:
         "--person": "person",
         "--months": "months",
         "--today": "today",
+        "--sessions": "sessions",
     }
 
     def _bail(msg: str) -> None:
@@ -690,7 +718,7 @@ def _parse_args(argv: list[str]) -> _Args:
                 "usage: read_tracker.py --person NAME [--months N] "
                 "[--today YYYY-MM-DD] [--include-rows] "
                 "[--include-1rm-history] [--include-daily-health] [--pretty] "
-                "[--override-gate]"
+                "[--override-gate] [--sessions N]"
             )
             raise SystemExit(0)
         if "=" in tok and tok.startswith("--"):
@@ -709,11 +737,13 @@ def _parse_args(argv: list[str]) -> _Args:
             attr = value_aliases[key]
             if value is None or (consumed == 2 and value.startswith("--")):
                 _bail(f"argument {key}: expected a value")
-            if attr == "months":
+            if attr in ("months", "sessions"):
                 try:
                     setattr(a, attr, int(value))
                 except (TypeError, ValueError):
-                    _bail(f"argument --months: invalid int value: {value!r}")
+                    _bail(f"argument --{attr}: invalid int value: {value!r}")
+                if attr == "sessions" and not 1 <= a.sessions <= 14:
+                    _bail("argument --sessions: expected a count from 1 to 14")
             else:
                 setattr(a, attr, value)
             i += consumed
@@ -797,11 +827,22 @@ def main() -> int:
     db_path = Path(__file__).resolve().parents[2] / "shared" / "exercises-database.md"
     db = load_exercises_db(db_path)
 
+    # ``catalog`` carries movement-pattern identity (the ## MUSCLE heading
+    # plus ### Subsection), which ``db`` structurally cannot: it resolves
+    # every subsection to one ``primary`` muscle and discards which pattern
+    # the movement was. Rotation is defined on the pattern, so the pattern
+    # has to survive. e1RM reads it for the equipment (a gym-change note
+    # does not bear on a dumbbell) and the rep ceiling behind the stall
+    # count; ``next_dose`` reads it for compound vs isolation and the
+    # load increment.
+    catalog = load_pattern_catalog(db)
+
     unknown_set: set[str] = set()
     weekly_volume = weekly_volume_per_muscle(rows, db, today_d, 28, unknown_set)
     e1rm = estimated_1rm(rows, deloads,
-                         include_history=args.include_1rm_history)
-    stale_full = stale_exercises(rows, db, today_d, 28)
+                         include_history=args.include_1rm_history,
+                         catalog=catalog)
+    stale_full = stale_exercises(rows, db, today_d, STALE_EXERCISE_DAYS)
     # Cap stale_exercises to 5 — beyond that the coach rarely uses them in
     # plan generation. WHICH five is the whole value of the field: a plain
     # prefix of the lapsed list is a retirement pile at one end and a
@@ -820,18 +861,11 @@ def main() -> int:
             unknown_set.add(r["exercise"])
 
     # ---- Prescription memory (W2 + W5). Everything above this line reads
-    # what was PERFORMED. These four blocks read what was PRESCRIBED —
+    # what was PERFORMED. These blocks read what was PRESCRIBED —
     # ``plans/<Person>/<date>-workout.md`` — and reconcile the two. Without
     # them the coach cannot tell a movement it prescribes six times and the
     # user performs zero times from one that works, and generation N cannot
     # differ from N-1 because it never sees it. ----
-    #
-    # ``catalog`` carries movement-pattern identity (the ## MUSCLE heading
-    # plus ### Subsection), which ``db`` structurally cannot: it resolves
-    # every subsection to one ``primary`` muscle and discards which pattern
-    # the movement was. Rotation is defined on the pattern, so the pattern
-    # has to survive.
-    catalog = load_pattern_catalog(db)
     # Priority tiers are resolved here rather than below because the bench
     # rule needs them: retiring every route into an emphasis muscle while
     # the same payload demands mid-MAV volume on it hands the coach two
@@ -840,7 +874,6 @@ def main() -> int:
     adherence = build_adherence(person, rows, db, today_d, catalog,
                                 priority_tiers=priority_tiers)
     plans_parsed = load_plans(person, today_d, limit=8)
-    dose_stale = dose_staleness(plans_parsed, db)
     # ``adherence`` feeds the block so benched slots are withdrawn from it.
     # ``e1rm`` feeds it ``stalled_sessions``, which is what lets the
     # rotation validator DERIVE ``stall_3_sessions`` instead of demanding
@@ -853,16 +886,48 @@ def main() -> int:
     # legal way to write a weight for anything else and rotation could not
     # actually be prescribed.
     #
-    # Benched movements are excluded: the payload used to name
+    # Benched and retired movements are excluded: the payload used to name
     # `Leg Curl (Lying)` under `adherence.benched` ("must not
     # re-prescribe") and offer it here with a derived load in the same
     # breath. The tiers go in so the 56-day pattern gate cannot hide the
     # emphasis categories the weekly spec forces the coach to add — they
     # sit at zero precisely because they are the gap.
+    retired = retired_movements(person)
     rot_candidates = rotation_candidates(
         rows, db, catalog, e1rm, today_d,
-        exclude={b["exercise"] for b in (adherence or {}).get("benched") or []},
+        exclude={b["exercise"] for b in (adherence or {}).get("benched") or []}
+        | retired,
         priority_tiers=priority_tiers)
+
+    # ---- The next load of every lift, in two passes around the gate. ----
+    # The load step of each lift is learned from a longer stretch of the log
+    # than the analytics window, so a lift that steps once a month still
+    # shows its jumps.
+    jump_rows = rows if args.months >= INCREMENT_HISTORY_MONTHS else \
+        _clip_series(extract_rows(person, INCREMENT_HISTORY_MONTHS,
+                                  today_d)[0], today_d)
+
+    def _next_dose(load_policy: dict) -> dict:
+        return build_next_dose(
+            rows, catalog, plans_parsed, block, load_policy, today_d,
+            deload_dates=deloads, jump_rows=jump_rows, retired=retired)
+
+    # Pass one runs under a neutral policy because it answers a question the
+    # gate asks and the policy cannot change: which lifts have EARNED a bump
+    # (every set at the top of the range). A lift that is owed weight is
+    # waiting for it, not stuck, so it must not count as stalled in the
+    # gate's reactive-deload trigger or the nutrition stop signal
+    # (`health_session_rec._genuinely_stalled_lifts` skips ``weight_owed``).
+    next_dose = _next_dose({"policy": "progress"})
+    owed = {e["exercise"].strip().lower() for e in next_dose["exercises"]
+            if e["action"] == "add_load"}
+    for lift, entry in e1rm.items():
+        if lift.strip().lower() in owed:
+            entry["weight_owed"] = True
+    # The block was built before this was known (next_dose reads the block's
+    # rep ranges), so withdraw the stall count it stamped on owed lifts: an
+    # owed lift is bumped, and must not qualify for `stall_3_sessions`.
+    withhold_owed_stalls(block, owed)
 
     # ---- Derived metrics ----
     monthly_sessions = build_monthly_sessions(
@@ -1124,29 +1189,16 @@ def main() -> int:
     # normalize a restrictive A/B/C tier to green so the dashboard's
     # "Today's call" and the per-workout set budget both reflect a full
     # session, while preserving the original rationale for honesty.
-    if args.override_gate and session_recommendation.get("tier") in ("A", "B", "C"):
-        _orig = session_recommendation
-        _orig_tier = _orig.get("tier")
-        _orig_head = _orig.get("headline") or ""
-        session_recommendation = {
-            "tier": "D",
-            "label": "green",
-            "headline": "Train as planned (you chose to override the recovery downgrade).",
-            "substitute": None,
-            "rationale": ([{
-                "signal": "user_override",
-                "value": None,
-                "threshold": None,
-                "note": (f"You overrode the system's Tier {_orig_tier} call "
-                         f"({_orig_head}) and chose to train normally."),
-            }] + list(_orig.get("rationale") or [])),
-            "override_allowed": True,
-            "override_message": (
-                f"User override in effect. The system's own read was Tier "
-                f"{_orig_tier}: {_orig_head} Training at full volume by request; "
-                f"listen to your body and back off if a lift feels off."),
-            "expected_rebound_by_session": None,
-        }
+    if args.override_gate:
+        session_recommendation = apply_user_override(
+            session_recommendation, recovery, strength_training_load)
+
+    # Pass two: the same dose under the gate's load policy, computed after the
+    # gate (and after an override) because the policy is the gate's output.
+    # Under ``progress`` it is pass one, byte for byte, so it is not recomputed.
+    policy = session_recommendation["load_policy"]
+    if policy.get("policy", "progress") != "progress":
+        next_dose = _next_dose(policy)
 
     # 14-day tier history strip (Trajectory tab — spot fatigue spirals).
     tier_history = compute_tier_history(
@@ -1218,6 +1270,21 @@ def main() -> int:
     # bench rule consumes it) turns into a set target per muscle in the
     # same FRACTIONAL unit as ``weekly_volume_per_muscle``. ----
     volume_targets = muscle_volume_targets(priority_tiers)
+    # The same function the plan check enforces, so the coach and the
+    # validator read one number per muscle. The floors are a four-session
+    # week's: they scale down for a week of fewer sessions, and by
+    # (n - 0.5) / n on a cadence deload week (one halved session), where they
+    # stay blocking. A full-block deload makes them advisory in the check, not
+    # smaller here.
+    sessions_per_week = args.sessions or profile.get("strength_sessions_per_week")
+    floors = muscle_floors(
+        priority_tiers,
+        servable={meta["primary"] for meta in db.values()
+                  if meta.get("primary")},
+        sessions_per_week=sessions_per_week,
+        cadence_deload=cadence_deload_week(session_recommendation, block))
+    last_session, last_session_reason = last_strength_session_type(
+        rows, plans_parsed, db, today_d)
     if priority_unknown:
         # A typo in the profile override must not resolve silently to
         # ``maintain``: that drops a muscle out of the emphasis set, which
@@ -1245,7 +1312,7 @@ def main() -> int:
         # ``_compact`` drops it, which reads correctly as "unknown" rather
         # than as 0% adherence. ----
         "adherence":            adherence,
-        "dose_staleness":       dose_stale,
+        "next_dose":            next_dose,
         "block":                block,
         "rotation_candidates":  rot_candidates or None,
         # ---- Distribution-shaped weekly specs + priority tiers (D8). ----
@@ -1253,6 +1320,15 @@ def main() -> int:
         "arm_week_spec":          ARM_WEEK_SPEC,
         "muscle_priority_tiers":  priority_tiers,
         "muscle_volume_targets":  volume_targets,
+        "muscle_floors":          floors,
+        # The session count to plan (``--sessions``, else profile.csv) and
+        # where the split rotation continues from. ``last_session_type`` is
+        # ``{type, title, date, plan_date}`` of the newest strength session;
+        # when it cannot be told, the key is absent and
+        # ``last_session_type_reason`` says why.
+        "strength_sessions_per_week": sessions_per_week,
+        "last_session_type":      last_session,
+        "last_session_type_reason": last_session_reason,
         "volume_landmark_unit":   "fractional",
         "synergist_credit_offset": SYNERGIST_CREDIT_OFFSET,
         "deloads": deloads,

@@ -59,7 +59,6 @@ from .monthly_csv_values import (  # noqa: F401
 )
 
 # Back-compat private re-exports for existing scripts:
-# - ``shared/import_health_auto_export.py`` imports row I/O helpers.
 # - ``shared/maintain.py`` imports duration/pace formatting helpers.
 # - legacy monthly CSV tests import classification/canonicalization helpers.
 from .monthly_csv_canonicalize import _build_data_row, _build_total_row  # noqa: F401,E402

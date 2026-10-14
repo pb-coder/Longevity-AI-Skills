@@ -27,15 +27,8 @@ Public surface:
   documented decision threshold (`recovery_decision_boundaries`) and a
   warning otherwise; magnitude is a noise floor, not the instrument.
 - ``recovery_decision_boundaries()`` — those thresholds, derived from
-  ``constants.SESSION_GATE_THRESHOLDS`` plus SKILL.md's plan-action band
-  edges (`SKILL_RECOVERY_BAND_EDGES`).
-- ``dose_progression_findings(text, prev_block, plan_date)`` — the
-  across-generations counterpart to the weekly specs: a carried-forward
-  exercise whose dose did not move, a stalled lift whose required
-  response never arrived, and a load that oscillates between two values.
-  Reads the previous generation's prescription off the block artifact and
-  defers to `adherence.dose_staleness` for what "carried" and "moved"
-  mean. ADVISORY this release — see ``DOSE_PROGRESSION_ENFORCED``.
+  ``constants.SESSION_GATE_THRESHOLDS`` plus one anti-fabrication edge
+  (`COACH_SCORE_TOP_BAND_EDGE`).
 - ``validate_workout_md(text) -> (errors, warnings)`` — validates the
   lean workout markdown's COPY (em-dashes, off-catalog names) before it
   is embedded in the dashboard.
@@ -48,10 +41,9 @@ Public surface:
   One name, one read site (`validate_workout_plan`).
 - ``ROTATION_ADVISORY_TAG`` — the suffix stamped on a rotation finding
   while the switch is off.
-- ``DOSE_PROGRESSION_ENFORCED`` / ``DOSE_ADVISORY_TAG`` — the same pair
-  for the dose-progression findings, demoted on 2026-08-02 after a review
-  found both a false positive on a SKILL.md-compliant cadence deload and
-  a mechanical bypass. Same discipline: one name, one read site.
+- ``muscle_floor_errors(text, payload) -> [str]`` — the one weekly
+  direct-set floor every muscle gets; the rule is in the block comment
+  above `_primary_muscle_by_exercise`.
 - ``payload_spec_errors(tracker_json) -> [str]`` — the tracker payload's
   ``core_week_spec`` / ``arm_week_spec`` are REPORTS of the constants,
   never gate inputs. This checks they are well formed so a corrupt one
@@ -81,7 +73,15 @@ from math import ceil
 import re
 
 
-from .constants import ARM_WEEK_SPEC, CORE_WEEK_SPEC
+from .constants import (
+    ARM_WEEK_SPEC,
+    CORE_WEEK_SPEC,
+    DELOAD_WEEK_LABELS,
+    FLOOR_REFERENCE_SESSIONS,
+    cadence_deload_week,
+    floor_scale,
+    full_block_deload,
+)
 from .render_helpers import esc
 
 
@@ -253,7 +253,9 @@ WORKOUT_SUB_BULLET_RE = re.compile(r"^\s{2,}" + re.escape(EM_DASH) + r"\s+")
 # The limit exists to stop rationale creep — "last time you did X",
 # "we're holding here because…" — in a file the user reads mid-workout.
 # An anchor-change declaration is not that: it is the plan's only channel
-# for a required field, not prose the coach chose to add.
+# for a required field, not prose the coach chose to add. So is the
+# `other gym: X kg` cue, which SKILL.md requires whenever `next_dose` has an
+# `other_gym_load_kg`.
 #
 # ANCHORED AT THE START OF THE SUB-BULLET, and that is not cosmetic. A
 # `.search()` over the whole line would make any sub-bullet CONTAINING
@@ -261,8 +263,14 @@ WORKOUT_SUB_BULLET_RE = re.compile(r"^\s{2,}" + re.escape(EM_DASH) + r"\s+")
 # also exempt a paragraph of rationale with the token buried in the
 # middle. Matched against the sub-bullet's body — the text after the
 # `  — ` marker — not the raw line.
+#
+# The `other gym:` cue is exempt only in its whole, fixed form: a number and
+# `kg`, then the end of the line (`other gym: 55 kg`). Anything after the
+# number, or a cue with words instead of one, is prose that happens to start
+# with the phrase, and counts like any other sub-bullet.
 WORKOUT_STRUCTURAL_SUB_BULLET_RE = re.compile(
-    r"^\s*anchor\s+change\s*:",
+    r"^\s*(?:anchor\s+change\s*:"
+    r"|other\s+gym\s*:\s*\d+(?:\.\d+)?\s*kg\s*$)",
     re.IGNORECASE,
 )
 # NOTE: the plan's workout-heading grammar lives in `adherence` and is
@@ -473,13 +481,15 @@ _SCORE_ROUND_PLACES = 3
 # it could not already have justified.
 COACH_SCORE_REDERIVE_NOISE = 0.2
 
-# SKILL.md's plan-action bands, the only decision points with no constant
-# behind them: `< 4` re-entry, `4-6.5` hold loads, `>= 6.5` green.
-# `constants.py` is not this module's to edit, so the band edge lives
-# here, beside the function that unions it in, rather than as a second
-# copy of a number that already exists somewhere else. 4.0 arrives from
-# the gate thresholds anyway; 6.5 exists nowhere in `constants`.
-SKILL_RECOVERY_BAND_EDGES = (4.0, 6.5)
+# The one boundary in `recovery_decision_boundaries` with no gate threshold
+# behind it, and NOT a load decision: the load policy's green line is the
+# gate's own 5.5 (`tier_d_recovery_score_min`). Every gate threshold sits at
+# or below 5.5, so without this edge the band from 5.5 to 10 is one band and
+# a fabricated "10 out of 10" against a real 5.6 would only warn, which is
+# the exploit G-07 closed. It exists to keep a claim from hiding in that
+# wide top band, and it used to be borrowed from a SKILL.md recovery rule
+# that no code ever enforced; that rule is gone, this edge is not.
+COACH_SCORE_TOP_BAND_EDGE = 6.5
 
 
 @lru_cache(maxsize=1)
@@ -505,16 +515,13 @@ def recovery_decision_boundaries() -> "tuple[float, ...]":
     (``tier_d_recovery_score_min``), plus 5.0
     (``tier_c_recovery_score_hi``).
 
-    ``SKILL_RECOVERY_BAND_EDGES`` is unioned in because SKILL.md's own
-    plan-action bands (``< 4`` re-entry, ``4-6.5`` hold loads, ``>= 6.5``
-    green) are prompt text with no constant behind them: 4.0 already
-    arrives from the gate, 6.5 does not exist anywhere in ``constants``.
-    It is stated once, here, next to the derivation that consumes it —
-    not copied from constants, which is the thing the rule forbids.
+    ``COACH_SCORE_TOP_BAND_EDGE`` is unioned in for the reason given
+    there: it is not a gate threshold, it is what stops a high claim from
+    hiding in the single band above the green line.
     """
     from .constants import SESSION_GATE_THRESHOLDS
 
-    out = set(SKILL_RECOVERY_BAND_EDGES)
+    out = {COACH_SCORE_TOP_BAND_EDGE}
     for key, value in SESSION_GATE_THRESHOLDS.items():
         if "recovery" not in key:
             continue
@@ -789,7 +796,7 @@ def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
             warnings.append(
                 f"{workout_title}: {sub_bullet_count} rationale sub-bullets; "
                 f"recommended max is {WORKOUT_SUB_BULLET_LIMIT} "
-                f"(anchor-change lines do not count)"
+                f"(anchor-change and other-gym lines do not count)"
             )
 
     for lineno, raw_line in enumerate(text.splitlines(), start=1):
@@ -1190,8 +1197,10 @@ AXIS_STRUCTURE = "structure"  # diversity, identity, placement, ceilings.
 # exists to protect; halving them on a bad-recovery day would re-create
 # the under-dosing, on exactly the days a coach is most likely to reach
 # for it. Under Tier C the isolation cut comes out of the rest of the
-# accessory block and `core_week_spec` / `arm_week_spec` stay enforced.
-DELOAD_WEEK_LABELS = frozenset({"reactive_deload", "rest"})
+# accessory block and the per-muscle floors and `core_week_spec` stay
+# enforced.
+# The set itself is `constants.DELOAD_WEEK_LABELS` (imported above), so the
+# tracker can read the same decision when it scales the payload's floors.
 
 
 # The smallest per-exercise dose a diversity axis may force a week into.
@@ -1271,38 +1280,45 @@ def _dose_cap_note(spec_min: int, effective_min: int, available_sets: int,
             f"{MIN_SETS_PER_DISTINCT_EXERCISE} sets per exercise)")
 
 
-def is_deload_week(session_recommendation: "dict | None",
-                   block: "dict | None" = None) -> bool:
-    """Whether this week is a prescribed whole-week volume cut.
+def is_deload_week(session_recommendation: "dict | None") -> bool:
+    """Whether this week is a FULL-BLOCK volume cut: every session halved.
 
-    Two independent sources, because there are two kinds of deload and
-    only one of them is a recovery decision:
+    Only then are the volume findings advisory (`validate_workout_plan`'s
+    ``deload_week``). It is the recovery gate's call, read off
+    ``session_recommendation`` (`constants.full_block_deload`): Tier A, a
+    `DELOAD_WEEK_LABELS` label, or a load policy of ``reduce`` (Tier A/B, or
+    strength TSB in the high-fatigue band). Tier C ``downgrade`` is NOT one;
+    see `DELOAD_WEEK_LABELS`.
 
-    * **Reactive** — the recovery gate calls it, and says so in
-      ``session_recommendation.label``. Tier C ``downgrade`` is NOT one;
-      see `DELOAD_WEEK_LABELS`.
-    * **Cadence** — the block is due one on age ("six weeks since the
-      last, cut volume in half"). That is a block decision, not a
-      recovery one, and on those runs `session_recommendation` reads
-      ``tier: D, label: green`` with nothing else to go on. It arrives
-      as ``block.deload_prescribed``, a boolean beside the block
-      payload's other boundary fields, written by `read_tracker`.
+    The block's CADENCE deload ("six weeks since the last, cut one session
+    in half") is NOT a full-block deload and does not come through here: it
+    is ONE halved session in an otherwise normal week, so it must not switch
+    the floors off for the whole week. See `is_cadence_deload_week`.
 
-    ``block.deload_prescribed`` now ships: `blocks.block_payload` writes
-    it (and ``deload_source``) on every read, so a cadence deload reaches
-    this function without anyone passing ``deload_week=True`` by hand.
-    The ``.get`` stays a ``.get`` because this is also called with a raw
-    on-disk block artifact, which carries no cadence fields at all.
-
-    Deliberately NOT inferred from set counts. "This plan looks light,
-    so it must be a deload" is the gaming vector that would let any
-    under-dosed week excuse itself; the deload has to be DECLARED
-    upstream, by whoever decided it.
+    Deliberately NOT inferred from set counts. "This plan looks light, so it
+    must be a deload" is the gaming vector that would let any under-dosed
+    week excuse itself; the deload has to be DECLARED upstream, by whoever
+    decided it.
     """
-    sr = session_recommendation or {}
-    if sr.get("tier") == "A" or sr.get("label") in DELOAD_WEEK_LABELS:
-        return True
-    return bool((block or {}).get("deload_prescribed"))
+    return full_block_deload(session_recommendation)
+
+
+def is_cadence_deload_week(session_recommendation: "dict | None",
+                           block: "dict | None") -> bool:
+    """Whether this week carries the block's cadence deload session.
+
+    ``block.deload_prescribed``, written by `blocks.block_payload` on the
+    generation where weeks-since-the-last-deload first crosses
+    `blocks.DELOAD_CADENCE_WEEKS`. It is a block decision, not a recovery
+    one, and on those runs `session_recommendation` reads ``tier: D, label:
+    green``. ONE session is halved (SKILL.md, Deload and re-entry), so the
+    week keeps every volume floor, scaled by (n - 0.5) / n
+    (`constants.floor_scale`), and the core dose in full: core is exempt from
+    the halving. False when a full-block deload already applies, which
+    subsumes it. The ``.get`` stays a ``.get`` because this is also called
+    with a raw on-disk block artifact, which carries no cadence fields.
+    """
+    return cadence_deload_week(session_recommendation, block)
 
 
 @lru_cache(maxsize=1)
@@ -1342,14 +1358,10 @@ def _core_pattern_categories() -> "tuple[set[str], dict[str, set[str]]]":
     ``min_pattern_categories_per_week`` axis picks it up with no code
     change.
     """
-    from .extract import load_exercises_db
-    from shared.exercises_database import (
-        DATABASE_PATH, entry_canonical_name, parse_database,
-    )
+    from shared.exercises_database import entry_canonical_name, parse_database
 
-    db = load_exercises_db(DATABASE_PATH)
-    core_names = {name for name, meta in db.items()
-                  if meta.get("primary") == "core"}
+    core_names = {name for name, muscle in _primary_muscle_by_exercise().items()
+                  if muscle == "core"}
 
     sections = (
         parse_database().get("muscles", {}).get("CORE", {})
@@ -1774,150 +1786,191 @@ def _core_week_findings(text: str, spec: "dict | None" = None):
                    f"is met; the absolute floor is not)")
 
 
-# Direct-arm dose floor. Biceps and triceps were chronically landing
-# below MEV in generated plans because the volume model credits
-# ~0.5 sets per pull/press compound as synergist work (see the
-# database's BICEPS/TRICEPS "Compound Contribution" notes), and that
-# synergist credit alone satisfied the plan's reported weekly volume
-# without a single isolation curl or extension ever appearing. Direct
-# (primary-muscle) isolation sets are the only thing that counts
-# against this floor.
+# ---------------------------------------------------------------------
+# The weekly per-muscle floor. Every muscle but core, one rule; it replaces
+# the arm-only weekly floor.
 #
-# Re-exported from `constants.ARM_WEEK_SPEC` so the floor and the rest of
-# the arm spec cannot drift apart.
-DIRECT_ARM_MIN_SETS_PER_WEEK = ARM_WEEK_SPEC["min_direct_sets_per_week"]
+# That floor, and core's, were written for one reason: the volume model credits ~0.5 set per
+# synergist, so a muscle can read "on target" with no direct set at all,
+# and a muscle nobody floors is the first thing cut when the budget is
+# tight. The 2026-10-10 plan dropped rear delt fly, shrugs and Y-T-W to
+# fit 27 arm sets, and the only floor in force (arms) was satisfied.
+#
+# THE RULE. A muscle's DIRECT sets across the plan (bullets whose catalog
+# ``primary`` is that muscle; synergist credit never counts) must reach:
+#
+#   emphasis tier -> its MEV in DIRECT sets (biceps 8, chest 8, triceps 6)
+#   anything else -> its MV in DIRECT sets
+#
+# The function is `constants.muscle_floors`; `read_tracker` emits its result
+# as ``payload["muscle_floors"]``, so the coach reads the number this check
+# enforces. ``payload["muscle_volume_targets"][muscle]["tier"]`` picks the
+# branch. The numbers come from ``constants.RP_DIRECT_SET_LANDMARKS``, not
+# from the payload's ``target_sets``: that is in the tracker's FRACTIONAL
+# unit (direct + the typical synergist credit, ``SYNERGIST_CREDIT_OFFSET``),
+# and a direct count compared with it would ask biceps for 3 sets only a row
+# can supply. It also keeps the bar out of the artifact under review: a
+# payload that rewrites its tiers can lower a floor to MV, never below it,
+# and this check ignores a ``muscle_floors`` key in the payload altogether.
+#
+# WHY THE FLOOR IS MEV FOR EMPHASIS AND MV FOR THE REST, AND NOT THE TIER
+# TARGET. As of 2026-10-14 the tier targets (mid-MAV / MEV / MV) of the
+# muscles a direct count can serve sum to 85 sets a week for Nihad and 86
+# for Fabian, against set budgets of 24 and 21 a session (96 and 84 over
+# four sessions): as a blocking floor that leaves Nihad 11 sets to place by
+# judgement and Fabian none. The tier targets stay the aim for spare sets,
+# per SKILL.md; the floor keeps a muscle from being dropped. Emphasis sits
+# one band above the rest because the person named those muscles as the
+# point of the block, and MEV is the smallest dose that grows them.
+#
+# CORE is not a row of this table. Its weekly dose is `CORE_WEEK_SPEC`
+# (4 per lower day, 2 per upper day, so 12 on a two-and-two week, plus the
+# flexion floor), which is what the weekly core floor was before this rule
+# existed and is higher than core's generic MEV of 4. It is still enforced,
+# per session, by `workout_core_warnings` and `core_week_errors`.
+#
+# SESSIONS, DELOADS AND TIERS. The landmarks are a four-session week's, so
+# the floor is scaled by min(1, sessions / 4), rounded down
+# (`constants.floor_scale`): a two-session week cannot carry 52 direct sets.
+# AXIS_VOLUME, so a FULL-BLOCK deload (`is_deload_week`) demotes it to an
+# advisory. A cadence deload (one halved session) does not: the floor stays
+# blocking, scaled by (n - 0.5) / n more. A Tier C downgrade does neither
+# (`DELOAD_WEEK_LABELS`). The floor is never scaled by tier; the set budget
+# is, and when it cannot hold the floors the budget loses (SKILL.md).
+
+# `constants.FLOOR_EXEMPT_MUSCLES` (erectors, forearms, core) are never
+# floored here, and a muscle the catalog has no primary entry for (external
+# rotators) is skipped for the opposite reason: it cannot be hit.
 
 
 @lru_cache(maxsize=1)
-def _biceps_triceps_exercise_names() -> "tuple[set[str], set[str]]":
-    """Return ``(biceps exercise names, triceps exercise names)``, both
-    lowercased canonical names read from the exercise catalog.
+def _primary_muscle_by_exercise() -> "dict[str, str]":
+    """Lowercased canonical exercise name -> its resolved primary muscle.
 
-    Sourced the same way `_core_pattern_categories` sources core
-    membership: `load_exercises_db` — the coach's own catalog parser
-    (`workout_coach.lib.extract`) — filtered to entries whose resolved
-    ``primary`` muscle is ``"biceps"`` / ``"triceps"``.
-
-    Deliberately primary-only: a pull compound's ~0.5 biceps synergist
-    credit (and a press compound's ~0.5 triceps synergist credit — see
-    the database's BICEPS/TRICEPS "Compound Contribution" notes) never
-    sets ``primary``, so those compounds never enter these sets. That
-    exclusion is the whole point of `workout_arm_dose_warnings`: it
-    exists to catch weeks where synergist-only credit satisfied the
-    volume model, so it must not count the very credit it is checking
-    against.
+    From `load_exercises_db`, the coach's own catalog parser. Primary
+    only: synergist credit never sets ``primary``, which keeps the floor
+    from counting the credit it exists to look past.
     """
     from .extract import load_exercises_db
     from shared.exercises_database import DATABASE_PATH
 
-    db = load_exercises_db(DATABASE_PATH)
-    biceps_names = {name for name, meta in db.items()
-                     if meta.get("primary") == "biceps"}
-    triceps_names = {name for name, meta in db.items()
-                      if meta.get("primary") == "triceps"}
-    return biceps_names, triceps_names
+    return {name: meta["primary"]
+            for name, meta in load_exercises_db(DATABASE_PATH).items()
+            if meta.get("primary")}
 
 
-def arm_week_errors(text: str, spec: "dict | None" = None,
-                    min_biceps: "int | None" = None,
-                    min_triceps: "int | None" = None) -> "list[str]":
-    """WEEKLY direct-arm checks — quantity AND diversity. Blocking.
+def _direct_sets_by_muscle(text: str) -> "dict[str, Counter]":
+    """``{muscle: Counter({exercise: working sets})}`` across the whole plan.
 
-    Sums across the WHOLE plan (every `## Workout` block combined = the
-    week), because both axes are weekly targets, not per-session ones.
-
-      * ``min_direct_sets_per_week``      — the existing MEV floor,
-        unchanged at 6 per muscle.
-      * ``min_distinct_exercises_per_week`` — new, and there for the same
-        reason the core spec has one: 6 sets of a single pushdown is a
-        quantity target met and a training target missed.
-
-    Only PRIMARY-muscle bullets count — synergist credit (the ~0.5 sets a
-    pull/press compound contributes to biceps/triceps) is intentionally
-    excluded; see `_biceps_triceps_exercise_names`. Catching weeks where
-    synergist-only credit satisfied the volume model is the entire point,
-    so the check must not count the very credit it is testing against.
-    A bullet contributing zero working sets counts toward neither axis.
-
-    ``min_biceps`` / ``min_triceps`` override the spec's shared floor per
-    muscle. Fails open per muscle when the catalog resolves no name for
-    it, rather than declaring every plan arm-deficient.
-
-    Also fails open — returns nothing — when the markdown contains no
-    ``## Workout`` block with bullets, the same precondition
-    `core_week_errors` documents. A weekly arm floor is not a question
-    you can ask of a document that prescribes no week: before these
-    checks became blocking, a summary doc or a fixture simply collected a
-    cosmetic "0 direct biceps sets" on stderr; now it would refuse the
-    render outright, on the strength of a week it never contained.
+    A zero-set bullet is absent: naming a movement is not performing it.
+    Empty for a document with no workout bullets, so every weekly check
+    fails open on a summary doc.
     """
-    return [msg for _axis, msg in _arm_week_findings(
-        text, spec=spec, min_biceps=min_biceps, min_triceps=min_triceps)]
-
-
-def _arm_week_findings(text: str, spec: "dict | None" = None,
-                       min_biceps: "int | None" = None,
-                       min_triceps: "int | None" = None):
-    """`arm_week_errors`'s body, yielding ``(axis, message)``.
-
-    The ≥6 direct sets/week floor is `AXIS_VOLUME`; the
-    distinct-exercise axis is `AXIS_STRUCTURE`. Two curls at one set
-    each is a legal deload week; six sets of one pushdown is not, deload
-    or otherwise.
-    """
-    spec = _resolved_spec(spec, ARM_WEEK_SPEC, "arm_week_spec")
-    biceps_names, triceps_names = _biceps_triceps_exercise_names()
-    if not biceps_names and not triceps_names:
-        return
-
-    per_workout = _iter_workout_exercise_bullets(text)
-    if not any(bullets for bullets in per_workout.values()):
-        return
-
-    floor = spec["min_direct_sets_per_week"]
-    min_distinct = spec["min_distinct_exercises_per_week"]
-    if min_biceps is None:
-        min_biceps = floor
-    if min_triceps is None:
-        min_triceps = floor
-
-    totals = {"biceps": 0, "triceps": 0}
-    distinct: "dict[str, set[str]]" = {"biceps": set(), "triceps": set()}
-
-    for bullets in per_workout.values():
+    primary = _primary_muscle_by_exercise()
+    out: "dict[str, Counter]" = {}
+    for bullets in _iter_workout_exercise_bullets(text).values():
         for b in bullets:
             name = b["name"].lower()
-            muscle = ("biceps" if name in biceps_names
-                      else "triceps" if name in triceps_names else None)
-            if muscle is None or b["sets"] <= 0:
-                continue
-            totals[muscle] += b["sets"]
-            distinct[muscle].add(name)
+            if b["sets"] > 0 and name in primary:
+                out.setdefault(primary[name], Counter())[name] += b["sets"]
+    return out
 
-    for muscle, resolved, muscle_floor, remedy in (
-        ("biceps", biceps_names, min_biceps, "add direct curl volume"),
-        ("triceps", triceps_names, min_triceps, "add direct extension volume"),
-    ):
-        if not resolved:
-            continue
-        total, n_distinct = totals[muscle], len(distinct[muscle])
-        if total < muscle_floor:
+
+def muscle_floors(tiers: dict, sessions_per_week: "int | None" = None,
+                  cadence_deload: bool = False) -> "dict[str, int]":
+    """Weekly direct-set floor per hittable muscle in ``tiers``.
+
+    `constants.muscle_floors` restricted to the muscles the catalog has a
+    primary entry for, scaled for the week's session count and for a cadence
+    deload (`constants.floor_scale`). See the block comment above.
+    """
+    from .constants import muscle_floors as _muscle_floors
+
+    return _muscle_floors(
+        tiers, servable=set(_primary_muscle_by_exercise().values()),
+        sessions_per_week=sessions_per_week, cadence_deload=cadence_deload)
+
+
+def muscle_floor_errors(text: str, payload: "dict | None",
+                        cadence_deload: bool = False) -> "list[str]":
+    """Blocking per-muscle weekly floor findings, as plain strings."""
+    return [msg for _axis, msg in _muscle_floor_findings(
+        text, payload, cadence_deload=cadence_deload)]
+
+
+def _muscle_floor_findings(text: str, payload: "dict | None",
+                           cadence_deload: bool = False):
+    """`muscle_floor_errors`'s body, yielding ``(axis, message)``.
+
+    Driven by the muscles ``payload["muscle_volume_targets"]`` lists; with
+    none, `validate_workout_plan` says the floor did not run. Fails open
+    on a document with no workout bullets, and per muscle when the catalog
+    has no primary entry for it (such a muscle has no floor).
+
+    The floors are the payload's ``strength_sessions_per_week`` worth
+    (`constants.floor_scale`), and ``cadence_deload`` scales them by
+    (n - 0.5) / n more, so the halved session does not fail its own week. The
+    session count is read from the payload because it comes from the
+    profile or the user's request, not from the plan under review: a plan
+    that wrote itself fewer sessions would otherwise lower its own bar. A
+    payload without the field is a four-session week.
+    """
+    targets = (payload or {}).get("muscle_volume_targets")
+    if not isinstance(targets, dict) or not targets:
+        return
+    sets = _direct_sets_by_muscle(text)
+    if not sets:
+        return
+    tiers = {m: v.get("tier") if isinstance(v, dict) else None
+             for m, v in targets.items()}
+    n = (payload or {}).get("strength_sessions_per_week")
+    scale = floor_scale(n, cadence_deload)
+    if scale == 1:
+        why = ""
+    else:
+        why = (f"; scaled x{float(scale):.3g} for "
+               f"{n or FLOOR_REFERENCE_SESSIONS} sessions a week"
+               + (" with a cadence deload session" if cadence_deload else ""))
+    for muscle, floor in sorted(muscle_floors(
+            tiers, n, cadence_deload).items()):
+        total = sum(sets.get(muscle, {}).values())
+        if total < floor:
             yield (AXIS_VOLUME,
                    f"Week: {total} direct {muscle} sets across the plan — "
-                   f"floor is {muscle_floor} (synergist credit does not "
-                   f"count; {remedy})")
+                   f"floor is {floor} ({tiers[muscle] or 'maintain'} tier"
+                   f"{why}; synergist credit does not count, add direct "
+                   f"{muscle} work)")
+
+
+def arm_week_errors(text: str, spec: "dict | None" = None) -> "list[str]":
+    """WEEKLY direct-arm diversity check. Blocking.
+
+    The arm volume floor is two rows of the per-muscle floor
+    (`muscle_floor_errors`). What stays is what a set count cannot say,
+    ``min_distinct_exercises_per_week``: 6 sets of one pushdown is a
+    quantity target met and a training target missed. Sums across the
+    whole plan, primary-muscle bullets only; zero-set bullets count
+    toward nothing.
+    """
+    return [msg for _axis, msg in _arm_week_findings(text, spec=spec)]
+
+
+def _arm_week_findings(text: str, spec: "dict | None" = None):
+    """`arm_week_errors`'s body, yielding ``(axis, message)``.
+
+    `AXIS_STRUCTURE`: two curls at one set each is a legal deload; six
+    sets of one pushdown is not.
+    """
+    spec = _resolved_spec(spec, ARM_WEEK_SPEC, "arm_week_spec")
+    min_distinct = spec["min_distinct_exercises_per_week"]
+    sets = _direct_sets_by_muscle(text)
+    for muscle in ("biceps", "triceps"):
+        exercises = sets.get(muscle, {})
+        total, n_distinct = sum(exercises.values()), len(exercises)
         # Dose-aware, same rule as core: at 2 sets the floor resolves to
         # 1, because splitting 2 sets into two 1-set curls is worse
-        # training than one 2-set curl.
-        #
-        # Zero is handled the OPPOSITE way to core, and on purpose. Core
-        # relies on this axis to name a total absence, because its only
-        # other absence findings demote on a deload. Arms do not: the
-        # `AXIS_VOLUME` floor immediately above names the absence
-        # explicitly ("0 direct biceps sets"), and it is a separate
-        # finding that a deload demotes as a unit. Two findings for one
-        # absence is noise, so this one stays suppressed at zero exactly
-        # as it always has been.
+        # training than one 2-set curl. Silent at zero: the muscle floor
+        # already names a total absence, once.
         effective_distinct = _dose_aware_distinct_floor(min_distinct, total)
         if total > 0 and n_distinct < effective_distinct:
             yield (AXIS_STRUCTURE,
@@ -1928,57 +1981,36 @@ def _arm_week_findings(text: str, spec: "dict | None" = None,
                                     f"direct {muscle} sets"))
 
 
-def workout_arm_dose_warnings(text: str, min_biceps: int | None = None,
-                              min_triceps: int | None = None,
-                              spec: "dict | None" = None) -> "list[str]":
-    """Direct-arm findings: the per-workout shape check plus every
+def workout_arm_dose_warnings(text: str, spec: "dict | None" = None
+                              ) -> "list[str]":
+    """Direct-arm findings: the per-workout placement check plus every
     `arm_week_errors` finding. Returns a list of strings.
 
-    Split of responsibility: this function owns the one check that is
-    per-`## Workout` — the LAST bullet must not be a direct-arm exercise
-    (same rationale as core's last-bullet rule: arms belong inside the
-    isolation block, never the terminal slot, because the terminal slot
-    is where a truncated session drops work). Everything weekly is
-    delegated, so the floor and the distinct-exercise axis have one
-    implementation.
-
-    As with `workout_core_warnings`, the name is historical: these became
-    blocking on 2026-08-02. `validate_workout_plan` is the entry point
-    that treats them that way.
+    The LAST bullet of a workout must not be a direct-arm exercise (same
+    rationale as core's last-bullet rule: the terminal slot is where a
+    truncated session drops work). The name is historical: these became
+    blocking on 2026-08-02, in `validate_workout_plan`.
     """
-    return [msg for _axis, msg in _arm_findings(
-        text, spec=spec, min_biceps=min_biceps, min_triceps=min_triceps)]
+    return [msg for _axis, msg in _arm_findings(text, spec=spec)]
 
 
-def _arm_findings(text: str, spec: "dict | None" = None,
-                  min_biceps: "int | None" = None,
-                  min_triceps: "int | None" = None):
+def _arm_findings(text: str, spec: "dict | None" = None):
     """`workout_arm_dose_warnings`'s body, yielding ``(axis, message)``.
 
-    Placement is `AXIS_STRUCTURE`: putting arms in the terminal slot
-    costs no fatigue to fix, and the terminal slot is exactly where a
-    truncated session drops work, so a deload is the LAST week to relax
-    it.
+    Placement is `AXIS_STRUCTURE`: it costs no fatigue to fix, so a
+    deload does not excuse it.
     """
-    biceps_names, triceps_names = _biceps_triceps_exercise_names()
-    if not biceps_names and not triceps_names:
-        return
-
+    primary = _primary_muscle_by_exercise()
     for title, bullets in _iter_workout_exercise_bullets(text).items():
         if not bullets:
             continue
-        last_name = bullets[-1]["name"].lower()
-        if last_name in biceps_names:
+        muscle = primary.get(bullets[-1]["name"].lower())
+        if muscle in ("biceps", "triceps"):
             yield (AXIS_STRUCTURE,
-                   f"{title}: biceps is the last bullet — arms must sit "
-                   f"inside the isolation block, not the terminal slot")
-        elif last_name in triceps_names:
-            yield (AXIS_STRUCTURE,
-                   f"{title}: triceps is the last bullet — arms must sit "
+                   f"{title}: {muscle} is the last bullet — arms must sit "
                    f"inside the isolation block, not the terminal slot")
 
-    yield from _arm_week_findings(
-        text, spec=spec, min_biceps=min_biceps, min_triceps=min_triceps)
+    yield from _arm_week_findings(text, spec=spec)
 
 
 @lru_cache(maxsize=1)
@@ -2131,295 +2163,219 @@ def block_rotation_errors(text: str, prev_block: "dict | None",
     return rotation_diff_errors(prev, proposed, catalog)
 
 
-# ------------------------------------------------- dose progression (G-06)
-#
-# "Every plan is the same plan" is the complaint this workstream started
-# from, and until now the gate could not detect the same plan. Both
-# `dose_staleness` and `stalled_sessions` were computed INTO the payload
-# for the coach to read and nothing checked either, so re-prescribing
-# every load and rep target identically rendered clean.
-#
-# WHERE THE PREVIOUS DOSE COMES FROM. Not from re-reading a plan file —
-# `validate_workout_plan` has no person and no paths, and a second plan
-# reader is what `Skills/CLAUDE.md` forbids. It comes off the block
-# artifact, which `blocks.block_from_plan` now stamps with each slot's
-# prescription (`dose`) and which `block_payload` already resolves to the
-# PREVIOUS generation for exactly this kind of diff. The plan under
-# validation is parsed by `adherence.parse_plan`, the same reader
-# `block_rotation_errors` uses.
-#
-# WHAT COUNTS AS A CHANGE is not decided here either. The block side is
-# reshaped into the plan shape `adherence.dose_staleness` consumes and
-# that function is called, so the gate and the payload's own report agree
-# by construction: same carried-forward rule, same materiality floors
-# (`adherence.DOSE_LOAD_MIN_PCT`, `DOSE_REP_MIN_MIDPOINT`), same
-# threshold. Two definitions of "the dose moved" would drift, and the
-# report would then absolve a plan the gate refuses.
+# ---------------------------------------------------------------------
+# Three advisory plan checks. They find what the coach is told to do and
+# nothing enforced: copy `next_dose`, keep the four main patterns in the
+# week, write no cardio. The original failures were all drift from a
+# written rule (a bench weight that never rose, an overhead press that
+# dropped out with a split change), and none of them was ever visible to
+# `check_plan`. WARNINGS, not errors: the owner approved advisory output,
+# and a coach that has a reason says so in the plan's opener. Each is
+# tagged so a reader can tell it from an enforced finding.
+NEXT_DOSE_DRIFT_TAG = "[advisory: next_dose drift]"
+MAIN_PATTERN_TAG = "[advisory: main pattern]"
+CARDIO_SECTION_TAG = "[advisory: cardio section]"
+
+_REP_RANGE_RE = re.compile(r"^\s*(\d+)(?:\s*[-\u2013]\s*(\d+))?\s*$")
 
 
-# ------------------------------------------------- the dose-gate switch
-#
-# THE ONE SWITCH, and the same shape as `BLOCK_ROTATION_ENFORCED` for the
-# same reason. Set to ``True`` to make dose-progression findings refuse a
-# render again; that is the entire change on this side.
-#
-# WHY IT IS ADVISORY. The check shipped blocking on 2026-08-02 and an
-# adversarial review found it had both halves of the worst possible
-# combination: false positives on compliant plans AND a mechanical bypass.
-#
-#   THE FALSE POSITIVE. SKILL.md §"Deload handling" requires a CADENCE
-#   deload to be ONE session — "halve that single session's working sets
-#   and hold its loads" — rather than a whole-week cut, and makes "hold
-#   loads" binding on every prescribed weight. Build exactly that and the
-#   rate finding fires at "dose staleness: 24 of 34 (71%)", because
-#   holding loads is what the prompt just ordered. ``deload_week=True``
-#   gives no relief either: these are `AXIS_STRUCTURE` findings and the
-#   deload relief is `AXIS_VOLUME` only. Worse, the same SKILL.md
-#   paragraph explicitly sanctions the outcome — "If a lift genuinely has
-#   nowhere to go on either axis, leave it and let it read as stale" —
-#   so prompt and gate gave opposite instructions and the gate won with
-#   exit 2.
-#
-#   THE BYPASS. `adherence._dose_delta` accepts a rep-midpoint move of
-#   exactly ``DOSE_REP_MIN_MIDPOINT``, so shifting `x8-10` to `x9-11` on
-#   enough carried exercises turns exit 2 into exit 0 with every load
-#   byte-identical. Then revert next generation and repeat: generation 3
-#   equals generation 1, generation 4 equals generation 2, and a coach
-#   that never touches a weight again passes every week.
-#
-# THE REAL FIX IS NOT THIS. Both halves come from the same root: the gate
-# compares two COACH-AUTHORED plans, so it can only ask "is this
-# prescription different from the last one", never "is this the
-# prescription the ledger implies". The fix is to derive the expected
-# increment from the LOG — completed reps at the top of the range, the
-# e1RM slope, the stall counter — and check the written dose against
-# that. Then holding a load under a deload is legal because the ledger
-# says hold, and a rep-range shuffle is illegal because the ledger did
-# not earn one. That is a bigger change than this one and it is the next
-# piece of work on this gate; do not re-arm the switch by flipping it
-# without doing it, because the false positive above comes straight back.
-#
-# Demoted, not disabled. `dose_progression_findings` still runs on every
-# render, the payload still carries `dose_staleness`, and the findings
-# still reach stderr tagged with `DOSE_ADVISORY_TAG`.
-DOSE_PROGRESSION_ENFORCED = False
-
-# Same shape as `ROTATION_ADVISORY_TAG` and the ``[advisory: deload
-# week]`` tag: a demoted finding must still read as demoted, not vanish
-# and not masquerade as a rule that was never checked.
-DOSE_ADVISORY_TAG = "[advisory: dose progression, not enforced this release]"
-
-
-def _block_as_plan(block: "dict | None") -> "dict | None":
-    """The previous block's slots, in the plan shape `dose_staleness` reads.
-
-    ``blocks.block_from_plan`` built these slots FROM a plan and kept each
-    one's prescription under ``dose`` with `adherence`'s own field names,
-    so this is an unpacking rather than a translation. Returns ``None``
-    when no slot carries a dose — a block persisted before that field
-    existed, or one with no prescription in it. ``None`` means "no
-    comparison is possible", which must read differently from "compared
-    and clean": every caller below skips silently on it.
-
-    ``prescribed_sets`` is COERCED, not trusted. The artifact is JSON on
-    disk and this is the one field `dose_staleness` indexes rather than
-    ``.get``s, so a dose dict written before the field existed raised
-    ``KeyError`` and one carrying ``null`` raised ``TypeError``, both of
-    which exit 1. Exit 1 says "this program broke"; a validator that
-    cannot read its input has to say "cannot compare", which is what a
-    zero here produces (`dose_staleness` skips non-positive slots).
-    """
-    if not isinstance(block, dict):
+def _rep_range_bounds(rep_range) -> "tuple[int, int] | None":
+    """``(lo, hi)`` of a ``next_dose`` rep range (``"10-12"`` or ``"12"``)."""
+    m = _REP_RANGE_RE.match(rep_range) if isinstance(rep_range, str) else None
+    if not m:
         return None
-    slots = []
-    for stype, entries in sorted((block.get("sessions") or {}).items()):
-        for s in entries or []:
-            dose = s.get("dose")
-            exercise = (s.get("exercise") or "").strip()
-            if not isinstance(dose, dict) or not exercise:
+    lo = int(m.group(1))
+    return lo, int(m.group(2)) if m.group(2) else lo
+
+
+def _cadence_deload_index(workouts: "list[dict]") -> "int | None":
+    """Index of the session the cadence deload halves (SKILL.md, Deload and
+    re-entry): the first lower-body session, else the first session. A
+    full-body session trains the lower body, so it counts as one."""
+    for w in workouts:
+        if w.get("session_type") in ("lower", "full"):
+            return w["index"]
+    return workouts[0]["index"] if workouts else None
+
+
+def next_dose_drift_warnings(text: str, payload: "dict | None", *,
+                             plan_date: "str | None" = None,
+                             deload_week: bool = False,
+                             cadence_deload: bool = False) -> "list[str]":
+    """One line per exercise whose written dose differs from ``next_dose``.
+
+    The working-set load must equal ``load_kg`` and the working-set rep
+    target must sit inside ``rep_range`` (a single number is a range of one).
+    Per side and ``10-12`` ranges parse through the ledger's own set
+    grammar (`adherence.parse_plan`), the same one the dose was learned
+    from. Not compared: warmup sets, an entry without a load
+    (``no_history``), and an exercise the plan does not prescribe.
+
+    Exempt, because the dose is not the instruction there:
+
+    * a full-block deload (``deload_week``, or ``next_dose.load_policy``
+      ``reduce``): loads are held and sets halved;
+    * a `## Deload Session` heading, and on a cadence-deload week the
+      session `_cadence_deload_index` names: loads may be ``last_load_kg``;
+    * a load equal to the entry's ``other_gym_load_kg``: the plan is
+      written for the other gym, which the entry names;
+    * a lift the plan prescribes in two workouts with different rep ranges
+      (a deliberate heavy and light day): `next_dose` carries one dose per
+      lift, so it is silent when any occurrence matches it and reported once
+      when none does.
+    """
+    nd = (payload or {}).get("next_dose") or {}
+    entries = {}
+    for e in nd.get("exercises") or []:
+        if isinstance(e, dict) and e.get("exercise") \
+                and e.get("load_kg") is not None:
+            entries[e["exercise"].strip().lower()] = e
+    if not entries or deload_week or nd.get("load_policy") == "reduce":
+        return []
+
+    from .adherence import parse_plan
+    from .strength import loads_equal
+
+    workouts = parse_plan(text, plan_date or "").get("workouts") or []
+    skip = _cadence_deload_index(workouts) if cadence_deload else None
+    live = [w for w in workouts if not w.get("is_deload")
+            and w["index"] != skip]
+
+    # Every occurrence of a lift the payload has an entry for. A lift written
+    # with two different REP RANGES (a heavy 6-8 and a light 12-15, on
+    # purpose; the same key `progression` uses to tell the doses apart) holds
+    # two intentional doses and `next_dose` carries one, so comparing only the
+    # first occurrence would call the other half a deviation and push the
+    # coach to collapse them. It is checked as a whole instead: silent when
+    # ANY occurrence matches `next_dose` on load and rep range, one line when
+    # none does. A lift with one rep range is compared occurrence by occurrence
+    # (a stale load in a second workout is drift).
+    occurrences: "dict[str, list[tuple]]" = {}
+    for w in live:
+        for slot in w["slots"]:
+            key = slot["exercise"].strip().lower()
+            if key not in entries or not slot["prescribed_sets"] \
+                    or (slot["load_kg"] is None and slot["rep_target"] is None):
+                continue        # (timed work has no load or rep target)
+            occurrences.setdefault(key, []).append((w, slot))
+
+    def _diffs(slot: dict, e: dict) -> "list[str]":
+        out = []
+        plan_load = slot["load_kg"]
+        if plan_load is None or not (
+                loads_equal(plan_load, e["load_kg"])
+                or loads_equal(plan_load, e.get("other_gym_load_kg"))):
+            out.append("load")
+        bounds = _rep_range_bounds(e.get("rep_range"))
+        if bounds and slot["rep_lo"] is not None and not (
+                bounds[0] <= slot["rep_lo"] and slot["rep_hi"] <= bounds[1]):
+            out.append("reps")
+        return out
+
+    def _dose_s(slot: dict) -> str:
+        out = (f"{slot['load_kg']:g}kg" if slot["load_kg"] is not None
+               else "no load")
+        return out + (f" x {slot['rep_target']}" if slot["rep_target"] else "")
+
+    lines: "dict[str, str]" = {}
+    for key, occ in occurrences.items():
+        e = entries[key]
+        nd_s = f"{e['load_kg']:g}kg"
+        if e.get("rep_range"):
+            nd_s += f" x {e['rep_range']}"
+        if len({(s["rep_lo"], s["rep_hi"]) for _w, s in occ}) > 1:
+            if any(not _diffs(s, e) for _w, s in occ):
                 continue
-            sets = dose.get("prescribed_sets")
-            if isinstance(sets, bool) or not isinstance(sets, (int, float)):
-                sets = 0
-            slots.append({"exercise": exercise, **dose,
-                          "prescribed_sets": int(sets)})
-    if not any(s["prescribed_sets"] > 0 for s in slots):
-        return None
-    return {"plan_date": block.get("started") or "", "workouts": [
-        {"title": "block", "index": 1, "slots": slots}]}
-
-
-def _oscillation_findings(payload: "dict | None") -> "list[tuple]":
-    """The load-alternation findings, read off the PAYLOAD's own report.
-
-    WHY NOT FROM THE COMPARISON ABOVE. `dose_progression_findings` holds
-    exactly two generations — the block artifact and the plan being
-    validated — and `adherence.dose_staleness` needs FOUR loads before it
-    can call an alternation. Computing this from the local pair would be
-    dead code that always answers "no": the first draft of it was, and it
-    passed its own test because the test asserted on the report instead of
-    on the finding. The history exists on the payload, where
-    `read_tracker` runs the same function over the last eight plans, so
-    that is where this reads it.
-
-    That makes it a finding about the plans ALREADY ON DISK rather than
-    about the one under validation, which is exactly right for this
-    signal: an alternating load is only visible across generations, and by
-    the time it is visible the coach needs to be told before it writes the
-    next one. Silent when the payload carries no report.
-
-    It reads LOADS ONLY, so the rep-range version of the same trick
-    (`x8-10` -> `x9-11` -> `x8-10`, the bypass recorded on
-    `DOSE_PROGRESSION_ENFORCED`) is NOT covered by it.
-    """
-    carried = ((payload or {}).get("dose_staleness") or {}).get("carried")
-    out: "list[tuple]" = []
-    for c in carried or []:
-        if not isinstance(c, dict) or not c.get("oscillating"):
+            parts = "; ".join(f"Workout {w['index']}: {_dose_s(s)}"
+                              for w, s in occ)
+            lines[key] = (
+                f"{e['exercise']}: written with different rep ranges in "
+                f"different workouts ({parts}), and none matches next_dose "
+                f"{nd_s} ({e.get('action')}); next_dose carries one dose per "
+                f"lift, so match one of them to it and keep the other "
+                f"{NEXT_DOSE_DRIFT_TAG}")
             continue
-        out.append((AXIS_STRUCTURE, (
-            f"{c.get('exercise')}: the load has alternated between two values "
-            f"across the last four generations ({c.get('prev_load_kg')}kg -> "
-            f"{c.get('load_kg')}kg). Every generation counts as a dose change "
-            f"and none of them is progress. Pick a direction or rotate the "
-            f"movement out.")))
-    return out
+        for w, slot in occ:
+            diffs = _diffs(slot, e)
+            if diffs:
+                lines[key] = (
+                    f"{e['exercise']} (Workout {w['index']}: {w['title']}): "
+                    f"plan {_dose_s(slot)} vs next_dose {nd_s} "
+                    f"({e.get('action')}); differs in {' and '.join(diffs)} "
+                    f"{NEXT_DOSE_DRIFT_TAG}")
+                break
+    return list(lines.values())
 
 
-def dose_progression_findings(text: str, prev_block: "dict | None",
-                              plan_date: "str | None" = None,
-                              payload: "dict | None" = None) -> "list[tuple]":
-    """``[(axis, message)]`` for carried-forward dose that did not move.
+def missing_main_pattern_warnings(text: str, *, plan_date: "str | None" = None,
+                                  deload_week: bool = False,
+                                  catalog: "dict | None" = None) -> "list[str]":
+    """One line per `blocks.MAIN_PATTERNS` entry the week's plan lacks.
 
-    Two findings, and they are deliberately different shapes.
-
-    **The stall response, per exercise.** SKILL.md marks it REQUIRED: a
-    lift with ``stalled_sessions >= 3`` and no deload MUST have one
-    variable changed. The trigger is the strongest input this file has —
-    ``estimated_1rm.stalled_sessions`` counts SESSIONS THE USER ACTUALLY
-    LOGGED at the same e1RM, so "they never performed it, of course it did
-    not move" cannot apply, and the coach cannot author it. Dropping the
-    movement from the plan counts as the response; so does any material
-    change to load, reps or set count. What does NOT count is a sub-bullet
-    saying a change was made, which is why the check reads the numbers and
-    not the prose.
-
-    **The staleness rate, per plan.** SKILL.md's stated target is under
-    40% of carried-forward exercises returning with an unchanged dose,
-    against a measured 70% baseline. Read straight off
-    `adherence.dose_staleness` so the gate cannot disagree with the
-    payload block the coach was handed while authoring.
-
-    SILENT, NOT CLEAN, when there is nothing to compare against: no
-    previous block, a block with no doses on it (persisted before the
-    field existed), the self-diff case `block_rotation_errors` documents,
-    or fewer than ``min_carried_for_share`` carried exercises. Returning
-    ``[]`` for "did not run" is a compromise every gate in this file
-    makes; the payload's own ``dose_staleness`` block is where a reader
-    checks whether the measurement exists at all.
-
-    **The oscillation, per exercise.** `adherence.dose_staleness` has
-    computed an ``oscillating`` flag since it was written and no gate read
-    it, which made it a report of a bypass rather than a check on one: a
-    coach that alternates 90 / 92.5 / 90 / 92.5 changes the dose on every
-    generation, satisfies both findings above forever, and progresses
-    nothing. Read off ``payload.dose_staleness`` — see
-    `_oscillation_findings` for why it cannot come from the two-generation
-    comparison this function otherwise makes — and therefore only when a
-    caller passes the payload.
-
-    NONE OF THESE BLOCK THIS RELEASE. `validate_workout_plan` routes them
-    by `DOSE_PROGRESSION_ENFORCED`; see that constant for the confirmed
-    false positive and the confirmed bypass that demoted them, and for
-    what re-arming them requires first.
-
-    THE KNOWN WEAKNESS, stated plainly: every finding here compares two
-    coach-authored plans, so the cheapest way past them is to write an
-    unjustified number — bump every carried lift by one material
-    increment every week regardless of what the logs say. That is
-    strictly harder than re-copying (it takes a different prescription,
-    not a different sentence) and strictly weaker than a check against
-    performance. Closing it means deciding the increment from the ledger,
-    which is a bigger change than this one.
+    SKILL.md: every week holds a horizontal push, a vertical push, a
+    horizontal pull and a vertical pull. A pattern counts when any exercise
+    with working sets maps to it in the catalog. Silent on a plan with no
+    parsed workout (a rest day) and on a full-block deload, where the week
+    is a volume cut and the selection is the user's call. Nothing in the
+    payload says "travel" or "bodyweight only", so those plans are not
+    special-cased: the catalog lists bodyweight movements under the same
+    patterns (Push-Up, Pike Push-Up, Table Inverted Row).
     """
-    from .adherence import dose_staleness, parse_plan
-    from .blocks import ANCHOR_STALL_SESSIONS
-    from .constants import DOSE_PROGRESSION_SPEC
+    if deload_week:
+        return []
+    from .adherence import parse_plan
+    from .blocks import MAIN_PATTERNS, pattern_group
 
-    out: "list[tuple]" = _oscillation_findings(payload)
+    workouts = parse_plan(text, plan_date or "").get("workouts") or []
+    slots = [s for w in workouts for s in w["slots"] if s["prescribed_sets"]]
+    if not slots:
+        return []
+    if catalog is None:
+        catalog = _pattern_catalog()
+    present = {pattern_group(s["exercise"], catalog) for s in slots}
+    return [f"week has no {pattern} exercise: add one to a session with "
+            f"room, sets from its isolation block (rotation_candidates "
+            f"offers one) {MAIN_PATTERN_TAG}"
+            for pattern in MAIN_PATTERNS if pattern not in present]
 
-    prev = _artifact_from_payload_block(prev_block)
-    if prev is None:
-        return out
-    if plan_date and prev.get("started") == plan_date:
-        # Same guard, same reason, as `block_rotation_errors`: this block
-        # was derived from the plan being validated, so every dose would
-        # compare equal to itself and the whole plan would read stale.
-        return out
-    prev_plan = _block_as_plan(prev)
-    if prev_plan is None:
-        return out
-    if prev_plan["plan_date"] == (plan_date or ""):
-        # Belt and braces for the guard above, and not only that.
-        # `dose_staleness` keys its per-exercise series BY PLAN DATE, so
-        # two plans sharing one date collapse into a single-entry series
-        # and its ``slots[-2]`` reads past the front of a one-item list.
-        # Reachable whenever a caller passes no ``plan_date`` against a
-        # block with no ``started`` — both become "". A crash is not a
-        # validation verdict; exit 1 means "this program broke".
-        return out
 
-    plan = parse_plan(text, plan_date or "")
-    if not any(w.get("slots") for w in plan.get("workouts") or []):
-        return out
+# What SKILL.md forbids in the workout markdown: "no cardio sections, no
+# Zone 2 or interval prescriptions" and cardio as a "section, bullet or
+# instruction". A heading that names cardio, Zone 2 or intervals (`## Cardio
+# 1: Zone 2`, `## Session 1: Zone 2 cardio + mobility`), or a bullet that
+# prescribes by Zone 2 or heart rate. Cardio in the opener's prose is
+# analysis and is not read.
+_CARDIO_HEADING_RE = re.compile(
+    r"\b(cardio|zone\s*2|z2|hiit|intervals?)\b", re.IGNORECASE)
+_CARDIO_PRESCRIPTION_RE = re.compile(
+    r"\b(zone\s*2|z2|hiit)\b|\d\s*bpm\b", re.IGNORECASE)
 
-    from .extract import load_exercises_db
-    from shared.exercises_database import DATABASE_PATH
-    db = load_exercises_db(DATABASE_PATH)
 
-    report = dose_staleness([prev_plan, plan], db)
-    if report is None:
-        return out
+def cardio_section_warnings(text: str) -> "list[str]":
+    """One line per cardio heading, and per bullet that prescribes cardio
+    outside one (the bullets of a flagged section are not repeated).
 
-    # --- the stall response, per exercise -------------------------------
-    stalled = {}
-    for entries in (prev.get("sessions") or {}).values():
-        for s in entries or []:
-            n = int(s.get("stalled_sessions") or 0)
-            key = (s.get("exercise") or "").strip().lower()
-            if key and n >= ANCHOR_STALL_SESSIONS:
-                stalled[key] = max(stalled.get(key, 0), n)
-    by_key = {c["exercise"].strip().lower(): c for c in report["carried"]}
-    for key in sorted(stalled):
-        carried = by_key.get(key)
-        if carried is None:
-            continue                # dropped or swapped out — that IS the change
-        if carried["dose_changed"]:
-            continue
-        out.append((AXIS_STRUCTURE, (
-            f"{carried['exercise']}: {stalled[key]} sessions stalled and the "
-            f"dose is unchanged ({carried['prev_load_kg']}kg x "
-            f"{carried['prev_rep_target']} -> {carried['load_kg']}kg x "
-            f"{carried['rep_target']}). SKILL.md's stall response is "
-            f"REQUIRED at {ANCHOR_STALL_SESSIONS}+ sessions: change the "
-            f"load, change the rep range, or swap the movement. Saying so "
-            f"in a sub-bullet is not the change.")))
-
-    # --- the staleness rate, per plan -----------------------------------
-    spec = DOSE_PROGRESSION_SPEC
-    if report["carried_count"] >= spec["min_carried_for_share"] and (
-            report["unchanged_pct"] >= spec["max_unchanged_share"]):
-        worst = ", ".join(c["exercise"] for c in report["carried"]
-                          if not c["dose_changed"])
-        out.append((AXIS_STRUCTURE, (
-            f"dose staleness: {report['unchanged_count']} of "
-            f"{report['carried_count']} carried-forward exercises "
-            f"({report['unchanged_pct']:.0%}) come back with an unchanged "
-            f"dose, against a target of under "
-            f"{spec['max_unchanged_share']:.0%}. Unchanged: {worst}. "
-            f"Move the load or the rep target on enough of them, or rotate "
-            f"them out.")))
-
+    The plan is strength only (SKILL.md, Output files). Cardio data feeds
+    the assessment and is never prescribed, even when the person is behind
+    the Zone 2 target.
+    """
+    out: "list[str]" = []
+    in_body = in_flagged = False
+    for lineno, raw in enumerate((text or "").splitlines(), start=1):
+        line = raw.rstrip()
+        if re.match(r"^#{2,6}\s", line):
+            in_body = True
+            in_flagged = bool(_CARDIO_HEADING_RE.search(line))
+            if in_flagged:
+                out.append(f"line {lineno}: {line.strip()!r} is a cardio "
+                           f"section: the plan is strength only, so delete "
+                           f"it and state any cardio shortfall on the "
+                           f"assessment card {CARDIO_SECTION_TAG}")
+        elif in_body and not in_flagged \
+                and line.lstrip().startswith(("-", "\u2014")) \
+                and _CARDIO_PRESCRIPTION_RE.search(line):
+            out.append(f"line {lineno}: {line.strip()!r} prescribes cardio: "
+                       f"the plan is strength only {CARDIO_SECTION_TAG}")
     return out
 
 
@@ -2466,6 +2422,7 @@ def tier_budget_by_index(session_recommendation: "dict | None",
     """
     if not base_budget:
         return None
+    from .constants import SESSION_GATE_THRESHOLDS as T
     sr = session_recommendation or {}
     label = sr.get("label")
     tier = sr.get("tier")
@@ -2481,7 +2438,8 @@ def tier_budget_by_index(session_recommendation: "dict | None",
         if tier == "A" or label == "reactive_deload":   # whole-week deload
             return round(base_budget * 0.5)
         if label == "downgrade":              # only first `rebound` trim
-            return round(base_budget * 0.6) if idx < rebound else base_budget
+            return (round(base_budget * T["tier_c_session_budget_scale"])
+                    if idx < rebound else base_budget)
         return base_budget
 
     return _budget_for
@@ -2497,6 +2455,7 @@ def validate_workout_plan(
     prev_block: "dict | None" = None,
     plan_date: "str | None" = None,
     deload_week: bool = False,
+    cadence_deload: bool = False,
     payload: "dict | None" = None,
 ) -> "tuple[list[str], list[str]]":
     """Return ``(errors, warnings)`` for a whole workout-plan markdown.
@@ -2511,8 +2470,10 @@ def validate_workout_plan(
     Errors (render must not proceed):
       * per-session core dose and shape (`workout_core_warnings`)
       * weekly core distribution (`core_week_errors`)
-      * direct-arm dose, diversity and placement
-        (`workout_arm_dose_warnings`)
+      * direct-arm diversity and placement (`workout_arm_dose_warnings`)
+      * the weekly per-muscle direct-set floor (`muscle_floor_errors`),
+        for the muscles ``payload["muscle_volume_targets"]`` lists. A
+        payload without that key gets a warning instead.
       * a recovery score in the plan's own opener that contradicts the
         payload (`coach_number_findings`), evaluated only when
         ``payload`` is given. The plan opener is the string the user
@@ -2527,7 +2488,14 @@ def validate_workout_plan(
         stays advisory because an intentional deload legitimately
         undershoots it. Only evaluated when ``target_working_sets`` is
         given.
-      * every `AXIS_VOLUME` finding above, when ``deload_week``.
+      * three advisory checks of rules the coach is told to follow:
+        a written dose that differs from ``payload["next_dose"]``
+        (`next_dose_drift_warnings`), a week without one of the four main
+        patterns (`missing_main_pattern_warnings`), and a cardio section
+        (`cardio_section_warnings`). Never errors; tagged `NEXT_DOSE_DRIFT_TAG`
+        etc.
+      * every `AXIS_VOLUME` finding above, when ``deload_week`` (a
+        FULL-BLOCK deload only; see below for the cadence deload).
       * block rotation against the previous block
         (`block_rotation_errors`), evaluated only when ``prev_block``
         carries one — see that function for the two silent cases.
@@ -2535,27 +2503,19 @@ def validate_workout_plan(
         constant `BLOCK_ROTATION_ENFORCED`; flip that to ``True`` and
         these become errors again with no other edit. Tagged with
         `ROTATION_ADVISORY_TAG` on the way out.
-      * carried-forward dose that did not move, an unanswered stall and
-        an oscillating load (`dose_progression_findings`), evaluated only
-        when ``prev_block`` carries per-slot doses. Advisory THIS RELEASE
-        ONLY, routed by `DOSE_PROGRESSION_ENFORCED` and tagged with
-        `DOSE_ADVISORY_TAG`. These shipped blocking on 2026-08-02 and were
-        demoted the same day: see that constant for the SKILL.md-compliant
-        cadence deload they refuse and the rep-range shuffle that walks
-        past them, and for why re-arming the switch needs the ledger-side
-        rewrite first rather than a one-line flip.
 
     ``deload_week`` demotes the VOLUME axis and nothing else. Without it
     the new specs punished a legitimate deload for being one. Measured on
     the real 2026-07-13 plan — a correct, deliberate half-volume week —
-    on both trackers, strict and then relaxed:
+    on both trackers, strict and then relaxed, without a payload (so no
+    per-muscle floor; with one, each muscle under its floor demotes too):
 
-        8 blocking errors  ->  3 errors + 5 advisory
+        6 blocking errors  ->  3 errors + 3 advisory
 
-    The five that demote are the ones that say the week contains less
+    The ones that demote are the ones that say the week contains less
     work (an under-allocated session, no loaded flexion movement, too few
-    flexion sets, and the two direct-arm floors), which is what a deload
-    IS. With the relief the diversity and identity axes still bite,
+    flexion sets, and a muscle under its weekly floor), which is what a
+    deload IS. With the relief the diversity and identity axes still bite,
     because they cost no fatigue: a deload is not a licence to go back to
     four sets of the same crunch.
 
@@ -2572,19 +2532,25 @@ def validate_workout_plan(
     accessory block, not out of core and direct arms. `is_deload_week`
     returns False for ``downgrade`` on purpose.
 
-    BOTH KINDS OF DELOAD ARE VISIBLE, and the gap that used to be
-    recorded here is closed. `is_deload_week` sees a REACTIVE deload
-    through the recovery gate's label, and a CADENCE deload — the
-    generation on which weeks-since-the-last-logged-deload crosses
-    `blocks.DELOAD_CADENCE_WEEKS`, which ships with ``label: green`` and
-    tells the gate nothing — through ``block.deload_prescribed``.
-    ``block.deload_source`` names which clock called it. `read_tracker`
-    emits both beside the block payload's boundary fields, so a cadence
-    deload no longer over-blocks and no caller has to pass
-    ``deload_week=True`` by hand. The two clocks stay separate:
-    ``deload_prescribed`` is "cut the volume", ``boundary_due`` is
-    "rotate the selection" — see `blocks.deload_cadence` for why all
-    four combinations occur.
+    THE TWO KINDS OF DELOAD ARE DIFFERENT SIZES, and only the big one
+    switches the floors off. ``deload_week`` is the FULL-BLOCK deload
+    (`is_deload_week`: the gate's Tier A, a `DELOAD_WEEK_LABELS` label or a
+    load policy of ``reduce``), where every session is halved, so the volume
+    findings are advisory. ``cadence_deload`` is the block's cadence deload
+    (`is_cadence_deload_week`, ``block.deload_prescribed``), which halves ONE
+    session of an otherwise normal week. Demoting every floor for the whole
+    week on that signal made a week of 3 normal sessions and 1 halved one
+    exempt from all of its volume. So on a cadence week the volume findings
+    STAY BLOCKING, and the one that counts sets per muscle (the weekly
+    floor) is scaled by (n - 0.5) / n for the n sessions of the week
+    (`constants.floor_scale`), rounded down. Core is not scaled: it is
+    exempt from the halving (SKILL.md, Deload and re-entry: the deload
+    session keeps its full per-session core dose), so the per-session core
+    dose, the loaded-flexion movement and the flexion set floor keep their
+    spec numbers. ``block.deload_source`` names which clock called the
+    cadence deload. The two clocks stay separate: ``deload_prescribed`` is
+    "cut the volume", ``boundary_due`` is "rotate the selection" — see
+    `blocks.deload_cadence` for why all four combinations occur.
 
     Copy rules (em-dashes, off-catalog exercise names) are NOT re-checked
     here; `validate_workout_md` owns those and callers run it first.
@@ -2605,6 +2571,11 @@ def validate_workout_plan(
     _route(_core_session_findings(text, spec=core_spec))
     _route(_core_week_findings(text, spec=core_spec))
     _route(_arm_findings(text, spec=arm_spec))
+    _route(_muscle_floor_findings(text, payload,
+                                  cadence_deload=cadence_deload))
+    if payload is not None and not payload.get("muscle_volume_targets"):
+        warnings.append("payload has no muscle_volume_targets: the "
+                        "per-muscle weekly floor was not checked")
 
     # The numbers the plan itself states, against the payload it was
     # written from. Same function, same severities and the same
@@ -2623,20 +2594,19 @@ def validate_workout_plan(
     else:
         warnings += [f"{m} {ROTATION_ADVISORY_TAG}" for m in rotation]
 
-    # The ONLY read of `DOSE_PROGRESSION_ENFORCED`, same discipline. The
-    # findings still carry an axis so re-arming routes them through
-    # `_route` unchanged; while the switch is off the axis is moot,
-    # because a warning cannot be demoted any further.
-    dose = dose_progression_findings(text, prev_block, plan_date=plan_date,
-                                     payload=payload)
-    if DOSE_PROGRESSION_ENFORCED:
-        _route(dose)
-    else:
-        warnings += [f"{m} {DOSE_ADVISORY_TAG}" for _axis, m in dose]
-
     if target_working_sets:
         warnings += workout_set_budget_warnings(
             text, target_working_sets, budget_by_index=budget_by_index)
+
+    warnings += next_dose_drift_warnings(
+        text, payload, plan_date=plan_date, deload_week=deload_week,
+        cadence_deload=cadence_deload)
+    # Evaluated only with a payload, like the cross-checks above: a bare
+    # plan fragment (the core-spec fixtures) is not a week.
+    if payload is not None:
+        warnings += missing_main_pattern_warnings(
+            text, plan_date=plan_date, deload_week=deload_week)
+    warnings += cardio_section_warnings(text)
 
     return errors, warnings
 

@@ -1,28 +1,22 @@
 """W7b — leanness channel: waist / body fat / lean mass end to end.
 
-Covers both HealthAutoExport readers (JSON and the deprecated CSV), the
-health_metrics.csv schema migration, and the manual-entry path a tape
-measure reading arrives on.
+Covers the unit/range normalisation, the health_metrics.csv schema
+migration, and the manual-entry path a tape measure reading arrives on.
 
-The absence cases matter as much as the presence ones: the export in hand
-today carries Body Mass and nothing else, so every metric here is one the
-importer must handle by leaving the cell blank rather than writing a zero.
+The absence cases matter as much as the presence ones: every metric here
+is one the store must handle by leaving the cell blank rather than
+writing a zero.
 """
 from __future__ import annotations
 
 import csv
-import io
 import tempfile
 import unittest
-import zipfile
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
 
 from shared import csv_store, csv_store_dense, maintain, person_paths
-from shared import import_health_auto_export as hae
-from shared.csv_store_dense import body_composition_lines
 from shared.health_units import (
     PLAUSIBLE_RANGES,
     normalize_body_fat_pct,
@@ -101,253 +95,6 @@ class BodyFatNormalisationTests(WarnStateTestCase):
         self.assertEqual(PLAUSIBLE_RANGES["waist_cm"], (30.0, 250.0))
         self.assertEqual(PLAUSIBLE_RANGES["lean_body_mass_kg"], (20.0, 150.0))
         self.assertEqual(PLAUSIBLE_RANGES["body_fat_pct"], (3.0, 75.0))
-
-
-# ----------------------------------------------------- HealthAutoExport
-def _daily_zip(path: Path, header: list[str], row: list[str]) -> None:
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(header)
-    writer.writerow(row)
-    with zipfile.ZipFile(path, "w") as zf:
-        zf.writestr("HealthAutoExport-2026-08-01-2026-08-01.csv", buf.getvalue())
-        zf.writestr("Workouts-20260801_000000-20260801_235959.csv", "Workout Type,Start\n")
-
-
-class HealthAutoExportBodyCompositionTests(WarnStateTestCase):
-    @staticmethod
-    def _parse(row: dict):
-        err = StringIO()
-        with redirect_stderr(err):
-            metrics, _sleep = hae.parse_daily_rows(
-                [{"Date/Time": "2026-08-01 00:00:00", **row}],
-                date(2026, 8, 1), date(2026, 8, 1),
-            )
-        return metrics[0], err.getvalue()
-
-    def test_imperial_headers_are_resolved_by_prefix_and_converted(self) -> None:
-        # HealthAutoExport bakes the user's in-app unit choice into the
-        # header. A fixed "(cm)" lookup would silently skip this export.
-        rows = [{
-            "Date/Time": "2026-08-01 00:00:00",
-            "Waist Circumference (in)": "33",
-            "Body Fat Percentage (%)": "0.181",
-            "Lean Body Mass (lb)": "140",
-        }]
-        err = StringIO()
-        with redirect_stderr(err):
-            metrics, _sleep = hae.parse_daily_rows(rows, date(2026, 8, 1), date(2026, 8, 1))
-
-        self.assertEqual(metrics[0]["waist_cm"], 83.8)
-        self.assertEqual(metrics[0]["body_fat_pct"], 18.1)
-        self.assertEqual(metrics[0]["lean_body_mass_kg"], 63.5)
-        self.assertNotIn("Waist Circumference (<unit>)", err.getvalue())
-
-    def test_blank_and_zero_cells_read_as_none(self) -> None:
-        rows = [{
-            "Date/Time": "2026-08-01 00:00:00",
-            "Waist Circumference (cm)": "",
-            "Body Fat Percentage (%)": "0",
-            "Lean Body Mass (kg)": "0",
-        }]
-        with redirect_stderr(StringIO()):
-            metrics, _sleep = hae.parse_daily_rows(rows, date(2026, 8, 1), date(2026, 8, 1))
-
-        self.assertIsNone(metrics[0]["waist_cm"])
-        self.assertIsNone(metrics[0]["body_fat_pct"])
-        self.assertIsNone(metrics[0]["lean_body_mass_kg"])
-
-    def test_unknown_header_unit_warns_and_skips(self) -> None:
-        # Deliberately the same unit token the Apple-XML test uses. The
-        # warn-once registry is process-global, so before it was made
-        # resettable these two tests could only both pass by picking
-        # different strings — an order dependency dressed up as coverage.
-        metrics, err = self._parse({"Waist Circumference (cubits)": "33"})
-        self.assertIsNone(metrics["waist_cm"])
-        self.assertIn("unknown waist circumference unit", err)
-
-    # ------------------------------------------------ plausibility gate
-    def test_waist_column_in_metres_is_dropped_not_stored_as_8450_cm(self) -> None:
-        # HealthAutoExport bakes the user's in-app unit into the header,
-        # so a metre-denominated waist column is a well-formed export.
-        metrics, err = self._parse({"Waist Circumference (m)": "84.5"})
-        self.assertIsNone(metrics["waist_cm"])
-        self.assertIn("outside the plausible 30-250 range", err)
-        self.assertIn("'m'", err)
-
-    def test_lean_mass_column_in_grams_is_dropped(self) -> None:
-        metrics, err = self._parse({"Lean Body Mass (g)": "63.2"})
-        self.assertIsNone(metrics["lean_body_mass_kg"])
-        self.assertIn("outside the plausible 20-150 range", err)
-
-    def test_absurd_waist_in_a_correct_unit_is_still_dropped(self) -> None:
-        metrics, err = self._parse({"Waist Circumference (cm)": "8450"})
-        self.assertIsNone(metrics["waist_cm"])
-        self.assertIn("outside the plausible 30-250 range", err)
-
-    def test_range_boundaries_are_inclusive_on_this_path_too(self) -> None:
-        for column, value in (("Waist Circumference (cm)", "30"),
-                              ("Waist Circumference (cm)", "250"),
-                              ("Lean Body Mass (kg)", "20"),
-                              ("Lean Body Mass (kg)", "150")):
-            metrics, _err = self._parse({column: value})
-            key = "waist_cm" if column.startswith("Waist") else "lean_body_mass_kg"
-            self.assertEqual(metrics[key], float(value), (column, value))
-        for column, value in (("Waist Circumference (cm)", "29.9"),
-                              ("Waist Circumference (cm)", "250.1"),
-                              ("Lean Body Mass (kg)", "19.9"),
-                              ("Lean Body Mass (kg)", "150.1")):
-            metrics, _err = self._parse({column: value})
-            key = "waist_cm" if column.startswith("Waist") else "lean_body_mass_kg"
-            self.assertIsNone(metrics[key], (column, value))
-
-    def test_body_fat_column_unit_is_read_and_gated(self) -> None:
-        metrics, err = self._parse({"Body Fat Percentage (cubits)": "0.181"})
-        self.assertIsNone(metrics["body_fat_pct"])
-        self.assertIn("unknown body fat percentage unit", err)
-
-    def test_body_fat_guard_band_applies_on_this_path_too(self) -> None:
-        metrics, err = self._parse({"Body Fat Percentage (%)": "1.0"})
-        self.assertIsNone(metrics["body_fat_pct"])
-        self.assertIn("outside the plausible 3-75 range", err)
-
-    def test_zip_roundtrip_writes_the_new_columns(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "HealthAutoExport.zip"
-            _daily_zip(
-                path,
-                ["Date/Time", "Waist Circumference (cm)", "Body Fat Percentage (%)",
-                 "Lean Body Mass (kg)"],
-                ["2026-08-01 00:00:00", "84.5", "0.181", "63.2"],
-            )
-            with redirect_stderr(StringIO()):
-                metrics, _sleep, _workouts, _swim = hae.parse_health_auto_export_zip(
-                    path, date(2026, 8, 1), date(2026, 8, 1)
-                )
-
-        self.assertEqual(metrics[0]["waist_cm"], 84.5)
-        self.assertEqual(metrics[0]["body_fat_pct"], 18.1)
-        self.assertEqual(metrics[0]["lean_body_mass_kg"], 63.2)
-
-
-class ReplaceRangeBodyCompositionTests(WarnStateTestCase):
-    """``--replace-range`` must not take the body-composition cells with it."""
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.tmp = tempfile.TemporaryDirectory()
-        root = Path(self.tmp.name)
-        self.old_root = person_paths.WORKOUT_TRACKER_ROOT
-        self.old_hae_root = hae.WORKOUT_TRACKER_ROOT
-        person_paths.WORKOUT_TRACKER_ROOT = root
-        hae.WORKOUT_TRACKER_ROOT = root
-        csv_store.write_profile("Test", source="health_auto_export", auto_cardio=True)
-
-    def tearDown(self) -> None:
-        person_paths.WORKOUT_TRACKER_ROOT = self.old_root
-        hae.WORKOUT_TRACKER_ROOT = self.old_hae_root
-        self.tmp.cleanup()
-
-    def test_a_populated_waist_survives_a_range_clear(self) -> None:
-        # The readings only exist because someone typed them into Apple's
-        # Body Measurements screen; the export cannot regenerate them, so
-        # clearing the window must leave them standing while the
-        # machine-sourced metrics beside them go.
-        csv_store.upsert_health_metrics("Test", [{
-            "date": "2026-08-01",
-            "waist_cm": 84.5,
-            "body_fat_pct": 18.1,
-            "lean_body_mass_kg": 63.2,
-            "bodyweight_kg": 79.5,
-            "resting_hr": 53,
-            "hrv_sdnn": 40.6,
-        }])
-
-        summary = hae.clear_health_metrics_range(
-            "Test", date(2026, 8, 1), date(2026, 8, 1)
-        )
-        self.assertIn("cleared 2 machine value(s)", summary)
-
-        row = csv_store.read_health_metrics("Test")[0]
-        self.assertEqual(row["waist_cm"], 84.5)
-        self.assertEqual(row["body_fat_pct"], 18.1)
-        self.assertEqual(row["lean_body_mass_kg"], 63.2)
-        self.assertEqual(row["bodyweight_kg"], 79.5)
-        # ...while the machine-sourced fields in the same row are wiped.
-        self.assertIsNone(row["resting_hr"])
-        self.assertIsNone(row["hrv_sdnn"])
-
-    def test_every_body_composition_field_is_out_of_the_clear_list(self) -> None:
-        # Guards the constant itself, so adding a fifth field to
-        # BODY_COMPOSITION_FIELDS without thinking about the clear path
-        # fails here rather than silently losing data on the next
-        # --replace-range run.
-        for field in csv_store_dense.BODY_COMPOSITION_FIELDS:
-            self.assertNotIn(field, hae.RANGE_FIELDS_TO_CLEAR)
-
-
-class HealthAutoExportJsonBodyCompositionTests(WarnStateTestCase):
-    """The JSON reader carries the same unit awareness the CSV reader has.
-
-    HealthAutoExport writes the user's in-app unit preference into the
-    metric's ``units`` field, so an imperial export sends waist in inches
-    and lean mass in pounds over identical JSON. Assuming metric has
-    already cost this repo one silent corruption.
-    """
-
-    @staticmethod
-    def _parse(name: str, units: str, qty):
-        err = StringIO()
-        with redirect_stderr(err):
-            metrics, _sleep, _w, _s = hae.parse_health_auto_export_json(
-                {"data": {"workouts": [], "metrics": [{
-                    "name": name, "units": units,
-                    "data": [{"date": "2026-08-01 07:30:00 +0200",
-                              "qty": qty, "source": "Device"}],
-                }]}},
-                None, None,
-            )
-        return (metrics[0] if metrics else {}), err.getvalue()
-
-    def test_waist_is_unit_aware_cm_and_inches(self) -> None:
-        row, _ = self._parse("waist_circumference", "cm", 84.5)
-        self.assertEqual(row["waist_cm"], 84.5)
-        row, _ = self._parse("waist_circumference", "in", 33.27)
-        self.assertEqual(row["waist_cm"], 84.5)
-
-    def test_lean_mass_is_unit_aware_kg_and_pounds(self) -> None:
-        row, _ = self._parse("lean_body_mass", "kg", 63.2)
-        self.assertEqual(row["lean_body_mass_kg"], 63.2)
-        row, _ = self._parse("lean_body_mass", "lb", 139.33)
-        self.assertEqual(row["lean_body_mass_kg"], 63.2)
-
-    def test_body_fat_accepts_both_encodings(self) -> None:
-        self.assertEqual(self._parse("body_fat_percentage", "%", 0.181)[0]["body_fat_pct"], 18.1)
-        self.assertEqual(self._parse("body_fat_percentage", "%", 18.1)[0]["body_fat_pct"], 18.1)
-
-    def test_an_unknown_unit_drops_the_value_rather_than_storing_it_raw(self) -> None:
-        row, err = self._parse("waist_circumference", "cubits", 84.5)
-        self.assertNotIn("waist_cm", row)
-        self.assertIn("unknown", err)
-
-    def test_a_clean_conversion_to_an_impossible_body_still_drops(self) -> None:
-        # "84.5 m" converts cleanly to 8450 cm. The unit table cannot
-        # catch that; the plausibility gate is what does.
-        row, err = self._parse("waist_circumference", "m", 84.5)
-        self.assertNotIn("waist_cm", row)
-        self.assertIn("plausible", err)
-
-    def test_an_absent_metric_leaves_the_cell_blank_not_zero(self) -> None:
-        row, _ = self._parse("weight_body_mass", "kg", 79.8)
-        self.assertEqual(row["bodyweight_kg"], 79.8)
-        for field in ("waist_cm", "body_fat_pct", "lean_body_mass_kg"):
-            self.assertIsNone(row.get(field))
-
-    def test_body_composition_lines_name_the_gap_on_a_json_import(self) -> None:
-        row, _ = self._parse("weight_body_mass", "kg", 79.8)
-        lines = body_composition_lines([row])
-        self.assertTrue(any("Bodyweight: 1 dates" in ln for ln in lines))
-        self.assertTrue(any("Waist: 0 dates" in ln for ln in lines))
 
 
 # ------------------------------------------------------------- CSV store

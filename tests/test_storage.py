@@ -259,32 +259,6 @@ class StorageTests(unittest.TestCase):
 
         self.assertEqual(hhmm(datetime(2026, 5, 1, 8, 15, 37)), "08:15:37")
 
-    def test_upsert_workout_sessions_reparsed_health_auto_export_minute_is_idempotent(self) -> None:
-        # Same guard as above for the HealthAutoExport importer. Its "Start"
-        # source column is itself minute-precision (HealthAutoExport's CSV
-        # never includes seconds), so _parse_workout_minute + _hhmmss always
-        # reproduce the same "HH:MM:00" key for the same raw Start string --
-        # including across HealthAutoExport's overlapping rolling exports,
-        # which re-emit an identical "Start" cell for a workout that falls
-        # in two consecutive export windows.
-        from shared.import_health_auto_export import _hhmmss, _parse_workout_minute
-
-        def build_entry() -> dict:
-            start_dt = _parse_workout_minute("2026-05-01 08:15")
-            return {
-                "date": "2026-05-01",
-                "start": _hhmmss(start_dt),
-                "apple_type": "Running",
-                "duration_min": 30,
-            }
-
-        csv_store.upsert_workout_sessions("Test", [build_entry()])
-        csv_store.upsert_workout_sessions("Test", [build_entry()])  # overlapping-export re-import
-
-        sessions = csv_store.read_workout_sessions("Test")
-        self.assertEqual(len(sessions), 1)
-        self.assertEqual(sessions[0]["start"], "08:15:00")
-
     def test_swim_laps_replace_on_match(self) -> None:
         base = {
             "date": "2026-05-04",

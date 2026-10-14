@@ -37,7 +37,7 @@ Each holds a `data/` folder with every CSV the skills read
 or write — there is no xlsx anywhere post-PR3a. That folder is also its
 own git repository (see the versioning convention below), so the commit
 history is the rollback path when an import or a mis-parsed `/log`
-damages a CSV. HealthAutoExport ZIPs drop into the root and are
+damages a CSV. Health Export Kit files (`health-export-json-*.json`) drop into the root and are
 **deleted after a successful import**; `--keep-export` is the escape
 hatch. Nothing is archived: the native `Export.zip` and the hand-made
 pre-git `data/` snapshots were deleted on 2026-08-16, and git is the
@@ -59,8 +59,8 @@ write code or prose that offers to re-extract anything from it.
 │       │   ├── 2026.05.workouts.csv       # per-month swim aggregates, (date,start)-keyed
 │       │   ├── 2026.05.laps.csv           # XML-era per-lap detail; frozen history, never written now
 │       │   └── …
-│       ├── sleep/                         # HealthAutoExport sleep nights
-│       │   ├── 2026.05.nights.csv         # per-night, date-keyed; all 6 stages + Time in Bed + Efficiency + first/last segment clock times (N Segments permanently blank)
+│       ├── sleep/                         # Health Export Kit sleep nights
+│       │   ├── 2026.05.nights.csv         # per-night, date-keyed; all 6 stages + Time in Bed + Efficiency + first/last segment clock times + N Segments
 │       │   └── …
 │       ├── thermal/                       # manual /log only; absent until first sauna / cold session is logged
 │       │   ├── 2026.05.sessions.csv       # per-session, (date,start)-keyed; heat (type/temp/rounds/durations/total) + cold (type/duration/temp)
@@ -151,35 +151,34 @@ shared/               # Code + docs imported by multiple skills
                         # Reports ambiguous names (e.g. bare "Leg Curl")
                         # instead of auto-renaming. Re-runnable.
                         # Usage: python3 shared/canonicalize_logs.py --person <Person>
-  import_health_auto_export.py
-                          # The only importer. Handles `HealthAutoExport*.zip`
-                          # and dispatches on the archive member: a
-                          # `HealthAutoExport-*.json` member selects the JSON
-                          # reader (the supported format); anything else falls
-                          # back to the legacy CSV reader with a deprecation
-                          # warning. Route GPX members are ignored. Writes the
-                          # full tracker surface: per-day Health Metrics
-                          # (VO2max, RHR, HRV, walking HR, wrist temp,
+  import_health_export_kit.py
+                          # The only importer (Health Export Kit). Reads one
+                          # `health-export-json-*.json` file (schema version 1
+                          # or 2; no archive, no CSV fallback). Writes the
+                          # tracker surface the export supports: per-day
+                          # Health Metrics (VO2max, RHR, walking HR,
                           # breathing disturbances, exercise minutes, steps,
                           # active/basal energy, body composition), per-night
                           # sleep architecture, per-workout Workout Sessions
                           # rows (avg/max/min HR, calories, distance), and
-                          # per-workout swim aggregates. Bootstraps
-                          # profile.csv with source=health_auto_export,
+                          # per-workout swim aggregates. It does NOT provide
+                          # all-day HRV or wrist temperature, so `hrv_sdnn`
+                          # and `wrist_temp` are never written. Bootstraps
+                          # profile.csv with source=health_export_kit,
                           # auto_cardio=true. When auto_cardio is on, also
                           # appends matching cardio workouts (Run / Hike /
                           # Cycle / Swim / HIIT) to the YYYY.MM monthly sheet
                           # via upsert_monthly_cardio. Idempotent; sparse-merge
                           # upserts never overwrite populated cells with None.
-                          # --replace-range clears old machine-imported rows
-                          # in the selected date range before writing.
-                          # Deletes the consumed ZIP on success, then commits
-                          # the person's data/ repo (`import: <zip name>`).
-                          # Usage: python3 shared/import_health_auto_export.py
-                          #          --person <Person> [--zip PATH_OR_GLOB]
+                          # Deletes the consumed export file on success, then
+                          # commits the person's data/ repo
+                          # (`import: <file name>`).
+                          # Usage: python3 shared/import_health_export_kit.py
+                          #          --person <Person> [--export PATH_OR_GLOB]
                           #          [--since YYYY-MM-DD] [--until YYYY-MM-DD]
-                          #          [--allow-past-months] [--replace-range]
+                          #          [--allow-past-months]
                           #          [--dry-run] [--keep-export]
+  hek_time.py             # Timestamp parsing for Health Export Kit stamps.
   health_units.py         # Source-agnostic unit conversion and plausibility
                           # gating: PLAUSIBLE_RANGES, convert_unit,
                           # plausible_or_none, normalize_body_fat_pct, plus the
@@ -194,14 +193,14 @@ shared/               # Code + docs imported by multiple skills
                           # Each person's data/ directory is its own git repo;
                           # every confirmed write commits it. Two call sites:
                           # append_workout.py (`log: <N> rows, <dates>`) and
-                          # import_health_auto_export.py (`import: <zip name>`).
+                          # import_health_export_kit.py (`import: <file name>`).
                           # One operation is one commit, not one per file.
                           # Never raises — a git failure warns and returns
                           # None, because a broken git state must not fail a
                           # workout log. Never runs `git gc` (see the
                           # versioning convention).
   apple_workout_types.py  # Single source of truth for Apple's workout-type
-                          # enum, which HealthAutoExport's workout names still
+                          # enum, which Health Export Kit's workout types
                           # map onto: rawValue → canonical name
                           # (RAWVALUE_TO_TYPE), the auto-cardio eligibility set
                           # (CARDIO_AUTOLOG_TYPES — Running / Hiking / Cycling
@@ -261,13 +260,22 @@ workout-coach/        # /coach — read tracker, assess, plan next workout (repo
                       #                  auto_deload_candidates, plus the
                       #                  per-session hr_zone_label (Z1–Z5)
                       #                  derived from intensity_pct via HRR.
-                      #   health.py    — health time-series helpers (window,
-                      #                  baseline, trend), weekly aggregates,
-                      #                  recovery_score (composes ~9 drivers
-                      #                  with per-signal sample-sufficiency
-                      #                  gate — confidence drops one band
-                      #                  when a high-weight z-scored driver
-                      #                  has too few recent readings).
+                      #   health_windowing.py — health time-series helpers
+                      #                  (window, baseline, trend) and
+                      #                  weekly aggregates.
+                      #   health_recovery.py — recovery_score (composes ~9
+                      #                  drivers with per-signal
+                      #                  sample-sufficiency gate —
+                      #                  confidence drops one band when a
+                      #                  high-weight z-scored driver has
+                      #                  too few readings).
+                      #   health_longevity.py — longevity trajectory score
+                      #                  and longevity-state parsing.
+                      #   health_session_rec.py — the five-tier session
+                      #                  recommendation gate, tier
+                      #                  history and the load_policy.
+                      #                  (There is no `health.py` facade;
+                      #                  import these directly.)
                       #   plan_checks.py — run_plan_checks: the ONE plan
                       #                  check sequence (tracker payload,
                       #                  coach_reads cross-check, workout
@@ -358,7 +366,7 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   `Source` column. `Source` values are `manual` or an importer identity:
   `apple[@HH:MM[:SS]]` / `gymkit:<Device>[@HH:MM[:SS]]` — the `gymkit:`
   form only ever appears on rows imported before the migration, since
-  HealthAutoExport carries no device identity, but readers must still
+  neither Health Auto Export nor Health Export Kit carries a device identity, but readers must still
   parse it. The optional time suffix is deliberate row identity for
   same-day same-type imported cardio workouts; consumers must parse the
   prefix before comparing.
@@ -406,14 +414,13 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   literal values, not Excel formulas. The user can preview the CSV in
   macOS Quick Look or Numbers and see the math directly. No xlsx
   exists post-PR3a; the CSV is the canonical store.
-- **Distance is unit-aware end-to-end.** HealthAutoExport bakes the
-  phone's in-app unit preference into its output, and its unit strings
-  are not always honest (`lapLength` is labelled `m` and carries
-  kilometres). Every numeric read off a workout therefore goes through
-  `_qty(..., expect_units=…)`, which drops and warns on an unexpected
-  unit rather than guessing, and every daily-metric conversion goes
-  through `health_units.convert_unit`. Never read a raw `qty` without
-  naming the unit you expect. The `_format_pace_min_per_km` helper
+- **Distance is unit-aware end-to-end.** Source exports can bake the
+  phone's in-app unit preference into their output, and unit strings
+  are not always honest (the retired Health Auto Export labelled
+  `lapLength` `m` while carrying kilometres). Every daily-metric
+  conversion therefore goes through `health_units.convert_unit`, which
+  drops and warns on an unexpected unit rather than guessing. Never read
+  a raw quantity without naming the unit you expect. The `_format_pace_min_per_km` helper
   blanks pace values outside `[0.5, 60]` min/km — degenerate `0:01`
   outputs from a future unit bug surface as a blank cell instead of
   silent corruption.
@@ -458,27 +465,20 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   training-load signal, and basal energy trending down during a cut is
   adaptive thermogenesis — the most useful thing this data tells a
   cutting athlete, and invisible in the total.
-- **One health source: HealthAutoExport.** Each person's
-  `data/profile.csv` pins `source` (only `health_auto_export` is
-  accepted) and `auto_cardio` (bool). `DEFAULT_DATA_SOURCE` is
-  `health_auto_export`, and `SOURCE_CAPABILITIES`
-  (`workout-coach/lib/constants.py`) and the `csv_store_dense.py`
-  schema each hold that single entry. Both keep their per-source *shape*
-  — the coach payload publishes `capabilities` as a contract and a
-  second source may return one day — but nothing may reintroduce a
-  second key without a documented migration.
-  `import_health_auto_export.py` handles `HealthAutoExport*.zip` and
-  dispatches on the archive member, not on the filename: a
-  `HealthAutoExport-*.json` member selects the JSON reader; anything
-  else falls back to the legacy CSV reader with a deprecation warning.
-  Route GPX members are ignored. **JSON is the format going forward**:
-  its metric and workout names are canonical English even on a localised
-  phone, and it carries the per-night `sleepStart` / `sleepEnd`
-  timestamps the Sleep Regularity Index needs — which is why
-  `sleep_regularity` is a True capability. The CSV reader is kept alive
-  only until the second tracker's phone settings switch to JSON, then it
-  goes. /coach gates report sections on `capabilities` and on data
-  presence. `auto_cardio` defaults to true; when on, eligible Apple
+- **One health source: Health Export Kit.** Each person's
+  `data/profile.csv` pins `source` (`health_export_kit`, which both
+  trackers carry; the older `health_auto_export` value is still accepted
+  when reading and is rewritten on the next import) and `auto_cardio`
+  (bool). `SOURCE_CAPABILITIES` (`workout-coach/lib/constants.py`) holds
+  the per-source capability map — the coach payload publishes
+  `capabilities` as a contract. `import_health_export_kit.py` reads a
+  single `health-export-json-*.json` file (no archive, no member
+  dispatch). It carries the per-night session start / end timestamps
+  the Sleep Regularity Index needs, which is why `sleep_regularity` is a
+  True capability. It does **not** carry all-day HRV or wrist
+  temperature (`hrv` and `wrist_temp` are False for this source), so the
+  recovery score runs without them. /coach gates report sections on
+  `capabilities` and on data presence. `auto_cardio` defaults to true; when on, eligible Apple
   workouts (Running / Hiking / Cycling / Swimming / HIIT) flow into the
   matching `monthly/YYYY.MM.csv`, with manual-wins dedupe (date +
   exercise, ±1min duration tolerance). When the current-month gate skips
@@ -488,7 +488,7 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   not pending: Apple's 1-10 workout effort score (`metadata` is empty on
   every JSON workout, so the coach's "no RIR/RPE intake" caveat is
   permanent and no amount of re-export fixes it); beat-to-beat intervals
-  and therefore RMSSD (HRV arrives as an SDNN scalar only);
+  and therefore RMSSD (there is no all-day HRV at all, and no wrist temperature);
   heart-rate motion context; ECG recordings; swim stroke style and
   SWOLF; and Apple's own HR-zone boundaries, which were the one
   independent read on max HR — `estimated_max_hr` still derives from
@@ -499,7 +499,7 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   history is the rollback path.** `shared/data_git.py::commit_data`
   stages and commits the whole directory after every confirmed write —
   `/log` via `append_workout.py` (`log: <N> rows, <dates>`) and the
-  importer (`import: <zip name>`). One operation is one commit, never
+  importer (`import: <file name>`). One operation is one commit, never
   one per touched CSV, so a bad `/log` or a bad import reverts as a
   single entry. Commit *after* the write is confirmed, and never let git
   decide whether a write succeeded: `commit_data` catches everything,
@@ -557,8 +557,8 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   + Time in Bed + Sleep Efficiency + N Segments + First/Last Segment
   Start clock times) on `YYYY.MM.nights.csv`, mirroring the
   `monthly/YYYY.MM.csv` and `swimming/YYYY.MM.*.csv` per-month
-  pattern. HealthAutoExport's per-night document is the source: stage
-  durations plus the `sleepStart` / `sleepEnd` timestamps that fill
+  pattern. The Health Export Kit per-night sleep sessions are the source:
+  stage durations plus the session start / end timestamps that fill
   First/Last Segment. Headline fields (Sleep Total / Deep / REM /
   Time in Bed) are also mirrored to `health_metrics.csv` so the
   existing recovery_score path reads them without a join.
@@ -567,13 +567,20 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   Notes — Sleep Efficiency is auto-derived when both Total and
   Time in Bed are present and `efficiency_pct` wasn't supplied
   explicitly. The clock-time fields are importer-only (manual /log
-  entries leave them blank). **`N Segments` is permanently blank**: the
-  source reports one aggregate row per night with no segment breakdown.
-  `sleep_summary`'s fragmentation reader must degrade to null there and
-  say nothing — a night that stopped carrying a segment count did not
-  become less fragmented. Segment-level detail is not stored anywhere,
-  and there is no archive to re-extract it from, so hypnograms and
-  sleep-latency derivation are off the table rather than deferred.
+  entries leave them blank). **`N Segments` is populated by the Health
+  Export Kit importer** (the count of sleep-stage entries across the
+  night's sessions; `import_health_export_kit.py`), so
+  `sleep_summary.fragmentation` (`n_segments_mean`,
+  `n_segments_trend_per_week`) is a live number for any 28-day window
+  that holds imported nights. It was blank only on rows written during
+  the retired Health Auto Export era (one aggregate row per night) and
+  stays blank on manual `/log` nights, which cannot supply it. The reader
+  degrades to null only when NO night in the window carries a count, and
+  says nothing then: a night that has no segment count did not become less
+  fragmented. Segment-level detail (the individual stage intervals) is
+  not stored anywhere, and there is no archive to re-extract it from, so
+  hypnograms and sleep-latency derivation are off the table rather than
+  deferred.
 - **Thermal (sauna + cold exposure) lives in `<Person>/data/thermal/YYYY.MM.sessions.csv`, per-month.**
   Per-session aggregates: Date, Start, Heat Type (`dry` / `steam` /
   `infrared` / `banya` / `none`), Heat Temp (°C), Heat Rounds, Heat
@@ -679,7 +686,7 @@ longevity-optimizer/  # /longevity — separate domain. All personal data lives
   date-keyed). `state.md` therefore doesn't freeze a bodyweight number
   — it points at health_metrics.csv as the live source. The same
   pattern applies to RHR, HRV, VO2max, sleep, HR Recovery: those flow
-  from the HealthAutoExport importer into health_metrics.csv and the
+  from the Health Export Kit importer into health_metrics.csv and the
   longevity skill reads them on demand via the coach's
   `read_tracker.py`.
 - **CSS (Critical Swim Speed)** lives on `profile.csv`:

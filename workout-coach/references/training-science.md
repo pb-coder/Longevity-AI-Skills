@@ -12,7 +12,7 @@
 | Weight/rep trends over time        | §6 Progressive Overload |
 | Injury risk / load progression     | §7 Tendon-Muscle Mismatch |
 | Push vs pull balance               | §8 Push-Pull Balance |
-| Recovery state / session timing    | §9 HRV-Guided Training |
+| Recovery state / session timing    | §9 HRV-Guided Training, §18 Recovery Signals |
 | Cardio prescription / VO2 max      | §10 Cardio & Longevity |
 | Fatigue management / periodization | §11 Deload Protocol |
 | Diet, meds, demographics           | §12 User Context |
@@ -21,7 +21,7 @@
 | Week-to-week progression within a block | §15 Mesocycle Structure |
 | Set structure                      | §16 Straight Sets |
 | Regional coverage within a muscle  | §17 Exercise Variation |
-| Recovery / HRV / wrist temp / sleep | §18 Recovery Signals |
+| Recovery score / sleep / resting HR | §18 Recovery Signals |
 | Per-session HR interpretation       | §19 Per-Session HR |
 | Daily activity / NEAT context       | §20 Daily Activity |
 | Sleep depth and consistency         | §21 Sleep Depth & Consistency |
@@ -139,6 +139,8 @@ User: weekday 30-40ms, weekend 60-70ms = systematic stress depression.
 
 Overreaching: RMSSD below baseline >1 SD for >3 days → reduce volume. Trends not single days.
 
+**Source note.** Health Export Kit carries no HRV (`capabilities.hrv` is False), so this lever is unavailable to the coach. The recovery score runs without it.
+
 ## §10 Cardio & Longevity
 
 VO2 max: strongest all-cause mortality predictor. Low fitness = 4-6x mortality risk (Mandsager 2018, 120K+ subjects).
@@ -164,7 +166,7 @@ Expected response to consistent Zone 2 + intervals: 1-3 ml/kg/min over 6-12 week
 
 Interpretation rules:
 - VO2max flat (slope per 4w near 0) AND `cardio_last_28d` shows targets met → cardio is maintaining, not progressing. Suggest adding intensity (more intervals, faster Zone 2 splits) before adding volume.
-- VO2max declining AND cardio targets met → check sleep/HRV first; chronic under-recovery suppresses VO2max.
+- VO2max declining AND cardio targets met → check sleep and resting HR first; chronic under-recovery suppresses VO2max.
 - VO2max declining AND cardio targets missed → it's a dose problem. Don't over-interpret. Restore the prescribed cardio.
 - VO2max climbing → keep doing what's working. Don't change the program for "variety."
 
@@ -215,7 +217,7 @@ Decision framework:
 - **3 sessions/week:** Full body or upper/lower/full. Both work. Full body 3x distributes volume more evenly.
 - **4 sessions/week:** Upper/lower 2x. Clean volume distribution. Default recommendation at this frequency.
 - **5 sessions/week:** Upper/lower + rotating session, or PPL + upper/lower hybrid. Straight PPL only hits each muscle ~1.7x/week.
-- **6 sessions/week:** PPL 2x. High volume capacity. Only appropriate if recovery supports it (check HRV, sleep, stress).
+- **6 sessions/week:** PPL 2x. High volume capacity. Only appropriate if recovery supports it (check sleep, resting HR, stress).
 
 Because the split type itself doesn't drive hypertrophy, personal preference and logistics matter. If the user has a working split, keep it unless it creates concrete problems (e.g., sessions running over 90 minutes, muscles only hit 1x/week, unbalanced volume distribution). Switching splits disrupts exercise continuity and makes progression tracking harder.
 
@@ -227,9 +229,9 @@ Each training block runs 4-6 weeks before a deload (§11). Within that block, so
 
 **Practical model for an early intermediate trainee:**
 
-For compounds, use double progression: keep the weight constant, push for more reps each session until hitting the top of the prescribed range for all sets. Then add load (per §6 benchmarks) and reset to the bottom of the range. This is simple, trackable, and evidence-equivalent to more complex models for this training stage.
+For compounds, use double progression: keep the weight constant, push for more reps each session until hitting the top of the prescribed range for all sets. Then add load (per §6 benchmarks) and reset to the bottom of the range. This is simple, trackable, and evidence-equivalent to more complex models for this training stage. The range tops out at 12 reps for compounds and 20 for isolation: past that, more reps are more endurance, and the lift is owed weight. `next_dose` applies this rule from the log and the coach copies it.
 
-For isolation exercises: same double progression principle. Add weight when hitting the top of the range for all prescribed sets across 2 consecutive sessions.
+For isolation exercises: same double progression principle, with the range topping out at 20 reps. Add weight when every working set reaches the top of the range.
 
 Optionally add 1 set to key exercises in weeks 3-4 of a block if recovery is good. This provides a volume ramp without aggressive week-to-week jumps, which Zourdos et al. (2020) caution against.
 
@@ -251,7 +253,7 @@ Different exercises grow different regions of the same muscle. Running the same 
 
 **Practical model:**
 
-- **Regional coverage within a week.** For each major muscle, the week's exercises should together cover different regions. Quads: a hip-extension compound (squat or leg press) plus a knee-extension isolation (leg extension), not two copies of either. Chest: at least one flat and one incline variant across the week. Back: vertical pull plus horizontal pull, and if volume allows, a grip-variant pair (wide plus neutral/close). Triceps: one overhead movement (long head) plus one extension/pushdown (lateral/medial).
+- **Regional coverage within a week.** For each major muscle, the week's exercises should together cover different regions. Quads: a hip-extension compound (squat or leg press) plus a knee-extension isolation (leg extension), not two copies of either. Chest: at least one flat and one incline variant across the week. Back: vertical pull plus horizontal pull, and if volume allows, a grip-variant pair (wide plus neutral/close). Triceps: one overhead movement (long head) plus one extension/pushdown (lateral/medial). Shoulders: one vertical (overhead) press plus lateral-delt isolation, with rear-delt work as available; a split change must not drop the press.
 - **Same split, second exposure.** In a 4-session week where Push/Pull/Legs repeats one day, vary the repeated day inside the week. Keep one anchor stable for progression, but change the lead angle/pattern or the isolation slot so the repeat covers a different region instead of duplicating session one.
 - **Cross-block rotation.** Every mesocycle (4-6 weeks, per §11 and §15), rotate 1-2 secondary variants. Flat DB press → incline DB press. Wide-grip pulldown → V-bar pulldown. Keep rotations scoped so progression tracking on at least one anchor per muscle stays continuous.
 - **Anchor compounds stay.** Preserve exercises where the user is actively progressing. The double-progression model in §15 needs a stable reference. Variation lives in the isolation and accessory slots and across blocks, not in the main lifts of an active block.
@@ -262,51 +264,48 @@ Different exercises grow different regions of the same muscle. Running the same 
 
 ## §18 Recovery Signals
 
-**Source dependency.** This section's HRV, wrist-temperature, and per-workout-HR levers require a full Apple Health source: native zipped XML or HealthAutoExport. The score's `confidence` field surfaces missing or sparse signals. Standard re-entry / deload heuristics still apply on any source.
+**Source dependency.** Health Export Kit carries no all-day HRV and no wrist temperature (`capabilities.hrv` and `capabilities.wrist_temp` are False), so the recovery score runs without them. The score's `confidence` field surfaces missing or sparse signals. Standard re-entry / deload heuristics still apply on any source.
 
-Apple Health provides six daily signals that materially change the recovery picture: HRV (SDNN), resting HR, total sleep, wrist temperature, HR Recovery 1-min, and VO2max trend. Single-day values are noisy; the score below uses 7-day means against 60-day baselines (or 28-day for RHR).
+The signals that move the recovery picture here: resting HR, total sleep, deep and REM sleep, HR Recovery 1-min, and sleep consistency. VO2max trend is a chronic-fitness signal and stays out of the score. Single-day values are noisy; the score uses 7-day means (5-day for HR Recovery) against 28-day personal baselines.
 
 **`recovery` is the primary read.** `scripts/read_tracker.py` returns:
 
 ```
-recovery: {score: 0-10, confidence: low|medium|high, drivers: [...]}
+recovery: {score: 0-10 | null, confidence: low|medium|high, drivers: [...]}
 ```
 
-The score sums clamped contributions from each driver against a baseline of 5. Drivers, weights, and triggers:
+Each signal is a z-score against the person's own baseline, mapped to a 0-10 component (5 = their average), and the score is the weighted average over the signals that have enough sample. Missing signals leave the rest to vote; they do not pull the score down. `score` is null when no signal had sample, typically when there is no recent health import. `confidence`: high (4 or more contributing signals), medium (2-3), low (fewer).
 
-| Signal | Comparison | Max swing | Reading |
-|---|---|---|---|
-| HRV (SDNN) | recent (7d) vs 60d baseline | ±2 | Higher = more parasympathetic / recovered. ±5% baseline = ±1 contribution. |
-| Resting HR | recent (7d) vs 28d typical | ±2 | Lower is better. ±2.5 bpm = ±1 contribution. |
-| Sleep total | recent (7d) vs 7h target | ±2 | ±1h = ±1 contribution. Caps at ±2. |
-| Wrist temp | recent (3d) vs 60d baseline | ±1.5 | Higher = stress / illness signal. ±0.2°C = ±1 contribution. |
-| HR Recovery 1-min | recent (5d) vs 28d typical | ±0.75 | Higher = recovered. ±5 bpm drop = ±0.75. |
-| VO2max trend | per-4w slope | ±0.75 | Positive = building fitness. ±2 ml/kg/min over 4w = ±0.75. |
+| Signal | Raw weight | Reading |
+|---|---|---|
+| Sleep total | 0.20 | Recent 7d vs 28d baseline. |
+| Resting HR | 0.15 | Lower is better (inverted). |
+| HR Recovery 1-min | 0.10 | Recent 5d vs 28d. Higher = recovered. |
+| Sleep deep / REM | 0.05 each | Needs `sleep_stages`. |
+| Sleep consistency | 0.05 | Penalty-only. |
 
-Maximum positive: ~9.0; maximum negative: ~1.0; clamped to [0, 10]. `confidence`: high (≥4 signals available), medium (3), low (≤2).
+(HRV at 0.30 and wrist temperature at 0.10 are capability-gated and absent for this source.)
 
-**Programming consequences** (applied by SKILL.md "Recovery-aware adjustments"):
-- `recovery.score < 4` → next session is re-entry (drop a working set, "leave 3-4 reps in tank"); lead with the dominant negative driver in "Why this plan".
-- `recovery.score 4–5.5` → hold loads, normal volume, no PR attempts.
-- `recovery.score ≥ 5.5` → green light unless another Tier gate binds.
-- A negative driver persisting across multiple `health_metrics_weekly` entries → flag deload as urgent regardless of cadence.
-- Always surface the reason in "Why this plan" — the user should know why the prescription is conservative.
+**Programming consequences.** The score reaches the plan through the session gate (`session_recommendation`), whose tier and `load_policy` decide whether the day is normal, scaled or a deload, and through `next_dose`, which decides loads. The score is not a second load rule:
+- A low score is Tier C or worse in the gate; lead with the dominant negative driver on the recovery-drivers card.
+- A negative driver persisting across several `health_metrics_weekly` entries is a reason to look harder at a deload; the gate and the deload clock (`block.deload_cadence_due`) make the call.
+- Always surface the reason on the card: the user should know why the day is conservative.
 
-**What NOT to do:** infer overreaching from one bad night (the score already smooths over 7 days), recommend the user "track HRV better" when `capabilities.hrv` is False (it's a source limitation, not a tracking gap), or react to a single high wrist-temp reading without a second day to confirm.
+**What NOT to do:** infer overreaching from one bad night (the score already smooths over 7 days), or recommend the user "track HRV better" or "track wrist temperature" (`capabilities.hrv` and `capabilities.wrist_temp` are False: a source limitation, not a tracking gap).
 
 ## §19 Per-Session HR
 
-**Source dependency.** This section requires a full Apple Health source for strength rows: native zipped XML or HealthAutoExport. The capability gate in `read_tracker.py` (`capabilities.per_workout_hr_strength`) short-circuits the cross-check on legacy or partial trackers; the standard load-progression rules (rep-range completion, perceived exertion) still drive their plans.
+**Source dependency.** This section needs per-workout HR on strength rows, which Health Export Kit provides. The capability gate in `read_tracker.py` (`capabilities.per_workout_hr_strength`) short-circuits the cross-check on partial trackers; the standard load-progression rule (`next_dose`) still drives their plans.
 
 Apple emits per-workout HR statistics (avg / max / min) on every `Workout` record. The importer matches these to logged training by date. `read_tracker.py` folds avg_hr + max_hr onto each `monthly_sessions[*]` entry and exposes per-muscle HR-creep flags via `hr_at_volume_divergence`.
 
 **Strength sessions, avg HR bands:**
 - 130-150 bpm avg = normal hypertrophy stimulus. Don't comment.
-- 150-160 bpm avg = running hot. Either rest periods are too short, accessory volume is too high, or the user is under-recovered. Hold load this block; tighten rest periods or trim accessory sets.
+- 150-160 bpm avg = running hot. Either rest periods are too short, accessory volume is too high, or the user is under-recovered. Tighten rest periods or trim accessory sets; add no sets this block.
 - >160 bpm sustained = under-recovered or excessive density. Investigate before progressing anything.
 - <110 bpm avg = effort too light. The user is leaving stimulus on the table — push reps before adding load.
 
-**Trend matters more than absolute.** A user with a low resting HR and good cardiac fitness can run a session at 125-135 bpm and hit failure on every set; another can sit at 145 bpm with the same effort. The cleanest fatigue signal is **per-muscle HR creep at constant volume** — `hr_at_volume_divergence[muscle].slope_bpm_per_4w` controls for volume changes that would otherwise confound the read. `hint == "rising HR at constant volume"` (slope ≥ +5 bpm/4w with ≥6 sessions) means the body is working harder for the same output. Hold load on that muscle group, finish the block, then deload.
+**Trend matters more than absolute.** A user with a low resting HR and good cardiac fitness can run a session at 125-135 bpm and hit failure on every set; another can sit at 145 bpm with the same effort. The cleanest fatigue signal is **per-muscle HR creep at constant volume** — `hr_at_volume_divergence[muscle].slope_bpm_per_4w` controls for volume changes that would otherwise confound the read. `hint == "rising HR at constant volume"` (slope ≥ +5 bpm/4w with ≥6 sessions) means the body is working harder for the same output. Add no sets to that muscle group, finish the block, then deload; loads still follow `next_dose`.
 
 **Cardio sessions, avg HR bands** (for Apple workouts of type Running / Cycling / Walking / Outdoor* / Indoor*):
 - Zone 2: 65-75% of max HR. Compute the actual range from the person's estimated max HR; if the average drifts above the upper band, the session was tempo, not Zone 2.
@@ -343,7 +342,7 @@ Total sleep hours is the headline metric, but two users sleeping 7h/night can ha
 
 **Sleep consistency** is its own signal. Stdev of nightly totals over a 7-night window: <1.0h is regular, 1.0-1.5h is acceptable, >1.5h is irregular and stressful regardless of average. The body adapts to consistent timing — a 6h/6h/6h/6h/6h/9h/9h week is worse than 6.5h/6.5h/6.5h/6.5h/6.5h/6.5h/6.5h despite the same total.
 
-**Source dependency.** Native Apple XML and HealthAutoExport carry deep / REM / core / awake breakdowns from watch-side sleep staging (calibrated against PSG). The capability gate `sleep_stages` in `read_tracker.py` short-circuits the deep/REM drivers on legacy or partial trackers; sleep_total_h and sleep consistency still apply whenever present.
+**Source dependency.** Health Export Kit carries deep / REM / core / awake breakdowns from watch-side sleep staging (calibrated against PSG). The capability gate `sleep_stages` in `read_tracker.py` short-circuits the deep/REM drivers on legacy or partial trackers; sleep_total_h and sleep consistency still apply whenever present.
 
 **Programming consequences** (applied by `recovery_score`):
 - `sleep_deep_pct < 13%` and persisting → -0.4 contribution to recovery score. Combined with low total hours, prefer a deload window.

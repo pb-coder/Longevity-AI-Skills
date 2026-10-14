@@ -734,19 +734,17 @@ class ArmWeekSpecTests(unittest.TestCase):
     def test_minimum_legal_arm_week_passes(self) -> None:
         self.assertEqual(arm_week_errors(self._MINIMUM_LEGAL), [])
 
-    def test_zero_arm_work_reports_the_floor_and_not_the_diversity_axis(self) -> None:
+    def test_zero_arm_work_is_the_muscle_floors_to_report_not_the_diversity_axis(self) -> None:
         plan = _HEAD + _workout(
             "1: UPPER A",
             "Dumbbell Flat Bench Press: 50kgx8 /// 50kgx8",
             "Cable Lat Pulldown: 65kgx8 /// 65kgx8")
-        errors = arm_week_errors(plan)
+        self.assertEqual(arm_week_errors(plan), [])
+        errors = render_validators.muscle_floor_errors(plan, {
+            "muscle_volume_targets": {"biceps": {"tier": "maintain"},
+                                      "triceps": {"tier": "maintain"}}})
         self.assertTrue(any("0 direct biceps sets" in e for e in errors))
         self.assertTrue(any("0 direct triceps sets" in e for e in errors))
-        self.assertFalse(any("distinct direct" in e for e in errors))
-
-    def test_spec_floor_is_the_single_source_of_the_six_set_minimum(self) -> None:
-        self.assertEqual(render_validators.DIRECT_ARM_MIN_SETS_PER_WEEK,
-                         ARM_WEEK_SPEC["min_direct_sets_per_week"])
 
     def test_a_zero_set_arm_bullet_does_not_buy_diversity(self) -> None:
         # The core loop skips zero-set bullets and so does the arm loop,
@@ -778,11 +776,16 @@ class ArmWeekSpecTests(unittest.TestCase):
 
 class BlockingEntryPointTests(unittest.TestCase):
     def test_dose_and_distribution_findings_come_back_as_errors(self) -> None:
-        errors, warnings = validate_workout_plan(_PLAN_ONE_EXERCISE_EVERY_SESSION)
+        errors, warnings = validate_workout_plan(
+            _PLAN_ONE_EXERCISE_EVERY_SESSION,
+            payload={"muscle_volume_targets": {"biceps": {"tier": "emphasis"}}})
         self.assertTrue(any("distinct core exercises" in e for e in errors))
         self.assertTrue(any("core pattern categories" in e for e in errors))
         self.assertTrue(any("direct biceps sets" in e for e in errors))
-        self.assertEqual(warnings, [])
+        # The fixture is a core and arm plan, not a week of main lifts, so
+        # the advisory main-pattern warning is expected and not under test.
+        self.assertEqual(
+            [w for w in warnings if "[advisory: main pattern]" not in w], [])
 
     def test_set_budget_drift_stays_a_warning(self) -> None:
         # An intentional deload legitimately undershoots the set budget,

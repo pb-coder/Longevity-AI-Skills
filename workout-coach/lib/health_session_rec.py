@@ -107,38 +107,25 @@ def _wrist_temp_deviation_c(health_all: list[dict], today_d: date) -> float | No
     return round(latest["value"] - baseline, 2)
 
 
-def _count_stalled_lifts(estimated_1rm: dict | None) -> int:
-    """Count lifts with stalled_sessions >= 2. Raw flat-e1RM count, kept for
-    backward compatibility. NOT used by the gate anymore — see
-    `_genuinely_stalled_lifts`, which excludes comeback lifts and lifts still
-    progressing so a returning trainee holding loads isn't read as fatigue."""
-    if not estimated_1rm:
-        return 0
-    n = 0
-    for v in estimated_1rm.values():
-        if not isinstance(v, dict):
-            continue
-        stalled = v.get("stalled_sessions")
-        try:
-            if stalled is not None and int(stalled) >= 2:
-                n += 1
-        except (TypeError, ValueError):
-            continue
-    return n
-
-
 def _genuinely_stalled_lifts(estimated_1rm: dict | None) -> int:
     """Count lifts that are genuinely stalled *at their ceiling* — the only
     kind that justifies a reactive deload.
 
-    `stalled_sessions` alone means "e1RM held flat within ±0.5kg for N
-    sessions" (see strength.py). Flatness is NOT fatigue:
+    `stalled_sessions` alone means "N sessions at one load without a rep
+    gain" (`strength.load_stall_sessions`). Flatness is NOT fatigue:
       - a lift well below its best is being re-built after a layoff; repeating
         a conservative load there is intended, not a stall, so exclude it
         (`current < 0.9 * best`).
       - a lift whose 4-week slope is still positive is progressing despite a
         flat last pair; exclude it (`slope_kg_per_4w > 0`).
+      - a lift that is owed weight (`weight_owed`, set by `read_tracker` from
+        `progression.build_next_dose`: every set hit the top of its range,
+        so the next dose adds load) has earned a bump. It is waiting for the
+        weight to go up, not stuck. A stall needs the reps to not improve AND
+        no bump to have been earned.
     What remains — flat, at/near best, not trending up — is a true plateau.
+    `nutrition_phase` reads the same count for its "lifts stalled while
+    bulking" stop signal, for the same reason.
     """
     if not estimated_1rm:
         return 0
@@ -151,6 +138,8 @@ def _genuinely_stalled_lifts(estimated_1rm: dict | None) -> int:
             if stalled is None or int(stalled) < 2:
                 continue
         except (TypeError, ValueError):
+            continue
+        if v.get("weight_owed"):      # a bump is earned — not a stall
             continue
         cur = v.get("current_e1rm_kg")
         best = v.get("best_e1rm_kg")
@@ -223,40 +212,163 @@ def _expected_tier_c_rebound_by_session(
     return 1
 
 
-def _tsb_sustained_days(today_tsb: float | None, training_load: dict | None,
-                        threshold: float, direction: str = "above") -> int:
-    """Approximation: returns 1 when the current TSB hits the threshold
-    in the given direction, otherwise 0. We don't have day-by-day TSB
-    history in `training_load` (only today), so over-recovered "sustained"
-    is approximated by current TSB + 7-day trend slope. The render layer
-    computes the proper 14-day strip from `compute_tier_history`."""
-    if today_tsb is None:
-        return 0
-    if direction == "above" and today_tsb >= threshold:
-        return 1
-    if direction == "below" and today_tsb <= threshold:
-        return 1
-    return 0
+def compute_load_policy(rec: dict, recovery: dict | None,
+                        training_load: dict | None) -> dict:
+    """``progress`` / ``reduce``: may a lift's weight go up?
+
+    The ONE place the recovery gate is turned into a load decision;
+    `progression.next_dose` applies it and SKILL.md carries no second copy.
+    Only a red flag blocks a bump: gate Tier A or B
+    (`constants.LOAD_REDUCE_TIERS`) or strength TSB in the high-fatigue band
+    (`constants.LOAD_REDUCE_TSB_BANDS`). Everything else, Tier C and the
+    carrying-load / fatigued bands included, is ``progress``: whether a lift
+    has earned weight is the double-progression rule's call, off the log.
+    A user override of the gate (a ``user_override`` rationale entry) is
+    ``progress`` too, whatever strength TSB says: the user chose a normal
+    block after seeing the call, and the reason states the TSB and the
+    override.
+    Tier C's cut to the session's set budget is volume, not load.
+
+    ``training_load`` is the strength-scoped load summary the gate itself
+    ran on. A missing input is NAMED in ``reason`` and flagged
+    (``recovery_available``), never silently substituted: a tracker with no
+    recent health import has no recovery score, and the policy then rests on
+    the tier and freshness alone, which the coach has to be able to say out
+    loud.
+    """
+    from .constants import (
+        LOAD_REDUCE_TIERS,
+        LOAD_REDUCE_TSB_BANDS,
+        SESSION_GATE_THRESHOLDS as T,
+        strength_tsb_band,
+    )
+    tier, label = rec["tier"], rec["label"]
+    score = (recovery or {}).get("score")
+    tsb = (training_load or {}).get("tsb")
+    band = strength_tsb_band(tsb)
+    overridden = any(r.get("signal") == "user_override"
+                     for r in rec.get("rationale") or [])
+    by_tier = tier in LOAD_REDUCE_TIERS
+    by_tsb = band in LOAD_REDUCE_TSB_BANDS
+    # A user override is an informed decision to train a normal block, made
+    # after seeing the call (SKILL.md, override protocol), and the gate it
+    # overrides is the only thing that sets ``reduce``. So the policy is
+    # ``progress`` whatever strength TSB says: the TSB is still stated, so
+    # the coach can say out loud what was overridden. A lift still has to
+    # earn its bump from the log.
+    policy = ("progress" if overridden
+              else "reduce" if (by_tier or by_tsb) else "progress")
+
+    why: list[str] = []
+    if overridden:
+        if tsb is None:
+            why.append("the user overrode the gate's downgrade and chose a "
+                       "normal block; strength TSB is unavailable. A lift "
+                       "that earned weight gets it")
+        else:
+            why.append(
+                f"the user overrode the gate's downgrade and chose a normal "
+                f"block, so loads follow the log; strength TSB is "
+                f"{tsb:+.1f} ({band.replace('_', ' ')})"
+                + (f", at or under the {T['tier_b_tsb_high_fatigue']:g} line "
+                   f"that would otherwise call for reduce"
+                   if by_tsb else "")
+                + ". A lift that earned weight gets it")
+    elif policy == "reduce":
+        if by_tier:
+            why.append(f"Tier {tier} ({label}) calls for reduce")
+        if by_tsb:
+            why.append(f"strength TSB {tsb:+.1f} is in the "
+                       f"{band.replace('_', ' ')} band "
+                       f"(<= {T['tier_b_tsb_high_fatigue']:g}), which calls "
+                       f"for reduce")
+    else:
+        why.append(f"Tier {tier} ({label}) and strength TSB {tsb:+.1f} "
+                   f"({band.replace('_', ' ')}) are not red flags: a lift "
+                   f"that earned weight gets it"
+                   if band else
+                   f"Tier {tier} ({label}) is not a red flag: a lift that "
+                   f"earned weight gets it")
+        if tier == "C":
+            why.append(f"Tier C still scales the session's set budget by "
+                       f"x{T['tier_c_session_budget_scale']:g}; that is "
+                       f"volume, not load")
+    floor = T["tier_d_recovery_score_min"]
+    if overridden:
+        pass
+    elif score is not None and tier in ("D", "E") and score < floor:
+        why.append(f"recovery {score:.1f}/10 is under the {floor:g} green "
+                   f"line but the gate did not downgrade it")
+    if score is None and tsb is None:
+        why.append("neither a recovery score nor a strength TSB is "
+                   "available: no fatigue signal is on file")
+    elif score is None:
+        why.append("recovery score unavailable (no recent health import): "
+                   "this rests on the tier and strength TSB alone")
+    elif tsb is None:
+        why.append("strength TSB unavailable: this rests on the tier "
+                   "alone")
+    return {
+        "policy":             policy,
+        "tier":               tier,
+        "label":              label,
+        "strength_tsb":       tsb,
+        "tsb_band":           band,
+        "recovery_score":     score,
+        "recovery_available": score is not None,
+        "reason":             "; ".join(why),
+    }
 
 
-def compute_session_recommendation(*,
-                                    recovery: dict | None,
-                                    training_load: dict | None,
-                                    acwr: dict | None,
-                                    weekly_volume: dict | None,
-                                    sleep_regularity: dict | None,
-                                    sleep_summary: dict | None,
-                                    estimated_1rm: dict | None,
-                                    hr_at_volume_divergence: dict | None,
-                                    deloads: list[str] | None,
-                                    auto_deload_candidates: list[str] | None,
-                                    health_all: list[dict],
-                                    today_d: date,
-                                    estimated_max_hr: float | None,
-                                    bodyweight_trend: float | None = None) -> SessionRecommendation:
-    """Top-down 5-tier gate. First gate to fire wins. Returns the
-    operational recommendation that the SKILL.md prompt MUST honor before
-    generating any workout.
+def apply_user_override(rec: dict, recovery: dict | None,
+                        training_load: dict | None) -> dict:
+    """The gate's call after an EXPLICIT user override (``--override-gate``).
+
+    SKILL.md's override protocol: the gate stays the deterministic default,
+    and this only runs when the user, having SEEN the call, asks to train
+    normally. A restrictive Tier A/B/C is normalised to green so the
+    dashboard's "Today's call" and the per-workout set budget both reflect a
+    full session, with the original rationale kept (the ``user_override``
+    entry first, then the gate's own) for honesty. A call that is already D
+    or E is returned as it is: there is nothing to override.
+
+    The load policy is recomputed on the overridden call, and
+    `compute_load_policy` reads the ``user_override`` entry: the user chose
+    a normal block, so the policy is ``progress`` even when strength TSB is
+    in the high-fatigue band, and the reason says so with the TSB value.
+    """
+    if rec.get("tier") not in ("A", "B", "C"):
+        return rec
+    orig_tier = rec.get("tier")
+    orig_head = rec.get("headline") or ""
+    out = {
+        "tier": "D",
+        "label": "green",
+        "headline": "Train as planned (you chose to override the recovery downgrade).",
+        "substitute": None,
+        "rationale": ([{
+            "signal": "user_override",
+            "value": None,
+            "threshold": None,
+            "note": (f"You overrode the system's Tier {orig_tier} call "
+                     f"({orig_head}) and chose to train normally."),
+        }] + list(rec.get("rationale") or [])),
+        "override_allowed": True,
+        "override_message": (
+            f"User override in effect. The system's own read was Tier "
+            f"{orig_tier}: {orig_head} Training at full volume by request; "
+            f"listen to your body and back off if a lift feels off."),
+        "expected_rebound_by_session": None,
+    }
+    out["load_policy"] = compute_load_policy(out, recovery, training_load)
+    return out
+
+
+def compute_session_recommendation(**inputs) -> SessionRecommendation:
+    """Top-down 5-tier gate plus the load policy that rides on it.
+
+    First gate to fire wins. Returns the operational recommendation that
+    the SKILL.md prompt MUST honor before generating any workout.
 
     Tiers (highest priority first):
       A — illness / acute rest
@@ -267,8 +379,34 @@ def compute_session_recommendation(*,
       E — over-recovered (train normal + taper warning)
 
     Returns a dict with `tier`, `label`, `headline`, `substitute`,
-    `rationale` list, and `override_*` fields.
+    `rationale` list, `override_*` fields and `load_policy`.
+
+    ``inputs`` are the keyword arguments of `_gate_tier`. The load policy is
+    attached HERE, once, on top of whichever tier fired, so no return path
+    of the tier decision can forget it (`compute_load_policy`).
     """
+    rec = _gate_tier(**inputs)
+    rec["load_policy"] = compute_load_policy(
+        rec, inputs.get("recovery"), inputs.get("training_load"))
+    return rec
+
+
+def _gate_tier(*,
+               recovery: dict | None,
+               training_load: dict | None,
+               acwr: dict | None,
+               weekly_volume: dict | None,
+               sleep_regularity: dict | None,
+               sleep_summary: dict | None,
+               estimated_1rm: dict | None,
+               hr_at_volume_divergence: dict | None,
+               deloads: list[str] | None,
+               auto_deload_candidates: list[str] | None,
+               health_all: list[dict],
+               today_d: date,
+               estimated_max_hr: float | None,
+               bodyweight_trend: float | None = None) -> SessionRecommendation:
+    """The top-down tier decision. See `compute_session_recommendation`."""
     from .constants import SESSION_GATE_THRESHOLDS as T  # local import
 
     drivers = (recovery or {}).get("drivers") or []
@@ -411,7 +549,7 @@ def compute_session_recommendation(*,
             and rhr_z is not None and rhr_z <= -T["tier_a_rhr_z_crash"]):
         tier_a_fired = True
         add("recovery_crash", recovery_score, T["tier_a_recovery_score_crash"],
-            f"Recovery {recovery_score:.1f}/10 with HRV z {hrv_z:+.2f} and RHR z {rhr_z:+.2f} — autonomic crash triad")
+            f"Recovery {recovery_score:.1f}/10 with HRV z {hrv_z:+.2f} and RHR z {rhr_z:+.2f}: autonomic crash triad")
 
     if tier_a_fired:
         return {
@@ -442,7 +580,7 @@ def compute_session_recommendation(*,
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "zone_2"
         add("tsb", tsb, T["tier_b_tsb_high_fatigue"],
-            f"Freshness (TSB) {tsb:+.1f} ≤ {T['tier_b_tsb_high_fatigue']:.0f} — high accumulated fatigue")
+            f"Freshness (TSB) {tsb:+.1f} ≤ {T['tier_b_tsb_high_fatigue']:.0f}: high accumulated fatigue")
     # SLOW: sustained HRV suppression.
     if (hrv_z is not None and hrv_z <= T["tier_b_hrv_z_sustained"]
             and not suppress_slow):
@@ -456,12 +594,12 @@ def compute_session_recommendation(*,
         tier_b_kind = "reactive_deload_week"
         names = ", ".join(over_mrv_muscles[:5])
         add("muscles_over_mrv", n_over_mrv, T["tier_b_muscles_over_mrv_count"],
-            f"{n_over_mrv} muscles over MRV ({names}) — RP MRV-breach protocol triggers a reactive deload")
+            f"{n_over_mrv} muscles over MRV ({names}): RP MRV-breach protocol triggers a reactive deload")
     # SLOW: an auto-deload candidate is stale once a deload was already served.
     if unmarked_deload_recent and not deload_served:
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "reactive_deload_week"
-        add("auto_deload_candidate", "yes", "—",
+        add("auto_deload_candidate", "yes", None,
             "auto-deload candidate flagged in the last 7 days; the data already looked like a deload was needed")
     # ACUTE: a sharp week-over-week training-stress spike — but only when
     # corroborated (negative strength freshness + meaningful absolute acute
@@ -472,7 +610,7 @@ def compute_session_recommendation(*,
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "zone_2"
         add("wow_change_pct", round(wow_pct, 1), T["tier_b_wow_spike_pct"],
-            f"week-over-week training stress +{wow_pct:.0f}% with negative strength freshness and high acute load — sharp ramp into red, cap the next 7 days at +10%")
+            f"week-over-week training stress +{wow_pct:.0f}% with negative strength freshness and high acute load: sharp ramp into red, cap the next 7 days at +10%")
     # SLOW: genuine ceiling-stall, but ONLY when corroborated by fatigue.
     # Flat loads on isolations / comeback lifts no longer force a deload.
     if (stalled >= T["tier_b_stalled_lifts_count"]
@@ -480,7 +618,7 @@ def compute_session_recommendation(*,
         tier_b_fired = True
         tier_b_kind = tier_b_kind or "reactive_deload_week"
         add("stalled_lifts", stalled, T["tier_b_stalled_lifts_count"],
-            f"{stalled} top lifts stalled at/near best for ≥2 sessions and not progressing, with a corroborating fatigue signal — Tuchscherer reactive-deload trigger")
+            f"{stalled} top lifts stalled at/near best for ≥2 sessions and not progressing, with a corroborating fatigue signal: Tuchscherer reactive-deload trigger")
 
     if tier_b_fired:
         if tier_b_kind == "reactive_deload_week":
@@ -496,7 +634,7 @@ def compute_session_recommendation(*,
             zone2_hint = f" at ~{zone2_hr} bpm" if zone2_hr else ""
             substitute = {
                 "kind": "zone_2",
-                "prescription": f"Zone 2 cardio 45–60 min{zone2_hint} · mobility 15 min · sauna 15 min optional · no strength today",
+                "prescription": f"Zone 2 cardio 45-60 min{zone2_hint} · mobility 15 min · sauna 15 min optional · no strength today",
                 "duration_min": 60,
                 "notes": "Re-evaluate tomorrow. Resume strength once the recovery score and TSB both lift.",
             }
@@ -520,7 +658,7 @@ def compute_session_recommendation(*,
         _why = ("genuinely low" if recovery_genuinely_low
                 else "moderate, and freshness is negative (carrying load)")
         add("recovery_score", recovery_score, T["tier_c_recovery_score_hi"],
-            f"Recovery {recovery_score:.1f}/10 — {_why}")
+            f"Recovery {recovery_score:.1f}/10: {_why}")
     if (hrv_z is not None and T["tier_c_hrv_z_lo"] < hrv_z <= T["tier_c_hrv_z_hi"]
             and not over_recovered and soft_dip_actionable):
         tier_c_fired = True
@@ -543,12 +681,12 @@ def compute_session_recommendation(*,
     if rhr_z is not None and rhr_z <= -T["tier_c_rhr_z_floor"]:
         tier_c_fired = True
         add("rhr_z", round(rhr_z, 2), -T["tier_c_rhr_z_floor"],
-            f"RHR z {rhr_z:+.2f} — resting HR elevated above baseline")
+            f"RHR z {rhr_z:+.2f}: resting HR elevated above baseline")
     if n_over_mrv >= T["tier_c_muscles_over_mrv_count"]:
         tier_c_fired = True
         names = ", ".join(over_mrv_muscles[:5])
         add("muscles_over_mrv", n_over_mrv, T["tier_c_muscles_over_mrv_count"],
-            f"{n_over_mrv} muscle(s) over MRV ({names}) — modify the affected groups")
+            f"{n_over_mrv} muscle(s) over MRV ({names}): modify the affected groups")
     # HR creep escalates to a session-wide downgrade ONLY when it's plausibly
     # fatigue AND corroborated by systemic under-recovery. Confounder guards:
     # a systemic shift across many muscles (bodyweight gain on a bulk, summer
@@ -575,7 +713,7 @@ def compute_session_recommendation(*,
         tier_c_fired = True
         names = ", ".join(hr_creep_muscles[:5])
         add("hr_at_volume_divergence", len(hr_creep_muscles), 2,
-            f"HR rising at constant volume on {names} with no confounder, plus moderate recovery — hold loads on those groups")
+            f"HR rising at constant volume on {names} with no confounder, plus moderate recovery: don't add sets on those groups")
 
     if tier_c_fired:
         rebound_by_session = _expected_tier_c_rebound_by_session(
@@ -584,15 +722,22 @@ def compute_session_recommendation(*,
             recovery_score=recovery_score,
             hr_creep_muscles=hr_creep_muscles,
         )
+        scale = T["tier_c_session_budget_scale"]
         return {
             "tier": "C",
             "label": "downgrade",
-            "headline": "Modified strength: hold loads, cut accessories.",
+            "headline": "Modified strength: cut accessories, loads follow next_dose.",
             "substitute": {
                 "kind": "modified_strength",
-                "prescription": f"keep the planned session pattern · −{T['tier_c_downgrade_volume_pct']:.0f}% volume on secondary lifts · hold loads on every working set · drop conditioning finisher · no PR attempts",
+                "prescription": (
+                    f"keep the planned session pattern · working-set budget "
+                    f"x{scale:g} for workouts 1..{rebound_by_session} (later "
+                    f"workouts keep the full budget) · drop conditioning "
+                    f"finisher · loads follow next_dose, which adds weight "
+                    f"only to a lift whose every set hit the top of its rep "
+                    f"range"),
                 "duration_min": None,
-                "notes": "Compound lifts stay at planned volume; isolations halve. Re-assess tomorrow.",
+                "notes": "The scale is on the whole session budget, which is volume: it does not hold loads. The per-muscle floors (`muscle_floors`) still apply in full, so the isolation block absorbs the cut. Re-assess tomorrow.",
             },
             "rationale": rationale[:5],
             "override_allowed": True,
@@ -606,31 +751,49 @@ def compute_session_recommendation(*,
     if (recovery_score is not None and recovery_score < T["tier_d_recovery_score_min"]
             and soft_dip_actionable):
         add("recovery_score", recovery_score, T["tier_d_recovery_score_min"],
-            f"Recovery {recovery_score:.1f}/10 below green floor, with genuinely low recovery or negative freshness — hold load, no PR attempts")
+            f"Recovery {recovery_score:.1f}/10 below green floor, with genuinely low recovery or negative freshness: full set budget, loads follow next_dose")
         return {
             "tier": "C",
             "label": "hold_load",
-            "headline": "Modified strength: hold loads, no PR attempts.",
+            "headline": "Modified strength: skip the finisher, loads follow next_dose.",
             "substitute": {
                 "kind": "modified_strength",
-                "prescription": "keep the planned movement pattern · hold loads · no PR attempts · skip conditioning finisher",
+                "prescription": "keep the planned movement pattern · loads follow next_dose, which adds weight only to a lift whose every set hit the top of its rep range · skip conditioning finisher",
                 "duration_min": None,
-                "notes": "This is the Tier-D floor guard: not a deload, but not green.",
+                "notes": "This is the Tier-D floor guard: not a deload, but not green. Neither volume nor load is cut.",
             },
             "rationale": rationale[:5],
             "override_allowed": True,
-            "override_message": "Resume normal load progression once recovery is back above the green floor.",
+            "override_message": "Resume normal training once recovery is back above the green floor.",
             "expected_rebound_by_session": 1,
         }
 
     # ---- TIER E: over-recovered taper warning ----
     if tsb is not None and tsb >= T["tier_e_tsb_high"]:
+        gap = recovery_score is None
+        # The TSB entry goes FIRST: it is what put the day in this tier, and
+        # `compute_tier_history` reads `rationale[0]` as the dominant signal.
         add("tsb", tsb, T["tier_e_tsb_high"],
-            f"Freshness (TSB) {tsb:+.1f} ≥ {T['tier_e_tsb_high']:.0f} — fitness is bleeding off, you've been over-recovered")
+            f"Freshness (TSB) {tsb:+.1f} ≥ {T['tier_e_tsb_high']:.0f}: "
+            + ("recent training load is low, which may or may not mean fitness is bleeding off"
+               if gap else
+               "fitness is bleeding off, you've been over-recovered"))
+        if gap:
+            # TSB alone is a training-LOAD signal: it rises when sessions
+            # stop, whatever the body is doing. With no recovery score to
+            # corroborate it, "over-recovered" is a guess, so it is
+            # presented as one.
+            add("recovery_unavailable", None, None,
+                "Recovery score unavailable (no recent health import): "
+                "over-recovery cannot be confirmed from freshness alone. "
+                "Import a fresh export to restore the recovery read.")
         return {
             "tier": "E",
             "label": "over_recovered",
-            "headline": "Train as planned — but you've been over-recovered, fitness is bleeding off.",
+            "headline": (
+                "Train as planned. Recovery data is missing, so this rests on freshness (TSB) alone and over-recovery is unconfirmed."
+                if gap else
+                "Train as planned, but you've been over-recovered, fitness is bleeding off."),
             "substitute": {
                 "kind": "normal_strength",
                 "prescription": "resume normal training load · don't sit in the taper any longer",
@@ -644,14 +807,26 @@ def compute_session_recommendation(*,
 
     # ---- TIER D: green ----
     if recovery_score is not None:
-        add("recovery_score", recovery_score, T["tier_d_recovery_score_min"],
-            f"Recovery {recovery_score:.1f}/10 — green")
+        floor = T["tier_d_recovery_score_min"]
+        if recovery_score >= floor:
+            add("recovery_score", recovery_score, floor,
+                f"Recovery {recovery_score:.1f}/10, green")
+        else:
+            # Reaching Tier D below the floor means the dip is not backed by
+            # anything else: not under the genuinely-low line and not
+            # carrying load. Say that instead of calling it green.
+            add("recovery_score", recovery_score, floor,
+                f"Recovery {recovery_score:.1f}/10 is under the {floor:g} "
+                f"green line, but not low enough "
+                f"(< {T['tier_c_recovery_hard_floor']:g}) and not backed by "
+                f"negative freshness (TSB < {T['tier_c_soft_tsb_floor']:g}) "
+                f"to downgrade")
     else:
         # Data gap: no recent health import means the recovery score is blind.
         # Don't let a confounded proxy ratchet the plan down — surface the gap
         # and lean on freshness (TSB) instead of guessing fatigue.
         add("recovery_unavailable", None, None,
-            "Recovery score unavailable (no recent health import) — leaning on "
+            "Recovery score unavailable (no recent health import): leaning on "
             "freshness (TSB). Import a fresh export to restore the recovery read.")
     if tsb is not None:
         add("tsb", tsb, None,
@@ -662,7 +837,7 @@ def compute_session_recommendation(*,
         "headline": "Train as planned.",
         "substitute": {
             "kind": "normal_strength",
-            "prescription": "execute the planned session with the load rules from SKILL.md §6",
+            "prescription": "execute the planned session; loads follow next_dose",
             "duration_min": None,
             "notes": "Green light. Hard training is on the table today.",
         },

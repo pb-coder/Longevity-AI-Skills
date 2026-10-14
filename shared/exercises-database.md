@@ -137,11 +137,13 @@ Organized by primary muscle group > movement pattern. Tags:
 - Dumbbell Lateral Raise [DB]
 - Cable Lateral Raise [Cable] ◆
 - Lateral Raise Machine [Machine]
-- Cable Front Raise [Cable]
-- Dumbbell Front Raise [DB]
 - Cable Upright Row [Cable] — +traps
 - Wall-Lean Side Slide [BW]
 - Self-Resisted Lateral Raise [BW]
+
+### Front Delt (Isolation)
+- Cable Front Raise [Cable]
+- Dumbbell Front Raise [DB]
 
 ### Rear Delt (Isolation)
 - Rear Delt Fly Machine [Machine]

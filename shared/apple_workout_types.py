@@ -1,8 +1,8 @@
 """Apple workout type mappings — single source of truth.
 
 The module keeps Apple's own name because it genuinely models Apple's
-activity-type enum, which HealthAutoExport's workout names still map
-onto. ``import_health_auto_export.py`` maps each export name to the
+activity-type enum, which the Health Export Kit workout types map
+onto. ``import_health_export_kit.py`` maps each export type to the
 canonical string below (``Running``, ``Hiking``, ...) before anything
 downstream sees it. ``RAWVALUE_TO_TYPE`` is retained for rows written by
 the retired XML importer, whose ``HKWorkoutActivityTypeRunning``-style
@@ -40,22 +40,6 @@ RAWVALUE_TO_TYPE: dict[int, str] = {
     79: "HighIntensityIntervalTraining",
     80: "Yoga",
 }
-
-
-def rawvalue_name(raw: int | str | None) -> str:
-    """Return the canonical name for an Apple rawValue, or ``Unknown(rawValue:N)``.
-
-    Accepts int or string ``"35"``. Returns the fallback string unchanged
-    so callers don't need to second-guess unknown types — they still flow
-    into the Workout Sessions sheet, just without auto-cardio handling.
-    """
-    if raw is None:
-        return "Unknown(rawValue:?)"
-    try:
-        i = int(raw)
-    except (TypeError, ValueError):
-        return f"Unknown(rawValue:{raw})"
-    return RAWVALUE_TO_TYPE.get(i, f"Unknown(rawValue:{i})")
 
 
 # --------------------------------------------------- auto-cardio eligibility

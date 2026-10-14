@@ -1,17 +1,17 @@
-"""The three block/ledger defects left open after the 2026-08-02 fix round.
+"""The two block/ledger defects left open after the 2026-08-02 fix round.
 
-R-05, R-13 and R-01 from ``GATE-GAPS-2026-08-02.md``'s STILL OPEN
-section. Each class below pins one of them with the reproduction that
-found it, so the fix cannot regress quietly.
+R-05 and R-13 from ``GATE-GAPS-2026-08-02.md``'s STILL OPEN section. Each
+class below pins one of them with the reproduction that found it, so the
+fix cannot regress quietly. (R-01, the progression increment, is now
+``progression.next_dose``: see ``test_progression.py``.)
 
 The governing rule every test here is written against: an enforcement
 input is safe iff it was written by someone other than the party being
 policed, or derived from such a source. User logs and the exercise
-catalog are trustworthy; COACH-WRITTEN FREE TEXT IS ADVERSARIAL. Two of
-these three defects are free text choosing its own threshold — a workout
-heading picking the core budget (R-13), and a block artifact the coach is
-told to copy contradicting the spec it ships beside (R-05). The third is
-an enforcement input read out of two coach-authored plans (R-01).
+catalog are trustworthy; COACH-WRITTEN FREE TEXT IS ADVERSARIAL. Both
+defects are free text choosing its own threshold — a workout heading
+picking the core budget (R-13), and a block artifact the coach is told to
+copy contradicting the spec it ships beside (R-05).
 """
 from __future__ import annotations
 
@@ -23,15 +23,8 @@ from datetime import date
 from pathlib import Path
 
 from workout_coach.lib.adherence import (
-    DOSE_LOAD_MIN_PCT,
-    LEDGER_LOAD_STALL_SESSIONS,
     SESSION_CONTENT_MIN_SETS,
-    expected_next_dose,
-    ledger_progression,
-    ledger_reference,
     parse_plan,
-    performed_sessions,
-    progression_verdict,
     session_content_regions,
     session_type_from_content,
     session_type_from_title,
@@ -650,284 +643,6 @@ class BlockPayloadCarriesBothFindingsTests(unittest.TestCase):
         axes = {c["axis"] for c in marker["conflicts"]}
         self.assertIn("min_distinct_exercises_per_week", axes)
         self.assertIn("sets_per_session", axes)
-
-
-# ===========================================================================
-# R-01 — the progression increment, derived from the LEDGER
-# ===========================================================================
-def _log(day: str, exercise: str, kg: float, reps: int, n: int = 3) -> list:
-    return [{"date": day, "exercise": exercise, "kg": kg, "reps": reps,
-             "notes": ""} for _ in range(n)]
-
-
-def _presc(load=None, lo=None, hi=None, sets=3, name="Barbell Back Squat"):
-    return {"exercise": name, "load_kg": load, "rep_lo": lo, "rep_hi": hi,
-            "rep_target": (f"{lo}-{hi}" if lo != hi else str(lo)),
-            "prescribed_sets": sets}
-
-
-def _history(*sessions):
-    """``(date, kg, reps)`` triples into the shape the verdict reads."""
-    rows = []
-    for day, kg, reps in sessions:
-        rows += _log(day, "Barbell Back Squat", kg, reps)
-    return performed_sessions(rows, _DB)["barbell back squat"]
-
-
-class ProgressionIsJudgedAgainstTheLedgerTests(unittest.TestCase):
-    """`dose_staleness` compares two COACH-AUTHORED plans, so shifting
-    every rep window up one (``x8-10`` -> ``x9-11``) reads as material
-    without a kilo being added. That is why
-    `render_validators.DOSE_PROGRESSION_ENFORCED` is False.
-
-    Everything here reads the logged sets instead and asks a different
-    question: does this prescription ask for anything the person has not
-    already done?
-    """
-
-    def test_the_rep_window_shuffle_is_not_a_progression(self) -> None:
-        """THE BYPASS, by name.
-
-        Ten reps at 90kg for three sessions running: the reps have
-        stopped arriving at this load. Widening the window to 9-11 asks
-        again for exactly what stopped happening.
-        """
-        history = _history(("2026-07-08", 90, 10), ("2026-07-15", 90, 10),
-                           ("2026-07-22", 90, 10))
-        out = progression_verdict(history, _presc(90, 9, 11))
-        self.assertEqual(out["verdict"], "cosmetic")
-        self.assertEqual(out["kind"], "rep_window_shift")
-        self.assertFalse(out["material"])
-
-    def test_the_same_two_prescriptions_get_two_verdicts_on_two_ledgers(self):
-        """THE STRUCTURAL POINT.
-
-        ``x8-10`` -> ``x9-11`` at a held load is one written change. It
-        is a progression when the reps at that load are still climbing
-        and it is not when they have stopped — and nothing about the two
-        prescriptions distinguishes those. Only the ledger does, which is
-        the whole reason this function exists.
-        """
-        stalled = _history(("2026-07-08", 90, 10), ("2026-07-15", 90, 10),
-                           ("2026-07-22", 90, 10))
-        climbing = _history(("2026-07-08", 90, 8), ("2026-07-15", 90, 9),
-                            ("2026-07-22", 90, 10))
-        presc = _presc(90, 9, 11)
-        self.assertEqual(progression_verdict(stalled, presc)["verdict"],
-                         "cosmetic")
-        self.assertEqual(progression_verdict(climbing, presc)["verdict"],
-                         "progression")
-
-    def test_adding_load_is_a_progression(self) -> None:
-        history = _history(("2026-07-15", 90, 10), ("2026-07-22", 90, 10))
-        out = progression_verdict(history, _presc(95, 8, 10))
-        self.assertEqual((out["verdict"], out["kind"]), ("progression", "load_up"))
-        self.assertTrue(out["material"])
-
-    def test_a_load_move_inside_the_granularity_floor_is_not_one(self) -> None:
-        history = _history(("2026-07-15", 90, 10), ("2026-07-22", 90, 10))
-        nudge = 90 * (1 + DOSE_LOAD_MIN_PCT / 2)
-        self.assertNotEqual(
-            progression_verdict(history, _presc(nudge, 8, 10))["verdict"],
-            "progression")
-
-    def test_working_up_through_a_range_is_a_legitimate_hold(self) -> None:
-        """``65kgx6-8`` against six reps performed.
-
-        Reading this as a cosmetic re-copy was wrong on three real
-        prescriptions in the shipped 2026-08-02 plan before the boundary
-        was fixed to ``<=``. The lift is at the floor of its range with
-        room above it; re-asking IS the instruction.
-        """
-        history = _history(("2026-07-15", 65, 6), ("2026-07-23", 65, 6))
-        out = progression_verdict(history, _presc(65, 6, 8))
-        self.assertEqual(out["verdict"], "hold")
-        self.assertEqual(out["kind"], "working_up_through_range")
-        self.assertTrue(out["material"])
-
-    def test_a_prescription_the_ledger_never_met_is_a_hold(self) -> None:
-        history = _history(("2026-07-22", 90, 6))
-        self.assertEqual(progression_verdict(history, _presc(90, 8, 10))
-                         ["verdict"], "hold")
-
-    def test_re_asking_for_what_was_already_done_is_cosmetic(self) -> None:
-        history = _history(("2026-07-15", 90, 12), ("2026-07-22", 90, 12))
-        out = progression_verdict(history, _presc(90, 10, 12))
-        self.assertEqual((out["verdict"], out["kind"]),
-                         ("cosmetic", "repeat_of_performed"))
-
-    def test_a_deload_reads_as_a_regression_and_is_not_judged(self) -> None:
-        """Deliberately NOT a verdict on legitimacy. This function does
-        not know whether a deload was prescribed; the caller pairs it
-        with ``block.deload_prescribed``.
-        """
-        history = _history(("2026-07-22", 100, 8))
-        out = progression_verdict(history, _presc(70, 8, 10))
-        self.assertEqual((out["verdict"], out["kind"]),
-                         ("regression", "load_down"))
-        self.assertIn("deload", out["why"])
-
-    def test_no_logged_history_is_unknown_not_a_failure(self) -> None:
-        out = progression_verdict([], _presc(90, 8, 10))
-        self.assertEqual(out["verdict"], "unknown")
-        self.assertIsNone(out["performed"])
-        self.assertIsNone(out["expected"])
-
-    def test_a_timed_hold_has_nothing_to_compare(self) -> None:
-        rows = [{"date": "2026-07-22", "exercise": "Plank", "kg": 0,
-                 "reps": 0, "duration_min": 1.0, "notes": ""}]
-        history = performed_sessions(rows, _DB)["plank"]
-        out = progression_verdict(history, _presc(None, None, None, name="Plank"))
-        self.assertEqual(out["verdict"], "unknown")
-        self.assertEqual(out["kind"], "no_rep_comparison")
-
-    def test_bodyweight_progression_reads_off_reps(self) -> None:
-        rows = _log("2026-07-15", "Pull-Up", 0, 8) + _log("2026-07-22", "Pull-Up", 0, 8)
-        history = performed_sessions(rows, _DB)["pull-up"]
-        # Eight reps for two sessions running, and the window shifts up
-        # around them: the floor drops under what was performed and the
-        # top asks for one more. Same shape as the loaded bypass.
-        stalled = progression_verdict(history, _presc(None, 7, 9, name="Pull-Up"))
-        self.assertEqual(stalled["verdict"], "cosmetic")
-        self.assertEqual(stalled["kind"], "rep_window_shift")
-        # The honest case: the ledger sits at the floor of the range.
-        self.assertEqual(
-            progression_verdict(history, _presc(None, 8, 10, name="Pull-Up"))
-            ["verdict"], "hold")
-
-
-class LedgerReferenceTests(unittest.TestCase):
-    def test_reps_stalled_needs_a_run_at_one_load(self) -> None:
-        """One session at a load is the load being INTRODUCED."""
-        one = _history(("2026-07-22", 90, 10))
-        self.assertFalse(ledger_reference(one)["reps_stalled"])
-        self.assertEqual(ledger_reference(one)["reps_trend"],
-                         "first_session_at_load")
-        run = _history(*[("2026-07-%02d" % (8 + 7 * i), 90, 10)
-                         for i in range(LEDGER_LOAD_STALL_SESSIONS)])
-        self.assertTrue(ledger_reference(run)["reps_stalled"])
-
-    def test_a_load_change_resets_the_run(self) -> None:
-        history = _history(("2026-07-01", 85, 10), ("2026-07-08", 85, 10),
-                           ("2026-07-15", 90, 8))
-        ref = ledger_reference(history)
-        self.assertEqual(ref["load_kg"], 90)
-        self.assertEqual(ref["sessions_at_load"], 1)
-        self.assertFalse(ref["reps_stalled"])
-
-    def test_reps_at_top_takes_the_best_set(self) -> None:
-        """The generous reading of what the person managed, because it is
-        the number a claimed progression has to beat."""
-        rows = (_log("2026-07-22", "Barbell Back Squat", 90, 8, n=2)
-                + _log("2026-07-22", "Barbell Back Squat", 90, 10, n=1))
-        history = performed_sessions(rows, _DB)["barbell back squat"]
-        self.assertEqual(history[-1]["reps_at_top"], 10)
-
-    def test_the_lever_names_what_the_ledger_can_actually_say(self) -> None:
-        """Flat reps mean the load has stopped yielding. They do NOT mean
-        the lift earned more weight — a person capped at the top of their
-        range and a person stuck under a load that is too heavy look
-        identical here, because the range that separates them is
-        coach-authored.
-        """
-        climbing = _history(("2026-07-08", 90, 8), ("2026-07-15", 90, 9),
-                            ("2026-07-22", 90, 10))
-        self.assertEqual(expected_next_dose(climbing)["lever"], "reps")
-        stalled = _history(("2026-07-08", 90, 10), ("2026-07-15", 90, 10),
-                           ("2026-07-22", 90, 10))
-        self.assertEqual(expected_next_dose(stalled)["lever"],
-                         "load_or_variation")
-
-    def test_the_expected_load_floor_is_a_percentage_not_a_plate(self) -> None:
-        stalled = _history(("2026-07-15", 90, 10), ("2026-07-22", 90, 10))
-        self.assertAlmostEqual(expected_next_dose(stalled)["min_load_kg"],
-                               round(90 * (1 + DOSE_LOAD_MIN_PCT), 2))
-
-    def test_warmups_and_cardio_never_enter_the_history(self) -> None:
-        rows = _log("2026-07-22", "Barbell Back Squat", 90, 10)
-        rows[0] = {**rows[0], "notes": "warm-up"}
-        history = performed_sessions(rows, _DB)["barbell back squat"]
-        self.assertEqual(history[-1]["sets"], 2)
-
-
-class LedgerProgressionPayloadTests(unittest.TestCase):
-    PLAN = (
-        "# Plan\n\n"
-        "## Workout 1: LOWER A + CORE\n"
-        "- Barbell Back Squat: 90kgx9-11 /// 90kgx9-11 /// 90kgx9-11\n"
-        "- Leg Press: 160kgx10 /// 160kgx10 /// 160kgx10\n"
-        "- Cable Reverse Crunch: 30kgx10 /// 30kgx10\n"
-    )
-
-    def _rows(self):
-        return (_log("2026-07-08", "Barbell Back Squat", 90, 10)
-                + _log("2026-07-15", "Barbell Back Squat", 90, 10)
-                + _log("2026-07-22", "Barbell Back Squat", 90, 10)
-                + _log("2026-07-22", "Leg Press", 150, 10))
-
-    def test_the_bypass_survives_the_whole_pipeline(self) -> None:
-        plan = parse_plan(self.PLAN, "2026-08-02", _DB)
-        out = ledger_progression(plan, self._rows(), _DB,
-                                 today_d=date(2026, 8, 2))
-        by_name = {e["exercise"]: e for e in out["exercises"]}
-        self.assertEqual(by_name["Barbell Back Squat"]["kind"],
-                         "rep_window_shift")
-        self.assertEqual(by_name["Leg Press"]["verdict"], "progression")
-        self.assertEqual(by_name["Cable Reverse Crunch"]["verdict"], "unknown")
-
-    def test_unknowns_stay_out_of_the_denominator(self) -> None:
-        """A rotated-in movement has no ledger. Counting it as a failure
-        would make rotation itself look like a progression defect.
-        """
-        plan = parse_plan(self.PLAN, "2026-08-02", _DB)
-        out = ledger_progression(plan, self._rows(), _DB,
-                                 today_d=date(2026, 8, 2))
-        self.assertEqual(out["counts"]["unknown"], 1)
-        self.assertEqual(out["judged_count"], 2)
-        self.assertEqual(out["material_pct"], 0.5)
-
-    def test_the_actionable_findings_sort_first(self) -> None:
-        plan = parse_plan(self.PLAN, "2026-08-02", _DB)
-        out = ledger_progression(plan, self._rows(), _DB,
-                                 today_d=date(2026, 8, 2))
-        self.assertEqual(out["exercises"][0]["verdict"], "cosmetic")
-        self.assertEqual(out["exercises"][-1]["verdict"], "unknown")
-
-    def test_a_reference_outside_the_window_is_not_evidence(self) -> None:
-        """A load last touched four months ago does not describe the
-        person now."""
-        old = _log("2026-01-05", "Barbell Back Squat", 90, 10)
-        plan = parse_plan(self.PLAN, "2026-08-02", _DB)
-        out = ledger_progression(plan, old, _DB, today_d=date(2026, 8, 2))
-        by_name = {e["exercise"]: e for e in out["exercises"]}
-        self.assertEqual(by_name["Barbell Back Squat"]["verdict"], "unknown")
-
-    def test_nothing_judgeable_returns_none(self) -> None:
-        self.assertIsNone(ledger_progression({"workouts": []}, [], _DB))
-
-    def test_it_reads_the_block_artifact_shape_too(self) -> None:
-        """The consumer contract names
-        `render_validators._block_as_plan` as an accepted input, so the
-        block's own ``dose`` dicts have to survive the trip.
-        """
-        from workout_coach.lib.render_validators import _block_as_plan
-        as_plan = _block_as_plan(_LIVE_SHAPED_BLOCK)
-        out = ledger_progression(
-            as_plan,
-            _log("2026-07-22", "Barbell Back Squat", 90, 8),
-            _DB, today_d=date(2026, 8, 2))
-        by_name = {e["exercise"]: e for e in out["exercises"]}
-        self.assertEqual(by_name["Barbell Back Squat"]["verdict"], "hold")
-
-    def test_it_is_not_wired_into_the_gate(self) -> None:
-        """Groundwork only. `DOSE_PROGRESSION_ENFORCED` and the findings
-        that read it live in `render_validators`, which a later round
-        owns — this pins that no wiring happened by accident.
-        """
-        import workout_coach.lib.render_validators as rv
-        self.assertFalse(rv.DOSE_PROGRESSION_ENFORCED)
-        source = Path(rv.__file__).read_text(encoding="utf-8")
-        self.assertNotIn("ledger_progression", source)
 
 
 if __name__ == "__main__":                                # pragma: no cover

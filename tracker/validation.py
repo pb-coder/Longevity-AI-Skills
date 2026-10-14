@@ -17,9 +17,11 @@ _CONTRACT_DECLARED_KEYS: "dict[str, frozenset[str]]" = {
         "today", "data_source", "capabilities", "auto_cardio_enabled",
         "monthly_sessions", "weekly_volume_per_muscle", "estimated_1rm",
         "progression_summary", "stale_exercises", "unknown_exercises",
-        "adherence", "dose_staleness", "block", "rotation_candidates",
+        "adherence", "next_dose", "block", "rotation_candidates",
         "core_week_spec", "arm_week_spec", "muscle_priority_tiers",
-        "muscle_volume_targets", "volume_landmark_unit",
+        "muscle_volume_targets", "muscle_floors", "volume_landmark_unit",
+        "strength_sessions_per_week", "last_session_type",
+        "last_session_type_reason",
         "synergist_credit_offset",
         "deloads", "auto_deload_candidates", "cardio_last_28d",
         "cardio_hr_zones_28d", "swim_summary", "sleep_summary",
@@ -44,7 +46,7 @@ _CONTRACT_DECLARED_KEYS: "dict[str, frozenset[str]]" = {
     "SessionRecommendation": frozenset({
         "tier", "label", "headline", "substitute", "rationale",
         "override_allowed", "override_message",
-        "expected_rebound_by_session",
+        "expected_rebound_by_session", "load_policy",
     }),
     "SessionSubstitute": frozenset({
         "kind", "prescription", "duration_min", "notes",

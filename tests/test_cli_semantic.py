@@ -80,7 +80,7 @@ class CliSemanticTests(unittest.TestCase):
 
     def test_public_cli_help_commands_import_cleanly(self) -> None:
         commands = [
-            ("shared/import_health_auto_export.py", "--help"),
+            ("shared/import_health_export_kit.py", "--help"),
             ("shared/canonicalize_logs.py", "--help"),
             ("workout-logger/scripts/append_workout.py", "--help"),
         ]

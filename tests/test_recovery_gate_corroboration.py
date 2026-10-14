@@ -17,7 +17,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, timedelta
 
-from workout_coach.lib.health import (
+from workout_coach.lib.health_session_rec import (
     compute_session_recommendation,
     _rhr_sustained_elevation_days,
 )

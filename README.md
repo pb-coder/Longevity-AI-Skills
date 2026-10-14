@@ -39,14 +39,12 @@ file I/O, canonicalization, and upserts split across
 `monthly_csv_schema.py`, `monthly_csv_values.py`, `monthly_csv_io.py`,
 `monthly_csv_canonicalize.py`, and `monthly_csv_upsert.py`.
 
-There is one importer: `shared/import_health_auto_export.py`, which
-reads `HealthAutoExport*.zip`. It dispatches on archive member — a
-`HealthAutoExport-*.json` member selects the JSON reader; anything else
-falls back to the deprecated CSV reader. JSON is the only supported
-format going forward, because it names metrics in canonical English
-regardless of phone locale and carries the per-night sleep timestamps
-the Sleep Regularity Index needs. Source-agnostic helpers live beside
-it: `shared/health_units.py` (unit conversion tables, plausibility
+There is one importer: `shared/import_health_export_kit.py`, which
+reads the Health Export Kit file `health-export-json-*.json` (a single
+JSON file, no archive). It carries the per-night sleep timestamps the
+Sleep Regularity Index needs. It does not provide daily HRV or wrist
+temperature, so those two recovery inputs are never written.
+Source-agnostic helpers live beside it: `shared/health_units.py` (unit conversion tables, plausibility
 ranges, timestamp parsing) and `shared/strength_sessions.py`
 (strength-session clustering). `shared/apple_workout_types.py` keeps
 its name because it genuinely models Apple's activity-type enum.
@@ -87,7 +85,7 @@ CSV under `<Person>/data/`, sibling to the skill repo:
 │   ├── YYYY.MM.workouts.csv    # per-workout aggregates
 │   └── YYYY.MM.laps.csv        # XML-era rows only; no importer writes laps now
 ├── sleep/                      # importer or manual /log entries
-│   └── YYYY.MM.nights.csv      # per-night architecture (6 stages + InBed + Efficiency + clock times; N Segments blank)
+│   └── YYYY.MM.nights.csv      # per-night architecture (6 stages + InBed + Efficiency + clock times + N Segments from the importer)
 ├── thermal/                    # manual /log only (sauna + cold exposure)
 │   └── YYYY.MM.sessions.csv    # per-session heat (type/temp/rounds/durations/total) + cold (type/duration/temp)
 └── longevity/                  # personal data; never committed
@@ -105,7 +103,7 @@ The exercise catalog, alias table, training-science reference, and longevity fra
 
 `canonicalize_monthly_csv` is idempotent. Out-of-order rows and stale schema columns self-heal on the next pass.
 
-HealthAutoExport JSON populates the full health/sleep/workout schema the coach reads, including the per-night bedtime and wake timestamps the Sleep Regularity Index runs on. Two things it does not expose: per-lap swim detail and sleep segment counts, so swim SWOLF / stroke mix and sleep fragmentation degrade to null rather than to zero. The coach still gates report sections on a `capabilities` dict, so a partially populated tracker doesn't see prompts for metrics its data can't support.
+The Health Export Kit file populates the health/sleep/workout schema the coach reads, including the per-night bedtime and wake timestamps the Sleep Regularity Index runs on. It does not expose daily HRV, wrist temperature, or per-lap swim detail, so HRV and wrist-temperature recovery signals are absent and swim SWOLF / stroke mix degrade to null rather than to zero. The coach still gates report sections on a `capabilities` dict, so a partially populated tracker doesn't see prompts for metrics its data can't support.
 
 Recovery is a personal z-score against the user's own rolling baseline. 5/10 means average for this person. Weights renormalize over signals that are actually present.
 

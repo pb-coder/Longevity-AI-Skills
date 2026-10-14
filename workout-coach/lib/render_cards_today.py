@@ -135,94 +135,84 @@ def card_neat(daily_activity):
 '''
 
 
-# How a `dose_staleness.carried[].change_kind` reads to a human. The
-# keys are `adherence._dose_delta`'s vocabulary; anything absent from
-# this map is a kind that did not move the dose, and those are counted
-# as held rather than narrated.
-_DOSE_CHANGE_PHRASE = {
-    "load_up":      "took weight",
-    "load_down":    "came down in weight",
-    "reps_up":      "took reps",
-    "reps_down":    "came down in reps",
-    "sets_up":      "gained a set",
-    "sets_down":    "lost a set",
-    "load_added":   "gained external load",
-    "load_removed": "dropped external load",
-}
-
-# Names listed inline before the row collapses to "and N more". Four is
-# what fits on one line at the narrow breakpoint.
+# Names listed inline before a row collapses to "and N more". Four is what
+# fits on one line at the narrow breakpoint.
 _DOSE_NAMES_SHOWN = 4
 
 
-def _dose_delta_rows(dose_staleness):
-    """The "what actually moved" rows under the block-position hero.
+def _names(entries) -> str:
+    names = [e.get("exercise") or "?" for e in entries]
+    shown = ", ".join(names[:_DOSE_NAMES_SHOWN])
+    if len(names) > _DOSE_NAMES_SHOWN:
+        shown += f", and {len(names) - _DOSE_NAMES_SHOWN} more"
+    return shown
+
+
+def _dose_delta_rows(next_dose, block=None):
+    """The "what moves next" rows under the block-position hero.
 
     Without these the card's own disclosure works against it: "selection
     is stable by design" and nothing else on the card reads as "nothing
     changed", which is the opposite of true inside a block, where the
     load and the rep target are precisely what move.
 
-    Two rows, not a table. Which lifts moved and how, then which held.
-    The card does not say WHY a lift held — the payload carries
-    ``generations_static``, not a reason, and the reason (a hold-loads
-    recovery band, a stall response, a deload) is the coach's to write in
-    the `block_position` callout. Printing a guessed reason here is how
-    the card would start disagreeing with the coach line beneath it.
+    Read off ``next_dose``, the same per-lift verdicts the plan copies, so
+    the card cannot disagree with the plan beneath it. Two rows: which
+    lifts take weight, then which are held or deloaded. The card names the
+    gate's ``load_policy`` as the reason when it is ``reduce`` (the only
+    policy that holds lifts) rather than inventing one; a lift held on its
+    own (a re-entry, a gym change) is not blamed on the gate, and its
+    per-lift ``basis`` stays in the payload.
+
+    The counts are over the BLOCK's prescribed lifts (``block["slots"]``),
+    not over every lift ``next_dose`` has an entry for: ``next_dose`` also
+    covers lifts the plan does not prescribe (lapsed ones, a re-entry
+    candidate, anything worked in the history window), and "weight goes up
+    3 of 34" would count lifts that are not on this card's block. Without a
+    block, or one with no slots, every entry counts.
     """
-    ds = dose_staleness or {}
-    carried = ds.get("carried") or []
-    total = ds.get("carried_count")
-    if not carried or not total:
-        # A first generation has nothing to diff against. Say that,
-        # rather than omitting the row and leaving "selection is stable"
-        # to stand alone.
+    nd = next_dose or {}
+    in_block = {(s.get("exercise") or "").strip().lower()
+                for s in (block or {}).get("slots") or []} - {""}
+    entries = [e for e in nd.get("exercises") or []
+               if e.get("action") != "no_history"
+               and (not in_block
+                    or (e.get("exercise") or "").strip().lower() in in_block)]
+    if not entries:
+        # Nothing logged to progress from. Say that, rather than omitting
+        # the row and leaving "selection is stable" to stand alone.
         return secondary_metric_row(
-            "Dose vs. last plan", "no earlier plan to compare", "muted",
-            sublabel="The dose delta starts with the next generation.")
+            "Next dose", "no logged lifts to progress", "muted",
+            sublabel="The load and rep targets start from the next session "
+                     "you log.")
 
-    unchanged = [c for c in carried if not c.get("dose_changed")]
-    moved = [c for c in carried if c.get("dose_changed")]
+    total = len(entries)
+    load = [e for e in entries if e.get("action") == "add_load"]
+    reps = [e for e in entries if e.get("action") == "add_reps"]
+    held = [e for e in entries if e.get("action") in ("hold", "reduce")]
 
-    counts = {}
-    for c in moved:
-        phrase = _DOSE_CHANGE_PHRASE.get(c.get("change_kind"))
-        if phrase:
-            counts[phrase] = counts.get(phrase, 0) + 1
-    breakdown = ", ".join(f"{n} {phrase}" for phrase, n
-                          in sorted(counts.items(), key=lambda kv: -kv[1]))
-    oscillating = ds.get("oscillating_count") or 0
-    if oscillating:
-        # A dose that alternates 90 / 92.5 / 90 / 92.5 changed on every
-        # generation and progressed nothing. It counts as moved above,
-        # so it has to be named here or the headline overstates.
-        breakdown = (f"{breakdown}. {oscillating} of them are oscillating "
-                     f"rather than progressing").lstrip(". ")
-
-    # `meets_target` is the payload's own verdict against
-    # `target_max_pct`; the card does not re-derive the threshold.
-    moved_cls = "good" if ds.get("meets_target") else "amber"
+    parts = []
+    if reps:
+        parts.append(f"{len(reps)} chase reps at the same weight")
+    if held:
+        parts.append(f"{len(held)} held")
     rows = secondary_metric_row(
-        "Dose moved", f"{len(moved)} of {total} carried lifts", moved_cls,
-        sublabel=breakdown or None)
+        "Weight goes up", f"{len(load)} of {total} lifts",
+        "good" if load else "muted",
+        sublabel=". ".join(filter(None, [_names(load) if load else None,
+                                        ", ".join(parts) or None])) or None)
 
-    if unchanged:
-        names = [c.get("exercise") or "?" for c in unchanged]
-        shown = ", ".join(names[:_DOSE_NAMES_SHOWN])
-        if len(names) > _DOSE_NAMES_SHOWN:
-            shown += f", and {len(names) - _DOSE_NAMES_SHOWN} more"
-        longest = max((c.get("generations_static") or 0) for c in unchanged)
-        held_sub = shown
-        if longest >= 2:
-            held_sub += f". Longest hold: {longest} generations"
+    if held:
+        policy = nd.get("load_policy")
         rows += secondary_metric_row(
-            "Held at the same dose", f"{len(unchanged)} of {total}",
-            "muted" if ds.get("meets_target") else "warn",
-            sublabel=held_sub)
+            "Held at the same weight", f"{len(held)} of {total}",
+            "amber" if policy == "reduce" else "muted",
+            sublabel=_names(held) + (f". Load policy: {policy}"
+                                     if policy == "reduce" else ""))
     return rows
 
 
-def card_block_position(block, dose_staleness, coach_text):
+def card_block_position(block, next_dose, coach_text):
     """Where this plan sits in its training block. REQUIRED every week.
 
     This card exists to disclose a design decision the user was never
@@ -304,7 +294,7 @@ def card_block_position(block, dose_staleness, coach_text):
   <h2>Block position</h2>
   {hero}
   {countdown}
-  <div class="secondary-metrics">{_dose_delta_rows(dose_staleness)}</div>
+  <div class="secondary-metrics">{_dose_delta_rows(next_dose, block)}</div>
   {coach_block(coach_text)}
 </section>
 '''

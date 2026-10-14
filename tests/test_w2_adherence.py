@@ -18,7 +18,6 @@ from pathlib import Path
 from workout_coach.lib.adherence import (
     BENCH_THRESHOLD,
     build_adherence,
-    dose_staleness,
     load_plans,
     parse_plan,
     plan_windows,
@@ -805,101 +804,6 @@ class WindowTests(LedgerHarness):
 
 
 # ---------------------------------------------------------------------------
-class DoseStalenessTests(unittest.TestCase):
-    """70% of carried exercises returned with an unchanged load. The
-    target is under 40%, and a target on 'did the number change' invites
-    changing it by an amount no muscle can detect."""
-
-    def _plans(self, doses: list[str]) -> list[dict]:
-        out = []
-        for i, dose in enumerate(doses):
-            day = f"2026-06-{1 + 7 * i:02d}"
-            out.append(parse_plan(
-                f"## Workout 1: UPPER A\n- Dumbbell Flat Bench Press: {dose}\n",
-                day))
-        return out
-
-    def test_an_unchanged_dose_is_reported_as_unchanged(self) -> None:
-        out = dose_staleness(self._plans(["50kgx8 /// 50kgx8",
-                                          "50kgx8 /// 50kgx8"]), _DB)
-        c = out["carried"][0]
-        self.assertFalse(c["dose_changed"])
-        self.assertEqual(c["change_kind"], "none")
-        self.assertEqual(out["unchanged_pct"], 1.0)
-        self.assertFalse(out["meets_target"])
-
-    def test_a_real_load_increase_counts(self) -> None:
-        out = dose_staleness(self._plans(["50kgx8 /// 50kgx8",
-                                          "55kgx8 /// 55kgx8"]), _DB)
-        c = out["carried"][0]
-        self.assertTrue(c["dose_changed"])
-        self.assertEqual(c["change_kind"], "load_up")
-
-    def test_a_sub_threshold_load_bump_is_cosmetic_not_a_change(self) -> None:
-        # The cheapest way to satisfy "the dose must change" is to change
-        # it by less than the plates allow.
-        out = dose_staleness(self._plans(["100kgx8 /// 100kgx8",
-                                          "100.5kgx8 /// 100.5kgx8"]), _DB)
-        c = out["carried"][0]
-        self.assertFalse(c["dose_changed"])
-        self.assertEqual(c["change_kind"], "cosmetic")
-
-    def test_a_rep_range_widened_by_half_a_rep_is_cosmetic(self) -> None:
-        out = dose_staleness(self._plans(["50kgx8-10 /// 50kgx8-10",
-                                          "50kgx8-11 /// 50kgx8-11"]), _DB)
-        self.assertFalse(out["carried"][0]["dose_changed"])
-
-    def test_a_whole_rep_of_midpoint_movement_counts(self) -> None:
-        out = dose_staleness(self._plans(["50kgx8 /// 50kgx8",
-                                          "50kgx10 /// 50kgx10"]), _DB)
-        c = out["carried"][0]
-        self.assertTrue(c["dose_changed"])
-        self.assertEqual(c["change_kind"], "reps_up")
-
-    def test_a_rep_only_progression_still_shows_as_unchanged_load(self) -> None:
-        # The measured 70% baseline counted load only. Redefining the
-        # metric to include rep moves is correct, and is also how a target
-        # gets hit without the weight ever going up — so both are
-        # reported, and this is the number that catches it.
-        out = dose_staleness(self._plans(["50kgx8 /// 50kgx8",
-                                          "50kgx10 /// 50kgx10"]), _DB)
-        self.assertEqual(out["unchanged_pct"], 0.0)
-        self.assertEqual(out["unchanged_load_pct"], 1.0)
-
-    def test_generations_static_counts_the_trailing_run(self) -> None:
-        out = dose_staleness(self._plans(["50kgx8", "55kgx8", "55kgx8",
-                                          "55kgx8"]), _DB)
-        self.assertEqual(out["carried"][0]["generations_static"], 2)
-
-    def test_oscillating_between_two_loads_is_flagged(self) -> None:
-        # 90 / 92.5 / 90 / 92.5 changes the dose every generation and
-        # progresses nothing.
-        out = dose_staleness(self._plans(["90kgx8", "92.5kgx8", "90kgx8",
-                                          "92.5kgx8"]), _DB)
-        self.assertTrue(out["carried"][0]["oscillating"])
-        self.assertEqual(out["oscillating_count"], 1)
-
-    def test_warmups_do_not_pad_the_denominator(self) -> None:
-        plans = [parse_plan("## Workout 1: UPPER A\n"
-                            "- Jumping Jacks: 50\n"
-                            "- Dumbbell Flat Bench Press: 50kgx8\n", d)
-                 for d in ("2026-06-01", "2026-06-08")]
-        out = dose_staleness(plans, _DB)
-        self.assertEqual([c["exercise"] for c in out["carried"]],
-                         ["Dumbbell Flat Bench Press"])
-
-    def test_an_exercise_not_carried_forward_is_excluded(self) -> None:
-        plans = [
-            parse_plan("## Workout 1: UPPER A\n- Dip: 10 /// 10\n", "2026-06-01"),
-            parse_plan("## Workout 1: UPPER A\n- Pull-Up: 8 /// 8\n", "2026-06-08"),
-        ]
-        self.assertIsNone(dose_staleness(plans, _DB))
-
-    def test_a_single_plan_has_nothing_to_compare(self) -> None:
-        self.assertIsNone(dose_staleness(self._plans(["50kgx8"]), _DB))
-
-
-# ---------------------------------------------------------------------------
 class RetiredRouteTests(LedgerHarness):
     """The route pool was built from logged history and the newest plan
     alone. An exercise the D5 flow RETIRED still counted as a live route
@@ -961,6 +865,23 @@ class RetiredRouteTests(LedgerHarness):
                       blocked["Lateral Raise Machine"]["blocked_reason"])
         self.assertNotIn("Lateral Raise Machine",
                          {b["exercise"] for b in out["benched"]})
+
+    def test_a_retired_candidate_is_benched_never_blocked(self) -> None:
+        # Both the dumbbell raise and the machine are retired. The route
+        # guard would refuse to bench the machine (one usable route left),
+        # but the user has already answered: it is benched, not asked about
+        # again as `bench_blocked`.
+        for name in ("Dumbbell Lateral Raise", "Lateral Raise Machine"):
+            record_bench_response(self.PERSON, name, answer="no space",
+                                  disposition="retired", on_date="2026-06-26")
+        out = build_adherence(self.PERSON, self._series(), _DB,
+                              date(2026, 6, 27), _CATALOG,
+                              priority_tiers=self.TIERS)
+        self.assertFalse(out["bench_blocked"])
+        benched = {b["exercise"]: b for b in out["benched"]}
+        self.assertEqual(benched["Lateral Raise Machine"]["disposition"],
+                         "retired")
+        self.assertIsNone(out["bench_prompt"])
 
     def test_a_retry_disposition_keeps_the_route(self) -> None:
         # Only ``retired`` removes a route. ``retry`` says the obstacle

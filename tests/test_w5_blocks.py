@@ -15,6 +15,7 @@ from pathlib import Path
 
 from workout_coach.lib.blocks import (
     ANCHOR_MAX_BLOCKS,
+    MAIN_PATTERNS,
     deload_cadence,
     BLOCK_MAX_WEEKS,
     block_from_plan,
@@ -564,12 +565,67 @@ class RotationCandidateTests(unittest.TestCase):
         self.assertEqual(out["target_reps"], 10)
         self.assertNotIn("target_reps", cands[0])
 
-    def test_a_stale_pattern_offers_nothing(self) -> None:
-        rows = [_set("2026-01-05", "Chest Supported Row Machine", 70, 10)]
-        e1rm = {"Chest Supported Row Machine": {"current_e1rm_kg": 90.0,
-                                                "last_date": "2026-01-05"}}
+    def test_a_stale_pattern_offers_nothing_unless_it_is_a_main_one(self) -> None:
+        rows = [_set("2026-01-05", "Leg Curl (Seated)", 50, 10)]
+        e1rm = {"Leg Curl (Seated)": {"current_e1rm_kg": 66.0,
+                                      "last_date": "2026-01-05"}}
         out = rotation_candidates(rows, _DB, _CATALOG, e1rm, date(2026, 8, 2))
-        self.assertEqual(out, {})
+        self.assertEqual({c["pattern"] for c in out["candidates"]},
+                         set(MAIN_PATTERNS))
+
+
+class MainPatternTests(unittest.TestCase):
+    """Horizontal/vertical push and pull are offered even when untrained.
+
+    Nihad's Vertical Push vanished from the payload the day his last
+    shoulder press fell out of the 56-day window, and nothing else could
+    bring it back.
+    """
+
+    ROWS = [_set("2026-07-16", "Shoulder Press Machine", 55, 10),
+            _set("2026-10-09", "Chest Press Machine", 60, 12),
+            _set("2026-10-09", "Dumbbell Row", 18, 12),
+            _set("2026-10-06", "Cable Lat Pulldown", 65, 12)]
+    E1RM = {"Shoulder Press Machine": {"current_e1rm_kg": 73.3,
+                                       "last_date": "2026-07-16"},
+            "Chest Press Machine": {"current_e1rm_kg": 84.0,
+                                    "last_date": "2026-10-09"}}
+
+    def _out(self, today=date(2026, 10, 14), **kw):
+        return rotation_candidates(self.ROWS, _DB, _CATALOG, self.E1RM,
+                                   today, **kw)
+
+    def test_the_four_names_are_catalog_patterns(self) -> None:
+        patterns = {meta["pattern"] for meta in _CATALOG.values()}
+        for pattern in MAIN_PATTERNS:
+            self.assertIn(pattern, patterns)
+
+    def test_an_untrained_main_pattern_is_offered_from_the_persons_own_history(self) -> None:
+        cands = [c for c in self._out()["candidates"]
+                 if c["pattern"] == "SHOULDERS/Vertical Push (Compound)"]
+        by_name = {c["exercise"]: c for c in cands}
+        own = by_name["Shoulder Press Machine"]
+        # 73.3 / (1 + 10/30) x 0.85 = 46.7, on a 5kg machine stack.
+        self.assertEqual(own["load_kg"], 45.0)
+        self.assertEqual(own["ref"], "Shoulder Press Machine")
+        self.assertEqual(own["ref_last"], "2026-07-16")
+        self.assertEqual(own["load_basis"], "like_for_like")
+
+    def test_a_trained_main_pattern_still_hides_what_the_person_already_does(self) -> None:
+        names = {c["exercise"] for c in self._out()["candidates"]
+                 if c["pattern"] == "CHEST/Horizontal Push (Compound)"}
+        self.assertTrue(names)
+        self.assertNotIn("Chest Press Machine", names)
+
+    def test_nothing_changes_once_the_pattern_is_back_in_the_window(self) -> None:
+        names = {c["exercise"] for c in self._out(today=date(2026, 8, 1))["candidates"]
+                 if c["pattern"] == "SHOULDERS/Vertical Push (Compound)"}
+        self.assertNotIn("Shoulder Press Machine", names)
+
+    def test_a_benched_movement_is_not_offered_through_the_gap(self) -> None:
+        names = {c["exercise"] for c in self._out(
+            exclude={"Shoulder Press Machine"})["candidates"]}
+        self.assertNotIn("Shoulder Press Machine", names)
 
 
 # ---------------------------------------------------------------------------
@@ -1037,6 +1093,21 @@ class RotationCandidateSelectionTests(unittest.TestCase):
             rows, _DB, _CATALOG, e1rm, date(2026, 8, 2),
             exclude={"Leg Curl (Lying)"})["candidates"]}
         self.assertNotIn("Leg Curl (Lying)", excluded)
+
+    def test_a_retired_movement_is_never_offered(self) -> None:
+        # read_tracker passes `adherence.retired_movements` in through
+        # `exclude`: Fabian's retired Ab Wheel Rollout was still offered
+        # under Anti-Extension.
+        wheel = "Ab Wheel Rollout"
+        plain = {c["exercise"] for c in rotation_candidates(
+            self.ROWS, _DB, _CATALOG, self.E1RM, date(2026, 8, 2),
+            priority_tiers={"core": "emphasis"})["candidates"]}
+        self.assertIn(wheel, plain)
+        excluded = {c["exercise"] for c in rotation_candidates(
+            self.ROWS, _DB, _CATALOG, self.E1RM, date(2026, 8, 2),
+            exclude={"ab wheel rollout"},
+            priority_tiers={"core": "emphasis"})["candidates"]}
+        self.assertNotIn(wheel, excluded)
 
 
 # ---------------------------------------------------------------------------

@@ -370,8 +370,8 @@ class SkillDocMatchesTheNullLoadContractTests(unittest.TestCase):
         doc = _SKILL_MD.read_text(encoding="utf-8")
         payload_site = doc[doc.index("- `rotation_candidates`:"):]
         payload_site = payload_site[:payload_site.index("\n**")]
-        coldstart_site = doc[doc.index("**Cold-start escape hatch.**"):]
-        coldstart_site = coldstart_site[:coldstart_site.index("\n  - `recovery")]
+        coldstart_site = doc[doc.index("**Cold start.**"):]
+        coldstart_site = coldstart_site[:coldstart_site.index("\n- `uncovered`")]
         for name, site in (("payload reference", payload_site),
                            ("cold-start rule", coldstart_site)):
             with self.subTest(site=name):

@@ -190,10 +190,11 @@ a strength stimulus, unless a hand-held weight and slow eccentrics are added.
   if used at all. Rank below everything above.
 - **A pull-up bar or 3 kg in the hand** each solve this outright.
 
-**Consequence for the plan checks.** `ARM_WEEK_SPEC` demands 6 direct sets and 2
-distinct exercises per side of the elbow. Triceps clears this honestly in a bare
-room. Biceps does not: the room produces about 5 sets worth doing, across two
-exercises both rated Thin. **Padding to 6 sets of the same weak work satisfies
+**Consequence for the plan checks.** The per-muscle weekly floor (`muscle_floors`,
+blocking) demands a count of DIRECT sets for biceps and triceps, and `ARM_WEEK_SPEC`
+demands 2 distinct exercises per side of the elbow. Triceps clears this honestly in a
+bare room. Biceps does not: the room produces about 5 sets worth doing, across two
+exercises both rated Thin. **Padding up to the floor with the same weak work satisfies
 the check without training the muscle**, which is the exact failure mode
 `CORE_WEEK_SPEC`'s distribution axes were built to prevent. Lower the floor
 explicitly and name the exemption in the report.

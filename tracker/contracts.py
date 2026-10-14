@@ -92,6 +92,10 @@ class SessionRecommendation(TypedDict, total=False):
     override_allowed: bool
     override_message: str
     expected_rebound_by_session: int
+    # ``progress`` / ``reduce`` with the tier, strength-TSB band and recovery
+    # availability behind it. The one answer to "may a load rise"; ``reduce``
+    # is the red-flag case only (Tier A/B or high-fatigue TSB).
+    load_policy: dict[str, JsonValue]
 
 
 class CoachReads(TypedDict, total=False):
@@ -115,7 +119,12 @@ class TrackerJSON(TypedDict, total=False):
     # and ``_compact`` drops the key rather than emitting zeroes that
     # would read as 0% adherence.
     adherence: dict[str, JsonValue] | None
-    dose_staleness: dict[str, JsonValue] | None
+    # Per exercise, the next load and rep range, derived from the log by
+    # double progression under the gate's ``session_recommendation.
+    # load_policy``: ``{load_policy, exercises: [{exercise, load_kg,
+    # rep_range, action, basis, ...}], uncovered}``. The coach copies it.
+    # ``uncovered.exercises`` is ``[{exercise, last_prescription}]``.
+    next_dose: dict[str, JsonValue] | None
     block: dict[str, JsonValue] | None
     rotation_candidates: dict[str, JsonValue] | None
     # Distribution-shaped weekly specs + priority tiers (W4's model,
@@ -124,6 +133,21 @@ class TrackerJSON(TypedDict, total=False):
     arm_week_spec: dict[str, JsonValue]
     muscle_priority_tiers: dict[str, str]
     muscle_volume_targets: dict[str, JsonValue]
+    # ``{muscle: direct sets per week}``, the floor the plan check enforces
+    # (emphasis = MEV, otherwise MV). A muscle with no floor is ABSENT, not
+    # 0: core (``core_week_spec`` carries its dose), erectors, forearms,
+    # MV-0 muscles, and muscles with no direct catalog exercise.
+    muscle_floors: dict[str, int]
+    # The session count to plan this week (``--sessions``, else profile.csv;
+    # absent when neither is set). The weekly ``muscle_floors`` are already
+    # scaled by it.
+    strength_sessions_per_week: int | None
+    # Where the split rotation continues from: ``{type, title, date,
+    # plan_date}`` of the newest strength session, the workout it matched.
+    # Absent when it cannot be told, in which case
+    # ``last_session_type_reason`` says why.
+    last_session_type: dict[str, JsonValue] | None
+    last_session_type_reason: str | None
     volume_landmark_unit: str
     synergist_credit_offset: dict[str, int]
     deloads: list[dict[str, JsonValue]]

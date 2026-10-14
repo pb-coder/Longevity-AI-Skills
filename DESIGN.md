@@ -208,7 +208,7 @@ Single shared chrome. Background `card`, border `border`, radius
 variants.** A card never communicates state through its border colour
 or background — that goes inside via a `.pill.*` or `.tier-indicator`.
 
-Defined in: `Skills/workout-coach/lib/render_assets.py` (`.card` block).
+Defined in: `Skills/workout-coach/lib/render_styles.py` (`.card` block).
 
 ### `.pill.{good|amber|warn|muted}` — status pill
 
@@ -216,7 +216,7 @@ Single semantic pill for state indicators. Class names match colour
 tokens. Used for: HSP-band sauna status, sleep-band indicator,
 risk-flag status, recovery-band status.
 
-Defined in: `Skills/workout-coach/lib/render_assets.py` (`.pill` block).
+Defined in: `Skills/workout-coach/lib/render_styles.py` (`.pill` block).
 
 ### `.pill-adherence.{on-target|below-target|above-target}` — adherence pill
 
@@ -264,7 +264,7 @@ Defined in: `Skills/workout-coach/lib/render_components.py`
 ### Bars, rings, sparklines, scales
 
 `.driver-row`, `.bar-row`, `.ring`, `.sparkline`, `.recovery-scale`,
-`.freshness-scale` — see `render_components.py` and `render_assets.py`
+`.freshness-scale` — see `render_components.py` and `render_styles.py`
 for the canonical implementations. All inherit semantic colour tokens;
 no inline hex.
 

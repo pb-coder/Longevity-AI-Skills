@@ -82,32 +82,6 @@ def baseline_60d(entries: list[dict], key: str, today_d: date) -> float | None:
     return _mean_or_none(_values_in_window(entries, key, today_d, 60))
 
 
-def workout_sessions_in_window(sessions: list[dict], today_d: date, days: int) -> list[dict]:
-    cutoff = today_d - timedelta(days=max(days - 1, 0))
-    out = []
-    for s in sessions:
-        d = _parse_iso_date(s.get("date"))
-        if d is None:
-            continue
-        if d < cutoff or d > today_d:
-            continue
-        # Filter out incidental walks — those aren't training.
-        # Post-2026-05 schema: typed ``incidental`` flag; legacy rows
-        # still carry the marker in ``notes``.
-        if s.get("incidental") is True \
-                or (s.get("notes") or "").lower().startswith("incidental"):
-            continue
-        out.append({
-            "date":         s["date"],
-            "type":         s.get("apple_type"),
-            "duration":     s.get("duration_min"),
-            "avg_hr":       s.get("avg_hr"),
-            "max_hr":       s.get("max_hr"),
-            "cal":          s.get("active_cal"),
-        })
-    return out
-
-
 def health_metrics_weekly(health_all: list[dict],
                           today_d: date, weeks: int = 4) -> list[dict]:
     """Per-week aggregates of Health Metrics for the last N weeks.

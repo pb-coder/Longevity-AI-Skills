@@ -9,7 +9,8 @@ the evidence next to the fix.
 The findings, and what each class pins:
 
   G-05  the session set budget allowed +5 while SKILL.md asked for +-2.
-  G-06  dose staleness and the stall response were never checked at all.
+  G-06  (dose staleness and the stall response: removed with `dose_staleness`;
+        `progression.next_dose` derives the increment from the log instead.)
   G-07  a fabricated recovery score rendered at exit 0 beside the real one.
   ----  the sub-bullet counter counted structure as rationale creep.
   ----  `anchor_change_reason` had no honest token for a logged
@@ -23,21 +24,15 @@ same reason as the first round: the evidence belongs next to the fix.
   F1    G-07 refused the recovery-drivers card SKILL.md REQUIRES,
         because a per-driver `component {n}/10` sits next to the word
         "recovery".
-  F2/F3 G-06 refused a SKILL.md-compliant one-session cadence deload AND
-        was walked past by a rep-range shuffle. Demoted to advisory.
   P2    the drift threshold was a magnitude with a false justification.
         Replaced by decision equivalence.
   F4    G-07's proximity anchor was coach-controlled, and the check never
         read the card label it already held.
   F5    the plan markdown's own opener was never number-checked.
-  F6    the stall response was laundered by one token bullet in another
-        workout.
   F8    the structural-sub-bullet exemption was a `.search()` and so a
         smuggling channel.
-  F9    G-06 crashed (exit 1) on a malformed dose dict.
   F10   `anchor_change_hint` was filtered against the full enum instead of
         the coach-declarable one.
-  F11   SKILL.md says set churn is not a dose change; the code said it was.
 
 Nothing here reads per-person tracker data: every fixture is written in
 the file. The real 2026-08-02 plans were checked by hand against these
@@ -50,7 +45,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from workout_coach.lib import render_validators as rv
-from workout_coach.lib.adherence import _dose_delta, dose_staleness, parse_plan
+from workout_coach.lib.adherence import parse_plan
 from workout_coach.lib.blocks import (
     ANCHOR_CHANGE_REASONS,
     COACH_DECLARABLE_ANCHOR_CHANGE_REASONS,
@@ -60,11 +55,9 @@ from workout_coach.lib.blocks import (
     rotation_diff_errors,
     rotation_diff_report,
 )
-from workout_coach.lib.constants import DOSE_PROGRESSION_SPEC
 from workout_coach.lib.extract import load_exercises_db
 from workout_coach.lib.render_validators import (
     coach_number_findings,
-    dose_progression_findings,
     validate_coach_reads,
     validate_workout_md,
     validate_workout_plan,
@@ -80,9 +73,8 @@ def _plan(date: str, body: str) -> str:
     return f"# Workout plan {date}\n\n## Workout 1: LOWER A + CORE\n\n{body}"
 
 
-# Six carried exercises, which clears `min_carried_for_share`. Loads and
-# rep ranges are the real 2026-07-25 prescriptions so the deltas below are
-# the ones a coach would actually be writing.
+# Real prescriptions from the 2026-07-25 plan, so the parser tests below see
+# the shapes a coach actually writes.
 _PREV_BODY = """- Barbell Back Squat: 100kgx8-10 /// 100kgx8-10 /// 100kgx8-10
 - Romanian Deadlift: 100kgx10-12 /// 100kgx10-12 /// 100kgx10-12
 - Leg Extension: 55kgx10-12 /// 55kgx10-12
@@ -91,33 +83,7 @@ _PREV_BODY = """- Barbell Back Squat: 100kgx8-10 /// 100kgx8-10 /// 100kgx8-10
 - Dumbbell Shrug: 60kgx12-15 /// 60kgx12-15
 """
 
-_PROGRESSED_BODY = """- Barbell Back Squat: 105kgx8-10 /// 105kgx8-10 /// 105kgx8-10
-- Romanian Deadlift: 85kgx6-8 /// 85kgx6-8 /// 85kgx6-8
-- Leg Extension: 60kgx10-12 /// 60kgx10-12
-- Calf Raise Machine: 60kgx12-15 /// 60kgx12-15
-- Ab Crunch Machine: 40kgx12-15 /// 40kgx12-15
-- Dumbbell Shrug: 64kgx12-15 /// 64kgx12-15
-"""
-
 _PREV_PLAN = _plan("2026-07-25", _PREV_BODY)
-_RECOPIED_PLAN = _plan("2026-08-02", _PREV_BODY)
-_PROGRESSED_PLAN = _plan("2026-08-02", _PROGRESSED_BODY)
-
-
-def _prev_block(stalled: "dict | None" = None) -> dict:
-    """The previous generation's block, doses and all.
-
-    Built the way the pipeline builds it — `block_from_plan` over a parsed
-    plan — rather than hand-written, so a change to what the artifact
-    carries breaks these tests instead of quietly bypassing them.
-    """
-    block = block_from_plan(parse_plan(_PREV_PLAN, "2026-07-25"), _CATALOG)
-    for slots in block["sessions"].values():
-        for s in slots:
-            n = (stalled or {}).get(s["exercise"])
-            if n:
-                s["stalled_sessions"] = n
-    return block
 
 
 # ---------------------------------------------------------------------------
@@ -168,170 +134,6 @@ class SetBudgetBandTests(unittest.TestCase):
         self.assertEqual([e for e in errors if "working sets vs budget" in e],
                          [])
         self.assertTrue(any("working sets vs budget" in w for w in warnings))
-
-
-# ---------------------------------------------------------------------------
-class DoseProgressionTests(unittest.TestCase):
-    """G-06 — "every plan is the same plan", and the gate could not see it.
-
-    `dose_staleness` and `stalled_sessions` were both computed into the
-    payload and neither was ever read by a validator.
-    """
-
-    def test_a_re_copied_plan_is_refused(self) -> None:
-        findings = dose_progression_findings(_RECOPIED_PLAN, _prev_block(),
-                                             plan_date="2026-08-02")
-        msgs = [m for _axis, m in findings]
-        self.assertTrue(any("dose staleness" in m for m in msgs), msgs)
-        self.assertTrue(any("100%" in m for m in msgs), msgs)
-
-    def test_a_progressed_plan_is_clean(self) -> None:
-        self.assertEqual(
-            dose_progression_findings(_PROGRESSED_PLAN, _prev_block(),
-                                      plan_date="2026-08-02"), [])
-
-    def test_a_stalled_lift_re_prescribed_identically_is_refused(self) -> None:
-        findings = dose_progression_findings(
-            _RECOPIED_PLAN, _prev_block({"Romanian Deadlift": 4}),
-            plan_date="2026-08-02")
-        msgs = [m for _axis, m in findings]
-        self.assertTrue(any(m.startswith("Romanian Deadlift: 4 sessions "
-                                         "stalled") for m in msgs), msgs)
-
-    def test_the_stall_response_must_be_a_number_not_a_sentence(self) -> None:
-        """A sub-bullet saying the dose changed is not the dose changing.
-
-        This is the whole reason the check reads the prescription and not
-        the prose: the deciding input has to be something the coach
-        cannot satisfy by writing a claim.
-        """
-        said_so = _RECOPIED_PLAN.replace(
-            "- Romanian Deadlift: 100kgx10-12 /// 100kgx10-12 /// 100kgx10-12",
-            "- Romanian Deadlift: 100kgx10-12 /// 100kgx10-12 /// 100kgx10-12"
-            "\n  — anchor change: stall_3_sessions, rep range shifted")
-        msgs = [m for _a, m in dose_progression_findings(
-            said_so, _prev_block({"Romanian Deadlift": 4}),
-            plan_date="2026-08-02")]
-        self.assertTrue(any("Romanian Deadlift" in m for m in msgs), msgs)
-
-    def test_a_cosmetic_bump_is_not_a_stall_response(self) -> None:
-        # 0.5kg on 100kg is 0.5%, inside `adherence.DOSE_LOAD_MIN_PCT`.
-        cosmetic = _RECOPIED_PLAN.replace("100kgx10-12", "100.5kgx10-12")
-        msgs = [m for _a, m in dose_progression_findings(
-            cosmetic, _prev_block({"Romanian Deadlift": 4}),
-            plan_date="2026-08-02")]
-        self.assertTrue(any("Romanian Deadlift" in m for m in msgs), msgs)
-
-    def test_dropping_the_stalled_lift_is_a_response(self) -> None:
-        dropped = _plan("2026-08-02", "\n".join(
-            ln for ln in _PROGRESSED_BODY.splitlines()
-            if "Romanian Deadlift" not in ln))
-        msgs = [m for _a, m in dose_progression_findings(
-            dropped, _prev_block({"Romanian Deadlift": 4}),
-            plan_date="2026-08-02")]
-        self.assertEqual([m for m in msgs if "Romanian Deadlift" in m], [])
-
-    def test_silent_with_no_previous_block(self) -> None:
-        self.assertEqual(
-            dose_progression_findings(_RECOPIED_PLAN, None,
-                                      plan_date="2026-08-02"), [])
-
-    def test_silent_on_a_block_carrying_no_doses(self) -> None:
-        """A block persisted before `dose` existed must not read as stale.
-
-        "No comparison possible" and "compared and clean" have to be the
-        same OUTPUT here, and they are; the payload's own `dose_staleness`
-        block is where a reader tells them apart.
-        """
-        stripped = _prev_block()
-        for slots in stripped["sessions"].values():
-            for s in slots:
-                s.pop("dose", None)
-        self.assertEqual(
-            dose_progression_findings(_RECOPIED_PLAN, stripped,
-                                      plan_date="2026-08-02"), [])
-
-    def test_silent_when_the_block_came_from_this_same_plan(self) -> None:
-        """The self-diff guard `block_rotation_errors` already documents.
-
-        Without it a re-render compares the plan against itself and every
-        carried exercise reads unchanged.
-        """
-        self.assertEqual(
-            dose_progression_findings(_RECOPIED_PLAN, _prev_block(),
-                                      plan_date="2026-07-25"), [])
-
-    def test_an_undated_pair_does_not_crash(self) -> None:
-        """`dose_staleness` keys its series by plan date.
-
-        Two plans on one date collapse to a one-item series and its
-        ``slots[-2]`` indexes past the front of the list. Reachable with
-        no ``plan_date`` against a block with no ``started``. An
-        IndexError here would exit 1, and 1 means the program broke, not
-        that the plan was refused.
-        """
-        undated = _prev_block()
-        undated["started"] = None
-        self.assertEqual(
-            dose_progression_findings(_RECOPIED_PLAN, undated), [])
-
-    def test_it_surfaces_through_validate_workout_plan_as_advisory(self) -> None:
-        """ADVISORY, not blocking, and the switch is the only reason.
-
-        It shipped blocking on 2026-08-02 and was demoted the same day:
-        `DOSE_PROGRESSION_ENFORCED` records the SKILL.md-compliant cadence
-        deload it refuses and the rep-range shuffle that walks past it.
-        `DemotionIsOneSwitchTests` below pins that flipping the constant is
-        the whole of re-arming it.
-        """
-        errors, warnings = validate_workout_plan(
-            _RECOPIED_PLAN, prev_block=_prev_block(), plan_date="2026-08-02")
-        self.assertEqual([e for e in errors if "dose staleness" in e], [])
-        self.assertTrue(any("dose staleness" in w and rv.DOSE_ADVISORY_TAG in w
-                            for w in warnings), warnings)
-
-    def test_a_deload_week_does_not_relax_it(self) -> None:
-        """Changing a load costs no fatigue, so this is not a VOLUME axis.
-
-        The deload relief is `AXIS_VOLUME` only, so it must not touch
-        these findings whether they are routed as errors or as advisories.
-        This is ALSO why the demotion was needed rather than a deload
-        exemption: SKILL.md's cadence deload holds loads by instruction, so
-        no volume-axis relief could ever have reached it.
-        """
-        with patch.object(rv, "DOSE_PROGRESSION_ENFORCED", True):
-            errors, _ = validate_workout_plan(
-                _RECOPIED_PLAN, prev_block=_prev_block(),
-                plan_date="2026-08-02", deload_week=True)
-        self.assertTrue(any("dose staleness" in e for e in errors), errors)
-
-    def test_the_target_is_one_number_read_by_two_modules(self) -> None:
-        """The gate's threshold and the payload's reported target agree.
-
-        `adherence.dose_staleness` reports `target_max_pct` to the coach
-        while it is authoring; `DOSE_PROGRESSION_SPEC` is what refuses the
-        result. If those two ever drift, the coach is told it passed and
-        the render says otherwise.
-        """
-        report = dose_staleness(
-            [parse_plan(_PREV_PLAN, "2026-07-25"),
-             parse_plan(_PROGRESSED_PLAN, "2026-08-02")], _DB)
-        self.assertEqual(report["target_max_pct"],
-                         DOSE_PROGRESSION_SPEC["max_unchanged_share"])
-
-    def test_a_short_carry_list_does_not_bind(self) -> None:
-        """Below `min_carried_for_share` the ratio measures arithmetic.
-
-        Two carried lifts, both held: 100% unchanged, and a deload or
-        comeback week routinely looks like that. The per-exercise stall
-        rule still bites there; the rate does not.
-        """
-        two = "- Leg Extension: 55kgx10-12 /// 55kgx10-12\n" \
-              "- Dumbbell Shrug: 60kgx12-15 /// 60kgx12-15\n"
-        self.assertLess(2, DOSE_PROGRESSION_SPEC["min_carried_for_share"])
-        self.assertEqual(
-            dose_progression_findings(_plan("2026-08-02", two), _prev_block(),
-                                      plan_date="2026-08-02"), [])
 
 
 # ---------------------------------------------------------------------------
@@ -710,8 +512,8 @@ class DecisionBoundaryDriftTests(unittest.TestCase):
         for key in ("tier_a_recovery_score_crash", "tier_c_recovery_hard_floor",
                     "tier_d_recovery_score_min", "tier_c_recovery_score_hi"):
             self.assertIn(SESSION_GATE_THRESHOLDS[key], boundaries, key)
-        for edge in rv.SKILL_RECOVERY_BAND_EDGES:
-            self.assertIn(edge, boundaries)
+        # The one edge that is not a gate threshold, named as such.
+        self.assertIn(rv.COACH_SCORE_TOP_BAND_EDGE, boundaries)
 
     def test_a_moved_threshold_moves_the_gate(self) -> None:
         moved = dict(
@@ -755,7 +557,8 @@ class DecisionBoundaryDriftTests(unittest.TestCase):
         specified — and it is still an overstatement on the page, so the
         warning is the only thing that says so.
         """
-        self.assertEqual(max(rv.recovery_decision_boundaries()), 6.5)
+        self.assertEqual(max(rv.recovery_decision_boundaries()),
+                         rv.COACH_SCORE_TOP_BAND_EDGE)
         self.assertEqual(self._verdict(9.9, 6.6), "warn")
 
     def test_the_old_constant_is_gone(self) -> None:
@@ -820,169 +623,6 @@ class PlanOpenerIsNumberCheckedTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-class DoseGateDemotionTests(unittest.TestCase):
-    """F2 + F3 — the worst combination: false positives AND a bypass.
-
-    SKILL.md's cadence deload is ONE session with its sets halved and its
-    loads HELD ("hold loads" is binding). Build exactly that and the rate
-    finding fires, and `deload_week=True` gives no relief because these
-    are structure-axis findings. The same SKILL.md paragraph also says a
-    lift with nowhere to go may "read as stale". Meanwhile the check is
-    walked past by shifting rep ranges one midpoint and back again.
-    """
-
-    def test_the_switch_exists_and_is_off(self) -> None:
-        self.assertFalse(rv.DOSE_PROGRESSION_ENFORCED)
-        self.assertIn("advisory", rv.DOSE_ADVISORY_TAG)
-
-    def test_flipping_the_constant_is_the_whole_of_re_arming_it(self) -> None:
-        """The `BLOCK_ROTATION_ENFORCED` precedent, followed exactly."""
-        args = dict(prev_block=_prev_block(), plan_date="2026-08-02")
-
-        errors, warnings = validate_workout_plan(_RECOPIED_PLAN, **args)
-        self.assertEqual([e for e in errors if "dose staleness" in e], [])
-        tagged = [w for w in warnings if rv.DOSE_ADVISORY_TAG in w]
-        self.assertTrue(tagged, warnings)
-
-        with patch.object(rv, "DOSE_PROGRESSION_ENFORCED", True):
-            on_errors, on_warnings = validate_workout_plan(_RECOPIED_PLAN, **args)
-        self.assertTrue(any("dose staleness" in e for e in on_errors), on_errors)
-        self.assertEqual(
-            [w for w in on_warnings if rv.DOSE_ADVISORY_TAG in w], [])
-
-    def test_the_findings_are_the_same_either_way(self) -> None:
-        """Demotion changes the ROUTE, not the rule."""
-        bare = [m for _axis, m in dose_progression_findings(
-            _RECOPIED_PLAN, _prev_block(), plan_date="2026-08-02")]
-        self.assertTrue(bare)
-        _errors, warnings = validate_workout_plan(
-            _RECOPIED_PLAN, prev_block=_prev_block(), plan_date="2026-08-02")
-        tagged = [w[:-len(rv.DOSE_ADVISORY_TAG) - 1] for w in warnings
-                  if w.endswith(rv.DOSE_ADVISORY_TAG)]
-        self.assertEqual(tagged, bare)
-
-    def test_a_compliant_cadence_deload_cannot_exit_2(self) -> None:
-        """F2, as the plan SKILL.md actually asks for.
-
-        One session's working sets halved, every load held. Under the old
-        routing this was exit 2 on a plan built to instruction.
-        """
-        held = _plan("2026-08-02", _PREV_BODY.replace(
-            "- Leg Extension: 55kgx10-12 /// 55kgx10-12",
-            "- Leg Extension: 55kgx10-12"))
-        errors, warnings = validate_workout_plan(
-            held, prev_block=_prev_block(), plan_date="2026-08-02")
-        self.assertEqual([e for e in errors if "dose staleness" in e], [])
-        self.assertTrue(any("dose staleness" in w for w in warnings), warnings)
-
-    def test_the_bypass_is_recorded_where_the_switch_is(self) -> None:
-        """The rep-range shuffle still passes; that is why it is advisory.
-
-        A reader who flips the constant has to meet this test and the
-        comment beside it, both of which say the ledger-side rewrite comes
-        first.
-        """
-        shuffled = _plan("2026-08-02", _PREV_BODY.replace("x8-10", "x9-11")
-                         .replace("x10-12", "x11-13").replace("x12-15", "x13-16"))
-        with patch.object(rv, "DOSE_PROGRESSION_ENFORCED", True):
-            errors, _ = validate_workout_plan(
-                shuffled, prev_block=_prev_block(), plan_date="2026-08-02")
-        self.assertEqual([e for e in errors if "dose staleness" in e], [],
-                         "the bypass is real; the comment on "
-                         "DOSE_PROGRESSION_ENFORCED must keep saying so")
-        source = Path(rv.__file__).read_text(encoding="utf-8")
-        self.assertIn("THE REAL FIX IS NOT THIS", source)
-
-    def _oscillating_payload(self) -> dict:
-        """A payload whose own `dose_staleness` saw 90 / 92.5 / 90 / 92.5."""
-        plans = [parse_plan(_plan(d, f"- Leg Extension: {kg}kgx10-12 /// "
-                                     f"{kg}kgx10-12\n"), d)
-                 for d, kg in zip(("2026-07-05", "2026-07-12", "2026-07-19",
-                                   "2026-07-26"), ("90", "92.5", "90", "92.5"))]
-        report = dose_staleness(plans, _DB)
-        self.assertEqual(report["oscillating_count"], 1)
-        return {"dose_staleness": report}
-
-    def test_the_oscillation_detector_is_finally_consumed(self) -> None:
-        """`dose_staleness.oscillating` existed and no gate read it.
-
-        90 / 92.5 / 90 / 92.5 changes the dose every generation and
-        progresses nothing, which satisfies both other findings forever.
-        """
-        msgs = [m for _a, m in dose_progression_findings(
-            _RECOPIED_PLAN, None, plan_date="2026-08-02",
-            payload=self._oscillating_payload())]
-        self.assertTrue(any("alternated between two values" in m
-                            for m in msgs), msgs)
-
-    def test_it_cannot_be_computed_from_the_two_generations_here(self) -> None:
-        """The trap the first draft of this finding fell into.
-
-        `dose_progression_findings` holds the block artifact plus the plan
-        under validation — two generations — and `oscillating` needs four.
-        Computed locally it is dead code that always answers "no". Pinned
-        so nobody moves it back.
-        """
-        self.assertEqual(
-            [m for _a, m in dose_progression_findings(
-                _RECOPIED_PLAN, _prev_block(), plan_date="2026-08-02")
-             if "alternated" in m], [])
-
-    def test_it_reaches_stderr_as_an_advisory(self) -> None:
-        errors, warnings = validate_workout_plan(
-            _RECOPIED_PLAN, prev_block=_prev_block(), plan_date="2026-08-02",
-            payload=self._oscillating_payload())
-        self.assertEqual([e for e in errors if "alternated" in e], [])
-        self.assertTrue(any("alternated" in w and rv.DOSE_ADVISORY_TAG in w
-                            for w in warnings), warnings)
-
-
-# ---------------------------------------------------------------------------
-class StallLaunderingTests(unittest.TestCase):
-    """F6 — one token bullet in another workout erased the finding.
-
-    `dose_staleness` collapsed an exercise to its HEAVIEST prescription in
-    the plan, so a stalled lift kept identical in Workout 1 plus a single
-    set five kilos heavier in Workout 3 read as "the dose moved" while the
-    session the user performs was untouched.
-    """
-
-    def _laundered(self, tail: str) -> list[str]:
-        text = _plan("2026-08-02", _PROGRESSED_BODY.replace(
-            "- Romanian Deadlift: 85kgx6-8 /// 85kgx6-8 /// 85kgx6-8",
-            "- Romanian Deadlift: 100kgx10-12 /// 100kgx10-12 /// 100kgx10-12")
-            ) + f"\n## Workout 3: LOWER B + CORE\n\n{tail}"
-        return [m for _a, m in dose_progression_findings(
-            text, _prev_block({"Romanian Deadlift": 4}),
-            plan_date="2026-08-02")]
-
-    def test_a_token_heavier_set_no_longer_answers_the_stall(self) -> None:
-        msgs = self._laundered("- Romanian Deadlift: 105kgx8\n")
-        self.assertTrue(any(m.startswith("Romanian Deadlift: 4 sessions "
-                                         "stalled") for m in msgs), msgs)
-
-    def test_a_real_second_exposure_still_counts(self) -> None:
-        """Three sets at a new load is a prescription, not a token."""
-        msgs = self._laundered("- Romanian Deadlift: 105kgx8 /// 105kgx8 "
-                               "/// 105kgx8\n")
-        self.assertEqual([m for m in msgs if m.startswith("Romanian Deadlift:")],
-                         [])
-
-    def test_the_selected_dose_is_the_one_that_carries_the_sets(self) -> None:
-        plans = [parse_plan(_plan("2026-07-25",
-                                  "- Leg Extension: 55kgx10-12 /// 55kgx10-12\n"),
-                            "2026-07-25"),
-                 parse_plan(_plan("2026-08-02",
-                                  "- Leg Extension: 55kgx10-12 /// 55kgx10-12\n"
-                                  "\n## Workout 3: LOWER B + CORE\n\n"
-                                  "- Leg Extension: 70kgx6\n"), "2026-08-02")]
-        report = dose_staleness(plans, _DB)
-        carried = report["carried"][0]
-        self.assertEqual(carried["load_kg"], 55.0)
-        self.assertFalse(carried["dose_changed"])
-
-
-# ---------------------------------------------------------------------------
 class SubBulletSmugglingTests(unittest.TestCase):
     """F8 — the structural exemption was a `.search()` over the whole line.
 
@@ -1014,46 +654,52 @@ class SubBulletSmugglingTests(unittest.TestCase):
             "  — anchor change: injury\n")))
         self.assertEqual([w for w in warnings if "sub-bullets" in w], [])
 
+    def test_the_other_gym_cue_is_exempt_too(self) -> None:
+        # Two form cues fill the cap; the mandatory `other gym:` cue on a
+        # third and fourth bullet must not tip the workout over it.
+        _errors, warnings = validate_workout_md(_plan("2026-08-02", (
+            "- Barbell Back Squat: 100kgx8 /// 100kgx8\n"
+            "  — brace before the first rep\n"
+            "- Cable Lat Pulldown: 65kgx10 /// 65kgx10\n"
+            "  — other gym: 55 kg\n"
+            "- Leg Extension: 55kgx10 /// 55kgx10\n"
+            "  — squeeze at the top\n"
+            "  — other gym: 45 kg\n")))
+        self.assertEqual([w for w in warnings if "sub-bullets" in w], [])
 
-# ---------------------------------------------------------------------------
-class MalformedDoseTests(unittest.TestCase):
-    """F9 — a crash is not a validation verdict.
+    def test_an_other_gym_cue_with_anything_after_the_number_counts(self) -> None:
+        # Only the whole fixed cue (`other gym: <number> kg`) is structure.
+        # Prose that starts with the phrase must not buy an exemption.
+        _errors, warnings = validate_workout_md(_plan("2026-08-02", (
+            "- Barbell Back Squat: 100kgx8 /// 100kgx8\n"
+            "  — other gym: 55 kg, the stack there is lighter and the "
+            "pulley is smoother\n"
+            "- Leg Extension: 55kgx10 /// 55kgx10\n"
+            "  — other gym: much lighter\n"
+            "- Calf Raise Machine: 55kgx12 /// 55kgx12\n"
+            "  — other gym: 55\n")))
+        self.assertTrue(any("3 rationale sub-bullets" in w for w in warnings),
+                        warnings)
 
-    `prescribed_sets` is the one dose field `dose_staleness` indexed
-    rather than `.get`, and the dose dict is JSON off a block artifact on
-    disk. A missing key exited 1 with a KeyError; a null one exited 1 with
-    a TypeError. Exit 1 means the program broke.
-    """
+    def test_the_whole_other_gym_cue_is_exempt_with_a_decimal(self) -> None:
+        _errors, warnings = validate_workout_md(_plan("2026-08-02", (
+            "- Barbell Back Squat: 100kgx8 /// 100kgx8\n"
+            "  — brace before the first rep\n"
+            "  — squeeze at the top\n"
+            "  — other gym: 36.25 kg\n"
+            "  — other gym: 36.25 KG  \n")))
+        self.assertEqual([w for w in warnings if "sub-bullets" in w], [])
 
-    def _block(self, mutate) -> dict:
-        block = _prev_block()
-        for slots in block["sessions"].values():
-            for s in slots:
-                mutate(s["dose"])
-        return block
-
-    def test_a_missing_prescribed_sets_is_not_a_crash(self) -> None:
-        block = self._block(lambda d: d.pop("prescribed_sets", None))
-        self.assertEqual(
-            dose_progression_findings(_RECOPIED_PLAN, block,
-                                      plan_date="2026-08-02"), [])
-
-    def test_a_null_prescribed_sets_is_not_a_crash(self) -> None:
-        block = self._block(lambda d: d.update(prescribed_sets=None))
-        self.assertEqual(
-            dose_progression_findings(_RECOPIED_PLAN, block,
-                                      plan_date="2026-08-02"), [])
-
-    def test_a_string_prescribed_sets_is_not_a_crash(self) -> None:
-        block = self._block(lambda d: d.update(prescribed_sets="three"))
-        self.assertEqual(
-            dose_progression_findings(_RECOPIED_PLAN, block,
-                                      plan_date="2026-08-02"), [])
-
-    def test_it_still_reads_a_well_formed_block(self) -> None:
-        """The guard must not turn every block into "cannot compare"."""
-        self.assertTrue(dose_progression_findings(
-            _RECOPIED_PLAN, _prev_block(), plan_date="2026-08-02"))
+    def test_a_buried_other_gym_token_still_counts(self) -> None:
+        _errors, warnings = validate_workout_md(_plan("2026-08-02", (
+            "- Barbell Back Squat: 100kgx8 /// 100kgx8\n"
+            "  — brace before the first rep, not other gym: stuff\n"
+            "- Leg Extension: 55kgx10 /// 55kgx10\n"
+            "  — squeeze at the top\n"
+            "- Calf Raise Machine: 55kgx12 /// 55kgx12\n"
+            "  — pause at the bottom\n")))
+        self.assertTrue(any("3 rationale sub-bullets" in w for w in warnings),
+                        warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -1077,46 +723,6 @@ class DerivedOnlyReasonIsReadFromTheRightTupleTests(unittest.TestCase):
     def test_the_declarable_reasons_still_work(self) -> None:
         for reason in COACH_DECLARABLE_ANCHOR_CHANGE_REASONS:
             self.assertEqual(self._block_with_hint(reason), reason)
-
-
-# ---------------------------------------------------------------------------
-class SetChurnIsNotProgressionTests(unittest.TestCase):
-    """F11 — the prompt and the code disagreed, and the code was wrong.
-
-    SKILL.md, on the hold-loads band: advancing the rep target "is a real
-    dose change and it counts as one. Churning set counts to move the
-    metric does not: adding or dropping a set purely to make the
-    prescription differ changes weekly volume for no training reason and
-    breaks the tier targets." `_dose_delta` counted ANY set-count change
-    as material, with no magnitude floor at all.
-    """
-
-    BASE = {"load_kg": 100.0, "rep_lo": 8, "rep_hi": 10, "prescribed_sets": 3}
-
-    def _delta(self, **over):
-        return _dose_delta(self.BASE, {**self.BASE, **over})
-
-    def test_adding_a_set_is_not_a_dose_change(self) -> None:
-        kind, changed = self._delta(prescribed_sets=4)
-        self.assertFalse(changed)
-        self.assertEqual(kind, "sets_up")
-
-    def test_dropping_a_set_is_not_a_dose_change(self) -> None:
-        kind, changed = self._delta(prescribed_sets=2)
-        self.assertFalse(changed)
-        self.assertEqual(kind, "sets_down")
-
-    def test_the_kind_is_still_reported(self) -> None:
-        """Counted as unchanged, not made invisible. Same as `cosmetic`."""
-        self.assertNotEqual(self._delta(prescribed_sets=4)[0], "none")
-
-    def test_load_and_reps_are_untouched(self) -> None:
-        self.assertEqual(self._delta(load_kg=105.0), ("load_up", True))
-        self.assertEqual(self._delta(rep_lo=9, rep_hi=11), ("reps_up", True))
-
-    def test_the_cost_is_stated_where_the_rule_is(self) -> None:
-        """A real volume cut now reads as unchanged. Say so in the code."""
-        self.assertIn("cadence deload", _dose_delta.__doc__)
 
 
 if __name__ == "__main__":                                  # pragma: no cover

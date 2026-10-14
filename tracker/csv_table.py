@@ -120,10 +120,6 @@ def sort_records(records: Iterable[dict], spec: CsvTableSpec) -> list[dict]:
     )
 
 
-def records_to_rows(records: Iterable[dict], fields: Sequence[str]) -> list[list]:
-    return [[rec.get(field) for field in fields] for rec in records]
-
-
 def sparse_upsert_records(
     existing: Iterable[dict],
     entries: Iterable[dict],

@@ -41,10 +41,9 @@ if str(_SKILLS_ROOT) not in sys.path:
 
 from workout_coach.lib.plan_checks import run_plan_checks
 from workout_coach.lib.render_helpers import esc
-# Direct submodule imports bypass the render_assets / render_components /
-# render_cards / render_cards_trajectory compatibility facades. Each
-# facade is a tiny re-export module; loading them just to forward names
-# is wasted parse + exec cost on every cold render subprocess.
+# Direct submodule imports bypass the render_components compatibility facade.
+# It is a tiny re-export module; loading it just to forward names is wasted
+# parse + exec cost on every cold render subprocess.
 from workout_coach.lib.render_components_load import build_load_series
 from workout_coach.lib.render_components_misc import embed_workout_markdown, ring
 from workout_coach.lib.render_styles import STYLESHEET
@@ -218,7 +217,7 @@ def render(j: TrackerJSON, coach: CoachReads, workout_md: str, person: str) -> s
     {card_acwr(acwr, coach_cards.get("today_acwr"))}
     {card_rings(rings_html, coach_cards.get("activity_rings"))}
     {card_neat(j.get("daily_activity_28d"))}
-    {card_block_position(j.get("block"), j.get("dose_staleness"), coach_cards.get("block_position"))}
+    {card_block_position(j.get("block"), j.get("next_dose"), coach_cards.get("block_position"))}
     {card_training_load(series, ctl, atl, tsb, tsb_trend, coach_cards.get("training_load"))}
     {card_muscle_volume(weekly_volume, coach_cards.get("muscle_volume"), hr_divergence=j.get("hr_at_volume_divergence"))}
     {card_strength(e_items, coach_cards.get("strength"))}

@@ -9,9 +9,9 @@ Two scripts run it and neither owns it:
 
 The checks used to live inline in the renderer's ``main()``, so making
 the report optional would have made the checks optional with it: a plan
-written without a report would ship with no core / arm floor, no set
-budget and no opener cross-check. One function, two callers, so the two
-paths cannot drift apart.
+written without a report would ship with no core spec, no per-muscle
+floor, no set budget and no opener cross-check. One function, two
+callers, so the two paths cannot drift apart.
 
 Stage order and early exit are part of the contract: tracker payload,
 then ``coach_reads.json``, then the workout markdown's copy, then the
@@ -33,6 +33,7 @@ from typing import TextIO
 
 from tracker.validation import validate_tracker_json
 from .render_validators import (
+    is_cadence_deload_week,
     is_deload_week,
     payload_spec_errors,
     tier_budget_by_index,
@@ -113,10 +114,12 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
         return fail("workout_md validation error", workout_errors)
 
     # Prescription-CONTENT validation: core dose + weekly core
-    # distribution, direct-arm dose + diversity, block rotation against
-    # the previous block, and the tier-scaled working-set budget.
+    # distribution, arm diversity, the weekly direct-set floor of every
+    # muscle (from the payload's `muscle_volume_targets`), block rotation
+    # against the previous block, and the tier-scaled working-set budget.
     #
-    # The core and arm findings are BLOCKING, and that is the change.
+    # The core, arm and per-muscle findings are BLOCKING, and that is the
+    # change.
     # They were printed to stderr and the next generated plan ignored
     # them; the 2026-07-18 plan met every numeric target the system
     # checked and was still wrong. The core and arm checks also used to
@@ -132,11 +135,13 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
     # an exit 2. Nothing below needs to change when stage two flips it:
     # the findings simply arrive in `plan_errors` instead.
     #
-    # A prescribed whole-week deload demotes the VOLUME findings to
-    # warnings, because cutting volume is what a deload IS. Diversity and
-    # placement stay blocking — they cost no fatigue. A Tier C recovery
-    # downgrade is NOT a deload and keeps every floor: see
-    # `render_validators.DELOAD_WEEK_LABELS`.
+    # A FULL-BLOCK deload (the gate's Tier A/B, i.e. a load policy of
+    # ``reduce``, or a `DELOAD_WEEK_LABELS` label) demotes the VOLUME findings
+    # to warnings, because cutting volume is what that deload IS. Diversity
+    # and placement stay blocking — they cost no fatigue. The block's cadence
+    # deload halves ONE session and demotes nothing: the floors stay
+    # blocking, scaled by (n - 0.5) / n. A Tier C recovery downgrade is NOT a
+    # deload and keeps every floor: see `render_validators.DELOAD_WEEK_LABELS`.
     #
     # THE SPECS ARE NOT PASSED IN, and that is deliberate. `read_tracker`
     # writes `core_week_spec` / `arm_week_spec` into the payload straight
@@ -161,7 +166,8 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
         budget_by_index=tier_budget_by_index(session_rec, base_budget),
         prev_block=block,
         plan_date=j.get("today"),
-        deload_week=is_deload_week(session_rec, block),
+        deload_week=is_deload_week(session_rec),
+        cadence_deload=is_cadence_deload_week(session_rec, block),
         # The plan's own opener states the recovery score to the user
         # mid-workout and shipped unchecked while `coach_reads` did not,
         # so one page could carry three different numbers for it: 5.6 in

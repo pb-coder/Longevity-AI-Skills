@@ -459,7 +459,8 @@ def _load_exercises_db_cached(path_str: str, _mtime_ns: int, _size: int) -> dict
                     break
             continue
         m = _BULLET_RE.match(s)
-        if not m:
+        # No section yet: the tag legend at the top, not an exercise.
+        if not m or section is None:
             continue
 
         name = m.group("name").strip()

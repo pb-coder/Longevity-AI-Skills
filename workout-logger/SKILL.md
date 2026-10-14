@@ -125,9 +125,8 @@ It takes a single `health-export-json-*.json` file — no archive, no member
 selection, no CSV fallback — and covers most of the tracker surface: VO2max,
 RHR, walking HR, breathing disturbances, exercise minutes, steps, active /
 basal energy, sleep stages, per-workout HR, and per-workout swim aggregates
-(partial — see below). The native Apple XML importer is retired, and so is
-the older zip-based importer script for this path; that script stays on
-disk, unused, until a later plan removes it.
+(partial — see below). The native Apple XML importer and the older zip-based
+Health Auto Export importer are both retired and removed.
 
 It writes into the per-person CSV store under `<Person>/data/`:
 

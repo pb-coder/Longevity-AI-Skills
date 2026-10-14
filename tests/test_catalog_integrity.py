@@ -271,6 +271,19 @@ class CatalogIntegrityTests(unittest.TestCase):
                    if m.get("primary") == "core" and m.get("lengthened")]
         self.assertEqual(flagged, [])
 
+    def test_front_raises_credit_front_delts_not_side_delts(self) -> None:
+        """They sat under `Lateral Delt (Isolation)` and so counted as side
+        delt work, which hid the missing overhead press from the volume
+        model twice over."""
+        db = load_exercises_db(_DB_PATH)
+        for name in ("cable front raise", "dumbbell front raise"):
+            with self.subTest(name=name):
+                self.assertEqual(db[name]["primary"], "front_delts")
+
+    def test_the_tag_legend_is_not_an_exercise(self) -> None:
+        db = load_exercises_db(_DB_PATH)
+        self.assertEqual([n for n in db if n.startswith("`")], [])
+
 
 if __name__ == "__main__":
     unittest.main()

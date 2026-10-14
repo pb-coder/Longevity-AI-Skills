@@ -10,6 +10,8 @@ from workout_coach.lib.render_validators import (
     auto_wrap_terms,
     core_week_errors,
     count_working_sets_per_workout,
+    muscle_floor_errors,
+    muscle_floors,
     validate_coach_reads,
     validate_workout_md,
     workout_arm_dose_warnings,
@@ -119,6 +121,12 @@ _PLAN_ARM_DOSE_MET = """# Workout plan — 2026-06-14
 - Bayesian Cable Curl: 12kgx10 /// 12kgx10 /// 12kgx10
 - Cable Face Pull: 20kgx15 /// 20kgx15
 """
+
+def _tiers(**tiers: str) -> dict:
+    """A payload carrying only ``muscle_volume_targets``: muscle -> tier."""
+    return {"muscle_volume_targets": {m: {"tier": t}
+                                      for m, t in tiers.items()}}
+
 
 _PLAN_ARM_CURL_LAST = """# Workout plan — 2026-06-14
 
@@ -350,21 +358,27 @@ class RenderValidatorTests(unittest.TestCase):
                               "Cable Pallof Press", "Plank", "Dead Bug"):
             self.assertNotIn(catalog_name, src)
 
-    def test_arm_dose_warnings_flags_zero_direct_sets_for_both_muscles(self) -> None:
-        warns = workout_arm_dose_warnings(_PLAN_ARM_NONE)
-        self.assertTrue(any(
-            "0 direct biceps sets" in w and "floor is 6" in w for w in warns))
-        self.assertTrue(any(
-            "0 direct triceps sets" in w and "floor is 6" in w for w in warns))
+    def test_zero_direct_arm_sets_trip_the_per_muscle_floor(self) -> None:
+        # The arm volume floor is two rows of the per-muscle floor now;
+        # `workout_arm_dose_warnings` keeps placement and diversity.
+        errors = muscle_floor_errors(_PLAN_ARM_NONE, _tiers(
+            biceps="maintain", triceps="emphasis"))
+        self.assertTrue(any("0 direct biceps sets" in e and "floor is 5" in e
+                            for e in errors), errors)
+        self.assertTrue(any("0 direct triceps sets" in e and "floor is 6" in e
+                            for e in errors), errors)
+        self.assertEqual(workout_arm_dose_warnings(_PLAN_ARM_NONE), [])
 
     def test_arm_dose_warnings_silent_when_weekly_floor_met(self) -> None:
         # 6 direct biceps sets (Incline Dumbbell Curl + Bayesian Cable
         # Curl) and 6 direct triceps sets (Cable Overhead Tricep
         # Extension + Cable Tricep Pushdown) summed ACROSS both
-        # workouts meets the floor exactly; no dose warning fires. The
-        # compounds (bench, lat pulldown) contribute synergist credit
-        # only and must not be counted.
+        # workouts meets a maintain floor (5 and 4) and the diversity
+        # axis; nothing fires. The compounds (bench, lat pulldown)
+        # contribute synergist credit only and must not be counted.
         self.assertEqual(workout_arm_dose_warnings(_PLAN_ARM_DOSE_MET), [])
+        self.assertEqual(muscle_floor_errors(_PLAN_ARM_DOSE_MET, _tiers(
+            biceps="maintain", triceps="maintain")), [])
 
     def test_arm_dose_warnings_flags_curl_as_last_bullet(self) -> None:
         warns = workout_arm_dose_warnings(_PLAN_ARM_CURL_LAST)
@@ -376,10 +390,12 @@ class RenderValidatorTests(unittest.TestCase):
         # A validator that cannot identify any biceps/triceps exercise
         # must not flag every workout as arm-deficient.
         with patch.object(
-            render_validators, "_biceps_triceps_exercise_names",
-            return_value=(set(), set()),
+            render_validators, "_primary_muscle_by_exercise",
+            return_value={},
         ):
             self.assertEqual(workout_arm_dose_warnings(_PLAN_ARM_NONE), [])
+            self.assertEqual(muscle_floor_errors(
+                _PLAN_ARM_NONE, _tiers(biceps="emphasis")), [])
 
     def test_arm_dose_warnings_does_not_hardcode_exercise_names(self) -> None:
         # Same regression guard as core: the biceps/triceps name sets must
@@ -466,6 +482,138 @@ class ExternalLoadFlagTests(unittest.TestCase):
         self.assertTrue(any("loaded flexion" in e
                             for e in core_week_errors(plan)),
                         core_week_errors(plan))
+
+
+# A week with one clean answer per muscle: 6 side delt sets, 0 rear delt,
+# 0 trap, a back extension and a wrist-free grip week, and two front raises.
+_PLAN_FLOOR_WEEK = """# Workout plan — 2026-10-14
+
+## Workout 1: UPPER A
+- Jumping Jacks: 50
+- Cable Lateral Raise: 14kgx10 /// 14kgx10 /// 14kgx10
+- Cable Front Raise: 10kgx10 /// 10kgx10
+- Cable Lat Pulldown: 65kgx8 /// 65kgx8
+
+## Workout 2: UPPER B
+- Dumbbell Lateral Raise: 8kgx12 /// 8kgx12 /// 8kgx12
+"""
+
+
+class MuscleFloorTests(unittest.TestCase):
+    """One weekly direct-set floor for every muscle."""
+
+    def test_floor_is_mv_in_direct_sets_and_mev_for_emphasis(self) -> None:
+        floors = muscle_floors({
+            "rear_delts": "grow", "biceps": "emphasis", "triceps": "emphasis",
+            "calves": "maintain", "traps": "maintain", "chest": "emphasis",
+            "back": "grow",
+        })
+        # Direct units, not the payload's fractional target_sets: biceps
+        # emphasis is 15 fractional and 8 direct (its MEV; mid-MAV is 12).
+        self.assertEqual(floors, {"rear_delts": 6, "biceps": 8, "triceps": 6,
+                                  "calves": 6, "traps": 2, "chest": 8,
+                                  "back": 6})
+
+    def test_the_same_muscle_is_lower_off_emphasis(self) -> None:
+        self.assertEqual(muscle_floors({"chest": "emphasis"}), {"chest": 8})
+        self.assertEqual(muscle_floors({"chest": "grow"}), {"chest": 3})
+        self.assertEqual(muscle_floors({"chest": "maintain"}), {"chest": 3})
+
+    def test_a_muscle_with_no_floor_is_absent_not_zero(self) -> None:
+        # Core keeps core_week_spec (12 sets on a two-and-two week, above
+        # its generic MEV of 4); erectors and forearms have no measured
+        # direct supply; the rest have an MV of 0 or no direct exercise.
+        floors = muscle_floors({
+            "core": "emphasis", "erectors": "emphasis",
+            "forearms": "emphasis", "glutes": "grow", "front_delts": "grow",
+            "adductors": "maintain", "neck": "maintain",
+            "external_rotators": "emphasis",
+        })
+        self.assertEqual(floors, {})
+
+    def test_the_constants_function_is_the_one_the_validator_calls(self) -> None:
+        from workout_coach.lib import constants
+        tiers = {"biceps": "emphasis", "external_rotators": "emphasis"}
+        # Without the catalog the unservable muscle is not filtered out...
+        self.assertEqual(constants.muscle_floors(tiers),
+                         {"biceps": 8, "external_rotators": 2})
+        # ...the validator's wrapper adds only that filter.
+        self.assertEqual(muscle_floors(tiers), {"biceps": 8})
+        self.assertEqual(
+            muscle_floors(tiers),
+            constants.muscle_floors(
+                tiers,
+                servable=set(
+                    render_validators._primary_muscle_by_exercise().values())))
+
+    def test_a_payload_floor_key_cannot_move_the_bar(self) -> None:
+        payload = _tiers(rear_delts="grow")
+        payload["muscle_floors"] = {"rear_delts": 0}
+        self.assertTrue(muscle_floor_errors(_PLAN_FLOOR_WEEK, payload))
+
+    def test_zero_floors_never_fire(self) -> None:
+        # Glutes, front delts, adductors and neck have MV 0; external
+        # rotators has no primary catalog entry at all.
+        tiers = _tiers(glutes="grow", front_delts="maintain",
+                       adductors="maintain", neck="maintain",
+                       external_rotators="emphasis")
+        self.assertEqual(muscle_floor_errors(_PLAN_FLOOR_WEEK, tiers), [])
+
+    def test_erectors_and_forearms_are_exempt(self) -> None:
+        self.assertEqual(muscle_floor_errors(
+            _PLAN_FLOOR_WEEK, _tiers(erectors="emphasis",
+                                     forearms="emphasis")), [])
+
+    def test_core_is_governed_by_the_core_spec_not_the_muscle_floor(self) -> None:
+        # _PLAN_FLOOR_WEEK has no core work; the per-muscle floor is silent
+        # about it and `core_week_errors` is where core is judged.
+        self.assertEqual(muscle_floor_errors(
+            _PLAN_FLOOR_WEEK, _tiers(core="emphasis")), [])
+
+    def test_the_message_names_muscle_sets_and_floor(self) -> None:
+        errors = muscle_floor_errors(
+            _PLAN_FLOOR_WEEK, _tiers(rear_delts="grow", traps="maintain",
+                                     side_delts="grow"))
+        self.assertEqual(len(errors), 2, errors)
+        self.assertIn("Week: 0 direct rear_delts sets across the plan — "
+                      "floor is 6 (grow tier;", errors[0])
+        self.assertIn("0 direct traps sets", errors[1])
+        # 6 side delt sets meet the MV floor of 6, and the lat pulldown's
+        # rear-delt synergist credit is not a direct set.
+        self.assertFalse(any("side_delts" in e for e in errors))
+
+    def test_front_raises_credit_front_delts_and_not_side_delts(self) -> None:
+        sets = render_validators._direct_sets_by_muscle(_PLAN_FLOOR_WEEK)
+        self.assertEqual(dict(sets["front_delts"]), {"cable front raise": 2})
+        self.assertEqual(sum(sets["side_delts"].values()), 6)
+
+    def test_only_listed_muscles_are_judged(self) -> None:
+        self.assertEqual(muscle_floor_errors(_PLAN_FLOOR_WEEK, _tiers()), [])
+        self.assertEqual(muscle_floor_errors(_PLAN_FLOOR_WEEK, None), [])
+
+    def test_a_document_with_no_workout_is_not_a_violation(self) -> None:
+        self.assertEqual(muscle_floor_errors(
+            "# Notes\n\nNo plan here.\n", _tiers(traps="maintain")), [])
+
+    def test_a_deload_demotes_the_floor_and_names_why(self) -> None:
+        from workout_coach.lib.render_validators import validate_workout_plan
+        payload = _tiers(rear_delts="grow")
+        errors, _ = validate_workout_plan(_PLAN_FLOOR_WEEK, payload=payload)
+        self.assertTrue(any("rear_delts sets" in e for e in errors))
+        errors, warnings = validate_workout_plan(
+            _PLAN_FLOOR_WEEK, payload=payload, deload_week=True)
+        self.assertFalse(any("rear_delts sets" in e for e in errors))
+        self.assertTrue(any("rear_delts sets" in w
+                            and "[advisory: deload week]" in w
+                            for w in warnings))
+
+    def test_a_payload_with_no_targets_says_the_floor_did_not_run(self) -> None:
+        from workout_coach.lib.render_validators import validate_workout_plan
+        _, warnings = validate_workout_plan(_PLAN_FLOOR_WEEK, payload={})
+        self.assertTrue(any("per-muscle weekly floor was not checked" in w
+                            for w in warnings))
+        _, warnings = validate_workout_plan(_PLAN_FLOOR_WEEK)
+        self.assertFalse(any("not checked" in w for w in warnings))
 
 
 if __name__ == "__main__":

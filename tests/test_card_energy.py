@@ -210,12 +210,6 @@ class CardEnergyRegistrationTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertFalse([w for w in warnings if "trajectory_energy" in w])
 
-    def test_documented_import_path_resolves_through_the_facade(self) -> None:
-        from workout_coach.lib import render_cards_trajectory
-
-        self.assertIs(render_cards_trajectory.card_energy, card_energy)
-        self.assertIn("card_energy", render_cards_trajectory.__all__)
-
     def test_render_dashboard_wires_the_card_above_nutrition_phase(self) -> None:
         from pathlib import Path
 

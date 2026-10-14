@@ -25,17 +25,17 @@ Public surface:
   core budget (R-13).
 - ``session_type_from_content(slots, db)`` /
   ``session_content_regions(slots, db)`` — the content half on its own.
-- ``ledger_progression(plan, rows, db, ...)`` — per exercise, whether a
-  prescription progresses, holds or only looks like it moved, judged
-  against what the LEDGER says was performed (R-01).
+- ``plan_doses(plan, db)`` — the one prescription per exercise a plan
+  carries. ``progression.next_dose`` reads the rep range off it.
+- ``session_workout_candidates(plan, rows, day, db)`` — which workout(s) of
+  a plan a logged session was credited to, for a lift the plan prescribes
+  more than once.
 - ``load_plans(person, today_d, limit)`` — the dated plan series, parsed,
   oldest first, never past the ``--today`` horizon.
 - ``reconcile_plan(plan, window, rows, db, catalog)`` — one plan against
   the logs inside its own window.
 - ``build_adherence(person, rows, db, today_d, catalog, history)`` — the
   ``adherence`` payload block, including the D5 bench list.
-- ``dose_staleness(plans, catalog)`` — per carried exercise, whether its
-  dose actually moved and for how many generations it has not.
 - ``read_bench_log(person)`` / ``record_bench_response(...)`` — the D5
   answer store, so "ask once" means once and not once per run.
 
@@ -815,7 +815,7 @@ def _catalog_meta(catalog: dict | None, exercise: str) -> dict:
     return (catalog or {}).get((exercise or "").strip().lower()) or {}
 
 
-def _is_isolation(exercise: str, catalog: dict | None, db: dict | None) -> bool:
+def is_isolation(exercise: str, catalog: dict | None, db: dict | None) -> bool:
     """Isolation vs compound, read off the catalog's own section headings.
 
     The truncation signal this feeds is the load-bearing one: measured
@@ -859,20 +859,30 @@ def _logged_working_sets(rows: list[dict], db: dict,
 _SESSION_MATCH_MIN_COVERAGE = 0.34
 
 
+def _workout_coverages(plan: dict, names: set[str]) -> dict[int, float]:
+    """``{workout_index: coverage}`` for a session that did ``names``.
+
+    Coverage is the share of the session's DISTINCT exercises that the
+    planned workout also prescribes — not Jaccard, because a session that is
+    a faithful partial execution of a planned workout (five of eight slots)
+    should still match it, and Jaccard penalises exactly that.
+    """
+    out: dict[int, float] = {}
+    for w in plan.get("workouts") or []:
+        want = {s["exercise"].strip().lower()
+                for s in w["slots"] if s["prescribed_sets"] > 0}
+        if want and names:
+            out[w["index"]] = len(names & want) / len(names)
+    return out
+
+
 def _match_sessions(plan: dict, sessions: dict[str, list[dict]]) -> dict:
     """Assign each logged session date to the planned workout it best covers.
 
     Returns ``{date: workout_index | None}``. Coverage is the share of
     the session's DISTINCT exercises that the planned workout also
-    prescribes — not Jaccard, because a session that is a faithful
-    partial execution of a planned workout (five of eight slots) should
-    still match it, and Jaccard penalises exactly that.
+    prescribes (`_workout_coverages`). A tie goes to the earlier workout.
     """
-    planned: dict[int, set[str]] = {
-        w["index"]: {s["exercise"].strip().lower()
-                     for s in w["slots"] if s["prescribed_sets"] > 0}
-        for w in plan.get("workouts") or []
-    }
     out: dict[str, int | None] = {}
     for d, rws in sessions.items():
         names = {(r.get("exercise") or "").strip().lower() for r in rws}
@@ -880,14 +890,71 @@ def _match_sessions(plan: dict, sessions: dict[str, list[dict]]) -> dict:
             out[d] = None
             continue
         best_idx, best_cov = None, 0.0
-        for idx, want in planned.items():
-            if not want:
-                continue
-            cov = len(names & want) / len(names)
+        for idx, cov in _workout_coverages(plan, names).items():
             if cov > best_cov:
                 best_idx, best_cov = idx, cov
         out[d] = best_idx if best_cov >= _SESSION_MATCH_MIN_COVERAGE else None
     return out
+
+
+def session_workout_candidates(plan: dict, rows: list[dict], day: str,
+                               db: dict) -> list[int]:
+    """The ``index`` of every workout of ``plan`` the session logged on
+    ``day`` is credited to, as `_match_sessions` would: the workouts that
+    cover it best, at least `_SESSION_MATCH_MIN_COVERAGE`. One entry when the
+    match is clear; several when workouts tie (a session of one lift that
+    two workouts both prescribe); none when it matched none or nothing was
+    logged that day. `_match_sessions` itself gives a tie to the first."""
+    d = _parse_iso_date(day)
+    if d is None:
+        return []
+    sessions = _logged_working_sets(rows, db, d, d + timedelta(days=1))
+    names = {(r.get("exercise") or "").strip().lower()
+             for r in sessions.get(day) or []}
+    cov = _workout_coverages(plan, names)
+    best = max(cov.values(), default=0.0)
+    if best < _SESSION_MATCH_MIN_COVERAGE:
+        return []
+    return [i for i, c in cov.items() if c == best]
+
+
+def last_strength_session_type(rows: list[dict], plans: list[dict],
+                               db: dict, today_d: date) -> tuple:
+    """``(info, reason)``: which workout the newest strength session was.
+
+    ``info`` is ``{"type", "title", "date", "plan_date"}``: the session type
+    (``upper`` / ``lower`` / ``full``, as the plan classified it), the
+    workout heading it matched, the date of the session and the date of the
+    plan whose workout it matched. The split rotation continues from here.
+
+    The session is the most recent date with a counted strength working set
+    (warmups and cardio dropped, as everywhere). It is matched to a workout
+    the way the adherence ledger matches it (`_match_sessions`) against the
+    plans written on or before that date, newest first; the first plan with
+    a workout covering enough of the session wins. ``info`` is ``None``
+    with a ``reason`` when there is no session, no plan, or no match: the
+    coach is told it does not know rather than handed a guess.
+    """
+    sessions = _logged_working_sets(rows, db, date.min, today_d + timedelta(days=1))
+    if not sessions:
+        return None, "no strength session is logged"
+    last = max(sessions)
+    older = [p for p in plans
+             if (_parse_iso_date(p["plan_date"]) or date.max)
+             <= (_parse_iso_date(last) or date.min)]
+    if not older:
+        return None, (f"no plan on disk was written on or before the last "
+                      f"strength session ({last})")
+    for plan in reversed(older):
+        idx = _match_sessions(plan, {last: sessions[last]}).get(last)
+        if idx is None:
+            continue
+        w = next((w for w in plan["workouts"] if w["index"] == idx), None)
+        if w is not None:
+            return {"type": w.get("session_type"), "title": w["title"],
+                    "date": last, "plan_date": plan["plan_date"]}, None
+    return None, (f"the last strength session ({last}) matches no workout in "
+                  f"any plan written on or before it")
 
 
 def reconcile_plan(plan: dict, start: date, end: date, rows: list[dict],
@@ -996,7 +1063,7 @@ def reconcile_plan(plan: dict, start: date, end: date, rows: list[dict],
             # False ≡ every workout holding this exercise went undone, so
             # the prescription is untested: neither performed nor refused.
             "tested":          tested > 0,
-            "is_isolation":    _is_isolation(agg["name"], catalog, db),
+            "is_isolation":    is_isolation(agg["name"], catalog, db),
             "workouts":        sorted(agg["workouts"]),
             "missed_workouts": sorted(agg["missed_workouts"]),
             "_credited_tested": credited_tested,
@@ -1146,6 +1213,18 @@ def _bench_index(log: dict) -> dict[str, dict]:
             if isinstance(e, dict)}
 
 
+def retired_movements(person: str) -> set[str]:
+    """Lower-cased names the person has retired (D5 disposition ``retired``).
+
+    The answer store is the source: a retired movement may still be a bench
+    candidate that the route guard refused to bench (``bench_blocked``) or sit
+    in the stored block, so neither of those says whether the user has
+    refused it. Only the stored disposition does.
+    """
+    return {k for k, e in _bench_index(read_bench_log(person)).items()
+            if (e.get("disposition") or "") == "retired"}
+
+
 def record_bench_response(person: str, exercise: str,
                           answer: str | None = None,
                           disposition: str = "pending",
@@ -1263,7 +1342,8 @@ def _apply_route_guard(candidates: list[dict], catalog: dict | None,
     ``bench_blocked`` with the muscle it protects, and it takes priority
     in the bench prompt — "you keep skipping this and it is the only
     route to X, do you want a different exercise for that muscle" is a
-    far more useful question than a silent retirement.
+    far more useful question than a silent retirement. A RETIRED movement
+    is never blocked: the user has already answered, so it is benched.
     """
     by_muscle, by_category = _available_routes(catalog, rows, latest,
                                                retired)
@@ -1301,6 +1381,8 @@ def _apply_route_guard(candidates: list[dict], catalog: dict | None,
                     f"it is the last usable movement in core pattern category "
                     f"'{category}', which the weekly pattern requirement needs")
 
+        if key in (retired or ()):
+            reason = None      # answered already: nothing left to ask or guard
         entry = dict(cand)
         entry["muscle"] = muscle
         entry["core_category"] = category
@@ -1651,72 +1733,8 @@ def build_adherence(person: str, rows: list[dict], db: dict, today_d: date,
     }
 
 
-# ------------------------------------------------------- dose staleness
-# What counts as the dose actually moving. Both floors exist because the
-# cheapest way to satisfy "the dose must change" is to change it by an
-# amount no muscle can detect: 90 kg to 90.5 kg, or a rep range widened
-# from 8-10 to 8-11 while the midpoint barely shifts. Anything under
-# these floors is reported as ``cosmetic`` and counted as UNCHANGED.
-DOSE_LOAD_MIN_PCT = 0.02      # 2% — inside plate/stack granularity below this.
-DOSE_REP_MIN_MIDPOINT = 1.0   # one whole rep of midpoint movement.
-
-
-def _rep_midpoint(slot: dict) -> float | None:
-    lo, hi = slot.get("rep_lo"), slot.get("rep_hi")
-    if lo is None and hi is None:
-        return None
-    if lo is None:
-        return float(hi)
-    if hi is None:
-        return float(lo)
-    return (float(lo) + float(hi)) / 2.0
-
-
-def _dose_delta(prev: dict, cur: dict) -> tuple[str, bool]:
-    """Classify the change between two prescriptions of one exercise.
-
-    THE SET COUNT IS NOT AN AXIS OF PROGRESSION HERE, and that is the
-    prompt's rule, not an implementation preference. SKILL.md's
-    hold-loads paragraph says it in as many words: the rep target is the
-    intended lever under a hold and "that is a real dose change and it
-    counts as one. Churning set counts to move the metric does not:
-    adding or dropping a set purely to make the prescription differ
-    changes weekly volume for no training reason and breaks the tier
-    targets." This function used to treat ANY set-count change as
-    material, with no magnitude floor at all — the cheapest bypass in the
-    module, and one the prompt explicitly told the coach was illegitimate
-    while the code rewarded it. A set-count-only change is now classified
-    (``sets_up`` / ``sets_down`` are kept as change KINDS so the payload
-    still reports what moved) and counted as UNCHANGED, the same
-    arrangement ``cosmetic`` already had.
-
-    The cost is stated: a real volume cut — a deload halving a session's
-    sets while holding its loads, which is exactly what SKILL.md's
-    cadence deload prescribes — reads as an unchanged dose. That is the
-    honest reading of the prompt's own rule, and it is one of the reasons
-    the staleness gate is advisory rather than blocking; see
-    `render_validators.DOSE_PROGRESSION_ENFORCED`.
-    """
-    pl, cl = prev.get("load_kg"), cur.get("load_kg")
-    if pl is not None and cl is not None and pl > 0:
-        rel = (cl - pl) / pl
-        if abs(rel) >= DOSE_LOAD_MIN_PCT:
-            return ("load_up" if rel > 0 else "load_down", True)
-    elif (pl is None) != (cl is None):
-        return ("load_added" if cl is not None else "load_removed", True)
-    pm, cm = _rep_midpoint(prev), _rep_midpoint(cur)
-    if pm is not None and cm is not None:
-        if abs(cm - pm) >= DOSE_REP_MIN_MIDPOINT:
-            return ("reps_up" if cm > pm else "reps_down", True)
-    ps, cs = prev.get("prescribed_sets"), cur.get("prescribed_sets")
-    if ps != cs:
-        return ("sets_up" if (cs or 0) > (ps or 0) else "sets_down", False)
-    if (pl, pm) != (cl, cm):
-        return ("cosmetic", False)
-    return ("none", False)
-
-
-def _plan_doses(plan: dict, db: dict | None = None) -> dict[str, dict]:
+# ------------------------------------------------------- one dose per plan
+def plan_doses(plan: dict, db: dict | None = None) -> dict[str, dict]:
     """One prescription per exercise for one plan, keyed lowercased.
 
     ONE DOSE PER EXERCISE PER PLAN, chosen by SET COUNT and only then by
@@ -1732,15 +1750,12 @@ def _plan_doses(plan: dict, db: dict | None = None) -> dict[str, dict]:
     when it carries as many sets, at which point it is a real second
     exposure rather than a token.
 
-    Warmups and cardio are dropped: they carry no dose to progress, and
-    "Jumping Jacks: 50" unchanged for eight generations pads the
-    denominator with rows that can only ever read as unchanged.
+    Warmups and cardio are dropped: they carry no dose to progress.
 
     ``prescribed_sets`` is type-checked rather than trusted. The block
-    artifact is JSON on disk and reaches this through
-    `render_validators._block_as_plan`; a dose written before the field
-    existed, or carrying null, used to raise KeyError / TypeError here.
-    Exit 1 says "the program broke" where "cannot compare" was meant.
+    artifact is JSON on disk and can reach this carrying a dose written
+    before the field existed, or null; a crash says "the program broke"
+    where "cannot compare" was meant.
     """
     best: dict[str, dict] = {}
     for w in plan.get("workouts") or []:
@@ -1761,534 +1776,6 @@ def _plan_doses(plan: dict, db: dict | None = None) -> dict[str, dict]:
                        cur.get("load_kg") or 0)):
                 best[key] = s
     return best
-
-
-def dose_staleness(plans: list[dict], db: dict | None = None) -> dict | None:
-    """Per carried-forward exercise: did its dose move, and for how long not.
-
-    "Carried forward" means the exercise appears in the newest plan AND
-    in the one before it. 70% of those returned with an unchanged load;
-    the target is under 40%. This block is what lets a validator check
-    that, and what lets the coach see which specific lifts it has been
-    re-copying.
-
-    ``oscillating`` is the second-order guard: a coach that satisfies
-    "the dose must change" by alternating 90 / 92.5 / 90 / 92.5 has
-    changed the dose on every generation and progressed nothing.
-
-    One prescription per exercise per plan, collapsed by `_plan_doses` —
-    see there for which one wins and why the obvious choice was a
-    laundering channel.
-
-    WHAT THIS CANNOT SEE, and it is the whole of R-01: every number here
-    comes from two COACH-AUTHORED plans. Shifting every rep window up one
-    (``x8-10`` -> ``x9-11``) without touching a weight reads as material
-    on this comparison, so a coach can pass it forever without adding
-    load. `ledger_progression` is the counterpart that grounds the same
-    question in what was PERFORMED.
-    """
-    if len(plans) < 2:
-        return None
-    series: dict[str, list[tuple[str, dict]]] = {}
-    for plan in plans:
-        for key, slot in _plan_doses(plan, db).items():
-            series.setdefault(key, []).append((plan["plan_date"], slot))
-
-    latest_date = plans[-1]["plan_date"]
-    prev_date = plans[-2]["plan_date"]
-    carried = []
-    for key, hist in sorted(series.items()):
-        dates = [d for d, _ in hist]
-        if latest_date not in dates or prev_date not in dates:
-            continue
-        slots = [s for _, s in hist]
-        kind, changed = _dose_delta(slots[-2], slots[-1])
-        static = 0
-        for i in range(len(slots) - 1, 0, -1):
-            _, moved = _dose_delta(slots[i - 1], slots[i])
-            if moved:
-                break
-            static += 1
-        loads = [s.get("load_kg") for s in slots[-4:]]
-        oscillating = (len(loads) == 4 and len(set(loads)) == 2
-                       and loads[0] == loads[2] and loads[1] == loads[3])
-        carried.append({
-            "exercise":            slots[-1]["exercise"],
-            "load_kg":             slots[-1].get("load_kg"),
-            "prev_load_kg":        slots[-2].get("load_kg"),
-            "rep_target":          slots[-1].get("rep_target"),
-            "prev_rep_target":     slots[-2].get("rep_target"),
-            "dose_changed":        changed,
-            "change_kind":         kind,
-            "generations_static":  static,
-            "generations_seen":    len(slots),
-            "oscillating":         oscillating,
-        })
-    if not carried:
-        return None
-    unchanged = [c for c in carried if not c["dose_changed"]]
-    # Two denominators, deliberately. The measured 70% baseline counted
-    # LOAD only; this module counts a rep-target move as a real dose
-    # change, which it is — the 2026-07-25 plan progressed several lifts
-    # by opening the rep range instead of adding weight, and calling that
-    # "unchanged" is wrong. But redefining the metric is also how a
-    # target gets hit without anything improving, so the load-only figure
-    # is reported beside it and stays comparable to the baseline. It is
-    # the number that catches "widen the rep range forever, never touch
-    # the weight".
-    loaded = [c for c in carried if c["load_kg"] is not None
-              and c["prev_load_kg"] is not None]
-    unchanged_load = [c for c in loaded
-                      if c["change_kind"] not in ("load_up", "load_down")]
-    return {
-        "from_plan":       prev_date,
-        "to_plan":         latest_date,
-        "carried_count":   len(carried),
-        "unchanged_count": len(unchanged),
-        "unchanged_pct":   round(len(unchanged) / len(carried), 3),
-        "target_max_pct":  0.40,
-        "meets_target":    len(unchanged) / len(carried) < 0.40,
-        "loaded_count":       len(loaded),
-        "unchanged_load_pct": (round(len(unchanged_load) / len(loaded), 3)
-                               if loaded else None),
-        "oscillating_count": sum(1 for c in carried if c["oscillating"]),
-        "carried":         sorted(carried,
-                                  key=lambda c: (-c["generations_static"],
-                                                 c["exercise"])),
-    }
-
-
-# -------------------------------------------- ledger-derived progression
-#
-# R-01, groundwork. `dose_staleness` above answers "did the written dose
-# move" by comparing two plans, and both of them are coach-authored, so
-# the answer is a comparison between two things the party being policed
-# wrote. Two measured consequences: shifting every rep window up one
-# (``x8-10`` -> ``x9-11``) reads as material without a kilo being added,
-# and a coach can cycle back to a byte-identical plan on the third
-# generation. `render_validators.DOSE_PROGRESSION_ENFORCED` is False
-# because of exactly this.
-#
-# Everything below reads the LEDGER instead — the logged sets, which the
-# user writes and the coach does not. It answers a different question:
-# not "does this prescription differ from the last one" but "does this
-# prescription ask for anything the person has not already done". The
-# rep-window shuffle fails that question flat, because the ledger already
-# contains the reps the wider window asks for.
-#
-# NOT WIRED INTO THE GATE. `DOSE_PROGRESSION_ENFORCED` and the findings
-# that read it live in `render_validators`, which a later round owns.
-# This is the input that round needs; the consumer contract is in
-# `ledger_progression`'s docstring.
-
-# How many trailing sessions in which the exercise was actually performed
-# define the reference. Four, because the question "has the load stopped
-# yielding reps" needs a run to look at, and because a fifth adds little
-# once a load has been held that long.
-LEDGER_PROGRESSION_SESSIONS = 4
-
-# Sessions at one load without a rep gain before the ledger says the load
-# itself is what is owed. Two is the smallest number that can mean
-# "again": one session at a load is the load being introduced.
-LEDGER_LOAD_STALL_SESSIONS = 2
-
-# How far back a performance reference may be drawn from. Beyond this the
-# person is not the person the number describes — a load last touched
-# four months ago is not evidence about what they can do now.
-LEDGER_LOOKBACK_DAYS = 120
-
-
-def performed_sessions(rows: list[dict], db: dict | None = None,
-                       since: date | None = None,
-                       until: date | None = None) -> dict[str, list[dict]]:
-    """Per exercise, one record per date it was performed. Oldest first.
-
-    ``{exercise_key: [{"date", "sets", "top_load_kg", "reps_at_top",
-    "sets_at_top", "best_reps", "best_e1rm_kg"}, ...]}``.
-
-    Working sets only, via `sessions._is_working_set` — the repo's one
-    definition of a counted hard set — and warmup / cardio catalog
-    entries dropped, so this counts the same sets every other volume
-    surface counts.
-
-    ``top_load_kg`` is the heaviest load moved that session and
-    ``reps_at_top`` the MOST reps achieved at it. Most, not fewest or
-    mean: it is the number a progression has to beat, and taking the
-    generous reading of what the person managed is what keeps the bar for
-    claiming a rep progression honest. ``top_load_kg`` is ``None`` for a
-    session of purely bodyweight work, where ``best_reps`` carries the
-    signal instead.
-    """
-    by: dict[str, dict[str, dict]] = {}
-    names: dict[str, str] = {}
-    for r in rows or []:
-        if not _is_working_set(r):
-            continue
-        d = _parse_iso_date(r.get("date"))
-        if d is None:
-            continue
-        if since is not None and d < since:
-            continue
-        if until is not None and d > until:
-            continue
-        key = (r.get("exercise") or "").strip().lower()
-        if not key:
-            continue
-        cat = (db or {}).get(key) or {}
-        if cat.get("is_warmup") or cat.get("is_cardio"):
-            continue
-        names.setdefault(key, (r.get("exercise") or "").strip())
-        kg = float(r.get("kg") or 0)
-        reps = int(r.get("reps") or 0)
-        day = by.setdefault(key, {}).setdefault(
-            r["date"], {"date": r["date"], "sets": 0, "loads": [], "reps": []})
-        day["sets"] += 1
-        day["loads"].append(kg)
-        day["reps"].append(reps)
-
-    out: dict[str, list[dict]] = {}
-    for key, days in by.items():
-        hist = []
-        for d in sorted(days):
-            rec = days[d]
-            pairs = list(zip(rec["loads"], rec["reps"]))
-            loaded = [(kg, reps) for kg, reps in pairs if kg > 0]
-            top_load = max((kg for kg, _ in loaded), default=None)
-            at_top = [reps for kg, reps in loaded if kg == top_load]
-            e1rms = [kg * (1.0 + reps / 30.0) for kg, reps in loaded if reps > 0]
-            all_reps = [reps for _kg, reps in pairs if reps > 0]
-            hist.append({
-                "date":         rec["date"],
-                "exercise":     names[key],
-                "sets":         rec["sets"],
-                "top_load_kg":  top_load,
-                "reps_at_top":  max(at_top) if at_top and max(at_top) > 0 else None,
-                "sets_at_top":  len(at_top) or None,
-                "best_reps":    max(all_reps) if all_reps else None,
-                "best_e1rm_kg": round(max(e1rms), 1) if e1rms else None,
-            })
-        out[key] = hist
-    return out
-
-
-def _loads_equal(a: float | None, b: float | None) -> bool:
-    """Same load, to the granularity a plate stack can express."""
-    if a is None or b is None:
-        return a is None and b is None
-    if a <= 0 or b <= 0:
-        return a == b
-    return abs(a - b) / max(a, b) < DOSE_LOAD_MIN_PCT
-
-
-def ledger_reference(history: list[dict]) -> dict | None:
-    """What the ledger says this exercise currently is. ``None`` with no history.
-
-    ``{"date", "load_kg", "reps", "sets_at_load", "sessions_at_load",
-    "reps_run", "reps_trend", "reps_stalled"}``.
-
-    ``reps_stalled`` is True when the top load has been HELD for at least
-    ``LEDGER_LOAD_STALL_SESSIONS`` performing sessions and the newest of
-    them did not beat the best rep count of the earlier ones. It says one
-    thing and only that thing: the reps at this load have stopped
-    arriving.
-
-    IT IS NOT "THE LIFT HAS EARNED MORE WEIGHT", and the distinction cost
-    a wrong verdict on live data before it was drawn. Flat reps at a load
-    have two causes the ledger cannot separate — the person capped out at
-    the top of a rep range they were told to stop at, and the person
-    stuck at a load that is too heavy — because the range that would
-    separate them is coach-authored. What the ledger CAN say is that
-    asking again for reps which have not been arriving is not evidence of
-    a progression, and that is exactly what `progression_verdict` uses it
-    for: it makes the rep-window shuffle visible without asserting which
-    of the two stalls it is.
-    """
-    hist = [h for h in (history or []) if h][-LEDGER_PROGRESSION_SESSIONS:]
-    if not hist:
-        return None
-    ref = hist[-1]
-    ref_load = ref["top_load_kg"]
-    ref_reps = ref["reps_at_top"] if ref_load else ref["best_reps"]
-
-    run = [ref]
-    for prev in reversed(hist[:-1]):
-        if not _loads_equal(prev["top_load_kg"], ref_load):
-            break
-        run.append(prev)
-    run.reverse()
-    reps_run = [(h["reps_at_top"] if ref_load else h["best_reps"]) or 0
-                for h in run]
-    if len(reps_run) < 2:
-        trend, earned = "first_session_at_load", False
-    elif reps_run[-1] > max(reps_run[:-1]):
-        trend, earned = "climbing", False
-    else:
-        trend = "flat" if reps_run[-1] == max(reps_run[:-1]) else "falling"
-        earned = len(run) >= LEDGER_LOAD_STALL_SESSIONS
-    return {
-        "date":             ref["date"],
-        "exercise":         ref.get("exercise"),
-        "load_kg":          ref_load,
-        "reps":             ref_reps,
-        "sets_at_load":     ref["sets_at_top"],
-        "sessions_at_load": len(run),
-        "reps_run":         reps_run,
-        "reps_trend":       trend,
-        "reps_stalled":     earned,
-    }
-
-
-def expected_next_dose(history: list[dict]) -> dict | None:
-    """The increment the LEDGER says is owed. ``None`` with no history.
-
-    ``{"lever", "min_load_kg", "min_reps", "why"}`` — what a prescription
-    has to reach to count as a progression, expressed as a floor rather
-    than as a number.
-
-    ``lever`` is ``reps`` while the reps at the current load are still
-    arriving, and ``load_or_variation`` once they have stopped. The
-    second is deliberately not just ``load``: flat reps mean the load has
-    stopped yielding, and SKILL.md's sanctioned responses to that are
-    more load, a rep-range change or a variation swap — the ledger can
-    say the current load is done, not which of the three to pick. What it
-    rules out is a wider rep window at the same load, which asks again
-    for the very thing that stopped happening.
-
-    ``min_load_kg`` is a percentage floor, not a rounded plate step: the
-    equipment increment is a fact about the gym and it lives in
-    `blocks._INCREMENT` with the load derivations that need it. A
-    consumer that wants a suggestion rounds this up to the increment; a
-    consumer that only wants to judge a written prescription compares
-    against the floor directly.
-    """
-    ref = ledger_reference(history)
-    if ref is None:
-        return None
-    load, reps = ref["load_kg"], ref["reps"]
-    min_load = (round(load * (1.0 + DOSE_LOAD_MIN_PCT), 2)
-                if load else None)
-    min_reps = (int(reps + DOSE_REP_MIN_MIDPOINT) if reps is not None else None)
-    if ref["reps_stalled"]:
-        return {
-            "lever":       "load_or_variation",
-            "min_load_kg": min_load,
-            "min_reps":    min_reps,
-            "why": (f"{ref['sessions_at_load']} sessions at "
-                    f"{load}kg and the reps stopped climbing "
-                    f"({'/'.join(str(r) for r in ref['reps_run'])}); this load "
-                    f"has stopped yielding reps"),
-        }
-    return {
-        "lever":       "reps",
-        "min_load_kg": min_load,
-        "min_reps":    min_reps,
-        "why": (f"the last session logged {reps} rep(s) at "
-                f"{load if load is not None else 'bodyweight'}"
-                f"{'kg' if load is not None else ''}; there is rep headroom "
-                f"at this load, so holding it and asking for more reps is a "
-                f"real progression"),
-    }
-
-
-def progression_verdict(history: list[dict], prescription: dict) -> dict:
-    """Does ``prescription`` progress, hold, or only look like it moved?
-
-    Judged entirely against ``history`` — what the ledger says was
-    PERFORMED — and never against a previous prescription. That is the
-    whole point: two coach-authored plans can differ without anything
-    being asked of the athlete that they have not already done.
-
-    ``verdict`` is one of:
-
-      ``progression``  the prescription asks for more load than was
-                       performed, or for more reps at a load that still
-                       has rep headroom.
-      ``hold``         LEGITIMATE. The ledger has the person AT OR BELOW
-                       this prescription's own floor at this load, so the
-                       range still has unclaimed room above them and
-                       re-asking is the correct instruction, not a
-                       re-copy. ``<=`` and not ``<`` is load-bearing:
-                       ``65kgx6-8`` against six reps performed is a lift
-                       working up through its range, and reading it as a
-                       cosmetic re-copy was wrong on three real
-                       prescriptions before the boundary was fixed.
-      ``cosmetic``     the prescription asks for nothing the ledger does
-                       not already contain. Two kinds, and
-                       ``rep_window_shift`` is the R-01 bypass by name:
-                       the reps at this load have stopped climbing, so
-                       the increment owed was load, and the window moved
-                       instead.
-      ``regression``   materially less than was performed. NOT a verdict
-                       on legitimacy — a deload week is a regression and
-                       is meant to be. The caller pairs this with
-                       ``block.deload_prescribed`` or the recovery gate.
-      ``unknown``      no logged history, or nothing comparable in the
-                       prescription (a timed carry against a rep target).
-
-    ``material`` is the one boolean a gate would branch on: True only for
-    ``progression`` and ``hold``. Everything else means the coach has not
-    yet written a prescription this ledger can call an instruction.
-    """
-    ref = ledger_reference(history)
-    if ref is None:
-        return {"verdict": "unknown", "kind": "no_logged_history",
-                "material": False, "performed": None, "expected": None,
-                "why": "no working sets logged for this movement in the window"}
-    expected = expected_next_dose(history)
-    p_load = prescription.get("load_kg")
-    p_lo, p_hi = prescription.get("rep_lo"), prescription.get("rep_hi")
-    ref_load, ref_reps = ref["load_kg"], ref["reps"]
-
-    def _out(verdict, kind, material, why):
-        return {"verdict": verdict, "kind": kind, "material": material,
-                "performed": ref, "expected": expected, "why": why}
-
-    # Load first: it is the axis the ledger can judge without any
-    # reference to a rep target at all.
-    if ref_load is not None and p_load is not None and ref_load > 0:
-        rel = (p_load - ref_load) / ref_load
-        if rel >= DOSE_LOAD_MIN_PCT:
-            return _out("progression", "load_up", True,
-                        f"{p_load}kg against {ref_load}kg performed on "
-                        f"{ref['date']}")
-        if rel <= -DOSE_LOAD_MIN_PCT:
-            return _out("regression", "load_down", False,
-                        f"{p_load}kg against {ref_load}kg performed on "
-                        f"{ref['date']} — legitimate under a deload, which "
-                        f"this function does not know about")
-    elif (ref_load is None) != (p_load is None):
-        if p_load is not None:
-            return _out("progression", "load_added", True,
-                        f"external load added to a movement performed at "
-                        f"bodyweight on {ref['date']}")
-        return _out("regression", "load_removed", False,
-                    f"load dropped from a movement performed at "
-                    f"{ref_load}kg on {ref['date']}")
-
-    # Load held. Everything from here is about reps, and the ledger has
-    # the reps.
-    if p_hi is None or ref_reps is None:
-        return _out("unknown", "no_rep_comparison", False,
-                    "the prescription or the log carries no rep count to "
-                    "compare (a timed hold or a loaded carry)")
-    if p_lo is not None and ref_reps <= p_lo:
-        return _out("hold", "working_up_through_range", True,
-                    f"{ref_reps} rep(s) performed on {ref['date']} against a "
-                    f"floor of {p_lo}; the range still has room above where "
-                    f"the ledger has this lift, so re-asking is the instruction")
-    if p_hi >= ref_reps + DOSE_REP_MIN_MIDPOINT:
-        if ref["reps_stalled"]:
-            return _out("cosmetic", "rep_window_shift", False,
-                        f"the range now runs {p_lo}-{p_hi} and the ledger is "
-                        f"already at {ref_reps} rep(s), above its floor; "
-                        f"{expected['why']}, so asking for more reps at the "
-                        f"same load re-asks for what has stopped arriving")
-        return _out("progression", "reps_up", True,
-                    f"{p_hi} reps asked against {ref_reps} performed on "
-                    f"{ref['date']}, at a load with rep headroom "
-                    f"({ref['reps_trend']})")
-    return _out("cosmetic", "repeat_of_performed", False,
-                f"the range tops out at {p_hi} and {ref_reps} rep(s) were "
-                f"already performed at this load on {ref['date']}; nothing is "
-                f"being asked that the ledger does not already contain")
-
-
-def ledger_progression(plan: dict, rows: list[dict], db: dict | None = None,
-                       today_d: date | None = None,
-                       lookback_days: int = LEDGER_LOOKBACK_DAYS) -> dict | None:
-    """Per exercise in ``plan``: progression, hold, or cosmetic nudge.
-
-    THE CONSUMER CONTRACT.
-
-    ``plan``   a parsed plan (`parse_plan` / `parse_plan_file`), or the
-               block artifact run through
-               `render_validators._block_as_plan` — anything with
-               ``{"workouts": [{"slots": [...]}]}`` whose slots carry
-               ``exercise`` / ``load_kg`` / ``rep_lo`` / ``rep_hi`` /
-               ``prescribed_sets``. One prescription per exercise is
-               chosen by `_plan_doses`.
-    ``rows``   the monthly ledger rows, same list every other coach
-               module reads.
-    ``db``     `extract.load_exercises_db`'s output, to drop warmup and
-               cardio entries. Optional; without it those entries are
-               judged like any other and read as unknown or cosmetic.
-    ``today_d`` / ``lookback_days``
-               the performance window. A reference older than
-               ``lookback_days`` is not evidence about the person now.
-
-    Returns ``None`` when the plan prescribes nothing judgeable.
-    Otherwise::
-
-        {"basis": "ledger", "window": {"from", "to", "days"},
-         "counts": {verdict: n, ...},
-         "material_pct": float,     # progression + hold, over all judged
-         "exercises": [ {exercise, verdict, kind, material, why,
-                         prescribed: {...}, performed: {...},
-                         expected: {...}}, ... ]}
-
-    ``exercises`` is sorted with the findings a gate would act on first —
-    ``cosmetic`` before ``regression`` before the rest — then by name, so
-    the head of the list is the actionable part and the order is stable.
-
-    HOW A GATE SHOULD READ THIS, when a later round wires it up. The
-    blocking question is not "is every lift progressing"; a week where
-    every lift progresses is a week that will stall. It is whether the
-    plan contains ANY prescription the ledger can call an instruction —
-    ``material_pct`` — and specifically whether a lift the ledger says
-    has earned a load increase got one. ``kind == "rep_window_shift"`` is
-    the confirmed bypass and is the narrowest thing worth blocking on.
-    Pair a ``regression`` with the deload flags before calling it a
-    defect: this function deliberately does not know whether a deload was
-    prescribed.
-    """
-    doses = _plan_doses(plan or {}, db)
-    if not doses:
-        return None
-    until = today_d
-    since = (today_d - timedelta(days=lookback_days)
-             if today_d is not None and lookback_days else None)
-    history = performed_sessions(rows, db, since=since, until=until)
-
-    out = []
-    counts: dict[str, int] = {}
-    for key in sorted(doses):
-        slot = doses[key]
-        verdict = progression_verdict(history.get(key) or [], slot)
-        counts[verdict["verdict"]] = counts.get(verdict["verdict"], 0) + 1
-        out.append({
-            "exercise":   slot["exercise"],
-            "verdict":    verdict["verdict"],
-            "kind":       verdict["kind"],
-            "material":   verdict["material"],
-            "why":        verdict["why"],
-            "prescribed": {
-                "load_kg":         slot.get("load_kg"),
-                "rep_lo":          slot.get("rep_lo"),
-                "rep_hi":          slot.get("rep_hi"),
-                "rep_target":      slot.get("rep_target"),
-                "prescribed_sets": slot.get("prescribed_sets"),
-            },
-            "performed":  verdict["performed"],
-            "expected":   verdict["expected"],
-        })
-    rank = {"cosmetic": 0, "regression": 1, "hold": 2, "progression": 3,
-            "unknown": 4}
-    out.sort(key=lambda e: (rank.get(e["verdict"], 9), e["exercise"]))
-    judged = sum(n for v, n in counts.items() if v != "unknown")
-    return {
-        "basis":  "ledger",
-        "window": {
-            "from": since.isoformat() if since else None,
-            "to":   until.isoformat() if until else None,
-            "days": lookback_days if since else None,
-        },
-        "counts":        counts,
-        "judged_count":  judged,
-        "material_pct":  (round((counts.get("progression", 0)
-                                 + counts.get("hold", 0)) / judged, 3)
-                          if judged else None),
-        "exercises":     out,
-    }
 
 
 # ------------------------------------------------------------------ CLI

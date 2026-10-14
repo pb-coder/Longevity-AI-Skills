@@ -5,7 +5,7 @@ When `session_recommendation.tier` is **A**, **B**, or **C**, the coach does NOT
 - **Tier C** is automatic: fill the markdown from the Tier C template below.
 - **Tier A and B are never decided alone.** Stop after `read_tracker`, before writing `coach_reads.json` or the plan, and ask the user in chat (protocol below). Fill the markdown from the template for the option they choose.
 
-Reasoning behind the gate is in the Phase 2 preamble of `SKILL.md`. The thresholds and per-tier triggers are in `lib/constants.py:SESSION_GATE_THRESHOLDS`. The decision lives in `lib/health.py:compute_session_recommendation`.
+Reasoning behind the gate is in the Phase 2 preamble of `SKILL.md`. The thresholds and per-tier triggers are in `lib/constants.py:SESSION_GATE_THRESHOLDS`. The decision lives in `lib/health_session_rec.py:compute_session_recommendation`, which also attaches the `load_policy` (`progress` or `reduce`) that `next_dose` applies.
 
 **No template contains cardio, and no plan does.** Cardio data feeds the gate and the assessment; it is never prescribed. The gate's `substitute.kind` can still read `zone_2`: that names the gate's own read of the signals, and it is one of the reasons you show the user when you ask, not a section to write.
 
@@ -26,7 +26,7 @@ Tell the user, in one short message (or a structured question when the client of
 Then offer three options and wait for the answer:
 
 1. **Rest day.** Use the rest-day template below.
-2. **Lighter strength**: fewer sets, held weights. Use the lighter-strength template below, against the tracker JSON as it is. On Tier A and on `reactive_deload` the set budget is half the base, and `check_plan.py` judges each session against it (advisory, like every budget finding). On Tier A and on `reactive_deload` the core and arm VOLUME floors drop to warnings (it is a declared deload), while diversity and placement stay blocking.
+2. **Lighter strength**: fewer sets, held weights. Use the lighter-strength template below, against the tracker JSON as it is. On Tier A and on `reactive_deload` the set budget is half the base, and `check_plan.py` judges each session against it (advisory, like every budget finding). On Tier A and on `reactive_deload` the core volume findings and the per-muscle weekly floors drop to warnings (it is a declared deload), while diversity and placement stay blocking. `load_policy` is `reduce`: loads are held and sets are cut.
 3. **Normal strength anyway**, for example planned for the following week. Regenerate the tracker JSON with `read_tracker.py --override-gate`, then follow "Override behavior" at the end of this file.
 
 Do not suggest a default beyond the gate's own call, and do not write any file until the user has answered.
@@ -37,7 +37,7 @@ Do not suggest a default beyond the gate's own call, and do not write any file u
 
 ```markdown
 # Workout plan — <date>
-> Today's call: Rest today.
+> Today's call: <session_recommendation.headline>
 > Why: <rationale[0].note>
 >      <rationale[1].note>
 >      <rationale[2].note>
@@ -54,97 +54,96 @@ Recovery: sauna ___ / cold ___ / rlt ___
 ## Re-evaluate tomorrow
 Date: ___
 
-- Check wrist temp, RHR, HRV in the morning before deciding next session
-- If wrist temp returns to baseline AND RHR drops AND HRV is back in the 60-day band, the next planned session is back on
+- Check resting HR and last night's sleep in the morning before deciding the next session
+- If resting HR is back at baseline and the next `/coach` run reads Tier C or better, the next planned session is back on
 ```
 
 **Do not** add strength alternatives or any cardio. **Do not** offer "if you feel better, do X". The user already chose rest.
 
 ---
 
-## Option 2 — Lighter strength (reactive-deload week)
+## Option 2 — Lighter strength (full-block deload week)
 
-Fewer sets, held weights. The markdown lists the lighter sessions for the whole week, not one day.
+Fewer sets, held weights. The markdown lists the lighter workouts for the whole week, in the normal workout format: `## Workout N: <TYPE>` headings (not "Deload Session"), every set its own `///` entry, sub-bullets only for a real cue.
 
 ```markdown
 # Workout plan — <date>
-> Today's call: Lighter strength this week. Fewer sets, held weights.
+> Today's call: <session_recommendation.headline>
 > Why: <rationale[0].note>
 >      <rationale[1].note>
 
 Assessment: ./<date>-assessment.html
 
-## Deload Session 1
-Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
+Lighter strength this week: half the sets, weights held. No finisher.
 
-- <Compound 1>: <last working weight>x<last reps>, <halved set count>
-  — hold load, halve sets
-- <Compound 2>: <last working weight>x<last reps>, <halved set count>
-- <Accessory 1>: <last weight>x<last reps>, <halved set count>
-- <Accessory 2>: <last weight>x<last reps>, <halved set count>
-
-## Deload Session 2
-Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
-
-- <…>
-
-## Deload Session 3
-Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
-
-- <…>
-
-## Notes
-- Conditioning finisher dropped from every session this week
-- Rotate <over-MRV muscle> exercises to a different movement pattern (e.g. flat bench → incline DB if chest is the over-MRV muscle)
-- Return to normal volume next week if `recovery.score ≥ 6` and HRV trend back in band
-```
-
-The user's session count for the week (the `/coach plan N sessions` arg) controls how many `## Deload Session N` blocks you write. Every set is still its own `///` entry; the `<halved set count>` placeholder above means writing that many entries.
-
----
-
-## Tier C — `modified_strength` (downgrade)
-
-Same session pattern as the planned workout, but with the modifications baked in:
-
-- **Volume**: −25% on secondary / isolation exercises (halve isolations; keep compounds at planned volume)
-- **Loads**: hold every working weight (compounds, accessories, isolation, core — all of it)
-- **Finisher**: drop the conditioning finisher entirely
-- **PR attempts**: not allowed
-- **Warm-up**: unchanged — keep the two prep movements and the ramp sets into the first heavy compound. A recovery downgrade reduces working volume, not the warm-up.
-- **Core and direct arms are NOT halved.** `core_week_spec` and `arm_week_spec` are blocking render errors and they are not tier-scoped: a Tier C plan carries its full core and arm dose or it does not render. The isolation cut comes out of the rest of the accessory block. Only an explicit deload (Tier B, or a prescribed deload session) reduces them.
-
-The workout markdown looks like a normal session but with the held loads explicit:
-
-```markdown
-# Workout plan — <date>
-> Today's call: Modified strength. Hold loads, cut accessories.
-> Why: <rationale[0].note>
->      <rationale[1].note>
-
-Assessment: ./<date>-assessment.html
-
-## Workout 1: PUSH
+## Workout 1: UPPER A + CORE
 Date: ___\
 Recovery: sauna ___ / cold ___ / rlt ___
 
 - Jumping Jacks: 50
 - Arm Circles: 20
-- Dumbbell Flat Bench Press: 25kgx5 (warmup) /// 35kgx3 (warmup) /// 50kgx8 /// 50kgx8
-  — hold last session's load
-- Incline Chest Press Machine: 50kgx10 /// 50kgx10
-- Cable Lateral Raise: 12kgx12 /// 12kgx12
-- Kneeling Cable Crunch: 20kgx12 /// 20kgx12
-- Cable Tricep Pushdown: 35kgx12 /// 35kgx12
-- (no finisher this session)
+- Dumbbell Flat Bench Press: 50kgx8-10 /// 50kgx8-10
+- Cable Lat Pulldown: 60kgx8-10 /// 60kgx8-10
+- Cable Lateral Raise: 10kgx12-15 /// 10kgx12-15
+- Kneeling Cable Crunch: 20kgx12-15 /// 20kgx12-15
+- Cable Face Pull: 20kgx12-15 /// 20kgx12-15
+
+## Workout 2: LOWER A + CORE
+Date: ___\
+Recovery: sauna ___ / cold ___ / rlt ___
+
+- <…>
 ```
 
-Two things the example is showing on purpose. The halved isolations are still written as one `///` token per set: a bullet reading `Cable Lateral Raise: 12kgx12` is ONE set, so writing two sets that way silently halves them again. And `PUSH` classifies as an upper day, so its core allocation is 2 sets, sitting inside the cable block rather than at the end.
+How to fill it:
 
-If the gate fired Tier C because of a specific over-MRV muscle, also rotate the affected exercise to a different movement pattern (e.g. if chest is over MRV, swap flat bench → incline DB for this session).
+- One `## Workout N: <TYPE>` block per session; the user's session count (the `/coach plan N sessions` arg) sets N. Keep the week's normal selection and split.
+- Every load is `next_dose.exercises[].load_kg` and every range its `rep_range`. Under `reduce`, `next_dose` already holds each load; a `hold` entry is treated the same way (keep its load, halve its sets).
+- Halve each exercise's working sets (4 becomes 2, 3 becomes 2, 2 stays 2), one `///` entry per set kept. Core keeps its per-session dose (4 sets lower, 2 upper). The normal placement rules still apply: core and arms inside the isolation block, something that is neither last.
+- Do not write "hold load" or "halve sets" in a sub-bullet: the validator warns on that phrasing, and the opener already says it.
+- If an over-MRV muscle drove the gate, rotate its exercise to a different movement pattern (e.g. flat bench to incline DB).
+- Return to normal volume next week if the next `/coach` run reads Tier C or better.
+
+---
+
+## Tier C — `modified_strength` (downgrade)
+
+Same session pattern as the planned workout, with the budget cut and nothing else held back:
+
+- **Volume**: the working-set budget is scaled x0.6 for workouts `1..expected_rebound_by_session` (inclusive); later workouts keep the full budget. `target_working_sets` is unscaled in the payload, so multiply it yourself. The `hold_load` variant of Tier C keeps the full budget.
+- **Loads**: NOT held. Every load and rep range is copied from `next_dose`: a lift that earned weight gets it. Only `load_policy` `reduce` (Tier A / B, or strength TSB of -15 or lower) holds loads.
+- **Finisher**: drop any finisher.
+- **Warm-up**: unchanged. Keep the two prep movements and the ramp sets into the first heavy compound. A recovery downgrade reduces working volume, not the warm-up.
+- **Core and the per-muscle weekly floors are NOT scaled.** `core_week_spec` and `muscle_floors` are blocking render errors and they are not tier-scoped: a Tier C plan carries its full core and direct-set floors or it does not render. The cut comes out of the rest of the accessory block. Only a full-block deload (`load_policy` `reduce`: Tier A / B) demotes them; a single cadence deload session does not.
+
+The workout markdown looks like a normal session at a smaller size:
+
+```markdown
+# Workout plan — <date>
+> Today's call: <session_recommendation.headline>
+> Why: <rationale[0].note>
+>      <rationale[1].note>
+
+Assessment: ./<date>-assessment.html
+
+## Workout 1: UPPER A + CORE
+Date: ___\
+Recovery: sauna ___ / cold ___ / rlt ___
+
+- Jumping Jacks: 50
+- Arm Circles: 20
+- Dumbbell Flat Bench Press: 25kgx5 (warmup) /// 35kgx3 (warmup) /// 50kgx8-10 /// 50kgx8-10 /// 50kgx8-10
+- Shoulder Press Machine: 45kgx8-10 /// 45kgx8-10
+- Cable Lat Pulldown: 60kgx8-10 /// 60kgx8-10
+- Cable Lateral Raise: 10kgx12-15 /// 10kgx12-15
+- Kneeling Cable Crunch: 20kgx12-15 /// 20kgx12-15
+- Cable Overhead Tricep Extension: 35kgx10-12 /// 35kgx10-12
+- Cable Face Pull: 20kgx12-15 /// 20kgx12-15
+```
+
+What the example shows on purpose: a 24-set base scaled to about 14 working sets (15 here), every set written as its own `///` entry (a bullet reading `Cable Lateral Raise: 10kgx12-15` is ONE set), the loads and ranges copied from `next_dose` rather than held, `UPPER A` classifying as an upper day with 2 core sets inside the cable block, and the session closing on a face pull, which is neither core nor arms.
+
+If the gate fired Tier C because of a specific over-MRV muscle, also rotate the affected exercise to a different movement pattern (e.g. if chest is over MRV, swap flat bench to incline DB for this session).
 
 ---
 
@@ -160,9 +159,11 @@ Normal session, with one-line warning at the top of the markdown:
 
 ```markdown
 # Workout plan — <date>
-> Today's call: Train as planned, but TSB has been over +10 for 5+ days. You've been over-recovered. Fitness is bleeding off if this continues.
+> Today's call: <session_recommendation.headline>
 
 Assessment: ./<date>-assessment.html
+
+Fitness is bleeding off if this continues.
 
 ## Workout 1: <…>
 [normal Phase 2 templating]

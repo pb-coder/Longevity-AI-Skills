@@ -13,11 +13,16 @@ Functions:
   per-week series (``per_week``) and its ``median`` so a single spiky
   week cannot masquerade as a steady weekly dose. Reports muscle
   landmarks alongside.
-- ``estimated_1rm(rows, deload_dates, include_history)`` — Epley
+- ``estimated_1rm(rows, deload_dates, include_history, catalog)`` — Epley
   projection per exercise with current/prev/best, slope, confidence,
-  and stalled-session count.
+  and stalled-session count (counted on LOAD and reps, not on e1RM).
+- ``session_history(rows, catalog, since, until)`` — per exercise, one
+  record per date it was worked: top load, the reps at it, and whether the
+  session was tagged as a gym/equipment change. The one reader both the
+  stall count and ``progression.next_dose`` stand on.
 - ``stale_exercises(rows, db, today_d, threshold_days)`` — exercises
-  whose last appearance is ≥ ``threshold_days`` ago, sorted newest-
+  whose last appearance is ≥ ``threshold_days`` ago (callers pass
+  ``constants.STALE_EXERCISE_DAYS``), sorted newest-
   stale first (cardio + warmup excluded). The caller slices the head,
   so newest-stale-first is what makes it a reintroduction pool rather
   than a retirement pile.
@@ -32,7 +37,8 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 
-from .constants import VOLUME_LANDMARKS
+from .adherence import is_isolation
+from .constants import LOAD_EQUAL_TOLERANCE_KG, REP_CEILING_RANGE, VOLUME_LANDMARKS
 from .parsing import _parse_iso_date
 from .sessions import _is_working_set
 
@@ -77,6 +83,193 @@ def _is_context_change_note(notes) -> bool:
         return False
     n = str(notes).lower()
     return any(p in n for p in CONTEXT_CHANGE_NOTES_PATTERNS)
+
+
+# Equipment whose load reads the same at every gym: a 44 kg dumbbell pair or
+# a loaded barbell weighs what it weighs. A "different gym" note says nothing
+# about those lifts, and the logger copies one such note onto every loaded
+# exercise of the session, so without this the free-weight lifts of a
+# gym-change day were excluded from slope and stall as if their numbers had
+# moved. Machines, cables, Smith and landmine rigs differ in stack ratio,
+# pulley and counterweight and stay flagged, and so does an exercise whose
+# equipment is unknown: absent a tag, the old behaviour. These are the
+# catalog's own bracket tags (`blocks.load_pattern_catalog` ``equipment``);
+# there is no kettlebell tag in the catalog, so none is listed.
+GYM_INVARIANT_EQUIPMENT = frozenset({"BB", "DB", "Plate"})
+
+
+def epley_e1rm(kg: float, reps: int) -> float:
+    """Epley: the 1RM a set of ``reps`` at ``kg`` projects to."""
+    return kg * (1.0 + reps / 30.0)
+
+
+def load_for_reps(e1rm: float, reps: int) -> float:
+    """The Epley inverse: the load a lifter with this e1RM does ``reps`` at."""
+    return e1rm / (1.0 + reps / 30.0)
+
+
+def context_change_days(rows: list[dict]) -> set[str]:
+    """Dates on which any row carries a gym/machine-change note.
+
+    The logger writes one such note per session and the person's lifts that
+    day are all at that gym, so a flagged DAY is a fact about every exercise
+    of it (not only about the exercise the note sits on). Not narrowed by
+    equipment: that is `is_context_change`'s job, for a single lift.
+    """
+    return {r["date"] for r in rows or []
+            if r.get("date") and _is_context_change_note(r.get("notes"))}
+
+
+def is_context_change(notes, meta: dict | None) -> bool:
+    """A gym/machine-change note that actually bears on this exercise's load."""
+    if not _is_context_change_note(notes):
+        return False
+    return (meta or {}).get("equipment") not in GYM_INVARIANT_EQUIPMENT
+
+
+def exercise_class(exercise: str, catalog: dict | None,
+                   db: dict | None = None) -> str | None:
+    """``compound`` / ``isolation`` off the catalog, ``None`` off-catalog.
+
+    The classification is `adherence.is_isolation`, read from the catalog's
+    own section headings: nothing here is a second taxonomy.
+    """
+    key = (exercise or "").strip().lower()
+    if key not in (catalog or {}) and key not in (db or {}):
+        return None
+    return "isolation" if is_isolation(exercise, catalog, db) else "compound"
+
+
+def loads_equal(a: float | None, b: float | None) -> bool:
+    """Same load, to well under the smallest real step (an absolute 0.5 kg,
+    `constants.LOAD_EQUAL_TOLERANCE_KG`): 100 and 101.25 are different loads."""
+    if a is None or b is None:
+        return a is None and b is None
+    if a <= 0 or b <= 0:
+        return a == b
+    return abs(a - b) < LOAD_EQUAL_TOLERANCE_KG
+
+
+def session_history(rows: list[dict], catalog: dict | None = None,
+                    since: date | None = None,
+                    until: date | None = None) -> dict[str, list[dict]]:
+    """Per exercise (lower-cased name), one record per date it was worked.
+
+    Oldest first. ``{"date", "exercise", "sets", "loads", "reps",
+    "top_load_kg", "reps_at_top", "context_change"}``; ``loads`` and
+    ``reps`` are every counted set in set order.
+
+    Working sets only, via `sessions._is_working_set` (the repo's one
+    definition of a counted hard set), with warmup and cardio catalog
+    entries dropped so this counts the same sets every volume surface does.
+
+    ``top_load_kg`` is the heaviest load moved that day and ``reps_at_top``
+    the reps of EVERY set at it, in set order: a progression decision needs
+    the weakest set, a stall count the best one. ``top_load_kg`` is ``None``
+    for purely unloaded work (a bodyweight set, a timed hold).
+    ``context_change`` is set when any set of the exercise that day carries
+    a gym/machine-change note AND the exercise's equipment depends on the
+    gym (see `GYM_INVARIANT_EQUIPMENT`).
+    """
+    by: dict[str, dict[str, dict]] = {}
+    names: dict[str, str] = {}
+    for r in rows or []:
+        if not _is_working_set(r):
+            continue
+        d = _parse_iso_date(r.get("date"))
+        if d is None:
+            continue
+        if since is not None and d < since:
+            continue
+        if until is not None and d > until:
+            continue
+        key = (r.get("exercise") or "").strip().lower()
+        if not key:
+            continue
+        meta = (catalog or {}).get(key) or {}
+        if meta.get("is_warmup") or meta.get("is_cardio"):
+            continue
+        names.setdefault(key, (r.get("exercise") or "").strip())
+        day = by.setdefault(key, {}).setdefault(
+            r["date"], {"loads": [], "reps": [], "ctx": False})
+        day["loads"].append(float(r.get("kg") or 0))
+        day["reps"].append(int(r.get("reps") or 0))
+        if is_context_change(r.get("notes"), meta):
+            day["ctx"] = True
+
+    out: dict[str, list[dict]] = {}
+    for key, days in by.items():
+        hist = []
+        for d in sorted(days):
+            rec = days[d]
+            loaded = [(kg, reps) for kg, reps in zip(rec["loads"], rec["reps"])
+                      if kg > 0]
+            top = max((kg for kg, _ in loaded), default=None)
+            hist.append({
+                "date":           d,
+                "exercise":       names[key],
+                "sets":           len(rec["loads"]),
+                "loads":          rec["loads"],
+                "reps":           rec["reps"],
+                "top_load_kg":    top,
+                "reps_at_top":    [reps for kg, reps in loaded
+                                   if loads_equal(kg, top)],
+                "context_change": rec["ctx"],
+            })
+        out[key] = hist
+    return out
+
+
+def load_stall_sessions(sessions: list[dict],
+                        deload_dates: "set[str] | frozenset[str]" = frozenset(),
+                        ceiling: int | None = None) -> int:
+    """Trailing sessions at the SAME LOAD in which the reps did not move.
+
+    ``sessions`` is one exercise's `session_history`, oldest first. The run
+    is the newest stretch of sessions at one top load; it ends at a load
+    change, at a gym/equipment-tagged session (its numbers are not
+    comparable) and at a deload falling between two sessions (holding loads
+    is what a deload is for, not a stall).
+
+    A session after the first is stalled when its best set at the load did
+    not beat the best the run had already reached. Past ``ceiling`` reps
+    nothing counts as beating it: a lift whose reps are already at the top
+    of what the program asks for has nothing left to gain at this load, so
+    each further session there is owed weight, not credited with progress.
+    Sessions of purely unloaded or timed work are ignored.
+
+    This replaces the e1RM-flatness count. Epley credits more reps at an
+    unchanged weight as a stronger lift, so a lift sitting at the top of its
+    range for weeks while the weight stayed put read as zero stalled
+    sessions.
+    """
+    usable = [s for s in sessions
+              if s["top_load_kg"] and s["reps_at_top"]
+              and all(r > 0 for r in s["reps_at_top"])]
+    run: list[dict] = []
+    for s in reversed(usable):
+        if run:
+            later = run[-1]
+            if not loads_equal(s["top_load_kg"], later["top_load_kg"]):
+                break
+            if s["context_change"] or later["context_change"]:
+                break
+            if any(s["date"] <= d <= later["date"] for d in deload_dates):
+                break
+        run.append(s)
+    run.reverse()
+
+    best: int | None = None
+    stalled = 0
+    for s in run:
+        top = max(s["reps_at_top"])
+        if best is None:
+            best = top                 # the load is introduced; nothing to beat
+            continue
+        beat = top > best and (ceiling is None or best < ceiling)
+        stalled = 0 if beat else stalled + 1
+        best = max(best, top)
+    return stalled
 
 
 def weekly_volume_per_muscle(
@@ -178,7 +371,8 @@ def weekly_volume_per_muscle(
 
 def estimated_1rm(rows: list[dict],
                   deload_dates: list[str] | None = None,
-                  include_history: bool = False) -> dict:
+                  include_history: bool = False,
+                  catalog: dict | None = None) -> dict:
     """Epley 1RM projection per exercise, with trajectory and confidence.
 
     For each exercise, take the heaviest projected e1RM per date (over all
@@ -190,12 +384,20 @@ def estimated_1rm(rows: list[dict],
         4-week window. Null if fewer than 3 sessions.
       - confidence: high|medium|low based on the rep ranges of the last
         3 top sets — Epley is most accurate at 3-8 reps.
-      - stalled_sessions: count of consecutive most-recent sessions with
-        |Δe1RM| ≤ 0.5kg, broken by any deload that falls in the window.
+      - stalled_sessions: trailing sessions at the same load whose reps did
+        not move (`load_stall_sessions`). Counted on load and reps, NOT on
+        e1RM, which reads rising reps at an unchanged weight as progress.
 
     Bodyweight and warmup sets excluded (kg must be > 0).
+
+    ``catalog`` (`blocks.load_pattern_catalog`) is optional and does two
+    things: it lets a gym-change note exempt the free-weight lifts it does
+    not bear on (`GYM_INVARIANT_EQUIPMENT`), and it supplies the exercise's
+    rep ceiling for the stall count. Without it a context note flags every
+    exercise it sits on, as before, and no ceiling applies.
     """
     deload_set = set(deload_dates or [])
+    sessions_by_ex = session_history(rows, catalog)
 
     by_ex: dict[str, list[dict]] = {}
     canonical_name: dict[str, str] = {}
@@ -208,13 +410,14 @@ def estimated_1rm(rows: list[dict],
             continue
         key = r["exercise"].lower()
         canonical_name.setdefault(key, r["exercise"])
-        e1rm = kg * (1.0 + reps / 30.0)
+        e1rm = epley_e1rm(kg, reps)
         by_ex.setdefault(key, []).append({
             "date": r["date"],
             "e1rm": e1rm,
             "reps": reps,
             "kg": kg,
-            "context_change": _is_context_change_note(r.get("notes")),
+            "context_change": is_context_change(
+                r.get("notes"), (catalog or {}).get(key)),
         })
 
     out: dict[str, dict] = {}
@@ -339,29 +542,12 @@ def estimated_1rm(rows: list[dict],
                           "medium": "low",
                           "low": "low"}[confidence]
 
-        # Stalled: walk back through consecutive sessions while the
-        # e1RM swing is within ±0.5kg. Break on the first deload that
-        # falls inside (or at either end of) the gap between two
-        # consecutive sessions — a deliberate volume cut isn't a stall.
-        # Also break on context-change sessions: a gym swap isn't a stall.
-        stalled = 0
-        for i in range(len(dates_desc) - 1):
-            this_date = dates_desc[i]
-            prev_date = dates_desc[i + 1]
-            crossed_deload = any(
-                prev_date <= d <= this_date for d in deload_set
-            )
-            if crossed_deload:
-                break
-            if per_date[this_date].get("context_change") \
-                    or per_date[prev_date].get("context_change"):
-                break
-            this_e = per_date[this_date]["e1rm"]
-            prev_e = per_date[prev_date]["e1rm"]
-            if abs(this_e - prev_e) <= 0.5:
-                stalled += 1
-            else:
-                break
+        # Stalled: sessions at the same load without a rep gain. See
+        # `load_stall_sessions` for why this is not read off the e1RM.
+        ceiling = (REP_CEILING_RANGE.get(exercise_class(
+            canonical_name[key], catalog)) or (None, None))[1]
+        stalled = load_stall_sessions(sessions_by_ex.get(key) or [], deload_set,
+                                      ceiling)
 
         # Drop e1rm_history entirely unless explicitly opted in. The
         # summary fields (current/prev/best, slope, confidence,

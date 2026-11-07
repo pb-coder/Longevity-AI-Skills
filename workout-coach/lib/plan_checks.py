@@ -35,14 +35,9 @@ class PlanCheckResult:
     """Outcome of `run_plan_checks`.
 
     ``exit_code`` is 0 (every blocking check passed) or 2 (a blocking
-    check failed; the messages are already printed). ``coach`` and
-    ``workout_md`` are the loaded inputs, so callers need not read
-    the files a second time; either is ``None`` when the sequence
-    stopped before reaching it.
+    check failed; the messages are already printed).
     """
     exit_code: int
-    coach: "dict | None" = None
-    workout_md: "str | None" = None
     warnings: list = field(default_factory=list)
     errors: list = field(default_factory=list)
 
@@ -83,7 +78,6 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
         return fail("tracker_json validation error", tracker_errors)
 
     coach = json.loads(Path(coach_path).read_text(encoding="utf-8"))
-    result.coach = coach
     # Pass the payload so coach-authored scores are checked against the
     # numbers they claim to report. Without it the cross-check is inert:
     # a card may state a recovery score the tracker contradicts, and the
@@ -94,7 +88,6 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
         return fail("coach_reads validation error", errors)
 
     workout_md = Path(workout_md_path).read_text(encoding="utf-8")
-    result.workout_md = workout_md
     workout_errors, workout_warnings = validate_workout_md(workout_md)
     warn("workout_md warning", workout_warnings)
     if workout_errors:

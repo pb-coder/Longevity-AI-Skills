@@ -154,12 +154,6 @@ WORKOUT_STRUCTURAL_SUB_BULLET_RE = re.compile(
     r"|other\s+gym\s*:\s*\d+(?:\.\d+)?\s*kg\s*$)",
     re.IGNORECASE,
 )
-# NOTE: the plan's workout-heading grammar lives in `adherence` and is
-# reached through `_plan_workout_heading_re()`. This name is retained only
-# for callers outside this module; do not use it for new checks. Matching
-# `Workout` alone let an off-catalog exercise inside a `## Deload Session`
-# heading pass validation — four real plans use that heading.
-WORKOUT_HEADING_RE = re.compile(r"^##\s+Workout\b", re.IGNORECASE)
 SECTION_HEADING_RE = re.compile(r"^##\s+")
 WORKOUT_EXERCISE_RE = re.compile(r"^-\s+([^:]+):")
 WORKOUT_BANNED_SUB_BULLET_RE = re.compile(
@@ -805,28 +799,6 @@ def _bullet_working_set_tokens(body: str) -> "list[str]":
     return [t for t in body.split("///") if _token_is_working_set(t, multi)]
 
 
-@lru_cache(maxsize=1)
-def _plan_workout_heading_re() -> "re.Pattern[str]":
-    """The plan's workout-heading grammar, borrowed from `adherence`.
-
-    `## Workout N:`, `## Deload Session N:` and `## Session N:` are all
-    real headings the coach emits, and `adherence._WORKOUT_HEADING_RE`
-    is where that fact is written down — the ledger had to learn it the
-    hard way when matching only ``Workout`` silently parsed two of one
-    person's fourteen plans to zero prescribed slots.
-
-    This module used to match ``^##\\s+Workout\\b`` and nothing else,
-    which produced two OPPOSITE failures from one inconsistency: a
-    deload plan written with `## Workout N:` got judged against
-    full-volume specs, while one written with `## Session N:` bypassed
-    the core and arm checks completely. One grammar, one place.
-
-    Imported through a cached accessor rather than at module scope
-    because pulling in `adherence` costs a parse on every validation run,
-    and callers that validate no plan should not pay it.
-    """
-    from .adherence import WORKOUT_HEADING_RE as LEDGER_HEADING_RE
-    return LEDGER_HEADING_RE
 
 
 # The validator recognises a deliberately broader grammar than the ledger's.
@@ -868,7 +840,7 @@ def _iter_workout_exercise_bullets(text: str) -> "dict[str, list[dict]]":
     records per title:
     ``{"name": str, "sets": int, "loaded": bool, "raw": str}``.
 
-    A "workout block" is whatever `_plan_workout_heading_re` recognises:
+    A "workout block" is whatever `_workout_heading_title` recognises:
     `## Workout N:`, `## Deload Session N:`, `## Session N:`.
 
     ``loaded`` means the bullet prescribes an external kg load. It is a

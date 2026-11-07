@@ -1523,11 +1523,9 @@ def _core_week_findings(text: str, spec: "dict | None" = None):
 # and this check ignores a ``muscle_floors`` key in the payload altogether.
 #
 # WHY THE FLOOR IS MEV FOR EMPHASIS AND MV FOR THE REST, AND NOT THE TIER
-# TARGET. As of 2026-10-14 the tier targets (mid-MAV / MEV / MV) of the
-# muscles a direct count can serve sum to 85 sets a week for Nihad and 86
-# for Fabian, against set budgets of 24 and 21 a session (96 and 84 over
-# four sessions): as a blocking floor that leaves Nihad 11 sets to place by
-# judgement and Fabian none. The tier targets stay the aim for spare sets,
+# TARGET. Tier targets (mid-MAV / MEV / MV) can consume nearly the entire
+# weekly set budget if treated as blocking floors, leaving no room for
+# judgment. The tier targets stay the aim for spare sets,
 # per SKILL.md; the floor keeps a muscle from being dropped. Emphasis sits
 # one band above the rest because the person named those muscles as the
 # point of the block, and MEV is the smallest dose that grows them.

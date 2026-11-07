@@ -1798,8 +1798,8 @@ ROTATION_CANDIDATES_PER_PATTERN = 3
 ROTATION_CANDIDATE_WINDOW_DAYS = 56
 # The four patterns every week must contain. One missing from the
 # window is offered even though the gates above would drop it: a pattern
-# at zero is the gap, and the window gate is what kept Nihad's Vertical
-# Push out of the payload for three months after his last shoulder press.
+# at zero is the gap; the window gate must not exclude an untrained
+# main pattern merely because its last logged session is too old.
 MAIN_PATTERNS = (
     "CHEST/Horizontal Push (Compound)",
     "SHOULDERS/Vertical Push (Compound)",

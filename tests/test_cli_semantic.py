@@ -36,7 +36,14 @@ class CliSemanticTests(unittest.TestCase):
             "--today", "2026-05-17",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        return json.loads(proc.stdout)
+        data = json.loads(proc.stdout)
+        # The coaching boundary exposes today's decision and measured trends,
+        # without recomputed decision history or report-only display series.
+        self.assertIn("session_recommendation", data)
+        self.assertIn("health_metrics_weekly", data)
+        for retired in ("tier_history", "week_over_week", "bodyweight_weekly"):
+            self.assertNotIn(retired, data)
+        return data
 
     def test_read_tracker_person_a_semantic_golden(self) -> None:
         data = self.read_tracker("person_a")

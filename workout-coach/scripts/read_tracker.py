@@ -166,7 +166,6 @@ from workout_coach.lib.extract import (  # noqa: E402
     extract_rows,
     find_deloads,
     load_exercises_db,
-    read_bodyweight,
     read_health_metrics,
     read_nutrition_phases,
     read_sleep_nights,
@@ -191,7 +190,6 @@ from workout_coach.lib.health_longevity import (  # noqa: E402
 from workout_coach.lib.health_session_rec import (  # noqa: E402
     apply_user_override,
     compute_session_recommendation,
-    compute_tier_history,
 )
 from workout_coach.lib.progression import (  # noqa: E402
     INCREMENT_HISTORY_MONTHS,
@@ -303,136 +301,20 @@ def _clip_date_map(m: dict, today_d: date) -> dict:
     return out
 
 
-def _wow_trend(this_v: float | None, last_v: float | None,
-               eps: float = 1e-6) -> str | None:
-    """Compare two scalar values; return ``up`` / ``down`` / ``flat`` /
-    ``None`` (when either side is missing)."""
-    if this_v is None or last_v is None:
-        return None
-    diff = this_v - last_v
-    if abs(diff) < eps:
-        return "flat"
-    return "up" if diff > 0 else "down"
 
 
-def _mean_over(values: list[float]) -> float | None:
-    """Mean of a list of floats; None when empty."""
-    vals = [v for v in values if v is not None]
-    if not vals:
-        return None
-    return sum(vals) / len(vals)
 
 
-def _bucket_strength_sessions(sessions: list[dict],
-                              start: date, end: date) -> int:
-    """Strength sessions in the half-open window ``[start, end]``."""
-    n = 0
-    for s in sessions:
-        if s.get("session_kind") != "strength":
-            continue
-        d = _parse_iso_date(s.get("date"))
-        if d is None:
-            continue
-        if start <= d <= end:
-            n += 1
-    return n
 
 
-def _bucket_cardio_sessions(sessions: list[dict],
-                            start: date, end: date) -> int:
-    """Cardio sessions in the half-open window ``[start, end]``."""
-    n = 0
-    for s in sessions:
-        if s.get("session_kind") != "cardio":
-            continue
-        d = _parse_iso_date(s.get("date"))
-        if d is None:
-            continue
-        if start <= d <= end:
-            n += 1
-    return n
 
 
-def _bucket_cardio_min(sessions: list[dict],
-                       start: date, end: date) -> float:
-    """Total cardio minutes in window ``[start, end]`` (any zone, any source)."""
-    total = 0.0
-    for s in sessions:
-        if s.get("session_kind") != "cardio":
-            continue
-        d = _parse_iso_date(s.get("date"))
-        if d is None or not (start <= d <= end):
-            continue
-        dm = s.get("duration_min")
-        try:
-            total += float(dm) if dm is not None else 0.0
-        except (TypeError, ValueError):
-            pass
-    return total
 
 
-def _bucket_health_mean(health_all: list[dict], key: str,
-                        start: date, end: date) -> float | None:
-    """Mean of ``health_all[*][key]`` for rows whose ISO date falls in
-    ``[start, end]``. Skips None / non-numeric."""
-    vals: list[float] = []
-    for row in health_all:
-        d = _parse_iso_date(row.get("date"))
-        if d is None or not (start <= d <= end):
-            continue
-        v = row.get(key)
-        try:
-            if v is not None:
-                vals.append(float(v))
-        except (TypeError, ValueError):
-            pass
-    return _mean_over(vals)
 
 
-def _bucket_bodyweight_mean(bw_all: list[dict],
-                            start: date, end: date) -> float | None:
-    """Mean bodyweight in window; bw rows use ``kg`` not a health key."""
-    vals: list[float] = []
-    for row in bw_all:
-        d = _parse_iso_date(row.get("date"))
-        if d is None or not (start <= d <= end):
-            continue
-        v = row.get("kg")
-        try:
-            if v is not None:
-                vals.append(float(v))
-        except (TypeError, ValueError):
-            pass
-    return _mean_over(vals)
 
 
-def _bodyweight_weekly_kg(bw_all: list[dict], today_d: date,
-                          weeks: int = 4) -> list[float | None]:
-    """Per-ISO-week mean bodyweight for the same window as
-    ``health_metrics_weekly``. Returns one entry per week present in
-    the data, oldest first; entries are None when no weight was logged
-    that week. The dashboard uses this to draw a bodyweight sparkline."""
-    if not bw_all:
-        return []
-    cutoff = today_d - timedelta(days=weeks * 7)
-    by_week: dict[tuple[int, int], list[float]] = {}
-    for row in bw_all:
-        d = _parse_iso_date(row.get("date"))
-        if d is None or d < cutoff:
-            continue
-        v = row.get("kg")
-        try:
-            if v is None:
-                continue
-            iso = d.isocalendar()
-            by_week.setdefault((iso.year, iso.week), []).append(float(v))
-        except (TypeError, ValueError):
-            continue
-    out: list[float | None] = []
-    for wk in sorted(by_week.keys()):
-        vals = by_week[wk]
-        out.append(round(sum(vals) / len(vals), 2) if vals else None)
-    return out
 
 
 def _body_comp_readings(health_all: list[dict], column: str,
@@ -503,130 +385,8 @@ def _attach_body_comp_weekly(weekly: list[dict], readings: list[dict],
     return weekly
 
 
-def _round_or_none(v: float | None, digits: int) -> float | None:
-    """Round ``v`` to ``digits`` decimals, preserving None."""
-    return None if v is None else round(v, digits)
 
 
-def _build_week_over_week(today_d: date,
-                          monthly_sessions: list[dict],
-                          health_all: list[dict],
-                          bw_all: list[dict],
-                          max_hr: float | None = None,
-                          rest_hr: float | None = None) -> dict:
-    """Build the dashboard's this-week / last-week / 4-week-avg block.
-
-    Buckets are calendar-ish windows anchored on ``today_d``: this-week
-    covers the last 7 days inclusive of today, last-week the 7 days
-    before that, and the 4-week-avg averages the 4 consecutive 7-day
-    windows ending today. Bucketing by relative day rather than ISO
-    week keeps the report stable when the coach runs mid-week.
-
-    The Zone-2 rows are computed on the SAME 7-day
-    windows as the rest of the block so the dashboard's "This week at a
-    glance" rings are window-consistent. (A prior bug rendered the Z2
-    ring from a 28-day average divided by 4, which read far lower than
-    the user's actual week and silently mixed windows inside one card.)
-    """
-    this_start = today_d - timedelta(days=6)
-    last_end   = this_start - timedelta(days=1)
-    last_start = last_end - timedelta(days=6)
-    avg_start  = today_d - timedelta(days=27)
-
-    def _z2_min(anchor_end: date) -> float:
-        z = cardio_hr_zones(monthly_sessions, anchor_end, max_hr, rest_hr,
-                            window_days=7)
-        return float(z.get("z2") or 0.0)
-
-    z2_this = _z2_min(today_d)
-    z2_last = _z2_min(last_end)
-    z2_avg  = float(
-        (cardio_hr_zones(monthly_sessions, today_d, max_hr, rest_hr,
-                         window_days=28).get("z2") or 0.0) / 4.0
-    )
-    avg_strength = _bucket_strength_sessions(monthly_sessions, avg_start, today_d) / 4.0
-    avg_cardio_sess = _bucket_cardio_sessions(monthly_sessions, avg_start, today_d) / 4.0
-    avg_cardio_min = _bucket_cardio_min(monthly_sessions, avg_start, today_d) / 4.0
-    avg_sleep = _bucket_health_mean(health_all, "sleep_total_h", avg_start, today_d)
-    avg_hrv   = _bucket_health_mean(health_all, "hrv_sdnn",      avg_start, today_d)
-    avg_rhr   = _bucket_health_mean(health_all, "resting_hr",    avg_start, today_d)
-    avg_wrist = _bucket_health_mean(health_all, "wrist_temp_c",  avg_start, today_d)
-    avg_bw    = _bucket_bodyweight_mean(bw_all, avg_start, today_d)
-
-    def row(label: str, key: str,
-            this_v: float | None, last_v: float | None,
-            avg_v: float | None, digits: int, unit: str | None) -> dict:
-        return {
-            "metric":      label,
-            "key":         key,
-            "this_week":   _round_or_none(this_v, digits),
-            "last_week":   _round_or_none(last_v, digits),
-            "four_wk_avg": _round_or_none(avg_v, digits),
-            "trend":       _wow_trend(this_v, last_v),
-            "unit":        unit,
-        }
-
-    return {
-        "windows": {
-            "this_week":   {"start": this_start.isoformat(), "end": today_d.isoformat()},
-            "last_week":   {"start": last_start.isoformat(), "end": last_end.isoformat()},
-            "four_wk_avg": {"start": avg_start.isoformat(),  "end": today_d.isoformat()},
-        },
-        "rows": [
-            row(
-                "Strength sessions", "strength_sessions",
-                _bucket_strength_sessions(monthly_sessions, this_start, today_d),
-                _bucket_strength_sessions(monthly_sessions, last_start, last_end),
-                avg_strength, 1, "sess",
-            ),
-            row(
-                "Cardio sessions", "cardio_sessions",
-                _bucket_cardio_sessions(monthly_sessions, this_start, today_d),
-                _bucket_cardio_sessions(monthly_sessions, last_start, last_end),
-                avg_cardio_sess, 1, "sess",
-            ),
-            row(
-                "Cardio minutes", "cardio_min",
-                _bucket_cardio_min(monthly_sessions, this_start, today_d),
-                _bucket_cardio_min(monthly_sessions, last_start, last_end),
-                avg_cardio_min, 0, "min",
-            ),
-            row(
-                "Zone 2 minutes", "cardio_z2_min",
-                z2_this, z2_last, z2_avg, 0, "min",
-            ),
-            row(
-                "Sleep total", "sleep_total_h",
-                _bucket_health_mean(health_all, "sleep_total_h", this_start, today_d),
-                _bucket_health_mean(health_all, "sleep_total_h", last_start, last_end),
-                avg_sleep, 2, "h",
-            ),
-            row(
-                "HRV (SDNN)", "hrv_sdnn",
-                _bucket_health_mean(health_all, "hrv_sdnn", this_start, today_d),
-                _bucket_health_mean(health_all, "hrv_sdnn", last_start, last_end),
-                avg_hrv, 1, "ms",
-            ),
-            row(
-                "Resting HR", "resting_hr",
-                _bucket_health_mean(health_all, "resting_hr", this_start, today_d),
-                _bucket_health_mean(health_all, "resting_hr", last_start, last_end),
-                avg_rhr, 1, "bpm",
-            ),
-            row(
-                "Wrist temp dev", "wrist_temp_c",
-                _bucket_health_mean(health_all, "wrist_temp_c", this_start, today_d),
-                _bucket_health_mean(health_all, "wrist_temp_c", last_start, last_end),
-                avg_wrist, 2, "°C",
-            ),
-            row(
-                "Bodyweight", "bodyweight_kg",
-                _bucket_bodyweight_mean(bw_all, this_start, today_d),
-                _bucket_bodyweight_mean(bw_all, last_start, last_end),
-                avg_bw, 2, "kg",
-            ),
-        ],
-    }
 
 
 class _Args:
@@ -781,7 +541,11 @@ def main() -> int:
         read_nutrition_phases(person), today_d, key="start_date",
         open_ended_keys=("end_date",))
 
-    bw_all = _clip_series(read_bodyweight(person), today_d)
+    bw_all = sorted(
+        ({"date": entry["date"], "kg": entry["bodyweight_kg"], "notes": None}
+         for entry in health_all if entry.get("bodyweight_kg") is not None),
+        key=lambda entry: entry["date"],
+    )
     bw_latest = (
         {"date": bw_all[-1]["date"], "kg": bw_all[-1]["kg"]}
         if bw_all else None
@@ -1068,10 +832,6 @@ def main() -> int:
     # ---- Week-over-week comparison block (used by the assessment HTML
     # dashboard's bottom card). Composes existing extracts; no new data
     # sources. ----
-    week_over_week = _build_week_over_week(
-        today_d, monthly_sessions, health_all, bw_all,
-        max_hr=max_hr, rest_hr=rest_hr,
-    )
 
     # ---- Longevity-trajectory derivations (Trajectory tab) ----
     longevity_state = read_longevity_state(person, today_d)
@@ -1139,24 +899,6 @@ def main() -> int:
         next_dose = _next_dose(policy)
 
     # 14-day tier history strip (Trajectory tab — spot fatigue spirals).
-    tier_history = compute_tier_history(
-        days=14,
-        today_d=today_d,
-        health_all=health_all,
-        monthly_sessions=monthly_sessions,
-        weekly_volume=weekly_volume,
-        sleep_nights_all=sleep_nights_all,
-        sleep_regularity_today=sleep_regularity,
-        sleep_summary_today=sleep,
-        estimated_1rm=e1rm,
-        hr_at_volume_divergence=hr_volume_div,
-        deloads=deloads,
-        auto_deload_candidates=auto_deloads,
-        capabilities=capabilities,
-        estimated_max_hr=max_hr,
-        estimated_rest_hr=rest_hr,
-        bodyweight_trend=bw_trend,
-    )
 
     # ---- Session-length budget. Strength-session duration is driven by total
     # WORKING SETS (rest dominates), not exercise count. So the coach budgets
@@ -1312,7 +1054,6 @@ def main() -> int:
         # loud rather than silently omit.
         "bodyweight_trend_kg_per_week": bw_trend,
         "bodyweight_trend": bw_trend_block,
-        "bodyweight_weekly": _bodyweight_weekly_kg(bw_all, today_d, weeks=4),
         # ---- Waist circumference ----
         # ``waist_latest`` is ``{value_cm, date}`` for the newest
         # measurement at or before ``today``, and None (dropped by
@@ -1344,12 +1085,10 @@ def main() -> int:
         "vo2max_trend_per_4w": metric_trend_per_4w(health_all, "vo2max"),
         # ---- Week-over-week comparison (this-week / last-week / 4-wk avg
         # for the assessment dashboard's bottom card). ----
-        "week_over_week": week_over_week,
         # ---- Recovery gate: 5-tier session recommendation. SKILL.md Phase 2
         # MUST honor this before generating any workout. ----
         "session_recommendation": session_recommendation,
         # 14-day rolling tier classifications (Trajectory tab).
-        "tier_history":           tier_history,
         # ---- Session-length budget (set-count driven, per-person target) ----
         "session_target_min":     session_target_min,
         "target_working_sets":    target_working_sets,

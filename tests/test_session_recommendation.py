@@ -529,32 +529,10 @@ class LoadPolicyTests(unittest.TestCase):
         self.assertIn("Recovery data is missing", rec["headline"])
         self.assertNotIn("you've been over-recovered", rec["headline"])
         # TSB is what put the day in Tier E, so it leads; the data gap
-        # follows. `compute_tier_history` reads rationale[0] as the
-        # dominant signal.
+        # follows.
         self.assertEqual([r["signal"] for r in rec["rationale"]],
                          ["tsb", "recovery_unavailable"])
 
-    def test_the_tier_history_names_tsb_as_the_dominant_signal_of_tier_e(self) -> None:
-        from unittest import mock
-
-        from workout_coach.lib.health_session_rec import compute_tier_history
-        today = date(2026, 10, 14)
-        with mock.patch("workout_coach.lib.health_session_rec.recovery_score",
-                        return_value={"score": None, "drivers": []}), \
-                mock.patch("workout_coach.lib.cardio.training_load_summary",
-                           return_value={"tsb": 12.0}), \
-                mock.patch("workout_coach.lib.cardio.compute_acwr",
-                           return_value={}):
-            hist = compute_tier_history(
-                days=1, today_d=today, health_all=[], monthly_sessions=[],
-                weekly_volume={}, sleep_nights_all=[],
-                sleep_regularity_today={}, sleep_summary_today={},
-                estimated_1rm={}, hr_at_volume_divergence={}, deloads=[],
-                auto_deload_candidates=[], capabilities={},
-                estimated_max_hr=190, estimated_rest_hr=55)
-        self.assertEqual(
-            hist, [{"date": "2026-10-14", "tier": "E",
-                    "label": "over_recovered", "dominant_signal": "tsb"}])
 
     def test_over_recovered_with_a_real_score_keeps_its_call(self) -> None:
         rec = recommendation(training_load={"tsb": 10.5})

@@ -1,4 +1,4 @@
-"""Five-tier session recommendation gate and tier history."""
+"""Five-tier session recommendation gate."""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tracker.contracts import SessionRecommendation, SessionRationaleEntry  # noqa: F401
-from .health_recovery import _z_score_signal, recovery_score
+from .health_recovery import _z_score_signal
 from .health_windowing import baseline_60d, latest_metric, _mean_or_none, _values_in_window
 from .parsing import _parse_iso_date
 
@@ -772,7 +772,6 @@ def _gate_tier(*,
     if tsb is not None and tsb >= T["tier_e_tsb_high"]:
         gap = recovery_score is None
         # The TSB entry goes FIRST: it is what put the day in this tier, and
-        # `compute_tier_history` reads `rationale[0]` as the dominant signal.
         add("tsb", tsb, T["tier_e_tsb_high"],
             f"Freshness (TSB) {tsb:+.1f} ≥ {T['tier_e_tsb_high']:.0f}: "
             + ("recent training load is low, which may or may not mean fitness is bleeding off"
@@ -851,76 +850,3 @@ def _gate_tier(*,
 # rolling-window view of `today`. Used for the Trajectory tab's
 # "Decision history" component (last 14 days of tier classifications).
 
-def compute_tier_history(*,
-                         days: int = 14,
-                         today_d: date,
-                         health_all: list[dict],
-                         monthly_sessions: list[dict],
-                         weekly_volume: dict | None,
-                         sleep_nights_all: list[dict],
-                         sleep_regularity_today: dict | None,
-                         sleep_summary_today: dict | None,
-                         estimated_1rm: dict | None,
-                         hr_at_volume_divergence: dict | None,
-                         deloads: list[str] | None,
-                         auto_deload_candidates: list[str] | None,
-                         capabilities: dict,
-                         estimated_max_hr: float | None,
-                         estimated_rest_hr: float | None,
-                         bodyweight_trend: float | None = None) -> list[dict]:
-    """For each of the last ``days`` days, recompute the recovery score,
-    training load (CTL/ATL/TSB), ACWR, and run the gate to determine that
-    day's tier. Returns a list of ``{date, tier, dominant_signal}`` entries
-    sorted oldest first.
-
-    Approximation: weekly_volume, sleep_regularity, sleep_summary,
-    estimated_1rm, hr_at_volume_divergence, deloads, and
-    auto_deload_candidates use TODAY's snapshot at every back-step (these
-    move slowly and a per-day recompute would be expensive). The history
-    is most accurate for the fast-moving signals (recovery, TSB, ACWR) —
-    which dominate Tier A/B classification anyway.
-    """
-    from .cardio import compute_acwr, training_load_summary, trimp_per_session  # local
-    out: list[dict] = []
-    # Recompute per-session TRIMPs once over the full window; faster than
-    # per-day. Then build training load and ACWR per back-step.
-    trimps = trimp_per_session(monthly_sessions, estimated_max_hr, estimated_rest_hr)
-    strength_trimps = [t for t in trimps if t.get("kind") == "strength"]
-    for offset in range(days - 1, -1, -1):
-        d = today_d - timedelta(days=offset)
-        # Lightweight per-day re-computations of the fast signals
-        rec_d = recovery_score(health_all, d, capabilities)
-        tl_all_d = training_load_summary(trimps, d)
-        # Strength-scoped TSB (whole-body fallback when no strength TRIMP yet),
-        # mirroring read_tracker's live gate so cardio blocks don't paint the
-        # decision-history strip as strength fatigue.
-        tl_strength_d = training_load_summary(strength_trimps, d)
-        tl_d = tl_strength_d if tl_strength_d.get("tsb") is not None else tl_all_d
-        acwr_d = compute_acwr(trimps, d)
-        rec_dict = compute_session_recommendation(
-            recovery=rec_d,
-            training_load=tl_d,
-            acwr=acwr_d,
-            weekly_volume=weekly_volume,
-            sleep_regularity=sleep_regularity_today,
-            sleep_summary=sleep_summary_today,
-            estimated_1rm=estimated_1rm,
-            hr_at_volume_divergence=hr_at_volume_divergence,
-            deloads=deloads,
-            auto_deload_candidates=auto_deload_candidates,
-            health_all=health_all,
-            today_d=d,
-            estimated_max_hr=estimated_max_hr,
-            bodyweight_trend=bodyweight_trend,
-        )
-        dominant_signal = ""
-        rationale = rec_dict.get("rationale") or []
-        if rationale:
-            dominant_signal = rationale[0].get("signal") or ""
-        out.append({
-            "date": d.isoformat(),
-            "tier": rec_dict["tier"],
-            "label": rec_dict["label"],
-            "dominant_signal": dominant_signal,
-        })
-    return out

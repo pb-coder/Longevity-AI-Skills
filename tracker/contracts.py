@@ -177,7 +177,6 @@ class TrackerJSON(TypedDict, total=False):
     # the ``reason`` and ``note`` that say WHY it is null. Consumers must
     # read this instead of inventing an explanation for a missing number.
     bodyweight_trend: dict[str, JsonValue]
-    bodyweight_weekly: list[float | None]
     # The leanness channel. Bodyweight alone cannot separate recomposition
     # from gain, so waist is carried as a second, independent series.
     # ``waist_trend_cm_per_4w`` mirrors ``bodyweight_trend``'s block shape
@@ -200,9 +199,7 @@ class TrackerJSON(TypedDict, total=False):
     health_metrics_recent: list[dict[str, JsonValue]] | None
     vo2max_latest: dict[str, JsonValue] | None
     vo2max_trend_per_4w: float | None
-    week_over_week: dict[str, JsonValue]
     session_recommendation: SessionRecommendation
-    tier_history: list[dict[str, JsonValue]]
     session_target_min: int
     target_working_sets: int
     longevity_score: dict[str, JsonValue]

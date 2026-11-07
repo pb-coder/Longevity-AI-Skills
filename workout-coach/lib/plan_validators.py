@@ -1195,52 +1195,14 @@ def _core_pattern_categories() -> "tuple[set[str], dict[str, set[str]]]":
 
 def _session_core_set_bounds(title: str, spec: dict,
                              bullets=None) -> "tuple[int, int]":
-    """``(min_sets, max_sets)`` of core work for one workout heading.
+    """Return the core-set band for the workout's heading and contents.
 
-    Which per-session core budget a workout gets (D3). Read off the
-    workout heading AND the session's own bullets, through
-    ``adherence.session_type_from_title``, the repo's one classifier for
-    that question.
-
-    ``bullets`` is what closes the last free-text hole. The heading is
-    written by the party being policed, and ``upper`` is the only session
-    type whose budget (2) sits BELOW the fail-safe the other three share
-    (4) — so it is the only answer a name can profit from. A leg day
-    named ``PUSH`` classified confidently as upper and bought the 2-set
-    budget; ``FULL BODY`` and unclassifiable headings had already been
-    closed by failing safe, but a confident wrong answer is not fixable
-    by a fail-safe. Passing the bullets lets the classifier check the
-    claim against the catalog-derived regions of the movements actually
-    prescribed, which the coach does not author. Content may move the
-    answer to a MORE demanding budget, never to a cheaper one — the
-    reverse would be the same exploit running backwards. This module used to carry a second pair of heading
-    regexes; two vocabularies for one concept is how the ledger and the
-    validator end up disagreeing about which sessions are lower days,
-    and the answer drives the 4-on-lower / 2-on-upper budget.
-
-    A heading the classifier cannot place (``None``), or one it places as
-    ``full``, gets the LARGER of the two budgets as its floor and the
-    larger as its ceiling — i.e. the lower-day band. D3 names no budget
-    for a full-body session, so something has to be assumed, and the two
-    directions are not symmetric.
-
-    Until 2026-08-02 this returned ``min(lower, upper)`` as the floor,
-    reasoning that a loose bound beats a fabricated one. That is true of
-    a CEILING and false of a FLOOR, and the asymmetry is exploitable:
-    ``session_type_from_title`` answers ``full`` for any heading naming
-    both halves, and the heading is free text the coach writes. So a
-    coach could pick its own core budget by naming the session — the
-    measured exploit renamed four sessions ``FULL BODY A..D`` and halved
-    the week's core floor from 12 sets to 8 without changing a single
-    bullet. A validator whose thresholds are chosen by the artifact it is
-    validating is not a validator.
-
-    Choosing the lower-day floor rather than the upper-day one is the
-    conservative direction for the same reason the whole build exists:
-    the measured failure is chronic UNDER-dosing, and a full-body session
-    has at least as much room for core as a lower day does. Over-asking
-    costs a coach one extra core set on an unclassified heading, and it
-    is fixable by naming the session honestly; under-asking is invisible.
+    The shared session classifier checks heading claims against catalog-derived
+    exercise regions. Contents may increase the required core dose, never
+    reduce it. Lower days use the lower-day band; upper days use the upper-day
+    band. Full-body or unclassified sessions use the larger band to prevent a
+    free-text heading from lowering the floor. Overshoot tolerance affects
+    only the ceiling.
     """
     from .adherence import session_type_from_title  # local: analytics import
 
@@ -1258,59 +1220,18 @@ def _session_core_set_bounds(title: str, spec: dict,
 def workout_core_warnings(text: str, spec: "dict | None" = None,
                           min_sets: "int | None" = None,
                           max_sets: "int | None" = None) -> "list[str]":
-    """PER-SESSION core checks. Returns a list of finding strings.
+    """Return per-session core findings; the public name is historical.
 
-    These are the `core_week_spec` axes that can be judged on a single
-    `## Workout` block. The weekly axes — distinct exercises, pattern
-    categories, per-exercise frequency, the loaded-flexion requirement —
-    live in `core_week_errors`, because none of them is answerable from
-    one session. `validate_workout_plan` runs both and returns the union
-    as BLOCKING errors.
+    ``validate_workout_plan`` treats these as blocking findings, except for
+    volume relief on a full-block deload. The default spec is CORE_WEEK_SPEC;
+    providing BOTH min_sets and max_sets overrides the session band.
 
-    The name is historical. These findings stopped being advisory on
-    2026-08-02: the July fix made them stderr warnings and the next
-    generated plan ignored them, which is what an advisory warning
-    mid-pipeline buys you. Callers that still print to stderr are the
-    remaining wiring gap, not a statement about severity.
+    Checks missing core, terminal placement, working-set dose, and optional
+    qualifiers. Flexion is required weekly, not in every session: imposing
+    flexion on every two-set upper day would crowd out pattern diversity.
+    ``core_week_errors`` owns that weekly distribution and loaded-flexion rule.
 
-    ``spec`` defaults to `constants.CORE_WEEK_SPEC`. The per-session dose
-    is D3's 4-on-lower / 2-on-upper, resolved from the workout heading by
-    `_session_core_set_bounds`. ``min_sets`` / ``max_sets``, when BOTH are
-    given, override that with a flat band for every session — an escape
-    hatch for a caller with a genuinely different budget, not a default.
-
-    Per `## Workout` block, reports when:
-      1. there is no core bullet at all;
-      2. the LAST bullet in the workout is a core bullet (§24.2: core
-         belongs inside the isolation block, never the terminal slot);
-      3. total core working sets fall outside the session's band;
-      4. a core bullet carries an "(if you can make it)" / "optional"
-         qualifier (§24: never mark a core set optional).
-
-    REMOVED 2026-08-02: "at least one spinal-flexion movement per
-    session". It was one of the three rules that produced the outcome
-    this workstream exists to fix — 94% of six months of logged core work
-    spinal or hip flexion, anti-rotation 0 sets, loaded carry 0 sets.
-
-    The arithmetic: on the D3 budget a four-day week is 4+2+4+2 = 12 core
-    sets. Requiring a flexion movement in every session spends at least
-    one bullet per session on flexion, which on a two-set upper day is
-    half the session's entire core allocation. The best case a scheduler
-    can do under both that rule and `min_pattern_categories_per_week` is
-    a 50% flexion floor, reached only by prescribing one-set bullets. The
-    rule cannot coexist with a distribution target; it IS a distribution
-    target, pointed at a single pattern.
-
-    Flexion is still mandatory — as a WEEKLY requirement, and a stricter
-    one, in `core_week_errors`: at least one flexion movement carrying an
-    external load. One concept, one source of truth, and the source is
-    the axis that can express "some, not all".
-
-    If the catalog can't resolve any core movement (an empty
-    `core_names`, e.g. the CORE section was renamed out from under
-    `SECTION_PRIMARY`), this fails open and returns nothing rather than
-    flagging every workout as missing core — a validator that cannot
-    identify core exercises must not pretend every session lacks one.
+    Returns no findings if the catalog cannot identify core movements.
     """
     return [msg for _axis, msg in _core_session_findings(
         text, spec=spec, min_sets=min_sets, max_sets=max_sets)]
@@ -1383,44 +1304,18 @@ def _core_session_findings(text: str, spec: "dict | None" = None,
 
 
 def core_week_errors(text: str, spec: "dict | None" = None) -> "list[str]":
-    """WEEKLY core checks — the distribution axes. Blocking.
+    """Return blocking weekly core-distribution findings.
 
-    A quantity-only target is always satisfiable by the cheapest legal
-    item times N; the measured proof is `Ab Crunch Machine x2 sets x4
-    sessions`, which cleared every validator the system had while
-    producing a training week that is 100% spinal flexion. These are the
-    three axes that make that plan illegal:
+    Distinct exercises, catalog pattern categories, and per-exercise session
+    caps prevent repeating one movement throughout the week. Only bullets
+    contributing working sets count; exercise names alone satisfy no axis.
 
-      * ``min_distinct_exercises_per_week``   — diversity of movement
-      * ``min_pattern_categories_per_week``   — diversity of PATTERN,
-        read from the catalog's own CORE subsections. This is the axis
-        that survives equipment-flavour gaming: two cable woodchop
-        directions are two distinct exercises but one category.
-      * ``max_sessions_per_exercise_per_week`` — identity. Caps how much
-        of the week any single movement may be.
+    Loaded-flexion identity and flexion-set quantity are separate constraints:
+    a single loaded set meets identity but may fall below the required dose.
+    ``_required_flexion_sets`` owns the quantity rule.
 
-    Plus two flexion requirements, which are separate constraints and
-    not a duplicate:
-
-      * ``min_loaded_flexion_exercises_per_week`` — identity. At least
-        one flexion movement carrying an external kg load. Without it a
-        week of bodyweight holds satisfies every count above while
-        dropping the only progressively-loadable pattern.
-      * ``min_flexion_share_of_core_sets`` / ``min_flexion_sets_per_week``
-        — quantity, on the pattern. The identity axis counts EXERCISES,
-        so one bullet at one set clears it, and a week of 8 core sets
-        carrying a single flexion set cleared every other axis in this
-        file while being 12.5% flexion. See `_required_flexion_sets`.
-
-    A core bullet contributing ZERO working sets does not count toward
-    any axis. Naming a movement is not performing it, and a spec that
-    counted names would be satisfiable by listing three exercises at
-    zero sets each.
-
-    Fails open (returns nothing) when the catalog resolves no core
-    movement, and when the markdown contains no `## Workout` block with
-    bullets — a weekly distribution is not a question you can ask of a
-    document that prescribes no week.
+    Returns no findings when the catalog identifies no core movements or the
+    document contains no workout blocks with exercise bullets.
     """
     return [msg for _axis, msg in _core_week_findings(text, spec=spec)]
 
@@ -2272,101 +2167,30 @@ def validate_workout_plan(
     cadence_deload: bool = False,
     payload: "dict | None" = None,
 ) -> "tuple[list[str], list[str]]":
-    """Return ``(errors, warnings)`` for a whole workout-plan markdown.
+    """Return ``(errors, warnings)`` for workout prescription content.
 
-    THE blocking entry point for prescription content, and the reason it
-    exists: `workout_core_warnings` and `workout_arm_dose_warnings` were
-    printed to stderr and nothing acted on them. An advisory warning
-    mid-pipeline is noise — the plan that shipped on 2026-07-18 met every
-    numeric target the system checked and was still the plan the user
-    rejected. Dose and distribution findings are now errors.
+    Blocking checks cover per-session core dose and placement, weekly core
+    distribution, arm diversity and placement, and weekly direct-set muscle
+    floors. Missing muscle targets warn instead. With a payload, recovery
+    scores in the opener are cross-checked against decision thresholds.
 
-    Errors (plan must not be accepted):
-      * per-session core dose and shape (`workout_core_warnings`)
-      * weekly core distribution (`core_week_errors`)
-      * direct-arm diversity and placement (`workout_arm_dose_warnings`)
-      * the weekly per-muscle direct-set floor (`muscle_floor_errors`),
-        for the muscles ``payload["muscle_volume_targets"]`` lists. A
-        payload without that key gets a warning instead.
-      * a recovery score in the plan's own opener that contradicts the
-        payload (`coach_number_findings`), evaluated only when
-        ``payload`` is given. The plan opener is the string the user
-        reads mid-workout. The saved files must not state one score in the
-        opener, another in a card callout and a third in the payload. An
-        error here means the two numbers fall on opposite sides of a
-        documented decision threshold; a re-derived payload warns.
+    Advisories cover working-set budgets, next-dose drift, missing main
+    patterns, and cardio sections. Rotation findings follow the single
+    BLOCK_ROTATION_ENFORCED switch and carry ROTATION_ADVISORY_TAG while
+    advisory. Budget checks require target_working_sets; payload-dependent
+    checks require a payload. Copy and catalog checks belong to
+    ``validate_workout_md`` and must run first.
 
-    Warnings (plan is accepted, finding is surfaced):
-      * working-set budget drift (`workout_set_budget_warnings`), which
-        stays advisory because an intentional deload legitimately
-        undershoots it. Only evaluated when ``target_working_sets`` is
-        given.
-      * three advisory checks of rules the coach is told to follow:
-        a written dose that differs from ``payload["next_dose"]``
-        (`next_dose_drift_warnings`), a week without one of the four main
-        patterns (`missing_main_pattern_warnings`), and a cardio section
-        (`cardio_section_warnings`). Never errors; tagged `NEXT_DOSE_DRIFT_TAG`
-        etc.
-      * every `AXIS_VOLUME` finding above, when ``deload_week`` (a
-        FULL-BLOCK deload only; see below for the cadence deload).
-      * block rotation against the previous block
-        (`block_rotation_errors`), evaluated only when ``prev_block``
-        carries one — see that function for the two silent cases.
-        Advisory THIS RELEASE ONLY, and routed by the single named
-        constant `BLOCK_ROTATION_ENFORCED`; flip that to ``True`` and
-        these become errors again with no other edit. Tagged with
-        `ROTATION_ADVISORY_TAG` on the way out.
+    Full-block deloads demote only AXIS_VOLUME findings. AXIS_STRUCTURE
+    findings (diversity, placement and ceilings) remain blocking.
+    Tier C downgrades do not receive this relief.
 
-    ``deload_week`` demotes the VOLUME axis and nothing else. Without it
-    the new specs punished a legitimate deload for being one. Measured on
-    the real 2026-07-13 plan — a correct, deliberate half-volume week —
-    on both trackers, strict and then relaxed, without a payload (so no
-    per-muscle floor; with one, each muscle under its floor demotes too):
-
-        6 blocking errors  ->  3 errors + 3 advisory
-
-    The ones that demote are the ones that say the week contains less
-    work (an under-allocated session, no loaded flexion movement, too few
-    flexion sets, and a muscle under its weekly floor), which is what a
-    deload IS. With the relief the diversity and identity axes still bite,
-    because they cost no fatigue: a deload is not a licence to go back to
-    four sets of the same crunch.
-
-    **The relief does not make that plan acceptable, and it is not meant
-    to.** The three errors that survive are core-placement findings —
-    core is the last bullet in all three sessions, §24 — so the reference
-    deload still exits 2. Placement costs nothing to fix and a deload is
-    the last week to relax it; the relief is about volume, not about
-    getting a known-bad plan through. See `AXIS_VOLUME` for the full
-    split and `is_deload_week` for what may set this.
-
-    **This is not the Tier C case.** A recovery downgrade keeps every
-    volume floor blocking; the isolation cut comes out of the rest of the
-    accessory block, not out of core and direct arms. `is_deload_week`
-    returns False for ``downgrade`` on purpose.
-
-    THE TWO KINDS OF DELOAD ARE DIFFERENT SIZES, and only the big one
-    switches the floors off. ``deload_week`` is the FULL-BLOCK deload
-    (`is_deload_week`: the gate's Tier A, a `DELOAD_WEEK_LABELS` label or a
-    load policy of ``reduce``), where every session is halved, so the volume
-    findings are advisory. ``cadence_deload`` is the block's cadence deload
-    (`is_cadence_deload_week`, ``block.deload_prescribed``), which halves ONE
-    session of an otherwise normal week. Demoting every floor for the whole
-    week on that signal made a week of 3 normal sessions and 1 halved one
-    exempt from all of its volume. So on a cadence week the volume findings
-    STAY BLOCKING, and the one that counts sets per muscle (the weekly
-    floor) is scaled by (n - 0.5) / n for the n sessions of the week
-    (`constants.floor_scale`), rounded down. Core is not scaled: it is
-    exempt from the halving (SKILL.md, Deload and re-entry: the deload
-    session keeps its full per-session core dose), so the per-session core
-    dose, the loaded-flexion movement and the flexion set floor keep their
-    spec numbers. ``block.deload_source`` names which clock called the
-    cadence deload. The two clocks stay separate: ``deload_prescribed`` is
-    "cut the volume", ``boundary_due`` is "rotate the selection" — see
-    `blocks.deload_cadence` for why all four combinations occur.
-
-    Copy rules (em-dashes, off-catalog exercise names) are NOT re-checked
-    here; `validate_workout_md` owns those and callers run it first.
+    Cadence deloads halve ONE session and keep volume findings blocking.
+    Weekly muscle floors scale by (n - 0.5) / n, rounded down. Core is exempt
+    from halving: its per-session dose and flexion requirements remain intact.
+    Selection boundaries and cadence deloads use separate clocks; boundary_due
+    rotates selection while deload_prescribed reduces volume; deload_source
+    identifies the clock responsible for the deload.
     """
     errors: "list[str]" = []
     warnings: "list[str]" = []

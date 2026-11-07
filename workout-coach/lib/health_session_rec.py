@@ -849,4 +849,3 @@ def _gate_tier(*,
 # Tier-history strip: walk back N days, re-running the gate against a
 # rolling-window view of `today`. Used for the Trajectory tab's
 # "Decision history" component (last 14 days of tier classifications).
-

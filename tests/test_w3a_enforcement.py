@@ -542,25 +542,6 @@ class DeloadVolumeReliefTests(unittest.TestCase):
         self.assertTrue(is_cadence_deload_week(green,
                                                {"deload_prescribed": True}))
 
-    def test_the_docstring_quotes_the_measured_split(self) -> None:
-        """The numbers in the docstring are a measurement, so they rot.
-
-        They already had. The docstring claimed the reference deload
-        collected "nine blocking errors, six of them for having less work
-        in it" and implied the relief made it renderable. Measured on the
-        real 2026-07-13 plan on both trackers: 6 strict, splitting 3 + 3,
-        and the three that survive are core-PLACEMENT findings, so the
-        plan still exits 2 with the relief applied. Pinned so the next
-        spec change has to re-measure rather than re-assert.
-
-        `RealPlanAcceptanceTests` re-derives these against the plan tree
-        when it is present; this half runs on a bare checkout.
-        """
-        doc = validate_workout_plan.__doc__
-        self.assertIn("6 blocking errors  ->  3 errors + 3 advisory", doc)
-        self.assertNotIn("nine blocking errors", doc)
-        self.assertIn("does not make that plan acceptable", doc)
-
     def test_a_normal_week_is_unaffected_by_the_split(self) -> None:
         errors, warnings = self._run(_PLAN_COMPLIANT)
         self.assertEqual(errors, [])
@@ -1500,7 +1481,7 @@ class RealPlanAcceptanceTests(unittest.TestCase):
         self.assertEqual(
             [e for e in strict if e not in volume], relaxed)
 
-    def test_the_reference_deload_splits_as_the_docstring_claims(self) -> None:
+    def test_the_reference_deload_keeps_structural_errors_blocking(self) -> None:
         # The measurement behind `validate_workout_plan`'s deload
         # paragraph, re-derived rather than restated. Both trackers'
         # 2026-07-13 plan is a deliberate half-volume week.

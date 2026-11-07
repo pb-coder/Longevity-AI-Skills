@@ -551,14 +551,26 @@ class EmptyImportError(RuntimeError):
 # ``main()`` as a raw KeyError traceback; ``/log`` promises one clear line.
 REQUIRED_META_KEYS = ("timeZone", "rangeStart", "rangeEnd", "exportedAt")
 
+# Schema 2 (app 1.0.16) is a superset of 1 for every field this reader
+# touches: activity.daily, activity.workouts, additional.{body,heart}.daily
+# and sleep.sessions[].{stages,asleepSec,awakeSec} are unchanged in shape,
+# key names and units. Its additions are ignored here -- sleep sessions gain
+# stageTotalsSec / sleepEfficiencyPct / awakenings, additional.heart gains
+# streams, meta gains verbose. Its one semantic change is a fix:
+# weatherHumidityPercent now really is 0-100 rather than basis points, which
+# only ``humidity_percent`` cares about, and that function already guards on
+# ``raw > 100``. The dropped ``additional.ecg`` section was never read.
+SUPPORTED_SCHEMA_VERSIONS = (1, 2)
+
 
 def read_export(path: Path) -> dict:
     payload = json.loads(path.read_text())
     meta = payload.get("meta") or {}
-    if meta.get("schemaVersion") != 1:
+    if meta.get("schemaVersion") not in SUPPORTED_SCHEMA_VERSIONS:
+        handled = ", ".join(str(v) for v in SUPPORTED_SCHEMA_VERSIONS)
         raise ValueError(
             f"{path.name}: unsupported schemaVersion "
-            f"{meta.get('schemaVersion')!r}; this reader handles 1"
+            f"{meta.get('schemaVersion')!r}; this reader handles {handled}"
         )
     for key in REQUIRED_META_KEYS:
         if not meta.get(key):

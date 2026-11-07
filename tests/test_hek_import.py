@@ -899,6 +899,25 @@ class MetaValidationTests(unittest.TestCase):
     def test_a_complete_meta_reads_normally(self) -> None:
         self.assertEqual(self._read(_payload())["meta"]["schemaVersion"], 1)
 
+    def test_schema_two_preserves_supported_payloads(self) -> None:
+        original = _load()
+        upgraded = json.loads(json.dumps(original))
+        upgraded["meta"]["schemaVersion"] = 2
+        upgraded["meta"]["verbose"] = True
+        accepted = self._read(upgraded)
+        for builder in (hek.build_health_payload, hek.build_sleep_payload,
+                        hek.sleep_headline_rows, hek.build_workout_payload,
+                        hek.build_swim_payload):
+            with self.subTest(builder=builder.__name__):
+                self.assertEqual(builder(accepted, None, None),
+                                 builder(original, None, None))
+
+    def test_unknown_schema_version_is_rejected(self) -> None:
+        payload = _payload()
+        payload["meta"]["schemaVersion"] = 999
+        with self.assertRaisesRegex(ValueError, "unsupported schemaVersion"):
+            self._read(payload)
+
     def test_the_failure_reaches_the_caller_as_a_value_error(self) -> None:
         # This is the type main() catches, so the CLI exits 3 with one line.
         with tempfile.TemporaryDirectory() as tmp:

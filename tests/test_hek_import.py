@@ -940,5 +940,55 @@ class CapabilityTests(unittest.TestCase):
         )
 
 
+class ImportBatchingTests(unittest.TestCase):
+    def test_sleep_grouping_and_totals_are_shared_during_import(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(person_paths, "WORKOUT_TRACKER_ROOT", Path(tmp)), \
+             patch.object(hek, "commit_data", return_value=None), \
+             patch.object(hek, "assemble_nights", wraps=hek.assemble_nights) as assemble, \
+             patch.object(hek, "_night_totals", wraps=hek._night_totals) as totals, \
+             patch.object(hek, "upsert_health_metrics", wraps=hek.upsert_health_metrics) as upsert:
+            export = Path(tmp) / "export.json"
+            export.write_text(FIXTURE.read_text())
+            hek.import_export("Test", export, None, None,
+                              allow_past_months=True, keep_export=True)
+            assemble.assert_called_once()
+            self.assertEqual(totals.call_count, len(hek.assemble_nights(_load())))
+            upsert.assert_called_once()
+
+    def test_batch_preserves_serial_sparse_merge_and_repeat_import_bytes(self) -> None:
+        from unittest.mock import patch
+
+        payload = _load()
+        health = hek.build_health_payload(payload, None, None)
+        headline = hek.sleep_headline_rows(payload, None, None)
+        self.assertTrue({r["date"] for r in health} & {r["date"] for r in headline})
+        day = headline[0]["date"]
+        seed = [{"date": day, "vo2max": 42, "hrv_sdnn": 51,
+                 "sleep_total_h": 1, "sleep_deep_h": 0.1}]
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(person_paths, "WORKOUT_TRACKER_ROOT", Path(tmp)), \
+             patch.object(hek, "commit_data", return_value=None):
+            csv_store.upsert_health_metrics("Serial", seed)
+            csv_store.upsert_health_metrics("Serial", health)
+            csv_store.upsert_health_metrics("Serial", headline)
+            expected = person_paths.health_metrics_csv("Serial").read_bytes()
+            csv_store.upsert_health_metrics("Batch", seed)
+            export = Path(tmp) / "export.json"
+            export.write_text(json.dumps(payload))
+            call = dict(person="Batch", export_path=export, since=None, until=None,
+                        allow_past_months=True, keep_export=True)
+            hek.import_export(**call)
+            self.assertEqual(person_paths.health_metrics_csv("Batch").read_bytes(), expected)
+            before = {p.relative_to(person_paths.data_dir("Batch")): p.read_bytes()
+                      for p in person_paths.data_dir("Batch").rglob("*.csv")}
+            hek.import_export(**call)
+            after = {p.relative_to(person_paths.data_dir("Batch")): p.read_bytes()
+                     for p in person_paths.data_dir("Batch").rglob("*.csv")}
+            self.assertEqual(after, before)
+
+
 if __name__ == "__main__":
     unittest.main()

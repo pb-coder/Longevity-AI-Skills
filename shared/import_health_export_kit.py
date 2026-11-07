@@ -239,11 +239,12 @@ def _night_totals(sessions: list[dict]) -> dict:
     }
 
 
-def build_sleep_payload(payload: dict,
-                        since: date | None,
-                        until: date | None) -> list[dict]:
-    """Rows for ``upsert_sleep_nights``, one per night."""
-    rows: list[dict] = []
+def _build_sleep_rows(payload: dict,
+                      since: date | None,
+                      until: date | None) -> tuple[list[dict], list[dict]]:
+    """Build nightly detail and daily mirrors from one grouping/totals pass."""
+    night_rows: list[dict] = []
+    headline_rows: list[dict] = []
     for key, sessions in sorted(assemble_nights(payload).items()):
         day = date.fromisoformat(key)
         if not _in_window(day, since, until):
@@ -254,7 +255,7 @@ def build_sleep_payload(payload: dict,
         awake = totals["awake"]
         in_bed = totals["in_bed"]
 
-        row = {
+        detail = {
             "date": key,
             "total_h": _hours(asleep),
             "awake_h": _hours(awake),
@@ -265,37 +266,8 @@ def build_sleep_payload(payload: dict,
         }
         for stage_name, field in STAGE_FIELDS.items():
             if stage_name in stage_seconds:
-                row[field] = _hours(stage_seconds[stage_name])
-        rows.append(row)
-    return rows
-
-
-def sleep_headline_rows(payload: dict,
-                        since: date | None,
-                        until: date | None) -> list[dict]:
-    """The sleep mirror written into ``health_metrics.csv``.
-
-    ``Resp Rate`` comes from the night's respiratory-rate average. The
-    retired importer sourced it from a metric it called daily, but Apple
-    only measures respiration during sleep, and the two agreed to 0.1 on
-    every overlapping day tested.
-
-    A night can be several sessions, so the per-session averages are
-    weighted by each session's ``asleepSec``: an unweighted mean lets a
-    20-minute nap pull the night's figure as hard as the 6-hour sleep it
-    is filed with. Falls back to the plain mean only when no session
-    reports asleep seconds, which leaves no basis for a weight.
-    """
-    nights = assemble_nights(payload)
-    rows: list[dict] = []
-    for key, sessions in sorted(nights.items()):
-        day = date.fromisoformat(key)
-        if not _in_window(day, since, until):
-            continue
-        totals = _night_totals(sessions)
-        stage_seconds = totals["stage_seconds"]
-        asleep = totals["asleep"]
-        in_bed = totals["in_bed"]
+                detail[field] = _hours(stage_seconds[stage_name])
+        night_rows.append(detail)
 
         row = {
             "date": key,
@@ -323,8 +295,26 @@ def sleep_headline_rows(payload: dict,
                 row["resp_rate"] = round(
                     sum(value for value, _ in resp) / len(resp), 2
                 )
-        rows.append(row)
-    return rows
+        headline_rows.append(row)
+    return night_rows, headline_rows
+
+
+def build_sleep_payload(payload: dict,
+                        since: date | None,
+                        until: date | None) -> list[dict]:
+    """Rows for ``upsert_sleep_nights``, one per night."""
+    return _build_sleep_rows(payload, since, until)[0]
+
+
+def sleep_headline_rows(payload: dict,
+                        since: date | None,
+                        until: date | None) -> list[dict]:
+    """Sleep mirrors for health metrics, with asleep-weighted respiration.
+
+    Sessions without asleep seconds use an unweighted respiratory-rate
+    average only when none of the night's readings has a positive weight.
+    """
+    return _build_sleep_rows(payload, since, until)[1]
 
 
 # --------------------------------------------------------------- workouts
@@ -605,8 +595,7 @@ def import_export(person: str,
     payload = read_export(export_path)
 
     health = build_health_payload(payload, since, until)
-    headline = sleep_headline_rows(payload, since, until)
-    nights = build_sleep_payload(payload, since, until)
+    nights, headline = _build_sleep_rows(payload, since, until)
     workouts = build_workout_payload(payload, since, until)
     swims = build_swim_payload(payload, since, until)
 
@@ -637,8 +626,8 @@ def import_export(person: str,
         out.append(f"Profile: source {profile.get('source') or 'unset'} -> {SOURCE_NAME}")
         profile = read_profile(person)
 
-    out.extend(upsert_health_metrics(person, health))
-    out.extend(upsert_health_metrics(person, headline))
+    # Preserve the previous merge order: sleep mirrors follow daily metrics.
+    out.extend(upsert_health_metrics(person, [*health, *headline]))
     out.extend(upsert_sleep_nights(person, nights))
     if swims:
         out.extend(upsert_swim_workouts(person, swims))

@@ -28,12 +28,12 @@ Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at
 ## Setup
 
 1. Read `../shared/exercises-database.md` for muscle mappings, synergist tags (`+muscle` = 0.5 sets), lengthened-position flags (`◆`).
-2. Read `references/training-science.md` and use its Quick Lookup table for each part of the analysis. Read the other references only when their trigger applies:
+2. Read `references/training-science.md` and use its Quick Lookup table for each part of the analysis. Detailed core evidence is selectively loaded from `references/core-evidence.md` when changing core selection, addressing poor adherence, or explaining a disputed core claim. Read the other references only when their trigger applies:
    - `swim_summary` present: `references/swim-coaching.md`.
    - `nutrition_phase` present and `current.phase_type == "bulk"`: `references/bulking-science.md`. On any phase type, or whenever `energy_28d` is present, read that file's **7,700 kcal/kg constant** section before writing a kcal figure.
    - Training through a break, illness, closure or deliberately reduced dose: `references/detraining-and-minimal-dose.md`. With no gym at all, also `references/no-equipment-training.md`.
    - Tier A, B or C, or an override: `references/substitute-protocols.md`.
-3. Run `python3 Skills/workout-coach/scripts/read_tracker.py --person <Name> --months 6 [--sessions N] > /tmp/tracker-<Person>.json` from the workout-tracker root (the same command as Pipeline step 1; `--sessions N` only when the user asks for a different count, see **Sessions**). It returns one JSON blob of session-level signals; every key is documented under **Data Reading Strategy**. Several blocks are gated on data presence and are simply absent when there is nothing to report. If the data folder isn't there, the script prints an error: relay it in one line and stop. Don't search the filesystem. Output is compact JSON (`--pretty` for inspection). `rows` (the flat per-set list) is off by default; pass `--include-rows` only for debugging.
+3. Run Pipeline step 1 once for the resolved person. If their data folder is absent, relay the error in one line and stop; do not search the filesystem. Read its compact JSON (`--pretty` for inspection); per-set `rows` are off by default and `--include-rows` is for debugging only. Several optional blocks are absent when no data supports them.
 4. From the output, identify the **most recent workout** (last date with logged sets). Note the muscle groups and exercises. Don't repeat the same primary muscle emphasis in the very next session.
 
 ## Output target
@@ -105,7 +105,7 @@ The plan ends after the last strength workout. Everything above the first `##` h
 - `session_recommendation`: the binding gate. See **Recovery gate** in Phase 2.
 
 **Bodyweight + waist (two channels):**
-- `bodyweight_latest`, `bodyweight_trend`, `bodyweight_trend_kg_per_week`, `bodyweight_weekly`, `waist_latest`, `waist_trend_cm_per_4w`. **Read `state` first.** `resolved` means the 95% interval excludes zero; `unresolved` carries a `reason` and a plain-English `note` and is an answer, not a failure. `point_kg_per_week` and `point_cm_per_4w` are raw point estimates and also appear on a resolved fit: only the resolved rate (`kg_per_week` / `cm_per_4w`) is quotable, never a point value. `bodyweight_trend_kg_per_week` is null unless resolved. With an open nutrition phase, use `nutrition_phase.actuals.rate_kg_per_wk_14d` as the primary status number.
+- `bodyweight_latest`, `bodyweight_trend`, `bodyweight_trend_kg_per_week`, `waist_latest`, `waist_trend_cm_per_4w`. **Read `state` first.** `resolved` means the 95% interval excludes zero; `unresolved` carries a `reason` and a plain-English `note` and is an answer, not a failure. `point_kg_per_week` and `point_cm_per_4w` are raw point estimates and also appear on a resolved fit: only the resolved rate (`kg_per_week` / `cm_per_4w`) is quotable, never a point value. `bodyweight_trend_kg_per_week` is null unless resolved. With an open nutrition phase, use `nutrition_phase.actuals.rate_kg_per_wk_14d` as the primary status number.
 - **Waist is the leanness channel; bodyweight is not.** The scale alone cannot separate recomposition from fat gain. A single waist reading is a baseline and supports no trend claim. When `waist_latest` is absent, say the channel is empty ("no waist measurements on file; the scale alone can't separate muscle from fat") instead of dropping it.
 - **Progress photos**: on the FIRST plan of each calendar month, put one short line in the opener asking for a monthly progress photo. Nothing in the tracker reads images: never claim to have looked at one. Skip the line on every other plan that month.
 
@@ -174,7 +174,7 @@ Goals are fixed: hypertrophy + longevity. Never ask about goals.
 
 1. **Read tracker data, 6 months back:** `python3 Skills/workout-coach/scripts/read_tracker.py --person <Name> --months 6 [--sessions N] > /tmp/tracker-<Person>.json` (one file per person: both trackers never share a path; `--sessions N` is optional, see **Sessions**). Six months warms up the 42-day CTL EWMA for the 90-day load chart. The Python stage produces every metric, the `session_recommendation` gate and `next_dose`: don't re-derive any of it.
 
-   **Tier A or B: stop here and ask.** If `session_recommendation.tier` is `A` or `B`, write nothing yet. Tell the user the tier, its `label`, the gate's `session_recommendation.headline` and the top `rationale` notes, and ask which of the three options in "Recovery gate" they want. The answer decides which tracker JSON the assessment is written against. Tier C, D and E continue automatically.
+   **Tier A or B: stop here and ask.** Follow **Recovery gate** before writing anything. The user's answer determines whether to use this tracker JSON or regenerate it with an explicit override. Tier C, D and E continue automatically.
 2. **Author and save `coach_reads.json`** (headline + every `cards.*` callout, rules under **Coach cards**) to `plans/<Person>/<date>-coach_reads.json`. **HARD CHECKPOINT: this file MUST exist on disk before step 3.**
 3. **Author `plans/<Person>/<date>-workout.md`.** Re-open `coach_reads.json` from disk (it forces the plan to honor the saved assessment, not paraphrase it from memory). Quote `cards.session_recommendation_callout` in the opener paragraph (the gate's `headline` goes only in `> Today's call:`, see Phase 2). Then draft the exercise bullets under the gate. Strength only. Rules in Phase 2.
 4. **Check the plan. Always. Must exit 0.**

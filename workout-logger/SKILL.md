@@ -89,21 +89,9 @@ line. Don't search the filesystem.
    - If stdout contains `Appended`, the workout-row write is confirmed. Proceed.
 5. Print the summary line before moving on to Apple Health refresh or verification: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)`. If one or more weights were logged, append ` | morning weight: 78.4kg` (or comma-separate multiple dates). The summary comes from the script's `Appended …` stdout line — extract N rows and dates from it. Do not skip this in test runs; if you are validating a `/log` flow, emit the same summary a real `/log` invocation would have emitted.
 
-6. **Apple Health refresh (automatic — no prompts at all).** After printing the summary line, ALWAYS run the importer for the resolved person. There is nothing to ask about: the user drops a fresh export every time they log, so the refresh is unconditional.
+6. **Apple Health refresh (automatic — no prompts at all).** After the summary, run `python3 Skills/shared/import_health_export_kit.py --person <Person>` unconditionally. See **Apple Health refresh** below for the source and store contract. No watchers or scheduled job are involved.
 
-   ```
-   python3 Skills/shared/import_health_export_kit.py --person <Person>
-   ```
-
-   That is the only importer. It auto-resolves the export from the workout-tracker root (one above the per-person folders): `./health-export-json-*.json`, **most recent by mtime wins**. There is no second file shape and no dispatch decision to make.
-
-   If no export is there, the importer prints `ERROR: Health Export Kit file not found: health-export-json-*.json` and exits 1 — surface that one line to the user and finish. A missing export just means the user didn't drop one this time.
-
-   It imports whatever range the export itself covers, so `/log` passes `--person` and nothing else. The full flag set, for the rare hand-run: `--person`, `--export`, `--since`, `--until`, `--allow-past-months`, `--dry-run`, `--keep-export`.
-
-   Capture stdout and append the importer's `Health Metrics: …`, `Sleep Nights: …`, `Swim Workouts: …`, and `Workout Sessions: …` summary lines (plus any `Auto-cardio: …` / `Strength clustering warnings:` / `Profile: …` / `Deleted source export: …` / `Committed <Person> data: …` lines) to the user-facing summary printed in step 5. Relay `manual-wins warnings`, skipped-negligible-swim lines, and nearby-swim notes too; those are user-facing data-quality decisions, not debug noise.
-
-   The refresh runs on every `/log` invocation automatically. Idempotent re-runs are fine — the importer's sparse-merge protects existing data, so refreshing when nothing changed is a harmless no-op.
+   Capture stdout and append the importer's `Health Metrics:`, `Sleep Nights:`, `Swim Workouts:`, `Workout Sessions:`, and any `Auto-cardio:`, `Strength clustering warnings:`, `Profile:`, `Deleted source export:`, or `Committed <Person> data:` lines to the user-facing summary. Relay manual-wins warnings, skipped-negligible-swim lines, and nearby-swim notes. If no export exists, surface its one-line `ERROR: Health Export Kit file not found: health-export-json-*.json` and finish. A missing export means no fresh file was supplied.
 
 The tracker itself is the output. No markdown tables, no files presented, no narration.
 
@@ -137,7 +125,7 @@ It also creates / reads `<Person>/data/profile.csv`, a 2-column key/value file p
 
 **Auto-cardio.** When the importer ingests cardio workouts (Running, Hiking, Cycling, Swimming, HIIT) AND `auto_cardio` in `profile.csv` is True, those workouts also flow into the matching `<Person>/data/monthly/YYYY.MM.csv` as cardio rows carrying an `apple` / `gymkit:<Device>` value in the typed `Source` column. Manually-logged rows always win — the dedupe rule (date + exercise + duration ±1 min) skips Apple workouts that match an existing manual entry. Default: `auto_cardio = true`. Flip to `false` per-tracker by editing `profile.csv` if a user prefers manual-only logging.
 
-**Step 6 always refreshes, and never asks.** No watchers, no cron, and no prompt of any kind: run the importer for the resolved person, append its summary to the user-facing output, and finish. If no export is in the folder, surface the importer's one-line `ERROR: Health Export Kit file not found: health-export-json-*.json` and finish. With a single source there is no source decision left to put to the user — the health refresh is fully silent.
+For an explicit manual import, supported flags are `--person`, `--export` (path or glob), `--since`, `--until`, `--allow-past-months`, `--dry-run`, and `--keep-export`. The default resolver picks the newest matching export by mtime. `/log` passes only `--person`.
 
 ## Bodyweight (opt-in)
 

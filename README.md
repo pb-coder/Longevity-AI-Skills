@@ -51,3 +51,7 @@ Committed text must use `<Person>` / `<OtherPerson>` placeholders, never private
 HTML dashboards and `render_dashboard.py` are retired; there is no HTML output or report-rendering command. Use the saved assessment JSON and workout markdown. The former HTML-only options and `Assessment:` links are unsupported.
 
 Thermal (sauna/cold) and light-therapy tracking, adherence analytics, suggestion inputs, and plan placeholders are retired. `thermal` and `light_therapy` logger payload keys are unsupported. Existing private CSVs and old generated reports are left untouched; they are not current coaching inputs. General longevity research remains available without claims of live modality tracking.
+
+The unused coach JSON outputs `tier_history`, `bodyweight_weekly`, and `week_over_week` are retired. Use the current session recommendation, bodyweight trend, and existing aggregate inputs. The unused public swim-lap writer `upsert_swim_laps` is retired; historical lap readers remain supported and imported swim aggregates continue unchanged.
+
+Importer status now combines daily and sleep updates into one `Health Metrics:` line; its written/updated counts aggregate both passes. Stored CSV values and schemas are unchanged.

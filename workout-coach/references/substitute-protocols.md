@@ -11,7 +11,6 @@ Reasoning behind the gate is in the Phase 2 preamble of `SKILL.md`. The threshol
 
 **The templates below are copy-me markdown and `validate_workout_md` runs over the result.** Its em-dash rule allows one only on the `# Workout plan — <date>` title line and on an indented `  — cue` sub-bullet. A `> Today's call:` or `> Why:` line is neither, so an em-dash there is a blocking error and `check_plan.py` exits 2. Use a period, comma, semicolon or colon when you fill these in.
 
-**The `Assessment: ./<date>-assessment.html` line** appears in every template below. Write it only on a run that renders the report; leave it out otherwise.
 
 ---
 
@@ -42,11 +41,9 @@ Do not suggest a default beyond the gate's own call, and do not write any file u
 >      <rationale[1].note>
 >      <rationale[2].note>
 
-Assessment: ./<date>-assessment.html
 
 ## Rest day
 Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
 
 - Hydration: front-load fluids today
 - Sleep priority: 8h target tonight, no caffeine after noon
@@ -72,13 +69,11 @@ Fewer sets, held weights. The markdown lists the lighter workouts for the whole 
 > Why: <rationale[0].note>
 >      <rationale[1].note>
 
-Assessment: ./<date>-assessment.html
 
 Lighter strength this week: half the sets, weights held. No finisher.
 
 ## Workout 1: UPPER A + CORE
 Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
 
 - Jumping Jacks: 50
 - Arm Circles: 20
@@ -90,7 +85,6 @@ Recovery: sauna ___ / cold ___ / rlt ___
 
 ## Workout 2: LOWER A + CORE
 Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
 
 - <…>
 ```
@@ -114,7 +108,7 @@ Same session pattern as the planned workout, with the budget cut and nothing els
 - **Loads**: NOT held. Every load and rep range is copied from `next_dose`: a lift that earned weight gets it. Only `load_policy` `reduce` (Tier A / B, or strength TSB of -15 or lower) holds loads.
 - **Finisher**: drop any finisher.
 - **Warm-up**: unchanged. Keep the two prep movements and the ramp sets into the first heavy compound. A recovery downgrade reduces working volume, not the warm-up.
-- **Core and the per-muscle weekly floors are NOT scaled.** `core_week_spec` and `muscle_floors` are blocking render errors and they are not tier-scoped: a Tier C plan carries its full core and direct-set floors or it does not render. The cut comes out of the rest of the accessory block. Only a full-block deload (`load_policy` `reduce`: Tier A / B) demotes them; a single cadence deload session does not.
+- **Core and the per-muscle weekly floors are NOT scaled.** `core_week_spec` and `muscle_floors` are blocking validation errors and they are not tier-scoped: a Tier C plan carries its full core and direct-set floors or it fails validation. The cut comes out of the rest of the accessory block. Only a full-block deload (`load_policy` `reduce`: Tier A / B) demotes them; a single cadence deload session does not.
 
 The workout markdown looks like a normal session at a smaller size:
 
@@ -124,11 +118,9 @@ The workout markdown looks like a normal session at a smaller size:
 > Why: <rationale[0].note>
 >      <rationale[1].note>
 
-Assessment: ./<date>-assessment.html
 
 ## Workout 1: UPPER A + CORE
 Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
 
 - Jumping Jacks: 50
 - Arm Circles: 20
@@ -161,7 +153,6 @@ Normal session, with one-line warning at the top of the markdown:
 # Workout plan — <date>
 > Today's call: <session_recommendation.headline>
 
-Assessment: ./<date>-assessment.html
 
 Fitness is bleeding off if this continues.
 

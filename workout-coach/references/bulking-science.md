@@ -59,7 +59,7 @@ The constant is a planning tool. It converts a *goal rate* into a *starting inta
 
 ## When to stop a bulk (the off-ramp)
 
-Pre-committed conditions stored on the phase row (`stop_conditions` column). The coach pattern-matches observed data against them at each /coach run and surfaces any triggered stop signal in the dashboard's nutrition_phase card.
+Pre-committed conditions stored on the phase row (`stop_conditions` column). The coach pattern-matches observed data against them at each /coach run and surfaces any triggered stop signal in the assessment's nutrition_phase_callout section.
 
 Default off-ramps (each one strong enough on its own to end the phase):
 

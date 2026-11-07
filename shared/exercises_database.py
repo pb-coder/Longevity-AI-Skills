@@ -166,7 +166,7 @@ def entry_canonical_name(entry_line: str) -> str:
     Public because it is the only place this parse lives, and callers
     outside this module need it to read a ``parse_database()`` section
     without re-implementing the split (`CLAUDE.md`: one concept, one
-    source of truth). ``workout-coach/lib/render_validators.py`` reads
+    source of truth). ``workout-coach/lib/plan_validators.py`` reads
     the CORE ``Flexion`` subsection through it.
     """
     bracket_idx = entry_line.find("[")

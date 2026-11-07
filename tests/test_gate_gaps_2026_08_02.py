@@ -44,7 +44,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from workout_coach.lib import render_validators as rv
+from workout_coach.lib import plan_validators as rv
 from workout_coach.lib.adherence import parse_plan
 from workout_coach.lib.blocks import (
     ANCHOR_CHANGE_REASONS,
@@ -56,7 +56,7 @@ from workout_coach.lib.blocks import (
     rotation_diff_report,
 )
 from workout_coach.lib.extract import load_exercises_db
-from workout_coach.lib.render_validators import (
+from workout_coach.lib.plan_validators import (
     coach_number_findings,
     validate_coach_reads,
     validate_workout_md,

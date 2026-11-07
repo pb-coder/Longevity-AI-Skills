@@ -126,7 +126,7 @@ TOTAL_LABEL = "TOTAL"
 # Those are different axes. Comparing a fractional measurement against a
 # direct-set landmark understates every muscle that receives synergist
 # credit: 6 credited triceps sets can be 0 curls plus 12 pressing sets,
-# which is exactly the failure `render_validators.workout_arm_dose_warnings`
+# which is exactly the failure `plan_validators.workout_arm_dose_warnings`
 # was written to catch after the fact. The landmark, not the validator,
 # is the right place to fix it.
 #
@@ -810,7 +810,7 @@ SESSION_GATE_THRESHOLDS = {
     "tier_c_muscles_over_mrv_count":   1,
     # Fraction of the base working-set budget a downgraded session keeps.
     # A WHOLE-SESSION scale on workouts 1..expected_rebound_by_session, not
-    # "-25% on secondaries": `render_validators.tier_budget_by_index`
+    # "-25% on secondaries": `plan_validators.tier_budget_by_index`
     # enforces exactly this number, and the payload text reads it from here,
     # so the call and the check cannot describe two different cuts. The
     # per-muscle floors (`muscle_floors`) are not scaled, so the isolation
@@ -1099,7 +1099,7 @@ FLOOR_EXEMPT_MUSCLES = frozenset({"erectors", "forearms", "core"})
 FLOOR_REFERENCE_SESSIONS = 4
 
 # Recovery-gate labels that mean "this whole week is a prescribed volume
-# reduction" (`render_validators.is_deload_week`). Tier C ``downgrade`` is
+# reduction" (`plan_validators.is_deload_week`). Tier C ``downgrade`` is
 # deliberately NOT here: see the comment there.
 DELOAD_WEEK_LABELS = frozenset({"reactive_deload", "rest"})
 
@@ -1156,7 +1156,7 @@ def muscle_floors(tiers: dict, servable=None,
     """Weekly DIRECT-set floor per muscle: ``{muscle: sets per week}``.
 
     THE one number the coach reads (``payload["muscle_floors"]``) and the
-    validator enforces (`render_validators.muscle_floor_errors`).
+    validator enforces (`plan_validators.muscle_floor_errors`).
 
       * ``emphasis`` tier -> the muscle's MEV
       * any other tier    -> its MV

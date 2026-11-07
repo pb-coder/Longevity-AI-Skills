@@ -1,70 +1,4 @@
-"""Coach-text validation + tooltip-term catalog for the renderer.
-
-This module owns the strict copy rules the renderer enforces against
-``coach_reads.json`` (no em-dashes, length caps) and the catalog of
-abbreviations that get auto-wrapped in dotted-underline tooltips when
-they appear in coach text.
-
-Public surface:
-
-- ``KNOWN_TERMS`` — abbreviation → (full name, plain-English
-  explanation). Adding a new tooltip-able abbreviation: add an entry
-  here, no other file needs changing.
-- ``COACH_CARD_KEYS`` — the card-key tuple the validator uses to warn
-  on missing optional callouts.
-- ``EM_DASH``, ``COACH_STRING_MAX`` — constants for the validator.
-- ``validate_coach_reads(coach, payload=None) -> (errors, warnings)`` —
-  hard errors vs. soft warnings. Errors fail the render with exit code 2;
-  warnings print to stderr but allow the render to proceed. Pass the
-  tracker payload to also cross-check the numbers the coach WROTE against
-  the numbers the payload HOLDS — see `coach_number_findings`. Optional,
-  and a caller that has the payload and omits it silently keeps the old
-  behaviour, which is that a fabricated recovery score renders.
-- ``coach_number_findings(payload, texts) -> (errors, warnings)`` — the
-  cross-check itself, over any labelled coach-authored strings. The only
-  rule in this file that reads coach text for TRUTH rather than for form.
-  A mismatch is an ERROR when the two numbers fall on opposite sides of a
-  documented decision threshold (`recovery_decision_boundaries`) and a
-  warning otherwise; magnitude is a noise floor, not the instrument.
-- ``recovery_decision_boundaries()`` — those thresholds, derived from
-  ``constants.SESSION_GATE_THRESHOLDS`` plus one anti-fabrication edge
-  (`COACH_SCORE_TOP_BAND_EDGE`).
-- ``validate_workout_md(text) -> (errors, warnings)`` — validates the
-  lean workout markdown's COPY (em-dashes, off-catalog names) before it
-  is embedded in the dashboard.
-- ``validate_workout_plan(text, ...) -> (errors, warnings)`` — validates
-  the plan's CONTENT against the prescription specs in ``constants`` and
-  against the previous training block. Dose and distribution findings
-  come back as errors, not warnings; see its docstring for why.
-- ``BLOCK_ROTATION_ENFORCED`` — the stage-two switch. ``False`` this
-  release, which routes rotation findings to warnings instead of errors.
-  One name, one read site (`validate_workout_plan`).
-- ``ROTATION_ADVISORY_TAG`` — the suffix stamped on a rotation finding
-  while the switch is off.
-- ``muscle_floor_errors(text, payload) -> [str]`` — the one weekly
-  direct-set floor every muscle gets; the rule is in the block comment
-  above `_primary_muscle_by_exercise`.
-- ``payload_spec_errors(tracker_json) -> [str]`` — the tracker payload's
-  ``core_week_spec`` / ``arm_week_spec`` are REPORTS of the constants,
-  never gate inputs. This checks they are well formed so a corrupt one
-  is a clean exit 2 rather than a traceback, and `SpecError` is what any
-  caller that passes its own spec gets instead of a ``KeyError``.
-- ``block_rotation_errors(text, prev_block, ...)`` — the W5 rotation
-  diff, run against a block derived from the plan markdown itself.
-- ``tier_budget_by_index(session_recommendation, base_budget)`` — the
-  per-workout-index working-set budget the recovery gate implies.
-- ``auto_wrap_terms(text)`` — wraps each ``KNOWN_TERMS`` key in a
-  tooltip span. First-occurrence-only per string by design (avoids
-  visual noise on lines that repeat a term).
-
-This module reaches into the analytics side (``constants``, ``extract``,
-``adherence``, ``blocks``) where a rule needs the catalog, the plan
-parser or the block model. That is deliberate and narrow: the
-alternative is a second copy of catalog parsing, heading classification
-and pattern identity inside the renderer, which `Skills/CLAUDE.md`
-forbids outright. Those imports are function-local so a render that
-never validates a plan does not pay for them.
-"""
+"""Validate coach assessment copy, tracker specs, and workout prescriptions."""
 from __future__ import annotations
 
 from collections import Counter
@@ -82,7 +16,6 @@ from .constants import (
     floor_scale,
     full_block_deload,
 )
-from .render_helpers import esc
 
 
 class SpecError(ValueError):
@@ -131,7 +64,7 @@ def _resolved_spec(spec: "dict | None", default: dict, label: str) -> dict:
 
     Unknown keys are carried through untouched rather than rejected. They
     are inert to every consumer, and refusing them would make a payload
-    written by an older or newer `read_tracker` unrenderable for a
+    written by an older or newer `read_tracker` invalid for a
     cosmetic reason.
     """
     if spec is None:
@@ -189,58 +122,6 @@ def payload_spec_errors(payload: "dict | None") -> "list[str]":
     return out
 
 
-# Terms that get a dotted-underline tooltip when they appear in the
-# coach text. The renderer auto-wraps them. The coach is encouraged
-# to use the plain-English equivalent instead.
-KNOWN_TERMS = {
-    "CTL":    ("Chronic Training Load",
-               "A 42-day moving average of your training stress. It moves slowly and represents your fitness baseline. On this dashboard the chart's blue line is your CTL."),
-    "ATL":    ("Acute Training Load",
-               "A 7-day moving average of your training stress. It moves quickly and represents your current fatigue. On this dashboard the chart's orange dashed line is your ATL."),
-    "TSB":    ("Training Stress Balance",
-               "Your fitness minus your current fatigue. Positive numbers mean you are fresh and ready, negative numbers mean fatigue is accumulating. Above +5 is fresh, below -10 starts to be tired."),
-    "e1RM":   ("Estimated one-rep max",
-               "Your single-rep capacity extrapolated from your working sets. It lets you track strength changes without ever doing a true one-rep test."),
-    "MEV":    ("Minimum Effective Volume",
-               "The smallest weekly set count that still drives growth in a muscle. Below this number, training does not produce a meaningful adaptation."),
-    "MAV":    ("Maximum Adaptive Volume",
-               "The upper end of the productive range for a muscle. Beyond this, extra sets cost more fatigue than they give back in growth."),
-    "MRV":    ("Maximum Recoverable Volume",
-               "The most weekly sets a muscle can take and still recover from. Above this you accumulate fatigue you cannot pay back, raising injury and overtraining risk."),
-    "SDNN":   ("Standard deviation of NN intervals",
-               "A measure of overnight heart-rate variability. It tracks how relaxed your nervous system was during sleep. Higher relative to your baseline is favorable."),
-    "HRR":    ("Heart-rate recovery",
-               "How many beats per minute your heart rate drops in the first minute after exercise. Higher means your autonomic system shifts back to rest faster."),
-    "RHR":    ("Resting heart rate",
-               "Your heart rate at rest, measured overnight. Lower relative to your 60-day baseline is favorable. A sustained rise of 5+ bpm often signals under-recovery or illness."),
-    "HRV":    ("Heart rate variability",
-               "The variation in the time between heartbeats overnight, measured here as SDNN. Higher relative to your baseline is favorable. Lower can mean under-recovery or stress."),
-    "Z2":     ("Zone 2",
-               "Aerobic cardio at roughly 60-70 percent of your maximum heart rate. You can hold a conversation. It builds mitochondrial density and the aerobic base."),
-    "Z5":     ("Zone 5",
-               "Near-maximal intervals at 90 percent or more of your maximum heart rate. The most efficient zone for raising your peak oxygen uptake."),
-    "VO2max": ("Peak oxygen uptake",
-               "The maximum rate at which your body can use oxygen during intense exercise. A standard fitness ceiling and one of the strongest predictors of long-term healthspan."),
-    "HSP":    ("Heat Shock Proteins",
-               "Molecular chaperones induced by heat exposure. They are linked to many of sauna's longevity-associated effects. Induction needs roughly 20 minutes at or above 80 degrees Celsius."),
-    "ACWR":   ("Acute:Chronic Workload Ratio",
-               "Last 7 days of training stress divided by the rolling 4-week average. Gabbett 2016 sweet spot is 0.8 to 1.3. Above 1.5 carries materially higher soft-tissue injury risk."),
-    "SRI":    ("Sleep Regularity Index",
-               "How consistent your sleep schedule is across consecutive days, scored 0 to 100. UK Biobank n=60,977: the top quintile has 20 to 48 percent lower all-cause mortality than the bottom."),
-    "ApoB":   ("Apolipoprotein B",
-               "The protein on every atherogenic lipoprotein particle. Better predictor of cardiovascular risk than LDL cholesterol alone."),
-    "ALMI":   ("Appendicular Lean Mass Index",
-               "DEXA-measured lean mass in arms plus legs, divided by height squared. Lower-than-cohort values predict sarcopenia and frailty risk decades out."),
-    "BMD":    ("Bone Mineral Density",
-               "DEXA-measured bone density. A baseline matters for anyone on tenofovir (PrEP) or with risk factors for osteoporosis."),
-    "VAT":    ("Visceral Adipose Tissue",
-               "Fat stored around abdominal organs. The metabolically dangerous fat depot. Above 100 cm² is the risk threshold; under 80 cm² is the Attia optimal target."),
-    "eGFR":   ("Estimated Glomerular Filtration Rate",
-               "Kidney filtration function. The cystatin-C variant is preferred when creatine supplementation can confound the serum-creatinine version."),
-    "PrEP":   ("Pre-exposure Prophylaxis",
-               "Daily HIV-prevention medication (tenofovir + emtricitabine). Requires eGFR and bone-density monitoring."),
-}
-
 EM_DASH = "—"
 COACH_STRING_MAX = 280
 
@@ -277,7 +158,7 @@ WORKOUT_STRUCTURAL_SUB_BULLET_RE = re.compile(
 # reached through `_plan_workout_heading_re()`. This name is retained only
 # for callers outside this module; do not use it for new checks. Matching
 # `Workout` alone let an off-catalog exercise inside a `## Deload Session`
-# heading render clean — four real plans use that heading.
+# heading pass validation — four real plans use that heading.
 WORKOUT_HEADING_RE = re.compile(r"^##\s+Workout\b", re.IGNORECASE)
 SECTION_HEADING_RE = re.compile(r"^##\s+")
 WORKOUT_EXERCISE_RE = re.compile(r"^-\s+([^:]+):")
@@ -291,57 +172,35 @@ WORKOUT_BANNED_SUB_BULLET_RE = re.compile(
 )
 
 
-# Card keys the renderer knows how to surface a coach callout for.
-# Listed here so the validator can warn when one is missing; the
-# corresponding card still renders (just without a callout) which is
-# a softer failure than a hard validator error.
-#
-# Today + Trajectory tabs have their own per-tab keys. ``vitals``,
-# ``sleep``, ``recovery_practices`` are retained where the corresponding
-# cards still render (cross-tab — they appear on the Trajectory tab).
+# Assessment JSON callout keys. Missing required callouts produce warnings.
 COACH_CARD_KEYS = (
-    # TODAY tab
+    # Current training state
     "session_recommendation_callout",  # narrative gloss on the recovery gate
     "today_acwr",
     "recovery_drivers", "activity_rings",
-    # NOT gated. `card_block_position` renders on every run, including
-    # the first (where it says the block starts with this plan), because
-    # the disclosure it carries is needed most on the weeks that look
-    # identical to last week. A missing callout here is always a real
-    # gap, so it always warns.
+    # Block position is expected even for the first plan.
     "block_position",
     "training_load",
     "muscle_volume", "strength",
-    # TRAJECTORY tab — domain callouts
+    # Longer-term domain callouts
     "trajectory_longevity_score", "trajectory_cardio", "trajectory_recovery",
     "trajectory_sleep", "trajectory_body_comp", "trajectory_metabolic",
     "trajectory_behavioral", "trajectory_risk_flags",
-    # TRAJECTORY tab — gated cards (callout only rendered when card renders).
-    # Missing keys are not a warning for these because the card itself may
-    # not render this run (no swim data, no open nutrition phase, no
-    # energy-expenditure block).
+    # Optional domains may lack source data.
     "swim_trajectory_callout",
     "nutrition_phase_callout",
     "trajectory_energy",
-    # Retained (cross-tab cards)
-    "vitals", "sleep", "recovery_practices",
+    # Measurement summaries
+    "vitals", "sleep",
 )
 
 
-# Cards that ONLY render when a gating block exists in the tracker JSON.
-# The validator skips "missing callout" warnings for these because the
-# card may legitimately not render this turn — and a missing callout is
-# only noise when there's no card to attach it to.
+# Optional assessment domains do not require a callout on every run.
 GATED_COACH_CARD_KEYS = frozenset({
     "swim_trajectory_callout",
     "nutrition_phase_callout",
-    # `card_energy` renders only when the payload carries `energy_28d`, and
-    # that block is ABSENT rather than null when there is no energy data.
+    # Energy data is absent rather than null when unavailable.
     "trajectory_energy",
-    # Renders an empty-state card (and intentionally takes no callout) when no
-    # sauna / cold / light sessions exist in the window, so a missing callout
-    # is not a defect, only noise. See card_recovery_practices.
-    "recovery_practices",
 })
 
 
@@ -353,19 +212,14 @@ GATED_COACH_CARD_KEYS = frozenset({
 #     {"headline": "Everything is fine. Recovery is 10 out of 10. Train
 #      hard.", "cards": {}}
 #
-# rendered at exit 0 against a payload whose ``recovery.score`` was 5.6,
-# and the fabricated "10 out of 10" appeared TWICE in the finished page,
-# directly beside the real 5.6. Forty-four soft warnings fired, every one
-# of them "card missing or empty", none about the contradiction. Every
-# copy rule in this module — em-dashes, length caps, missing callouts —
-# polices the FORM of coach text and nothing polices its truth, so the
-# single most dangerous artifact the pipeline can produce is a
-# confidently wrong dashboard.
+# would contradict a payload whose ``recovery.score`` is 5.6. Copy
+# formatting checks alone cannot catch that false claim, so the assessment
+# and plan opener also need a score cross-check.
 #
 # WHY THIS ONE NUMBER AND NOT A GENERAL FACT-CHECKER. The check has to be
 # high-precision: a false positive here refuses a legitimate plan, and a
 # gate that cries wolf gets routed around. ``recovery.score`` is the
-# number the whole dashboard is framed around, so getting it wrong is the
+# number the coaching recommendation is framed around, so getting it wrong is the
 # failure with the most downstream consequence. A rule per payload scalar
 # was considered and deliberately not written: the rule below is one rule
 # because one rule is what the evidence supports.
@@ -384,7 +238,7 @@ GATED_COACH_CARD_KEYS = frozenset({
 # was refused with exit 2, because "recovery" sits four characters from
 # the 1.6. The shipped plans survived only by accident: their drivers
 # cards happen to quote bpm and hours instead of the documented ``/10``
-# form. One prompt-compliant rewrite would have refused the render.
+# form. One prompt-compliant rewrite would have rejected the plan.
 #
 # THE ANCHOR THAT REPLACED PROXIMITY. Two rules, both narrow on purpose.
 #
@@ -466,10 +320,10 @@ _RECOVERY_SCORE_RE = re.compile(
 _SCORE_ROUND_PLACES = 3
 
 # The re-derivation noise floor, MEASURED, not chosen. `recovery.score` is
-# a rolling composite over a live window, so the same plan re-rendered
+# a rolling composite over a live window, so the same plan rechecked
 # hours later is scored against a payload that has moved. Observed on this
 # tracker pair: three mismatches of 0.1 across eight historical
-# generations, 0.2 on both people when a 2026-08-02 plan was re-rendered
+# generations, 0.2 on both people when a 2026-08-02 plan was rechecked
 # against a payload rebuilt after that afternoon's health import (the
 # shipped plan's opener says 5.6; the payload now says 5.4). None of those
 # is a false statement by the coach.
@@ -608,7 +462,7 @@ def coach_number_findings(payload: "dict | None",
     The one exception is `COACH_SCORE_REDERIVE_NOISE`: a straddle whose
     whole magnitude is inside the measured re-derivation band is reported
     as a warning that NAMES the boundary, because the alternative is
-    refusing to re-render an honest page whose payload moved under it —
+    rejecting an honest assessment whose payload moved under it —
     which is what the shipped 2026-08-02 plan does (opener 5.6, payload
     re-derived at 5.4 after that afternoon's import, straddling 5.5).
 
@@ -696,19 +550,9 @@ def validate_coach_reads(coach: dict,
                          ) -> tuple[list[str], list[str]]:
     """Return ``(errors, warnings)``.
 
-    Errors are hard failures (the renderer refuses to write the HTML).
-    Warnings are surfaced to stderr but don't block the render. A
-    missing ``cards.<key>`` for a documented card is a warning, not an
-    error, because the card itself still renders cleanly without a
-    callout.
-
-    ``payload`` is the tracker JSON. When given, coach-authored scores are
-    cross-checked against it (`coach_number_findings`) and a contradiction
-    is an ERROR — a dashboard that states a recovery score the payload
-    disagrees with is worse than no dashboard. It is optional so that
-    every existing caller and every unit test that only has coach text
-    keeps working; a caller that HAS the payload and does not pass it gets
-    the pre-2026-08 behaviour, which is that the exploit above renders.
+    Errors block plan acceptance; warnings identify missing assessment
+    callouts without preventing the workout workflow. When ``payload``
+    is given, coach-authored scores are checked against the tracker.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -745,12 +589,10 @@ def validate_coach_reads(coach: dict,
 
     for key in COACH_CARD_KEYS:
         if key in GATED_COACH_CARD_KEYS:
-            # Card only renders when its gating block is present in tracker
-            # JSON; a missing callout is only meaningful when the card would
-            # actually render. The renderer decides per-run via its own gate.
+            # This domain is optional because source data may be absent.
             continue
         if not cards.get(key):
-            warnings.append(f"cards.{key} missing or empty; that card will render without a coach callout")
+            warnings.append(f"cards.{key} missing or empty; assessment callout is absent")
 
     return (errors, warnings)
 
@@ -771,12 +613,12 @@ def _is_known_exercise_name(name: str, known_names: set[str]) -> bool:
 
 
 def validate_workout_md(text: str) -> tuple[list[str], list[str]]:
-    """Validate lean workout markdown before dashboard rendering.
+    """Validate lean workout markdown before accepting the plan.
 
-    Hard errors block render output when the markdown would create user
+    Hard errors block plan acceptance when the markdown would create user
     friction later: off-catalog exercise names or em-dashes outside the
     allowed title/sub-bullet positions. Warnings flag coach-writing drift
-    that should be fixed, but can still render.
+    that should be fixed, but do not block acceptance.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -980,8 +822,8 @@ def _plan_workout_heading_re() -> "re.Pattern[str]":
     the core and arm checks completely. One grammar, one place.
 
     Imported through a cached accessor rather than at module scope
-    because pulling in `adherence` costs a parse on every cold render,
-    and a render that validates no plan should not pay it.
+    because pulling in `adherence` costs a parse on every validation run,
+    and callers that validate no plan should not pay it.
     """
     from .adherence import WORKOUT_HEADING_RE as LEDGER_HEADING_RE
     return LEDGER_HEADING_RE
@@ -997,7 +839,7 @@ def _plan_workout_heading_re() -> "re.Pattern[str]":
 # the exact failure this workstream exists to remove.
 #
 # Both directions have now bitten in practice. Matching `Workout` alone
-# let an off-catalog exercise inside a `## Deload Session` heading render
+# let an off-catalog exercise inside a `## Deload Session` heading pass
 # clean (four real plans use that heading). Narrowing to the ledger's
 # grammar instead dropped `## Workout 1` with no colon, which the old
 # gate caught. Hence: ledger grammar first for the display form, this
@@ -1109,8 +951,8 @@ def count_working_sets_per_workout(text: str) -> "dict[str, int]":
 #
 # THIS STAYS A WARNING. `validate_workout_plan` routes it into
 # ``warnings``, never ``errors``, and tightening a band that cannot block
-# a render cannot break a plan — it can only make an existing silence
-# audible. Both directions need to stay renderable: a deload legitimately
+# acceptance cannot break a plan — it can only make an existing silence
+# audible. Both directions need to stay acceptable: a deload legitimately
 # undershoots, and SKILL.md's own conflict rule ("when the budget and the
 # volume floors cannot both be met, the budget loses") requires a legal
 # way to go over.
@@ -1129,7 +971,7 @@ def workout_set_budget_warnings(text: str, target_working_sets,
     `SET_BUDGET_OVER_TOL` — see those for why the band is SKILL.md's ±2
     rather than the old asymmetric 3/5. Warning, not error: an intentional
     deload/downgrade legitimately undershoots and an emphasis-heavy
-    downgraded week legitimately overshoots, and both should still render,
+    downgraded week legitimately overshoots, and both should still pass,
     just visibly flagged.
 
     `budget_by_index`, when given, is a callable ``idx -> budget`` that
@@ -1755,7 +1597,7 @@ def _core_week_findings(text: str, spec: "dict | None" = None):
     #     here. Tagging the whole floor as volume was tried first and
     #     handed the exploit a complete bypass: all five of its findings
     #     were volume, so a payload declaring `reactive_deload` demoted
-    #     every one and the 12.5%-flexion week rendered at exit 0 again.
+    #     every one and the 12.5%-flexion week passed validation again.
     #     A gate the artifact's own payload can disarm is the defect
     #     class this build removes.
     #   * the ABSOLUTE floor is `AXIS_VOLUME`. Below 9 core sets, getting
@@ -2021,7 +1863,7 @@ def _pattern_catalog() -> dict:
     its own, but it builds it on every call, and building it reparses
     ``exercises-database.md``. `Skills/CLAUDE.md`: *"Optimize by removing
     wasted work first: ... reparsing static markdown inside one
-    command."* One render is one parse.
+    command."* One validation run is one parse.
     """
     from .blocks import load_pattern_catalog
     from .extract import load_exercises_db
@@ -2081,7 +1923,7 @@ def _artifact_from_payload_block(block: "dict | None") -> "dict | None":
 # ------------------------------------------------- the stage-two switch
 #
 # THE ONE SWITCH. Set to ``True`` to make block-rotation findings refuse
-# a render again; that is the entire stage-two change on this side.
+# a plan again; that is the entire stage-two change on this side.
 #
 # Rotation is ADVISORY for this release. It is not that the rule is
 # wrong — `rotation_diff_errors` is a thoroughly tested pure function and
@@ -2094,7 +1936,7 @@ def _artifact_from_payload_block(block: "dict | None") -> "dict | None":
 # once its input surface has been through the same hardening.
 #
 # Demoted, not disabled. `block_rotation_errors` still runs on every
-# render, the payload still carries the full ``block`` state, and the
+# validation run, the payload still carries the full ``block`` state, and the
 # findings still reach stderr. They are tagged with
 # `ROTATION_ADVISORY_TAG` so a reader can tell an unenforced finding from
 # a finding that is inherently advisory.
@@ -2121,7 +1963,7 @@ def block_rotation_errors(text: str, prev_block: "dict | None",
     ``prev_block`` is the tracker payload's ``block`` (or a raw artifact).
     The proposed block is derived from the plan markdown itself with
     ``blocks.block_from_plan`` — the plan IS the proposal, and deriving it
-    here is what lets a rotation rule bind at render time instead of
+    here is what lets a rotation rule bind during plan validation instead of
     waiting for someone to hand-write an artifact.
 
     The findings this returns are real findings; whether they BLOCK is
@@ -2136,7 +1978,7 @@ def block_rotation_errors(text: str, prev_block: "dict | None",
     * the previous block STARTED on ``plan_date``. That block was derived
       from this very plan, so the diff would compare the plan against
       itself and report every rotating slot as unchanged. A tautology is
-      not a finding. This is the re-render case (the plan file is already
+      not a finding. This is the recheck case (the plan file is already
       on disk when ``read_tracker`` runs again), not a way past the check:
       a genuinely new plan carries a new date and its previous block does
       not.
@@ -2467,7 +2309,7 @@ def validate_workout_plan(
     numeric target the system checked and was still the plan the user
     rejected. Dose and distribution findings are now errors.
 
-    Errors (render must not proceed):
+    Errors (plan must not be accepted):
       * per-session core dose and shape (`workout_core_warnings`)
       * weekly core distribution (`core_week_errors`)
       * direct-arm diversity and placement (`workout_arm_dose_warnings`)
@@ -2477,13 +2319,12 @@ def validate_workout_plan(
       * a recovery score in the plan's own opener that contradicts the
         payload (`coach_number_findings`), evaluated only when
         ``payload`` is given. The plan opener is the string the user
-        reads mid-workout and it shipped unchecked while the dashboard's
-        coach text did not: the same page could state one score in the
+        reads mid-workout. The saved files must not state one score in the
         opener, another in a card callout and a third in the payload. An
         error here means the two numbers fall on opposite sides of a
         documented decision threshold; a re-derived payload warns.
 
-    Warnings (render proceeds, finding is surfaced):
+    Warnings (plan is accepted, finding is surfaced):
       * working-set budget drift (`workout_set_budget_warnings`), which
         stays advisory because an intentional deload legitimately
         undershoots it. Only evaluated when ``target_working_sets`` is
@@ -2519,7 +2360,7 @@ def validate_workout_plan(
     because they cost no fatigue: a deload is not a licence to go back to
     four sets of the same crunch.
 
-    **The relief does not make that plan renderable, and it is not meant
+    **The relief does not make that plan acceptable, and it is not meant
     to.** The three errors that survive are core-placement findings —
     core is the last bullet in all three sessions, §24 — so the reference
     deload still exits 2. Placement costs nothing to fix and a deload is
@@ -2579,7 +2420,7 @@ def validate_workout_plan(
 
     # The numbers the plan itself states, against the payload it was
     # written from. Same function, same severities and the same
-    # decision-equivalence rule the dashboard's coach text gets.
+    # decision-equivalence rule the assessment text gets.
     if payload is not None:
         num_errors, num_warnings = coach_number_findings(payload,
                                                          _plan_texts(text))
@@ -2609,42 +2450,3 @@ def validate_workout_plan(
     warnings += cardio_section_warnings(text)
 
     return errors, warnings
-
-
-# Wrap KNOWN_TERMS with a tooltip span when they appear in any coach
-# string. Whole-word, case-sensitive (so "Cold" doesn't match "CTL").
-# Each term wraps at most once per string so we don't double-wrap when
-# the user repeats a term.
-# Pattern is lazy-compiled so a render whose coach_block calls all
-# short-circuit on empty text (the benchmark fixture, plus any run where
-# the LLM omitted card callouts) doesn't pay the alternation-compile.
-_TERM_PATTERN: "re.Pattern[str] | None" = None
-
-
-def _term_pattern() -> "re.Pattern[str]":
-    global _TERM_PATTERN
-    if _TERM_PATTERN is None:
-        _TERM_PATTERN = re.compile(
-            r"\b(" + "|".join(sorted(map(re.escape, KNOWN_TERMS.keys()), key=len, reverse=True)) + r")\b"
-        )
-    return _TERM_PATTERN
-
-
-def auto_wrap_terms(text: str) -> str:
-    """Wrap each known abbreviation in a tooltip span.
-
-    Only the FIRST occurrence of each term per string is wrapped; later
-    occurrences are left plain. This is intentional, not a bug: wrapping
-    every occurrence creates dotted-underline visual noise on lines that
-    repeat a term. Do not 'fix' this to wrap all occurrences."""
-    seen: set[str] = set()
-
-    def _sub(m):
-        t = m.group(1)
-        if t in seen:
-            return t
-        seen.add(t)
-        full, expl = KNOWN_TERMS[t]
-        return f'<span class="term" data-tip="{esc(full)}. {esc(expl)}">{esc(t)}</span>'
-
-    return _term_pattern().sub(_sub, esc(text))

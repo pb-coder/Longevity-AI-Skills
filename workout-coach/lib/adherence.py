@@ -67,7 +67,7 @@ from .sessions import _is_working_set
 # is the exact failure being fixed.
 #
 # THE PLAN'S WORKOUT-HEADING GRAMMAR. Public, because it is not only the
-# ledger's business: `render_validators` has to recognise exactly the
+# ledger's business: `plan_validators` has to recognise exactly the
 # headings this recognises, and a second copy of the pattern over there
 # is how the two drift. Read it through `is_workout_heading` /
 # `workout_heading_title` rather than matching the regex by hand.
@@ -212,7 +212,7 @@ _FULL_TITLE_RE = re.compile(r"\bfull[\s-]?body\b", re.IGNORECASE)
 #   not in the catalog
 #              UNCLASSIFIED. Reported, counted nowhere. An off-catalog
 #              name is already a blocking error in
-#              `render_validators.validate_workout_md`, so this is not a
+#              `plan_validators.validate_workout_md`, so this is not a
 #              way through: inventing a name costs one blocked render per
 #              bullet.
 LOWER_BODY_PRIMARIES = frozenset({
@@ -285,7 +285,7 @@ def _slot_name_and_sets(slot: dict) -> tuple[str, int]:
     """``(exercise name, working sets)`` out of either slot shape.
 
     This module's own slots say ``exercise`` / ``prescribed_sets``;
-    `render_validators._iter_workout_exercise_bullets` says ``name`` /
+    `plan_validators._iter_workout_exercise_bullets` says ``name`` /
     ``sets``. Both are exercise bullets with a working-set count, and the
     classifier has to read the ones the gate holds, so it reads both
     spellings rather than forcing a translation layer at the call site.

@@ -4,10 +4,9 @@ import unittest
 from unittest.mock import patch
 
 
-from workout_coach.lib import render_validators
-from workout_coach.lib.render_validators import (
+from workout_coach.lib import plan_validators
+from workout_coach.lib.plan_validators import (
     COACH_STRING_MAX,
-    auto_wrap_terms,
     core_week_errors,
     count_working_sets_per_workout,
     muscle_floor_errors,
@@ -160,19 +159,17 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertTrue(any("cards.strength missing" in w for w in warnings))
 
     def test_gated_cards_do_not_warn_when_missing(self) -> None:
-        # recovery_practices renders an empty-state with no callout when there
-        # is no thermal/light data, so a missing callout must not warn.
         _, warnings = validate_coach_reads({"headline": "Valid", "cards": {}})
         joined = "\n".join(warnings)
-        for gated in ("recovery_practices", "swim_trajectory_callout",
+        for gated in ("swim_trajectory_callout",
                       "nutrition_phase_callout"):
             self.assertNotIn(gated, joined)
 
     def test_session_recommendation_callout_is_a_known_card(self) -> None:
         # Guards the doc/code drift that silently dropped today_headline.
         self.assertIn("session_recommendation_callout",
-                      render_validators.COACH_CARD_KEYS)
-        self.assertNotIn("today_headline", render_validators.COACH_CARD_KEYS)
+                      plan_validators.COACH_CARD_KEYS)
+        self.assertNotIn("today_headline", plan_validators.COACH_CARD_KEYS)
 
     def test_working_set_count_excludes_warmup_and_prep(self) -> None:
         counts = count_working_sets_per_workout(_PLAN_17)
@@ -243,10 +240,6 @@ class RenderValidatorTests(unittest.TestCase):
         self.assertTrue(
             any("over" in w for w in workout_set_budget_warnings(plan, 13)))
 
-    def test_auto_wrap_terms_wraps_first_occurrence_only(self) -> None:
-        wrapped = auto_wrap_terms("CTL is up; CTL matters.")
-        self.assertEqual(wrapped.count('class="term"'), 1)
-        self.assertIn("Chronic Training Load", wrapped)
 
     def test_workout_md_rejects_prose_em_dash(self) -> None:
         errors, _ = validate_workout_md("""# Workout plan — 2026-05-29
@@ -353,7 +346,7 @@ class RenderValidatorTests(unittest.TestCase):
         # movement set and the flexion subset must come from the catalog
         # parser, never a literal list living in this module.
         import inspect
-        src = inspect.getsource(render_validators)
+        src = inspect.getsource(plan_validators)
         for catalog_name in ("Kneeling Cable Crunch", "Leg Raise",
                               "Cable Pallof Press", "Plank", "Dead Bug"):
             self.assertNotIn(catalog_name, src)
@@ -390,7 +383,7 @@ class RenderValidatorTests(unittest.TestCase):
         # A validator that cannot identify any biceps/triceps exercise
         # must not flag every workout as arm-deficient.
         with patch.object(
-            render_validators, "_primary_muscle_by_exercise",
+            plan_validators, "_primary_muscle_by_exercise",
             return_value={},
         ):
             self.assertEqual(workout_arm_dose_warnings(_PLAN_ARM_NONE), [])
@@ -401,7 +394,7 @@ class RenderValidatorTests(unittest.TestCase):
         # Same regression guard as core: the biceps/triceps name sets must
         # come from the catalog parser, never a literal list in this module.
         import inspect
-        src = inspect.getsource(render_validators)
+        src = inspect.getsource(plan_validators)
         for catalog_name in ("Incline Dumbbell Curl", "Bayesian Cable Curl",
                               "Cable Overhead Tricep Extension",
                               "Cable Tricep Pushdown"):
@@ -416,7 +409,7 @@ class RenderValidatorTests(unittest.TestCase):
 - Dumbbell Flat Bench Press: 30kgx8
 """
         with patch.object(
-            render_validators,
+            plan_validators,
             "_workout_exercise_name_set",
             return_value={"dumbbell flat bench press"},
         ) as names:
@@ -441,7 +434,7 @@ class ExternalLoadFlagTests(unittest.TestCase):
 
     def _loaded(self, bullet: str) -> bool:
         text = f"## Workout 1: PUSH\n- {bullet}\n"
-        bullets = render_validators._iter_workout_exercise_bullets(text)
+        bullets = plan_validators._iter_workout_exercise_bullets(text)
         return bullets["Workout 1: PUSH"][0]["loaded"]
 
     def test_a_kg_load_is_loaded(self) -> None:
@@ -544,7 +537,7 @@ class MuscleFloorTests(unittest.TestCase):
             constants.muscle_floors(
                 tiers,
                 servable=set(
-                    render_validators._primary_muscle_by_exercise().values())))
+                    plan_validators._primary_muscle_by_exercise().values())))
 
     def test_a_payload_floor_key_cannot_move_the_bar(self) -> None:
         payload = _tiers(rear_delts="grow")
@@ -583,7 +576,7 @@ class MuscleFloorTests(unittest.TestCase):
         self.assertFalse(any("side_delts" in e for e in errors))
 
     def test_front_raises_credit_front_delts_and_not_side_delts(self) -> None:
-        sets = render_validators._direct_sets_by_muscle(_PLAN_FLOOR_WEEK)
+        sets = plan_validators._direct_sets_by_muscle(_PLAN_FLOOR_WEEK)
         self.assertEqual(dict(sets["front_delts"]), {"cable front raise": 2})
         self.assertEqual(sum(sets["side_delts"].values()), 6)
 
@@ -596,7 +589,7 @@ class MuscleFloorTests(unittest.TestCase):
             "# Notes\n\nNo plan here.\n", _tiers(traps="maintain")), [])
 
     def test_a_deload_demotes_the_floor_and_names_why(self) -> None:
-        from workout_coach.lib.render_validators import validate_workout_plan
+        from workout_coach.lib.plan_validators import validate_workout_plan
         payload = _tiers(rear_delts="grow")
         errors, _ = validate_workout_plan(_PLAN_FLOOR_WEEK, payload=payload)
         self.assertTrue(any("rear_delts sets" in e for e in errors))
@@ -608,7 +601,7 @@ class MuscleFloorTests(unittest.TestCase):
                             for w in warnings))
 
     def test_a_payload_with_no_targets_says_the_floor_did_not_run(self) -> None:
-        from workout_coach.lib.render_validators import validate_workout_plan
+        from workout_coach.lib.plan_validators import validate_workout_plan
         _, warnings = validate_workout_plan(_PLAN_FLOOR_WEEK, payload={})
         self.assertTrue(any("per-muscle weekly floor was not checked" in w
                             for w in warnings))

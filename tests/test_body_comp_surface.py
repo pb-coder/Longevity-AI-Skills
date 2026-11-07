@@ -42,9 +42,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from workout_coach.lib import render_cards_health as rch
 from workout_coach.lib import sessions
-from workout_coach.lib.render_cards_health import card_vitals
 from workout_coach.lib.sessions import (
     BODY_FAT_MEASUREMENT_SD_PCT,
     BODY_FAT_TREND_MAX_STALE_DAYS,
@@ -551,28 +549,12 @@ def _vitals(weekly, **kw) -> str:
     return card_vitals(weekly, *_VITALS_ARGS, **kw)
 
 
-def _row(html: str, label: str) -> str:
-    rows = [r for r in html.split("<tr>") if f">{label}<" in r]
-    return rows[0] if rows else ""
 
 
-def _cells(html: str, label: str) -> list[str]:
-    """The row's four ``<td>`` bodies: term / value / sparkline / State.
-
-    Assertions go against the CELL, not the row: the tooltip lives in the
-    first cell and quotes phrases like "not measured" verbatim, so a
-    whole-row substring check would pass on a row whose State cell said
-    something else entirely.
-    """
-    return re.findall(r"<td[^>]*>(.*?)</td>", _row(html, label), re.S)
 
 
-def _state(html: str, label: str) -> str:
-    return _cells(html, label)[3].strip()
 
 
-def _value(html: str, label: str) -> str:
-    return _cells(html, label)[1].strip()
 
 
 def _weekly(**series) -> list[dict]:
@@ -590,196 +572,8 @@ def _weekly(**series) -> list[dict]:
     return out
 
 
-class BodyCompCardTests(unittest.TestCase):
-    def test_both_rows_exist_even_with_nothing_to_show(self) -> None:
-        """R-09's whole point. A row that vanishes when unmeasured cannot
-        be told apart from a row nobody thought to add."""
-        html = _vitals(_weekly())
-        for label in ("Body fat", "Lean mass"):
-            with self.subTest(label):
-                self.assertTrue(_row(html, label),
-                                f"the {label} row disappeared")
-                self.assertEqual(_state(html, label), "not measured")
-
-    def test_an_empty_row_prints_no_number_and_no_bare_unit(self) -> None:
-        """Neither a zero nor a lone "%" hanging in the value cell. Both
-        read as a measurement whose value went missing rather than as a
-        channel nobody has filled in."""
-        html = _vitals(_weekly())
-        for label, unit in (("Body fat", "%"), ("Lean mass", "kg")):
-            with self.subTest(label):
-                self.assertEqual(_value(html, label), "")
-                self.assertNotIn(unit, _value(html, label))
-
-    def test_an_empty_row_draws_no_line(self) -> None:
-        html = _vitals(_weekly())
-        for label in ("Body fat", "Lean mass"):
-            with self.subTest(label):
-                self.assertNotIn("polyline", _row(html, label))
-
-    def test_a_single_point_says_so_rather_than_drawing_a_flat_line(self) -> None:
-        html = _vitals(_weekly(body_fat_pct=[None, None, 21.4]))
-        self.assertIn("21.4", _value(html, "Body fat"))
-        self.assertEqual(_state(html, "Body fat"), "1 week logged, no trend")
-        self.assertNotIn("polyline", _row(html, "Body fat"))
-
-    def test_two_or_more_points_draw_the_sparkline(self) -> None:
-        html = _vitals(_weekly(lean_mass_kg=[60.1, 60.4, 60.9]))
-        self.assertIn("polyline", _row(html, "Lean mass"))
-
-    def test_a_resolved_block_prints_the_rate_with_its_sign(self) -> None:
-        html = _vitals(
-            _weekly(body_fat_pct=[22.1, 21.6, 21.0],
-                    lean_mass_kg=[60.1, 60.4, 60.9]),
-            body_fat_trend_block={"state": "resolved", "reason": None,
-                                  "pct_per_4w": -0.94},
-            lean_mass_trend_block={"state": "resolved", "reason": None,
-                                   "kg_per_4w": 0.61})
-        self.assertEqual(_state(html, "Body fat"), "-0.94 pp/4w")
-        self.assertEqual(_state(html, "Lean mass"), "+0.61 kg/4w")
-
-    def test_the_favourable_direction_differs_between_the_two_rows(self) -> None:
-        """Losing fat is good news and losing lean mass is not. A shared
-        renderer that got this wrong would colour one of them backwards."""
-        html = _vitals(
-            _weekly(body_fat_pct=[22.1, 21.6, 21.0],
-                    lean_mass_kg=[61.0, 60.4, 60.1]),
-            body_fat_trend_block={"state": "resolved", "reason": None,
-                                  "pct_per_4w": -0.94},
-            lean_mass_trend_block={"state": "resolved", "reason": None,
-                                   "kg_per_4w": -0.61})
-        # The status class rides on the sparkline element for this table.
-        self.assertIn('class="sparkline good"', _row(html, "Body fat"))
-        self.assertIn('class="sparkline amber"', _row(html, "Lean mass"))
-
-    def test_an_unresolved_block_never_prints_a_rate(self) -> None:
-        html = _vitals(
-            _weekly(body_fat_pct=[22.1, 21.6, 21.0]),
-            body_fat_trend_block={"state": "unresolved",
-                                  "reason": "ci_straddles_zero",
-                                  "pct_per_4w": None,
-                                  "point_pct_per_4w": -0.31})
-        state = _state(html, "Body fat")
-        self.assertNotIn("pp/4w", state)
-        self.assertNotIn("-0.31", state)
-        self.assertEqual(state, "direction unresolved")
-
-    def test_a_resolved_block_with_no_rate_is_not_read_as_zero(self) -> None:
-        html = _vitals(
-            _weekly(lean_mass_kg=[60.1, 60.4, 60.9]),
-            lean_mass_trend_block={"state": "resolved", "reason": None,
-                                   "kg_per_4w": None})
-        state = _state(html, "Lean mass")
-        self.assertNotIn("kg/4w", state)
-        self.assertNotIn("0.00", state)
-
-    def test_an_unknown_future_reason_falls_back_without_inventing_one(self) -> None:
-        html = _vitals(
-            _weekly(body_fat_pct=[22.1, 21.6, 21.0]),
-            body_fat_trend_block={"state": "unresolved",
-                                  "reason": "some_future_reason",
-                                  "pct_per_4w": None})
-        self.assertEqual(_state(html, "Body fat"), "trend unresolved")
-
-    def test_the_lean_mass_tooltip_says_it_is_derived(self) -> None:
-        html = _vitals(_weekly())
-        row = _row(html, "Lean mass")
-        tip = re.search(r'data-tip="([^"]*)"', row).group(1)
-        self.assertIn("do not measure it", tip)
-        self.assertIn("restates", tip)
-
-    def test_both_tooltips_state_the_gate_as_enforced(self) -> None:
-        html = _vitals(_weekly())
-        for label, span, weeks in (("Body fat", "49 days", "12 weeks"),
-                                   ("Lean mass", "88 days", "16 weeks")):
-            with self.subTest(label):
-                tip = re.search(r'data-tip="([^"]*)"',
-                                _row(html, label)).group(1)
-                self.assertIn("4 readings", tip)
-                self.assertIn(span, tip)
-                self.assertIn(weeks, tip)
-                self.assertIn("4 weeks old", tip)
-                self.assertIn("half that spread", tip)
-
-    def test_the_card_carries_no_raw_hex_colour(self) -> None:
-        """Per Skills/DESIGN.md, colour lives in the token front matter
-        and render modules reference CSS variables."""
-        html = _vitals(
-            _weekly(body_fat_pct=[22.1, 21.6, 21.0],
-                    lean_mass_kg=[60.1, 60.4, 60.9]),
-            body_fat_latest={"value_pct": 21.0, "date": "2026-08-03"},
-            lean_mass_latest={"value_kg": 60.9, "date": "2026-08-03"},
-            body_fat_trend_block={"state": "resolved", "reason": None,
-                                  "pct_per_4w": -0.94},
-            lean_mass_trend_block={"state": "resolved", "reason": None,
-                                   "kg_per_4w": 0.61})
-        self.assertEqual(_HEX_LITERAL_RE.findall(html), [])
-
-    def test_the_existing_rows_are_unchanged_by_the_new_neighbours(self) -> None:
-        html = _vitals(_weekly())
-        for label in ("HRV", "Resting HR", "Wrist temp", "VO2max",
-                      "Bodyweight", "Waist"):
-            with self.subTest(label):
-                self.assertTrue(_row(html, label))
-
-    def test_the_headline_value_prefers_the_latest_reading(self) -> None:
-        """The weekly series carries ISO-week MEANS; ``*_latest`` is the
-        reading itself, so it wins the value cell when supplied."""
-        html = _vitals(
-            _weekly(body_fat_pct=[22.1, 21.6, 21.0]),
-            body_fat_latest={"value_pct": 20.4, "date": "2026-08-03"})
-        self.assertIn("20.4", _value(html, "Body fat"))
 
 
-class LabelsMatchTheGateTests(unittest.TestCase):
-    """The renderer restates the estimator's floors in prose.
-
-    Two sources of truth for one number is a drift hazard, and the
-    renderer deliberately does not import ``sessions`` (it is a pure
-    renderer). This test is the seam that catches the drift instead.
-    """
-
-    def test_every_reason_the_new_estimators_emit_has_a_label(self) -> None:
-        """A reason with no label falls through to a generic "trend
-        unresolved", which is how a dashboard ends up saying less than
-        the estimator knows."""
-        emitted = set(re.findall(r'"(\w+)", \*tail',
-                                 inspect.getsource(sessions._trend_verdict)))
-        emitted.add("no_readings")
-        self.assertTrue(emitted, "reason codes could not be extracted")
-        for labels in (rch._BODY_FAT_STATE_LABEL, rch._LEAN_MASS_STATE_LABEL):
-            for reason in emitted:
-                with self.subTest(reason=reason):
-                    self.assertIn(reason, labels)
-
-    def test_each_label_set_is_internally_distinct(self) -> None:
-        for labels in (rch._BODY_FAT_STATE_LABEL, rch._LEAN_MASS_STATE_LABEL,
-                       rch._WAIST_STATE_LABEL, rch._BW_STATE_LABEL):
-            self.assertEqual(len(set(labels.values())), len(labels))
-
-    def test_the_labels_quote_the_floors_the_estimator_enforces(self) -> None:
-        for labels, window, span in (
-            (rch._WAIST_STATE_LABEL, WAIST_TREND_MIN_WINDOW_DAYS,
-             WAIST_TREND_MIN_SPAN_DAYS),
-            (rch._BODY_FAT_STATE_LABEL, BODY_FAT_TREND_MIN_WINDOW_DAYS,
-             BODY_FAT_TREND_MIN_SPAN_DAYS),
-            (rch._LEAN_MASS_STATE_LABEL, LEAN_MASS_TREND_MIN_WINDOW_DAYS,
-             LEAN_MASS_TREND_MIN_SPAN_DAYS),
-        ):
-            with self.subTest(window=window):
-                self.assertIn(f"{window}d",
-                              labels["window_shorter_than_min"])
-                self.assertIn(f"{span}d", labels["span_shorter_than_min"])
-
-    def test_the_recency_labels_quote_the_reporting_horizon(self) -> None:
-        for labels, stale in (
-            (rch._WAIST_STATE_LABEL, WAIST_TREND_MAX_STALE_DAYS),
-            (rch._BODY_FAT_STATE_LABEL, BODY_FAT_TREND_MAX_STALE_DAYS),
-            (rch._LEAN_MASS_STATE_LABEL, LEAN_MASS_TREND_MAX_STALE_DAYS),
-        ):
-            with self.subTest(stale=stale):
-                self.assertEqual(stale, 28)
-                self.assertIn("4w ago", labels["readings_stale"])
 
 
 if __name__ == "__main__":

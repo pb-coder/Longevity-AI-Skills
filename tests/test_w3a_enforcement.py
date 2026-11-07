@@ -31,11 +31,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from workout_coach.lib import render_validators
+from workout_coach.lib import plan_validators
 from workout_coach.lib.adherence import session_type_from_title
 from workout_coach.lib.blocks import new_block
 from workout_coach.lib.constants import ARM_WEEK_SPEC, CORE_WEEK_SPEC
-from workout_coach.lib.render_validators import (
+from workout_coach.lib.plan_validators import (
     AXIS_STRUCTURE,
     AXIS_VOLUME,
     arm_week_errors,
@@ -55,18 +55,11 @@ from workout_coach.lib.render_validators import (
 )
 
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
-RENDER_DASHBOARD = SKILLS_ROOT / "workout-coach" / "scripts" / "render_dashboard.py"
-# The check sequence both `render_dashboard.py` and `check_plan.py` run.
+CHECK_PLAN = SKILLS_ROOT / "workout-coach" / "scripts" / "check_plan.py"
+# The shared check sequence the public plan-check CLI runs.
 PLAN_CHECKS = SKILLS_ROOT / "workout-coach" / "lib" / "plan_checks.py"
 
 
-def _load_render_dashboard():
-    """Import the script module so ``render()`` can be called directly."""
-    spec = importlib.util.spec_from_file_location(
-        "_w3a_render_dashboard", RENDER_DASHBOARD)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def _workout(title: str, *bullets: str) -> str:
@@ -146,7 +139,7 @@ _ROTATION_PREV_BLOCK = {
 }
 
 
-def _run_render(tracker: dict, workout_md: str) -> subprocess.CompletedProcess:
+def _run_checks(tracker: dict, workout_md: str) -> subprocess.CompletedProcess:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         (tmp / "tracker.json").write_text(json.dumps(tracker), encoding="utf-8")
@@ -154,13 +147,14 @@ def _run_render(tracker: dict, workout_md: str) -> subprocess.CompletedProcess:
             json.dumps({"headline": "Train as planned.", "cards": {}}),
             encoding="utf-8")
         (tmp / "workout.md").write_text(workout_md, encoding="utf-8")
+        import os
+        os.utime(tmp / "coach.json", (1, 1))
         return subprocess.run(
-            [sys.executable, str(RENDER_DASHBOARD),
+            [sys.executable, str(CHECK_PLAN),
              "--tracker", str(tmp / "tracker.json"),
              "--coach", str(tmp / "coach.json"),
              "--workout-md", str(tmp / "workout.md"),
-             "--out", str(tmp / "out.html"),
-             "--person", "TestPerson"],
+],
             cwd=SKILLS_ROOT, capture_output=True, text=True)
 
 
@@ -169,7 +163,7 @@ class ValidationIsBlockingTests(unittest.TestCase):
     """The render must refuse a plan the specs reject."""
 
     def test_a_core_deficient_plan_exits_2(self) -> None:
-        proc = _run_render({"today": "2026-08-02", "target_working_sets": 24},
+        proc = _run_checks({"today": "2026-08-02", "target_working_sets": 24},
                            _PLAN_CORE_DEFICIENT)
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("workout_md validation error:", proc.stderr)
@@ -182,13 +176,13 @@ class ValidationIsBlockingTests(unittest.TestCase):
         # skipped them entirely and the render passed.
         tracker = {"today": "2026-08-02"}
         self.assertNotIn("target_working_sets", tracker)
-        proc = _run_render(tracker, _PLAN_CORE_DEFICIENT)
+        proc = _run_checks(tracker, _PLAN_CORE_DEFICIENT)
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("distinct core exercises", proc.stderr)
         self.assertIn("core pattern categories", proc.stderr)
 
     def test_a_compliant_plan_still_renders(self) -> None:
-        proc = _run_render({"today": "2026-08-02", "target_working_sets": 24},
+        proc = _run_checks({"today": "2026-08-02", "target_working_sets": 24},
                            _PLAN_COMPLIANT)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertNotIn("workout_md validation error:", proc.stderr)
@@ -196,7 +190,7 @@ class ValidationIsBlockingTests(unittest.TestCase):
     def test_set_budget_drift_warns_but_still_renders(self) -> None:
         # An intentional deload legitimately undershoots the budget, so
         # this one finding must stay advisory.
-        proc = _run_render({"today": "2026-08-02", "target_working_sets": 40},
+        proc = _run_checks({"today": "2026-08-02", "target_working_sets": 40},
                            _PLAN_COMPLIANT)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("plan warning:", proc.stderr)
@@ -209,7 +203,7 @@ class ValidationIsBlockingTests(unittest.TestCase):
         # here; arms did not, which is only visible once the finding
         # blocks instead of printing.
         self.assertEqual(arm_week_errors(_NOT_A_PLAN), [])
-        proc = _run_render({"today": "2026-08-02"}, _NOT_A_PLAN)
+        proc = _run_checks({"today": "2026-08-02"}, _NOT_A_PLAN)
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
     def test_a_real_plan_with_no_arm_work_still_errors(self) -> None:
@@ -257,7 +251,7 @@ class MalformedSpecTests(unittest.TestCase):
     _PARTIAL_ARM = {"min_distinct_exercises_per_week": 2}
 
     def test_a_partial_spec_fills_in_from_the_constant(self) -> None:
-        merged = render_validators._resolved_spec(
+        merged = plan_validators._resolved_spec(
             self._PARTIAL_CORE, CORE_WEEK_SPEC, "core_week_spec")
         self.assertEqual(merged["min_distinct_exercises_per_week"], 3)
         self.assertEqual(merged["sets_per_session"],
@@ -266,7 +260,7 @@ class MalformedSpecTests(unittest.TestCase):
     def test_a_partial_nested_spec_fills_in_one_level_deep(self) -> None:
         # `{"sets_per_session": {"lower": 5}}` must keep `upper`, or the
         # next `per_session["upper"]` is the same KeyError in a new place.
-        merged = render_validators._resolved_spec(
+        merged = plan_validators._resolved_spec(
             {"sets_per_session": {"lower": 5}}, CORE_WEEK_SPEC,
             "core_week_spec")
         self.assertEqual(merged["sets_per_session"],
@@ -284,15 +278,15 @@ class MalformedSpecTests(unittest.TestCase):
         for label, spec in (("core_week_spec", "four sets"),
                             ("arm_week_spec", ["six"])):
             with self.subTest(label=label):
-                with self.assertRaises(render_validators.SpecError) as caught:
-                    render_validators._resolved_spec(
+                with self.assertRaises(plan_validators.SpecError) as caught:
+                    plan_validators._resolved_spec(
                         spec, CORE_WEEK_SPEC, label)
                 self.assertIn(label, str(caught.exception))
                 self.assertIn("must be a mapping", str(caught.exception))
 
     def test_a_wrong_typed_value_names_the_field_and_the_type(self) -> None:
-        with self.assertRaises(render_validators.SpecError) as caught:
-            render_validators._resolved_spec(
+        with self.assertRaises(plan_validators.SpecError) as caught:
+            plan_validators._resolved_spec(
                 {"min_distinct_exercises_per_week": "three"},
                 CORE_WEEK_SPEC, "core_week_spec")
         msg = str(caught.exception)
@@ -301,13 +295,13 @@ class MalformedSpecTests(unittest.TestCase):
 
     def test_a_share_written_as_an_int_is_not_a_type_error(self) -> None:
         # Numeric tolerance, on purpose: 1 and 1.0 are the same share.
-        merged = render_validators._resolved_spec(
+        merged = plan_validators._resolved_spec(
             {"min_flexion_share_of_core_sets": 1}, CORE_WEEK_SPEC,
             "core_week_spec")
         self.assertEqual(merged["min_flexion_share_of_core_sets"], 1)
         # ...but a bool is not a number here.
-        with self.assertRaises(render_validators.SpecError):
-            render_validators._resolved_spec(
+        with self.assertRaises(plan_validators.SpecError):
+            plan_validators._resolved_spec(
                 {"min_flexion_sets_per_week": True}, CORE_WEEK_SPEC,
                 "core_week_spec")
 
@@ -319,10 +313,10 @@ class MalformedSpecTests(unittest.TestCase):
                          "arm_week_spec": self._PARTIAL_ARM}):
             with self.subTest(payload=payload):
                 self.assertEqual(
-                    render_validators.payload_spec_errors(payload), [])
+                    plan_validators.payload_spec_errors(payload), [])
 
     def test_the_cli_exits_2_on_a_malformed_spec(self) -> None:
-        proc = _run_render(
+        proc = _run_checks(
             {"today": "2026-08-02", "core_week_spec": "four sets"},
             _PLAN_COMPLIANT)
         self.assertEqual(proc.returncode, 2, proc.stderr)
@@ -336,7 +330,7 @@ class MalformedSpecTests(unittest.TestCase):
         for key, spec in (("core_week_spec", self._PARTIAL_CORE),
                           ("arm_week_spec", self._PARTIAL_ARM)):
             with self.subTest(key=key):
-                proc = _run_render({"today": "2026-08-02", key: spec},
+                proc = _run_checks({"today": "2026-08-02", key: spec},
                                    _PLAN_COMPLIANT)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 self.assertNotIn("Traceback", proc.stderr)
@@ -352,7 +346,7 @@ class MalformedSpecTests(unittest.TestCase):
                      "min_loaded_flexion_exercises_per_week": 0,
                      "min_flexion_share_of_core_sets": 0.0,
                      "min_flexion_sets_per_week": 0}
-        proc = _run_render(
+        proc = _run_checks(
             {"today": "2026-08-02", "core_week_spec": toothless},
             _PLAN_CORE_DEFICIENT)
         self.assertEqual(proc.returncode, 2, proc.stderr)
@@ -426,7 +420,7 @@ _PLAN_HALF_VOLUME_ONE_CORE = _HEAD + "".join([
 
 # Only the ABSOLUTE flexion floor is a volume finding. The SHARE half of
 # the same rule is structural and must survive a deload — see
-# `render_validators._core_week_findings`.
+# `plan_validators._core_week_findings`.
 _VOLUME_MARKERS = ("under-allocated", "floor is 6", "loaded flexion",
                    "flexion sets across the plan", "no core exercise")
 _DIVERSITY_MARKERS = ("distinct core exercises", "core pattern categories",
@@ -565,7 +559,7 @@ class DeloadVolumeReliefTests(unittest.TestCase):
         doc = validate_workout_plan.__doc__
         self.assertIn("6 blocking errors  ->  3 errors + 3 advisory", doc)
         self.assertNotIn("nine blocking errors", doc)
-        self.assertIn("does not make that plan renderable", doc)
+        self.assertIn("does not make that plan acceptable", doc)
 
     def test_a_normal_week_is_unaffected_by_the_split(self) -> None:
         errors, warnings = self._run(_PLAN_COMPLIANT)
@@ -779,7 +773,7 @@ class DeloadPrescribedHandshakeTests(unittest.TestCase):
         # direction of "this is missing" costs the same as drift in the
         # direction of "this works".
         import inspect
-        src = inspect.getsource(render_validators)
+        src = inspect.getsource(plan_validators)
         self.assertNotIn("UPSTREAM GAP", src)
         self.assertNotIn("the field is being\n    added by separate work", src)
         self.assertIn("deload_source", src)
@@ -1025,7 +1019,7 @@ class BlockRotationWiringTests(unittest.TestCase):
     """``rotation_diff_errors`` reaching a caller for the first time."""
 
     def setUp(self) -> None:
-        render_validators._pattern_catalog.cache_clear()
+        plan_validators._pattern_catalog.cache_clear()
 
     tearDown = setUp
 
@@ -1170,11 +1164,11 @@ class BlockRotationWiringTests(unittest.TestCase):
         """
         base = {"today": "2026-08-02", "target_working_sets": 24}
 
-        without = _run_render(base, _PLAN_COMPLIANT)
+        without = _run_checks(base, _PLAN_COMPLIANT)
         self.assertEqual(without.returncode, 0, without.stderr)
         self.assertNotIn("unchanged from the previous block", without.stderr)
 
-        with_block = _run_render(dict(base, block=_ROTATION_PREV_BLOCK),
+        with_block = _run_checks(dict(base, block=_ROTATION_PREV_BLOCK),
                                  _PLAN_COMPLIANT)
         self.assertIn("unchanged from the previous block", with_block.stderr)
 
@@ -1209,7 +1203,7 @@ class RotationIsAdvisoryTests(unittest.TestCase):
     _BASE = {"today": "2026-08-02", "target_working_sets": 24}
 
     def test_a_rotation_only_violation_renders(self) -> None:
-        proc = _run_render(dict(self._BASE, block=_ROTATION_PREV_BLOCK),
+        proc = _run_checks(dict(self._BASE, block=_ROTATION_PREV_BLOCK),
                            _PLAN_COMPLIANT)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertNotIn("workout_md validation error:", proc.stderr)
@@ -1217,12 +1211,12 @@ class RotationIsAdvisoryTests(unittest.TestCase):
         # is tagged so a reader can tell it is not a gate.
         self.assertIn("workout_md plan warning:", proc.stderr)
         self.assertIn("unchanged from the previous block", proc.stderr)
-        self.assertIn(render_validators.ROTATION_ADVISORY_TAG, proc.stderr)
+        self.assertIn(plan_validators.ROTATION_ADVISORY_TAG, proc.stderr)
 
     def test_a_core_spec_violation_still_exits_2(self) -> None:
         # Same block payload, so rotation findings are present too. The
         # core spec is what decides the exit code.
-        proc = _run_render(dict(self._BASE, block=_ROTATION_PREV_BLOCK),
+        proc = _run_checks(dict(self._BASE, block=_ROTATION_PREV_BLOCK),
                            _PLAN_CORE_DEFICIENT)
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("workout_md validation error:", proc.stderr)
@@ -1240,7 +1234,7 @@ class RotationIsAdvisoryTests(unittest.TestCase):
                      "Cable Pallof Press: 15kgx10 /// 15kgx10",
                      "Cable Lateral Raise: 14kgx10 /// 14kgx10"),
         ])
-        proc = _run_render(dict(self._BASE, block=_ROTATION_PREV_BLOCK,
+        proc = _run_checks(dict(self._BASE, block=_ROTATION_PREV_BLOCK,
                                 **_tiers(biceps="maintain")), plan)
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("direct biceps sets", proc.stderr)
@@ -1252,16 +1246,16 @@ class RotationIsAdvisoryTests(unittest.TestCase):
         is the point: the switch is only worth having while it is one
         branch in one function.
         """
-        self.assertFalse(render_validators.BLOCK_ROTATION_ENFORCED)
+        self.assertFalse(plan_validators.BLOCK_ROTATION_ENFORCED)
         args = dict(prev_block=_ROTATION_PREV_BLOCK, plan_date="2026-08-02")
 
         errors, warnings = validate_workout_plan(_PLAN_COMPLIANT, **args)
         self.assertEqual(errors, [])
         rotation = [w for w in warnings
-                    if render_validators.ROTATION_ADVISORY_TAG in w]
+                    if plan_validators.ROTATION_ADVISORY_TAG in w]
         self.assertTrue(rotation, warnings)
 
-        with patch.object(render_validators, "BLOCK_ROTATION_ENFORCED", True):
+        with patch.object(plan_validators, "BLOCK_ROTATION_ENFORCED", True):
             on_errors, on_warnings = validate_workout_plan(
                 _PLAN_COMPLIANT, **args)
         self.assertTrue(any("unchanged from the previous block" in e
@@ -1270,7 +1264,7 @@ class RotationIsAdvisoryTests(unittest.TestCase):
         # "computed but not a gate", and once it is a gate that is false.
         self.assertEqual(
             [w for w in on_warnings
-             if render_validators.ROTATION_ADVISORY_TAG in w], [])
+             if plan_validators.ROTATION_ADVISORY_TAG in w], [])
 
     def test_the_findings_are_the_same_either_way(self) -> None:
         """Demotion changes the ROUTE, not the rule.
@@ -1284,9 +1278,9 @@ class RotationIsAdvisoryTests(unittest.TestCase):
         _, warnings = validate_workout_plan(
             _PLAN_COMPLIANT, prev_block=_ROTATION_PREV_BLOCK,
             plan_date="2026-08-02")
-        tagged = [w[:-len(render_validators.ROTATION_ADVISORY_TAG) - 1]
+        tagged = [w[:-len(plan_validators.ROTATION_ADVISORY_TAG) - 1]
                   for w in warnings
-                  if w.endswith(render_validators.ROTATION_ADVISORY_TAG)]
+                  if w.endswith(plan_validators.ROTATION_ADVISORY_TAG)]
         self.assertEqual(tagged, bare)
 
 
@@ -1301,7 +1295,7 @@ class SessionTypeSingleSourceTests(unittest.TestCase):
 
     def test_the_private_heading_regexes_are_gone(self) -> None:
         import inspect
-        src = inspect.getsource(render_validators)
+        src = inspect.getsource(plan_validators)
         self.assertNotIn("_LOWER_DAY_RE", src)
         self.assertNotIn("_UPPER_DAY_RE", src)
 
@@ -1418,261 +1412,12 @@ _BW_REASON_LABELS = {
 }
 
 
-class BodyweightReasonWiringTests(unittest.TestCase):
-    """Both bodyweight surfaces get the reason, not just a null rate.
-
-    "You have not measured enough" and "the data cannot resolve a
-    direction" are different sentences with different remedies. The bug
-    this replaces reported a confident loss while the user gained 1.7 kg,
-    so a card that shrugs at a null is not an acceptable substitute.
-    """
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.rd = _load_render_dashboard()
-
-    def _html(self, block) -> str:
-        j = {
-            "today": "2026-08-02",
-            "bodyweight_latest": {"kg": 78.4, "date": "2026-08-01"},
-            "bodyweight_trend_kg_per_week": None,
-            "bodyweight_trend": block,
-            "bodyweight_weekly": [77.9, 78.1, 78.4],
-            "health_metrics_weekly": [{"hrv_sdnn": 55, "resting_hr": 52,
-                                       "wrist_temp_c": 36.1,
-                                       "sleep_total_h": 7.2, "vo2max": 48.0}],
-        }
-        return self.rd.render(j, {"headline": "h", "cards": {}}, "# plan", "P")
-
-    def test_every_reason_code_renders_its_own_words(self) -> None:
-        seen = set()
-        for reason, (body_comp, vitals) in _BW_REASON_LABELS.items():
-            with self.subTest(reason=reason):
-                html = self._html({"state": "unresolved", "reason": reason,
-                                   "note": "n", "kg_per_week": None})
-                self.assertIn(body_comp, html)
-                self.assertIn(vitals, html)
-                seen.add((body_comp, vitals))
-        # Distinct wording per reason, or the distinction is decorative.
-        self.assertEqual(len(seen), len(_BW_REASON_LABELS))
-
-    def test_not_measured_enough_reads_differently_from_not_resolvable(self) -> None:
-        too_few = self._html({"state": "unresolved",
-                              "reason": "too_few_readings",
-                              "note": "n", "kg_per_week": None})
-        unresolved = self._html({"state": "unresolved",
-                                 "reason": "ci_straddles_zero",
-                                 "note": "n", "kg_per_week": None})
-        self.assertIn("too few weigh-ins to fit a rate", too_few)
-        self.assertNotIn("95% interval spans zero", too_few)
-        self.assertIn("95% interval spans zero", unresolved)
-        self.assertNotIn("too few weigh-ins to fit a rate", unresolved)
-
-    def test_without_the_block_both_cards_fall_back_to_saying_nothing(self) -> None:
-        # The pre-wiring behaviour, kept as the honest fallback: a card
-        # with no reason must not invent one.
-        html = self._html(None)
-        self.assertIn("rate not resolvable from the current window", html)
-        self.assertIn("trend unresolved", html)
-        for body_comp, _vitals in _BW_REASON_LABELS.values():
-            self.assertNotIn(body_comp, html)
-
-    def test_a_resolved_rate_prints_the_number_on_both_cards(self) -> None:
-        j = {
-            "today": "2026-08-02",
-            "bodyweight_latest": {"kg": 78.4},
-            "bodyweight_trend_kg_per_week": 0.25,
-            "bodyweight_trend": {"state": "resolved", "reason": None,
-                                 "kg_per_week": 0.25},
-            "bodyweight_weekly": [77.9, 78.1, 78.4],
-            "health_metrics_weekly": [{"hrv_sdnn": 55}],
-        }
-        html = self.rd.render(j, {"headline": "h", "cards": {}}, "# plan", "P")
-        self.assertIn("lean-bulk range", html)
-        self.assertIn("+0.25 kg/wk", html)
-
-    def test_the_renderer_passes_the_block_to_both_cards(self) -> None:
-        # Structural guard: the two call sites are one keyword away from
-        # silently reverting to the reason-less fallback.
-        lines = RENDER_DASHBOARD.read_text(encoding="utf-8").splitlines()
-        for call in ("card_body_comp_domain(", "card_vitals("):
-            hits = [ln for ln in lines if call in ln and "import" not in ln]
-            self.assertTrue(hits, f"no call site for {call}")
-            for ln in hits:
-                self.assertIn("bw_trend_block", ln,
-                              f"{call} call site drops the trend block: {ln.strip()}")
 
 
 # ---------------------------------------------------------------- task 5
 _ISO_DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
-class BlockPositionCardTests(unittest.TestCase):
-    """The weekly block-position disclosure has somewhere to land.
-
-    `SKILL.md` and `references/assessment-dashboard.md` both mark this
-    REQUIRED every week, and there was no card and no `COACH_CARD_KEYS`
-    entry, so the instruction pointed at nothing. The card exists to say
-    out loud that mid-block repetition is deliberate: the SELECTION is
-    held stable and the load and rep targets are what move. A week that
-    looks like last week is the design working, and nobody had told the
-    user that.
-    """
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.rd = _load_render_dashboard()
-
-    _MID_BLOCK = {"age_weeks": 1.1, "max_weeks": 6, "boundary_due": False,
-                  "weeks_to_boundary": 4.9, "block_id": "2026-07-25",
-                  "started": "2026-07-25"}
-
-    _DOSE = {
-        "load_policy": "progress",
-        "exercises": [
-            {"exercise": "Barbell Back Squat", "action": "add_load"},
-            {"exercise": "Cable Lat Pulldown", "action": "add_load"},
-            {"exercise": "Leg Press", "action": "add_reps"},
-            {"exercise": "Hip Adductor Machine", "action": "hold"},
-            {"exercise": "Dead Bug", "action": "no_history"},
-        ],
-    }
-
-    def _card(self, block, dose=None, coach=None) -> str:
-        j = {"today": "2026-08-02", "block": block, "next_dose": dose,
-             "health_metrics_weekly": [{"hrv_sdnn": 55}]}
-        cards = {"block_position": coach} if coach else {}
-        html = self.rd.render(j, {"headline": "h", "cards": cards},
-                              "# plan", "P")
-        start = html.index("<h2>Block position</h2>")
-        return html[start:html.index("</section>", start)]
-
-    @staticmethod
-    def _text(fragment: str) -> str:
-        import html as _html
-        stripped = re.sub(r"<[^>]+>", " ", fragment)
-        return re.sub(r"\s+", " ", _html.unescape(stripped)).strip()
-
-    def test_it_renders_the_required_line(self) -> None:
-        text = self._text(self._card(self._MID_BLOCK))
-        # The exact disclosure the user asked for, in order: where they
-        # are, why it looks the same, when it changes.
-        self.assertIn("Week 2 of 6 in this block", text)
-        self.assertIn("Exercise selection stays put by design, the load and "
-                      "rep targets are what move.", text)
-        self.assertIn("Next rotation in 4.9 weeks.", text)
-
-    def test_the_week_number_is_the_week_they_are_in(self) -> None:
-        # `age_weeks` is elapsed weeks: 0.0 on the day the block started,
-        # so day one is week 1 and 1.1 elapsed weeks is week 2. Reading
-        # it as the week number is off by one for the whole block.
-        for age, expected in ((0.0, "Week 1 of 6"), (0.9, "Week 1 of 6"),
-                              (1.1, "Week 2 of 6"), (5.4, "Week 6 of 6")):
-            with self.subTest(age=age):
-                block = dict(self._MID_BLOCK, age_weeks=age,
-                             weeks_to_boundary=round(6 - age, 1))
-                self.assertIn(expected, self._text(self._card(block)))
-
-    def test_it_renders_on_a_week_where_nothing_changed(self) -> None:
-        # The whole point. A card that only appears when there is news
-        # cannot disclose that the absence of news is deliberate.
-        stale = {"load_policy": "reduce", "exercises": [
-            dict(e, action="reduce") for e in self._DOSE["exercises"][:4]]}
-        text = self._text(self._card(self._MID_BLOCK, stale))
-        self.assertIn("Week 2 of 6 in this block", text)
-        self.assertIn("Held at the same weight", text)
-        self.assertIn("0 of 4 lifts", text)
-
-    def test_boundary_due_replaces_the_countdown(self) -> None:
-        block = dict(self._MID_BLOCK, boundary_due=True, age_weeks=6.0,
-                     weeks_to_boundary=0.0)
-        text = self._text(self._card(block))
-        self.assertIn("Rotating this week.", text)
-        self.assertNotIn("Next rotation in", text)
-
-    def test_a_first_run_says_so_and_prints_no_countdown(self) -> None:
-        # Two shapes reach here: no `block` key at all, and the block
-        # payload `read_tracker` emits when nothing is on record, which
-        # is a dict with a null `age_weeks`. Neither may invent a week
-        # number or a countdown for a block that does not exist.
-        for block in (None, {}, {"age_weeks": None, "max_weeks": 6,
-                                 "boundary_due": True,
-                                 "weeks_to_boundary": None,
-                                 "source": "none"}):
-            with self.subTest(block=block):
-                text = self._text(self._card(block))
-                self.assertIn("Block starts here", text)
-                self.assertIn("with this plan", text)
-                self.assertNotIn("Next rotation in", text)
-                self.assertNotIn("Rotating this week", text)
-                self.assertNotRegex(text, r"Week \d")
-
-    def test_it_never_prints_a_date(self) -> None:
-        # `block` deliberately carries a horizon and not a
-        # `boundary_due_by` date: a payload anchored as-of cannot emit a
-        # future-dated string without tripping the horizon rule. Deriving
-        # one here from `today + weeks_to_boundary` would put it straight
-        # back. `started` IS in the block and must not leak either.
-        for block in (self._MID_BLOCK,
-                      dict(self._MID_BLOCK, boundary_due=True),
-                      None):
-            with self.subTest(block=block):
-                found = _ISO_DATE_RE.findall(self._card(block, self._DOSE))
-                self.assertEqual(found, [], f"card printed a date: {found}")
-
-    def test_the_dose_delta_says_what_actually_moved(self) -> None:
-        # Without this, "selection is stable by design" reads as
-        # "nothing changed", which is the opposite of true inside a
-        # block. Read off `next_dose`, the verdicts the plan copies.
-        text = self._text(self._card(self._MID_BLOCK, self._DOSE))
-        self.assertIn("2 of 4 lifts", text)          # no_history not counted
-        self.assertIn("Barbell Back Squat, Cable Lat Pulldown", text)
-        self.assertIn("1 chase reps at the same weight", text)
-        self.assertIn("Held at the same weight", text)
-        self.assertIn("Hip Adductor Machine", text)
-
-    def test_the_load_policy_is_named_when_it_holds_lifts(self) -> None:
-        held = {"load_policy": "reduce", "exercises": [
-            {"exercise": "Leg Press", "action": "reduce"}]}
-        self.assertIn("Load policy: reduce",
-                      self._text(self._card(self._MID_BLOCK, held)))
-
-    def test_a_lift_held_on_its_own_is_not_blamed_on_the_policy(self) -> None:
-        # A re-entry or a gym change holds one lift; the gate said progress.
-        held = {"load_policy": "progress", "exercises": [
-            {"exercise": "Leg Press", "action": "hold"}]}
-        text = self._text(self._card(self._MID_BLOCK, held))
-        self.assertIn("Held at the same weight", text)
-        self.assertNotIn("Load policy", text)
-
-    def test_no_dose_history_is_stated_not_omitted(self) -> None:
-        text = self._text(self._card(self._MID_BLOCK, None))
-        self.assertIn("no logged lifts to progress", text)
-
-    def test_the_coach_callout_key_is_wired(self) -> None:
-        self.assertIn("block_position", render_validators.COACH_CARD_KEYS)
-        # Not gated: the card renders every run, so a missing callout is
-        # always a real gap and must warn.
-        self.assertNotIn("block_position",
-                         render_validators.GATED_COACH_CARD_KEYS)
-        _, warnings = render_validators.validate_coach_reads(
-            {"headline": "h", "cards": {}})
-        self.assertTrue(any("cards.block_position" in w for w in warnings),
-                        warnings)
-        self.assertIn("holding at 90kg on purpose",
-                      self._card(self._MID_BLOCK, self._DOSE,
-                                 coach="Squat is holding at 90kg on purpose."))
-
-    def test_the_renderer_passes_both_payload_blocks(self) -> None:
-        # Structural guard, same class of bug as the bodyweight one
-        # above: the card degrades silently to its first-run state if the
-        # call site stops handing it `block`.
-        lines = RENDER_DASHBOARD.read_text(encoding="utf-8").splitlines()
-        hits = [ln for ln in lines
-                if "card_block_position(" in ln and "import" not in ln]
-        self.assertEqual(len(hits), 1, hits)
-        self.assertIn('j.get("block")', hits[0])
-        self.assertIn('j.get("next_dose")', hits[0])
 
 
 # ---------------------------------------------------- real-data acceptance
@@ -1721,7 +1466,7 @@ class RealPlanAcceptanceTests(unittest.TestCase):
         # on real markdown: volume findings demote, structural ones do
         # not. Detection here is for FINDING a test fixture; the
         # validator itself never infers a deload from set counts.
-        from workout_coach.lib.render_validators import (
+        from workout_coach.lib.plan_validators import (
             count_working_sets_per_workout)
 
         best = None

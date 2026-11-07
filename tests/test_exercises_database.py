@@ -47,7 +47,7 @@ class ExercisesDatabaseTests(unittest.TestCase):
     def test_band_pull_apart_stays_off_catalog(self) -> None:
         """Commit ff13d82 removed all four ``[Band]`` entries — "no band
         equipment available". ``known_name_set()`` carries alias INPUT
-        strings and ``render_validators.validate_workout_md`` gates plan
+        strings and ``plan_validators.validate_workout_md`` gates plan
         rendering on that set, so an alias row here would silently re-permit
         band prescriptions. Do not add one; see the "Deliberately NOT
         aliased" section in ``workout-logger/references/aliases.md``.

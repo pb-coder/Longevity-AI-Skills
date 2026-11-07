@@ -4,9 +4,7 @@ description: >
   Reads the requested person's tracker (per-person CSVs under
   <Person>/data/), analyzes recent training state, and writes dated
   files to plans/<Person>/: the structured assessment (coach_reads.json)
-  and a lean strength-only workout-plan markdown. The self-contained
-  assessment HTML dashboard is rendered only when the user asks for it
-  ("report", "dashboard", "assessment"). Invoked by the `/coach`
+  and a lean strength-only workout-plan markdown. Invoked by the `/coach`
   slash command or when the user explicitly asks for coaching, analysis,
   or a new plan. Do NOT trigger on general fitness questions, training
   discussion, logging, or requests unrelated to the tracker.
@@ -25,7 +23,7 @@ Resolve which person this request is about BEFORE running the script:
 - If pronouns or context clearly refer to one tracker, use that tracker.
 - Otherwise ask which tracker/person this is for before proceeding.
 
-Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at the workout-tracker root, dated per generation. Never write one person's plan over the other; never write to the repo root (the old `./workout_plan - <Person>.md` files are frozen history). Build every path with the resolvers in `Skills/shared/person_paths.py`: `plans_dir(person)`, `workout_plan_md(person, date)`, `assessment_html(person, date)`.
+Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at the workout-tracker root, dated per generation. Never write one person's plan over the other; never write to the repo root (the old `./workout_plan - <Person>.md` files are frozen history). Build every path with the resolvers in `Skills/shared/person_paths.py`: `plans_dir(person)`, `workout_plan_md(person, date)`.
 
 ## Setup
 
@@ -40,17 +38,16 @@ Pass the resolved name via `--person <Name>`. Outputs go to `plans/<Person>/` at
 
 ## Output target
 
-Every run writes **two dated files** under `plans/<Person>/`, and a third only on request:
+Every run writes **two dated files** under `plans/<Person>/`:
 
 - `<YYYY-MM-DD>-coach_reads.json`: the assessment (headline + card callouts). **Always written, before the plan.**
 - `<YYYY-MM-DD>-workout.md`: the lean workout list. **Strength workouts only**: no cardio sections, no Zone 2 or interval prescriptions, no tables, no rationale block. Sub-bullet notes only when genuinely actionable.
-- `<YYYY-MM-DD>-assessment.html`: the self-contained dashboard. **Opt-in: render it only when the user's `/coach` message asks for it** ("report", "dashboard", "assessment", or a clear equivalent). The script `scripts/render_dashboard.py` owns all HTML; you never hand-write any. Its card inventory, data contracts and the coach-reads schema are in `references/assessment-dashboard.md`.
 
 `<YYYY-MM-DD>` is the JSON's `today`. Each generation writes a fresh dated set; older ones stay on disk. Plans dated before 2026-08-02 predate the current core spec and fail today's gate: read them for history, never as a template.
 
 **Cardio is analysis, never prescription.** Cardio data feeds every read (recovery, training load, the cardio and behavioural cards). It never becomes a section, bullet or instruction in the workout markdown.
 
-The chat gets one short block: a one-line verdict plus `Wrote plan to plans/<Person>/<date>-workout.md (N sessions)`, then `check_plan.py`'s warning count (and the warnings themselves when there are any). When the report was asked for, add `Wrote dashboard to plans/<Person>/<date>-assessment.html`. Nothing else.
+The chat gets one short block: a one-line verdict plus `Wrote plan to plans/<Person>/<date>-workout.md (N sessions)`, then `check_plan.py`'s warning count (and the warnings themselves when there are any). Nothing else.
 
 ### Workout-plan markdown structure
 
@@ -59,13 +56,11 @@ The chat gets one short block: a one-line verdict plus `Wrote plan to plans/<Per
 > Today's call: <session_recommendation.headline>
 > Why: <rationale notes>
 
-Assessment: ./<YYYY-MM-DD>-assessment.html   (only on a run that renders the report)
 
 <intro: block position, what changed, the food line>
 
 ## Workout 1: <TYPE>
 Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
 
 - <general warm-up>: e.g. Jumping Jacks: 50
 - <activation matched to the day>: e.g. Arm Circles: 20
@@ -84,7 +79,7 @@ The plan ends after the last strength workout. Everything above the first `##` h
 
 **Source + capabilities (read first to gate sections):**
 - `data_source`: `health_export_kit`. Trust it.
-- `capabilities`: per-source feature map. **False = structurally unsupported**: gate sections on it and never ask the user to track something their source cannot emit. For this source `hrv` and `wrist_temp` are False: there is no HRV and no wrist temperature, and the recovery score runs without them. `sleep_regularity` and `sleep_nights` are True. `thermal_log` and `light_therapy_log` are manual-log, so their summaries are gated on data presence instead.
+- `capabilities`: per-source feature map. **False = structurally unsupported**: gate sections on it and never ask the user to track something their source cannot emit. For this source `hrv` and `wrist_temp` are False: there is no HRV and no wrist temperature, and the recovery score runs without them. `sleep_regularity` and `sleep_nights` are True.
 - **Permanently unavailable, whatever an empty field looks like**: HRV and wrist temperature, Apple's 1-10 effort score (so there is no effort-in-reserve intake), beat-to-beat intervals and RMSSD, ECG, swim stroke style / SWOLF / per-lap detail, and Apple's own HR-zone boundaries. Never list these under a missing-from-tracking note, and never read an emptied field as something that changed about the person. Sleep fragmentation (`sleep_summary.fragmentation`) IS available; see the sleep card rule.
 - `auto_cardio_enabled`, `today`, `estimated_max_hr`, `estimated_rest_hr` (derived once; all HR-zone / TRIMP math uses them).
 
@@ -128,7 +123,7 @@ The plan ends after the last strength workout. Everything above the first `##` h
 - `strength_sessions_per_week` (the session count to plan) and `last_session_type` (where the split rotation continues from: the next session is the one after `last_session_type.title` in the block's session order): top-level, read from the payload, not from `profile.csv`.
 - `target_working_sets`: the unscaled per-session working-set budget (from `session_target_min` and the per-person minutes per set).
 
-**Longevity trajectory (Trajectory tab inputs).** Field names are self-describing; what the payload cannot say about itself:
+**Longevity trajectory inputs.** Field names are self-describing; what the payload cannot say about itself:
 - `longevity_score`: 0-100 composite, weights renormalized across present components. **Always `bloodwork_pending: True` until a lab panel is on file.** `longevity_state` is parsed from private text and null when absent; never hardcode private profile facts into this file.
 - `vo2_percentile` (null when sex is unknown), `hr_recovery` (1-min HRR below 12 bpm is abnormal), `acwr` (0.8-1.3 is the sweet spot), `sleep_regularity` (SRI; null means too few nights), `rem_anomaly`, `movement_consistency`.
 
@@ -136,9 +131,6 @@ The plan ends after the last strength workout. Everything above the first `##` h
 - `health_metrics_weekly`: 4 Mon-anchored weeks of `{week_start, n_days, vo2max, resting_hr, walking_hr, hr_recovery_1min, sleep_total_h, sleep_deep_h, sleep_rem_h, time_in_bed_h, resp_rate, exercise_min}`. `time_in_bed_h` may be derived from the sleep-period span: call it continuity, not clinical in-bed time. `vo2max_latest` and `vo2max_trend_per_4w` (null until 4 readings over 21+ days).
 - `sleep_summary` (absent with no nights in 28 days): per-night analysis with circular schedule stdevs, `sleep_efficiency_pct` (with `source`), `schedule_consistency`, `outliers`, `absolute_sleep_note`.
 
-**Heat, cold and light (manual `/log`, 28-day window; keys absent when nothing was logged):**
-- `thermal_summary`: `heat` and `cold` sub-blocks. `adherence.heat_status` scores against `sauna_target_per_week` (default 4). `adherence.duration_status` scores dry/banya only against the >= 80 C and >= 20 min HSP band; steam counts as habit minutes, never HSP dose.
-- `light_therapy_summary`: `adherence.status` against `light_therapy_target_per_week` (default 3) and `session_dose_status` against `light_therapy_target_min_per_session` (default 10).
 
 **How to read the signals (no need to dig into `rows`):**
 - **Should I train hard today?** `session_recommendation.tier` and `.load_policy`, which are binding. Cite `recovery.score` only when `load_policy.recovery_available` is true; otherwise say recovery data is missing.
@@ -170,9 +162,9 @@ Do the science in your head (set counts on the fractional model, tier targets, s
 
 - Short sentences. Vary length. Specific numbers ("12 back sets a week, enough") over adjectives.
 - Imperative voice ("Target 7.5h tonight"). Action only when there is one: a card whose state has not moved gets "On track, hold course.", never invented urgency.
-- No em dashes (the renderer fails on them; the only allowed ones in workout.md are the title separator and the `  — cue` sub-bullet marker). Use periods or commas.
+- No em dashes (the validator rejects them; the only allowed ones in workout.md are the title separator and the `  — cue` sub-bullet marker). Use periods or commas.
 - Banned words: crucial, vital, pivotal, robust, comprehensive, significant, key role, landscape, delve, multifaceted, intricate, "serves as", "stands as", "testament to". No "Additionally / Moreover / Furthermore / Nevertheless" openers, no hedging stacks, no filler ("It is important to note that"), no near-synonym triplets. Bold only for exercise names in progression.
-- "Fitness" reads better than CTL, "freshness" better than TSB; known abbreviations are auto-wrapped in tooltips so they are allowed.
+- "Fitness" reads better than CTL, "freshness" better than TSB; known abbreviations are allowed when clear.
 
 ## Phase 1: Assessment (coach_reads.json) and plan checks
 
@@ -192,44 +184,32 @@ Goals are fixed: hypertrophy + longevity. Never ask about goals.
      --coach plans/<Person>/<date>-coach_reads.json \
      --workout-md plans/<Person>/<date>-workout.md
    ```
-   It runs every check the renderer runs (`lib/plan_checks.run_plan_checks`) and writes nothing: the payload, `coach_reads.json` cross-checked against the tracker numbers, the workout copy rules and catalog names, the core spec and the per-muscle weekly floors (blocking), the set budget and block rotation (advisory), three more advisories (a written dose that differs from `next_dose`, a week missing one of the four main patterns, a cardio section), and the number check on the opener. It also requires `coach_reads.json` to be strictly older on disk than `workout.md`. **Exit 2 means fix the plan (or `coach_reads.json`) and rerun until it exits 0.** Relay any warnings in the chat summary. If it prints a `next_dose drift`, `main pattern` or `cardio section` warning, fix the plan and rerun, unless it is a deliberate exception the opener states.
-5. **Render the report, only when the user asked for the report:**
-   ```
-   python3 Skills/workout-coach/scripts/render_dashboard.py \
-     --tracker /tmp/tracker-<Person>.json \
-     --coach plans/<Person>/<date>-coach_reads.json \
-     --workout-md plans/<Person>/<date>-workout.md \
-     --out plans/<Person>/<date>-assessment.html \
-     --person <Person>
-   ```
-   On a report run, add the `Assessment: ./<date>-assessment.html` line to the plan intro before step 4, so the checks run on the final file. If the report is asked for after a plan was written, run this step on that day's saved files with a freshly read tracker JSON; the analysis is not redone. If only the coach text needs editing, edit `coach_reads.json` and rerun step 5 (or step 4).
-
+   It runs the shared check sequence (`lib/plan_checks.run_plan_checks`) and writes nothing: the payload, `coach_reads.json` cross-checked against the tracker numbers, the workout copy rules and catalog names, the core spec and the per-muscle weekly floors (blocking), the set budget and block rotation (advisory), three more advisories (a written dose that differs from `next_dose`, a week missing one of the four main patterns, a cardio section), and the number check on the opener. It also requires `coach_reads.json` to be strictly older on disk than `workout.md`. **Exit 2 means fix the plan (or `coach_reads.json`) and rerun until it exits 0.** Relay any warnings in the chat summary. If it prints a `next_dose drift`, `main pattern` or `cardio section` warning, fix the plan and rerun, unless it is a deliberate exception the opener states.
 ### Coach cards
 
-The key list is `lib/render_validators.py::COACH_CARD_KEYS`; each card's data contract is in `references/assessment-dashboard.md`. The renderer enforces no em dashes, <= 280 characters per card string and <= 560 for `headline`. All `cards` keys are optional (a missing one renders pure data), except that `block_position` always warns when missing. The gated keys (`swim_trajectory_callout`, `trajectory_energy`, `nutrition_phase_callout`) are not warned about when absent, but author them whenever the data is present. There is no `today_headline` and no `trajectory_decathlon` card.
+The key list is `lib/plan_validators.py::COACH_CARD_KEYS`; each card's data contract is in `references/assessment-contract.md`. The validator enforces no em dashes, <= 280 characters per card string and <= 560 for `headline`. Missing ungated `cards` keys produce warnings; always author `block_position` and omit a section only when there is no relevant signal. The gated keys (`swim_trajectory_callout`, `trajectory_energy`, `nutrition_phase_callout`) are not warned about when absent, but author them whenever the data is present. There is no `today_headline` and no `trajectory_decathlon` card.
 
-Keep lines tight. The user is an established trainee: say what **changed** since the last block, and give a card whose state hasn't moved one sentence. The Trajectory cards translate numbers into age-cohort context and longevity action: where am I, where should I be, what do I do.
+Keep lines tight. The user is an established trainee: say what **changed** since the last block, and give a card whose state hasn't moved one sentence. The trajectory sections translate numbers into age-cohort context and longevity action: where am I, where should I be, what do I do.
 
 **`headline`** (the coach's own `coach_reads.json` string, not the gate's `session_recommendation.headline`): 2-3 sentences anchored on the longevity trajectory and today's call, with days since the last session (`monthly_sessions[-1].date` vs `today`): "last trained 2 days ago, normal cadence".
 
-**Today tab**
+**Current training assessment**
 - `session_recommendation_callout`: the gate's call in plain words (tier, `label`, what drove it). If `load_policy.policy` is `reduce`, say loads hold and sets are cut, and why. If `recovery_available` is false, say recovery data is missing and the call rests on strength freshness. Falls back to the gate's own `headline` when omitted.
 - `today_acwr`: `acwr` against the 0.8-1.3 band.
 - `recovery_drivers`: lead with `recovery.score`, then the one or two leading entries of `recovery.drivers` by name, with recent value vs personal baseline. If `score` is null, say recovery data is missing (no recent health import) instead. If `confidence` is `low`, say so; never ask the user to track HRV or wrist temperature (the source cannot supply them).
-- `activity_rings`: strength and cardio sessions, Zone 2 (take the number from `cardio_hr_zones_28d.z2`, intervals from `cardio_last_28d.interval_sessions`; qualify with `z2_by_activity` when a short swim is padding the total), recovery practices, sleep.
+- `activity_rings`: strength and cardio sessions, Zone 2 (take the number from `cardio_hr_zones_28d.z2`, intervals from `cardio_last_28d.interval_sessions`; qualify with `z2_by_activity` when a short swim is padding the total), sleep.
 - `block_position` (**REQUIRED every week**): inside a block the exercise selection is stable by design and the load and rep targets move. Nobody has told the user this, so a week that looks like last week reads as laziness. In plain language, from `block` and nothing else (never compute a date): where they are ("Week 2 of 6", from `age_weeks` and `max_weeks`), that selection holds by design, and when it changes (`weeks_to_boundary`, or "rotating in THIS plan" when `boundary_due`). Then say what the dose does next, from `next_dose.exercises[].action`: which lifts take weight (`add_load`), which chase reps (`add_reps`), which are held and why (quote the `basis`). Add the deload clock when it matters: `weeks_since_deload` against `deload_cadence_weeks`, and "a deload is still owed" when `deload_cadence_due`. With `block` null (or `age_weeks` null), say the block starts with this plan and skip the countdown.
   > Week 2 of 6 in this block. Selection stays put by design, the load and rep targets are what move. Bench and row take weight, the leg press chases reps, the lateral raise holds after a 5-week gap. Next rotation in 4.9 weeks.
 - `training_load`: cite the **strength** TSB (`training_load_by_modality.strength.tsb`; whole-body only as secondary context) and its band by name (`load_policy.tsb_band`: `over_recovered`, `balanced`, `carrying_load`, `fatigued`, `high_fatigue`). If `auto_deload_candidates` is non-empty, phrase it as a question.
 - `muscle_volume`: per-muscle verdicts against `muscle_volume_targets`, naming the muscle whenever you move its volume. With fewer than 2 full training weeks of data, report what is visible and caveat the sample. Name any `unknown_exercises` (their sets count as zero volume until the typo is fixed or the exercise is added to `shared/exercises-database.md`), and the HR-creep calls from `hr_at_volume_divergence` (omit the HR call when that block is empty). One or two stale exercises worth reintroducing are fair game; never list the whole `stale_exercises` list.
 - `strength`: per major lift, `prev_e1rm_kg -> current_e1rm_kg` with `slope_kg_per_4w` as the trend (drop the trend chunk when null; with `confidence` `low`, say the e1RM is noisy at 12+ reps and don't claim a trend). Call a stall only on `stalled_sessions >= 2`, and say it is inferred from load and reps, because the tracker has no effort-in-reserve data. A negative `delta_vs_prev_kg` with a flat-or-negative slope and no deload around it is a real flag; with a positive slope it is one bad session. If `context_change_excluded >= 1`, say the slope reset on a gym or equipment change and don't call the lift stalled or regressing. Respect the user's own annotation in the lift's `progression_summary` entry (`last_notes`): an explained outlier is not a logging error. Skip the card (and say why) with fewer than 3 sessions over 2+ weeks, or with a single session of data.
 
-**Trajectory tab**
+**Longer-term assessment**
 - `trajectory_longevity_score`, `trajectory_recovery`, `trajectory_risk_flags`: one sentence each on the domain, from `longevity_score`, `recovery`/`hr_recovery`/`rem_anomaly`, and `longevity_state` risk flags.
 - `trajectory_cardio`: the cardio check against the Zone 2 target (about 150 min Zone 2 plus about 20 min of intervals a week, so roughly 600 min and 4 interval sessions over 28 days; flag a shortfall in plain numbers: "Zone 2: 60 min logged, target ~600"). **Cross-check against `daily_activity_28d.assessment` before calling it a gap**, and state the band with its basis: `high` with a rising VO2max means the shortfall is mostly on paper; `low` means the base dose is too low even when the 28-day targets are met; `null` says so and takes the standard read. Call out `z3_pct` > 40 (grey zone) and z1-dominated hike time. Append the VO2max line from `vo2max_latest` (trend only when `vo2max_trend_per_4w` is non-null).
 - `trajectory_body_comp`, `vitals`: bodyweight and waist under the rules in the Bodyweight section: direction only when `state == "resolved"` (+0.25 to +0.5 kg/wk is the hypertrophy band; above +0.5 the surplus is outrunning muscle; a resolved loss on a hypertrophy goal is under-eating), a lone waist reading named as a baseline, an empty channel said out loud.
 - `trajectory_metabolic`, `trajectory_behavioral`: as the data supports (`movement_consistency`, `daily_activity_28d`, adherence).
 - `trajectory_sleep`, `sleep` (present when `sleep_summary` is): total with stage means, efficiency or continuity (call it continuity or an in-bed proxy when `sleep_efficiency_pct.source` is `derived_sleep_period`; > 85% healthy, < 80% disturbed), and schedule consistency (+/-30 min tight, +/-90 min erratic). State the short-sleep floor first when `absolute_sleep_note` is present. Soften every claim under 14 nights and ignore one bad night. `fragmentation.n_segments_mean` (segments per night, lower is better) is available: use it only to explain a soft efficiency or continuity read, never as a headline number or a trend under 14 nights. Don't judge stage splits against population norms; compare within the user.
-- `recovery_practices` (present when `thermal_summary` or `light_therapy_summary` is): adherence against the **configured** target ("below the configured target", never a moral failure), the HSP band for dry/banya only, cold with its `cold_temp_c` when set (a -2 C outdoor session is a real dose; `dose_hint: "amber"` is a weak one), multi-round sessions count as ONE session. Light therapy: did it happen and at roughly what duration; no wavelength-efficacy claims.
 - `swim_trajectory_callout` (when `swim_summary` is present; read `references/swim-coaching.md` first): quote `window_14d.improvement_verdict` in plain English, name the ONE signal behind it (the largest move in `delta_vs_prior_14d`, lower is better for pace and SPL; mention `pace_pr` / `swolf_pr` when true), and give ONE focus for the next session. Don't lecture technique. Comment on SWOLF or stroke mix only when populated (historical swims only; absent is a retired field, not unmeasured). Prompt a CSS test when `css` is null and `css_test_detected` or `css_missing_nudge` is present, and a retest when `css_retest_due`; flag `stroke_outliers` once as a watch-misclassification candidate.
 - `nutrition_phase_callout` (when `nutrition_phase` is present; read `references/bulking-science.md` first on a bulk): quote `coach_action_hint` verbatim (it is the binding token), name the one load-bearing why (observed rate vs target, a triggered stop signal, or weeks elapsed with no signal), and for `consider_ending` / `end_now` quote `stop_signals_triggered[0]`. If `targets.protein_tracking_status == "target_only"`, say protein is a configured target with no intake tracked.
 - `trajectory_energy` (when `energy_28d` is present). These four rules bind this callout, the nutrition callout, and every other line about food:
@@ -309,7 +289,7 @@ Use a structured question when the client offers one. Tier C, D and E never ask.
   - **HR creep** (`hint == "rising HR at constant volume — fatigue or under-recovery"`): hold or cut that muscle's volume this block (baseline: its direct sets in the last plan) and add no sets. This is a volume rule: loads still follow `next_dose`. When a muscle is both under target and flagged, hold or cut wins. For `improving conditioning` a set may be added if it is under MAV. Say it on the `muscle_volume` card, not in the workout markdown.
 - **Rotate the arm exercise** across sessions and blocks rather than repeating the same curl and pushdown, and start a fresh variant conservative (2-3 reps in reserve). `arm_week_spec` also requires 2 distinct direct exercises a week per arm muscle.
 
-**Warm-up (REQUIRED, bounded to ~5 min).** Every strength workout opens with two prep movements as plain bullets (they carry no working volume): one general pulse-raiser (`Jumping Jacks`, `Rowing Machine` or `Arm Circles`) plus one activation matched to the day (push: `Arm Circles` or `Wall Slide`; pull: `Scapular Pull-Up` or `Dead Hang`; legs: `Bodyweight Squat`, `Glute Bridge` or `Hip Circle Walk`). **Write the canonical catalog name and nothing else**: the bracketed tag in `exercises-database.md` (`[Band]`, `[DB]`, `[BW]`) is metadata, and `Hip Circle Walk [Band]` is rejected as off-catalog and blocks the render. The catalog is also the equipment list (`Band Pull-Apart` is deliberately absent). If a movement is not in `shared/exercises-database.md`, it is not prescribable.
+**Warm-up (REQUIRED, bounded to ~5 min).** Every strength workout opens with two prep movements as plain bullets (they carry no working volume): one general pulse-raiser (`Jumping Jacks`, `Rowing Machine` or `Arm Circles`) plus one activation matched to the day (push: `Arm Circles` or `Wall Slide`; pull: `Scapular Pull-Up` or `Dead Hang`; legs: `Bodyweight Squat`, `Glute Bridge` or `Hip Circle Walk`). **Write the canonical catalog name and nothing else**: the bracketed tag in `exercises-database.md` (`[Band]`, `[DB]`, `[BW]`) is metadata, and `Hip Circle Walk [Band]` is rejected as off-catalog and blocks plan acceptance. The catalog is also the equipment list (`Band Pull-Apart` is deliberately absent). If a movement is not in `shared/exercises-database.md`, it is not prescribable.
 
 **Ramp sets on the first heavy free-weight compound only.** When the first working exercise is a heavy barbell or dumbbell compound (squat, bench, deadlift, RDL, overhead or DB press), precede its working sets with 1-2 ramp sets marked `(warmup)` at about 50% then 70% of the working load, low reps (about 5 then 3): `Barbell Back Squat: 60kgx5 (warmup) /// 80kgx3 (warmup) /// 95kgx8 /// 95kgx8 /// 95kgx8`. The marker keeps them out of volume and e1RM. Skip ramps for a light cable, machine or isolation opener, and never ramp later compounds.
 
@@ -342,7 +322,7 @@ python3 -m workout_coach.lib.adherence bench-record --person <Name> \
 - **`benched`**: prescribed into sessions the user trained and skipped, with other routes to that muscle available. The coach stops prescribing it. Ask **why** (equipment, dislike, time): `retired` if it is not coming back, `retry` if the answer names something fixable.
 - **`route_blocked`**: same evidence, but benching it would strand a muscle at emphasis or grow tier or empty a core pattern category, so it sits in `adherence.bench_blocked` and stays prescribable. Ask **what instead**, naming the stranded pattern category precisely (not "the only route to core"). Persist `retired` with their words when they name a substitute, and prescribe the named swap in that slot this generation (from the next run the retired movement is benched; e.g. "swap to Plank": write `Plank` if it is in the catalog; if it is not, say so in chat and take the nearest catalog movement of the same pattern). Persist `retry` when the movement itself is fixable.
 
-**Block rotation (advisory).** Exercise selection is stable inside a block and rotates at the boundary (`block.boundary_due`); loads and rep targets move week to week. Findings print as warnings and do not refuse a render. Read `block.slots[]` for what each position holds, `must_rotate` for slots the boundary has come due for, `anchor_overdue` for aged-out anchors. "Rotated" means:
+**Block rotation (advisory).** Exercise selection is stable inside a block and rotates at the boundary (`block.boundary_due`); loads and rep targets move week to week. Findings print as warnings and do not refuse plan acceptance. Read `block.slots[]` for what each position holds, `must_rotate` for slots the boundary has come due for, `anchor_overdue` for aged-out anchors. "Rotated" means:
 - **A different movement pattern, not a different equipment word.** Cable Lateral Raise to Dumbbell Lateral Raise is the same `pattern`. Landing in a `pattern` the session did not have is what stops anti-rotation and carries sitting at zero forever.
 - **Not a name the slot held recently** (`slots[].history`).
 - **Anchors persist**, changing only for a reason in `block.anchor_change_reasons` (`stall_3_sessions`, `injury`, `age_3_blocks`).
@@ -355,7 +335,7 @@ A **lean exercise list**: no tables, no rationale paragraphs, no cardio. The "wh
 
 No em dashes in workout prose. The only allowed ones are the title separator and the indented `  — cue` marker. In `> Today's call:` / `> Why:` lines use a period, comma, semicolon or colon; a prose em dash fails the check.
 
-Every strength workout heading is followed by `Date: ___\` then `Recovery: sauna ___ / cold ___ / rlt ___`, each on its own line, then a blank line, then the bullets. The trailing backslash is a Markdown hard break. The user fills the date in when they train and replaces only the recovery blanks they used (`/log` parses each modality independently).
+Every strength workout heading is followed by `Date: ___`, then a blank line and exercise bullets. The user fills in the date when they train.
 
 **Exercise bullets**: one line per exercise, no code fences. **There is one set format and it is `///`: every set is its own entry, whatever the unit.** 4 sets = 4 entries.
 - Weighted: `Dumbbell Flat Bench Press: 52kgx10 /// 52kgx10 /// 52kgx10`
@@ -377,7 +357,6 @@ Example (no code fence in the actual file):
 ```
 ## Workout 1: UPPER A + CORE
 Date: ___\
-Recovery: sauna ___ / cold ___ / rlt ___
 
 - Jumping Jacks: 50
 - Arm Circles: 20
@@ -397,7 +376,7 @@ This is an Upper day that keeps the vertical press next to the horizontal push, 
 
 ### Where the rationale goes
 
-The workout markdown carries no rationale beyond its short opener. The "why" lives on the card showing the data: the strength TSB band on `training_load`, the dominant driver on `recovery_drivers`, HR-at-volume on `muscle_volume`, the dose changes on `block_position`.
+The workout markdown carries no rationale beyond its short opener. The "why" lives on the assessment section for that signal: the strength TSB band on `training_load`, the dominant driver on `recovery_drivers`, HR-at-volume on `muscle_volume`, the dose changes on `block_position`.
 
 ## Common Mistakes
 

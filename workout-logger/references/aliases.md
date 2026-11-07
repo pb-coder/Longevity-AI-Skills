@@ -118,7 +118,7 @@ each one sufficient:
 1. **It re-opens a closed path.** Commit `ff13d82` removed every `[Band]`
    exercise from the catalog for the stated reason "no band equipment
    available". `exercises_database.known_name_set()` includes alias *input*
-   strings, and `render_validators.validate_workout_md` uses that set as a
+   strings, and `plan_validators.validate_workout_md` uses that set as a
    hard, render-blocking gate — so the render gate is the only thing enforcing
    that decision. An alias row silently re-permits band prescriptions.
 2. **It converts warm-up prep into emphasis-muscle volume.** `Band Pull-Apart`

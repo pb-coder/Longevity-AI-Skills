@@ -229,7 +229,7 @@ class PlanParsingTests(unittest.TestCase):
         self.assertFalse(parse_plan(PLAN_0725, "2026-07-25")["is_deload"])
 
     def test_the_heading_grammar_is_public(self) -> None:
-        # `render_validators` has to recognise exactly what the ledger
+        # `plan_validators` has to recognise exactly what the ledger
         # recognises. It reached for the private regex because there was
         # no public name; a second copy of the pattern over there is how
         # the two drift.

@@ -39,7 +39,7 @@ from workout_coach.lib.blocks import (
 )
 from workout_coach.lib.constants import CORE_WEEK_SPEC
 from workout_coach.lib.extract import load_exercises_db
-from workout_coach.lib.render_validators import _session_core_set_bounds
+from workout_coach.lib.plan_validators import _session_core_set_bounds
 
 _DB_PATH = Path(__file__).resolve().parents[1] / "shared" / "exercises-database.md"
 _DB = load_exercises_db(_DB_PATH)
@@ -264,7 +264,7 @@ class SessionTypeCannotBeAssertedByItsNameTests(unittest.TestCase):
         self.assertEqual(session_type_from_content(slots), "lower")
 
     def test_the_gate_s_own_bullet_shape_is_accepted(self) -> None:
-        """`render_validators._iter_workout_exercise_bullets` says
+        """`plan_validators._iter_workout_exercise_bullets` says
         ``name`` / ``sets``; this module says ``exercise`` /
         ``prescribed_sets``. Both are exercise bullets with a working-set
         count, and the classifier has to read the shape the GATE holds —
@@ -465,7 +465,7 @@ class BlockMustNotContradictTheCoreSpecTests(unittest.TestCase):
 
     def test_compliant_never_means_every_axis_was_checked(self) -> None:
         """The three flexion axes have one implementation, in
-        `render_validators`, and a second copy here is how the two end up
+        `plan_validators`, and a second copy here is how the two end up
         disagreeing about the number that decides a render. They are
         named rather than silently omitted.
         """

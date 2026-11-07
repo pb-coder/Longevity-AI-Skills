@@ -18,7 +18,7 @@ from pathlib import Path
 from test_check_plan import _GOOD_COACH, _check, _write_inputs
 from test_w3a_enforcement import _PLAN_COMPLIANT
 
-from workout_coach.lib.render_validators import (
+from workout_coach.lib.plan_validators import (
     CARDIO_SECTION_TAG,
     MAIN_PATTERN_TAG,
     NEXT_DOSE_DRIFT_TAG,

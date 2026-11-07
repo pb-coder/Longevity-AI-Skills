@@ -1,17 +1,6 @@
 """The one check sequence every `/coach` plan must pass.
 
-Two scripts run it and neither owns it:
-
-* ``scripts/check_plan.py`` — the default `/coach` path. Runs these
-  checks and writes nothing.
-* ``scripts/render_dashboard.py`` — the opt-in report. Runs the SAME
-  checks, and renders only when they pass.
-
-The checks used to live inline in the renderer's ``main()``, so making
-the report optional would have made the checks optional with it: a plan
-written without a report would ship with no core spec, no per-muscle
-floor, no set budget and no opener cross-check. One function, two
-callers, so the two paths cannot drift apart.
+``scripts/check_plan.py`` runs these checks and writes nothing.
 
 Stage order and early exit are part of the contract: tracker payload,
 then ``coach_reads.json``, then the workout markdown's copy, then the
@@ -19,9 +8,7 @@ prescription content. A failing stage stops the sequence, and the files
 for later stages are not even read, so a broken tracker JSON reports as
 a tracker error and not as whatever the next stage trips on.
 
-Every message is printed to stderr with the same prefix the renderer
-has always used, so a coach reading the output sees the same lines
-whichever script ran.
+Messages are printed to stderr with stable diagnostic prefixes.
 """
 from __future__ import annotations
 
@@ -32,7 +19,7 @@ from pathlib import Path
 from typing import TextIO
 
 from tracker.validation import validate_tracker_json
-from .render_validators import (
+from .plan_validators import (
     is_cadence_deload_week,
     is_deload_week,
     payload_spec_errors,
@@ -49,7 +36,7 @@ class PlanCheckResult:
 
     ``exit_code`` is 0 (every blocking check passed) or 2 (a blocking
     check failed; the messages are already printed). ``coach`` and
-    ``workout_md`` are the loaded inputs, so the renderer does not read
+    ``workout_md`` are the loaded inputs, so callers need not read
     the files a second time; either is ``None`` when the sequence
     stopped before reaching it.
     """
@@ -65,7 +52,7 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
     """Run every plan check, print each finding, return the outcome.
 
     ``j`` is the parsed tracker JSON (the caller parses it because the
-    renderer also accepts it on stdin). ``coach_path`` and
+    CLI also accepts it on stdin). ``coach_path`` and
     ``workout_md_path`` are read here, in stage order.
     """
     out = stream if stream is not None else sys.stderr
@@ -100,7 +87,7 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
     # Pass the payload so coach-authored scores are checked against the
     # numbers they claim to report. Without it the cross-check is inert:
     # a card may state a recovery score the tracker contradicts, and the
-    # dashboard renders both, side by side, at exit 0.
+    # conflicting assessment would otherwise pass validation.
     errors, warnings = validate_coach_reads(coach, j)
     warn("coach_reads warning", warnings)
     if errors:
@@ -130,7 +117,7 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
     #
     # ROTATION IS ADVISORY THIS RELEASE and this module does not decide
     # that. `validate_workout_plan` routes rotation findings by the one
-    # named constant `render_validators.BLOCK_ROTATION_ENFORCED`, so they
+    # named constant `plan_validators.BLOCK_ROTATION_ENFORCED`, so they
     # arrive here in `plan_warnings` and no rotation finding can produce
     # an exit 2. Nothing below needs to change when stage two flips it:
     # the findings simply arrive in `plan_errors` instead.
@@ -141,11 +128,11 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
     # and placement stay blocking — they cost no fatigue. The block's cadence
     # deload halves ONE session and demotes nothing: the floors stay
     # blocking, scaled by (n - 0.5) / n. A Tier C recovery downgrade is NOT a
-    # deload and keeps every floor: see `render_validators.DELOAD_WEEK_LABELS`.
+    # deload and keeps every floor: see `plan_validators.DELOAD_WEEK_LABELS`.
     #
     # THE SPECS ARE NOT PASSED IN, and that is deliberate. `read_tracker`
     # writes `core_week_spec` / `arm_week_spec` into the payload straight
-    # from `constants`, which is the same constant `render_validators`
+    # from `constants`, which is the same constant `plan_validators`
     # already imports, so this call used to hand the validator back its
     # own defaults — a measured no-op (passing `None` instead changed no
     # output anywhere). It was not a harmless one, though: it made the

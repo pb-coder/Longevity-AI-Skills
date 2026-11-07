@@ -1,21 +1,14 @@
-"""Check a `/coach` plan without rendering the HTML report.
+"""Check a `/coach` assessment and workout plan.
 
 Inputs:
   --tracker     path to JSON from read_tracker.py (or "-" for stdin)
   --coach       path to coach_reads.json
   --workout-md  path to <date>-workout.md
 
-This is step 4 of the default `/coach` pipeline. It runs every check the
-report renderer runs, through the same function
-(`lib/plan_checks.run_plan_checks`), prints the same warnings and errors
-to stderr, and writes nothing. Exit 0 means the plan passed every
-blocking check; exit 2 means fix the plan and rerun.
-
-One check runs here and NOT in the renderer: ``coach_reads.json`` must
-be strictly older on disk than the workout markdown, because the plan is
-built on top of the saved assessment. The renderer skips it on purpose:
-a report asked for later, after a card's wording was edited, legitimately
-has a newer ``coach_reads.json``.
+Runs the shared plan checks, prints warnings and errors to stderr, and
+writes nothing. Exit 0 means the plan passed every blocking check; exit
+2 means fix the plan and rerun. The assessment must be saved before the
+workout markdown because the plan builds on the saved assessment.
 """
 from __future__ import annotations
 

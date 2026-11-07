@@ -1154,20 +1154,6 @@ class OwedLiftIsNotSwappableTests(unittest.TestCase):
         self.assertTrue(payload["estimated_1rm"][BENCH]["weight_owed"])
 
 
-class BlockCardCountTests(unittest.TestCase):
-    def test_the_card_counts_the_blocks_lifts_not_every_next_dose_entry(self):
-        from workout_coach.lib.render_cards_today import _dose_delta_rows
-        nd = {"load_policy": "progress", "exercises": [
-            {"exercise": "A", "action": "add_load"},
-            {"exercise": "B", "action": "add_reps"},
-            {"exercise": "C", "action": "add_load"},      # not in the block
-            {"exercise": "D", "action": "hold"}]}          # not in the block
-        block = {"slots": [{"exercise": "A"}, {"exercise": "b"},
-                           {"exercise": "A"}]}
-        html = _dose_delta_rows(nd, block)
-        self.assertIn("1 of 2 lifts", html)
-        # Without a block, every entry counts.
-        self.assertIn("2 of 4 lifts", _dose_delta_rows(nd, None))
 
 
 class RotationGapTests(unittest.TestCase):
@@ -1587,7 +1573,7 @@ class PayloadTests(unittest.TestCase):
 
     def test_muscle_floors_are_the_numbers_the_validator_enforces(self):
         from workout_coach.lib.constants import floor_scale
-        from workout_coach.lib.render_validators import muscle_floors
+        from workout_coach.lib.plan_validators import muscle_floors
         floors = self.payload["muscle_floors"]
         tiers = {m: v["tier"]
                  for m, v in self.payload["muscle_volume_targets"].items()}

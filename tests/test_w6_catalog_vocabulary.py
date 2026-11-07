@@ -238,7 +238,7 @@ class NewCatalogEntryTests(unittest.TestCase):
 
     def test_plate_around_the_world_is_not_a_flexion_movement(self) -> None:
         """Spec §4.2: it must never satisfy the flexion requirement.
-        ``render_validators`` reads flexion membership straight out of the
+        ``plan_validators`` reads flexion membership straight out of the
         CORE ``Flexion`` subsection, so subsection placement IS the rule."""
         flexion = [exdb.entry_canonical_name(e) for e in
                    self.parsed["muscles"]["CORE"]["sections"]["Flexion"]]
@@ -373,7 +373,7 @@ class AliasTests(unittest.TestCase):
     def test_the_render_gate_still_rejects_band_pull_apart(self) -> None:
         """The gate ff13d82 relied on, proven live. A plan bullet naming the
         movement must be a hard render error, not a warning."""
-        from workout_coach.lib import render_validators as rv
+        from workout_coach.lib import plan_validators as rv
 
         rv._workout_exercise_name_set.cache_clear()
         try:

@@ -573,7 +573,7 @@ def deload_cadence(deloads: list[str] | None, today_d: date,
     silently lowers them.
 
     This covers the PLANNED path only. A REACTIVE deload comes from the
-    recovery gate (``render_validators.is_deload_week``, a full-block cut);
+    recovery gate (``plan_validators.is_deload_week``, a full-block cut);
     a caller that wants "is this a deload week at all" takes the OR of the
     two, but only the reactive one makes the volume floors advisory.
     """
@@ -1108,7 +1108,7 @@ def rotation_diff_errors(prev_block: dict | None, new_block: dict | None,
     rotation is legal. Every string names the session type so the caller
     can point at the offending bullet.
 
-    The signature is fixed: this is what ``render_validators``' render
+    The signature is fixed: this is what ``plan_validators``' render
     gate calls. ``rotation_diff_report`` is the same computation with its
     non-blocking findings attached — read that one when you need to know
     WHY the list is empty (mid-block, un-diffable, a session that has no
@@ -1200,7 +1200,7 @@ def core_spec_conflicts(block: dict | None, catalog: dict | None = None,
     ``min_loaded_flexion_exercises_per_week``) are NOT checked here, and
     that is a rule about this repo rather than about the data: the
     combined requirement is one formula and it already has one
-    implementation, in `render_validators`. A second copy is how the two
+    implementation, in `plan_validators`. A second copy is how the two
     end up disagreeing about the number that decides a render. They are
     named in ``axes_not_checked`` so ``compliant: True`` reads as
     "compliant on the axes an artifact can answer", never as "checked
@@ -1326,7 +1326,7 @@ def core_spec_conflicts(block: dict | None, catalog: dict | None = None,
         ],
         # Named, not silently omitted: `compliant` must never read as
         # "every axis was checked". See the docstring for why these three
-        # live in `render_validators` and only there.
+        # live in `plan_validators` and only there.
         "axes_not_checked": [
             "min_flexion_sets_per_week", "min_flexion_share_of_core_sets",
             "min_loaded_flexion_exercises_per_week",

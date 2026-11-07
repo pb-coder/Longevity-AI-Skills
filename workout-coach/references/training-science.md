@@ -425,7 +425,7 @@ diastasis-recti population, untrained, dose never reported in sets, small effect
 **The per-session dose is `core_week_spec.sets_per_session` in `lib/constants.py`, not a
 number in this file** — 4 on lower days, 2 on upper (D3), with the weekly target read from
 `muscle_volume_targets["core"]`. Lower days carry the larger share because they have the
-isolation slots to spare. The dose is enforced as a blocking render error in both directions:
+isolation slots to spare. The dose is enforced as a blocking validation error in both directions:
 under-allocation is the failure this block exists to fix, over-allocation past the tolerance
 means core is eating budget it did not earn. It costs a few minutes of a 60-minute session
 either way; core does not take sets from chest, back or legs.
@@ -480,7 +480,7 @@ available on this question, and it outranks a null that assumes compliance. Evid
 
 **The same argument binds direct arm work**, which is the other allocation the logs show
 being truncated: nothing here is specific to the trunk, only to the slot. Both are enforced
-— core or a biceps/triceps exercise as a workout's last bullet is a blocking render error.
+— core or a biceps/triceps exercise as a workout's last bullet is a blocking validation error.
 Close the session on something that is neither: rear delts, calves, a face pull. **Not "a
 carry"** — `Suitcase Carry` is core (anti-lateral-flexion; see the slot-B table in §24.3
 and the D4 note in §24.8), so closing on it trips the core placement error rather than
@@ -544,7 +544,7 @@ mechanistic analogy to the Pallof press, and it must never satisfy the flexion r
 
 The countable part of all this — how many distinct exercises, how many categories, how often
 one movement may repeat, and the one-loaded-flexion-per-week floor — is `core_week_spec` in
-`lib/constants.py`, enforced as blocking render errors. Do not restate those numbers in prose.
+`lib/constants.py`, enforced as blocking validation errors. Do not restate those numbers in prose.
 
 **Prefer the movements <Person> will actually perform.** A prescription with a 0% completion
 rate delivers 0 sets regardless of its evidence base. When adherence data exists in the log,

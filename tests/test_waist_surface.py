@@ -35,7 +35,6 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from workout_coach.lib.render_cards_health import card_vitals
 from workout_coach.lib.sessions import (
     WAIST_TREND_MIN_READINGS,
     WAIST_TREND_MIN_WINDOW_DAYS,
@@ -514,92 +513,6 @@ def _waist_row(html: str) -> str:
     return rows[0] if rows else ""
 
 
-class WaistCardTests(unittest.TestCase):
-    def test_an_empty_channel_says_not_measured_rather_than_vanishing(self) -> None:
-        html = _vitals([{"week_start": "2026-07-27", "hrv_sdnn": 55}])
-        row = _waist_row(html)
-        self.assertTrue(row, "the waist row disappeared on an empty channel")
-        self.assertIn("not measured", row)
-
-    def test_a_single_point_says_so_and_draws_no_line(self) -> None:
-        html = _vitals(_weekly_series("2026-07-13", [None, None, 87.0]))
-        row = _waist_row(html)
-        self.assertIn("87.0", row)
-        self.assertIn("no trend", row)
-        self.assertNotIn("polyline", row,
-                         "one point must not be drawn as a flat line")
-
-    def test_two_or_more_points_draw_the_sparkline(self) -> None:
-        html = _vitals(_weekly_series("2026-07-13", [88.4, 87.9, 87.0]))
-        row = _waist_row(html)
-        self.assertIn("polyline", row)
-
-    def test_an_unresolved_block_names_its_reason(self) -> None:
-        cases = {
-            "no_readings":             "not measured",
-            "too_few_readings":        "too few measurements",
-            "window_shorter_than_min": "window under 56d",
-            "no_time_variance":        "one day only",
-            "ci_straddles_zero":       "direction unresolved",
-        }
-        weekly = _weekly_series("2026-07-13", [88.4, 87.9, 87.0])
-        for reason, label in cases.items():
-            with self.subTest(reason=reason):
-                row = _waist_row(_vitals(weekly, waist_trend_block={
-                    "state": "unresolved", "reason": reason,
-                    "cm_per_4w": None}))
-                self.assertIn(label, row)
-
-    def test_an_unresolved_block_never_prints_a_rate(self) -> None:
-        weekly = _weekly_series("2026-07-13", [88.4, 87.9, 87.0])
-        row = _waist_row(_vitals(weekly, waist_trend_block={
-            "state": "unresolved", "reason": "ci_straddles_zero",
-            "cm_per_4w": None, "point_cm_per_4w": -1.21}))
-        self.assertNotIn("cm/4w", row)
-        self.assertNotIn("-1.21", row)
-
-    def test_a_resolved_block_prints_the_rate_with_its_sign(self) -> None:
-        weekly = _weekly_series("2026-07-13", [88.4, 87.9, 87.0])
-        row = _waist_row(_vitals(weekly, waist_trend_block={
-            "state": "resolved", "reason": None, "cm_per_4w": -1.21}))
-        self.assertIn("-1.21 cm/4w", row)
-
-    def test_the_headline_value_prefers_the_latest_measurement(self) -> None:
-        """The weekly series carries ISO-week MEANS; ``waist_latest`` is the
-        measurement itself, so it wins the value cell when supplied."""
-        weekly = _weekly_series("2026-07-13", [88.4, 87.9, 87.0])
-        row = _waist_row(_vitals(
-            weekly, waist_latest={"value_cm": 86.2, "date": "2026-08-02"}))
-        self.assertIn("86.2", row)
-
-    def test_a_resolved_block_with_no_rate_is_not_read_as_zero(self) -> None:
-        """A malformed block must not print a bare unit or a "+0.00"."""
-        weekly = _weekly_series("2026-07-13", [88.4, 87.9, 87.0])
-        row = _waist_row(_vitals(weekly, waist_trend_block={
-            "state": "resolved", "reason": None, "cm_per_4w": None}))
-        self.assertNotIn("cm/4w", row)
-        self.assertNotIn("0.00", row)
-
-    def test_an_unknown_future_reason_falls_back_without_inventing_one(self) -> None:
-        weekly = _weekly_series("2026-07-13", [88.4, 87.9, 87.0])
-        row = _waist_row(_vitals(weekly, waist_trend_block={
-            "state": "unresolved", "reason": "some_future_reason",
-            "cm_per_4w": None}))
-        self.assertIn("trend unresolved", row)
-
-    def test_the_card_carries_no_raw_hex_colour(self) -> None:
-        """Per Skills/DESIGN.md, colour lives in the token front matter and
-        render modules reference CSS variables."""
-        html = _vitals(_weekly_series("2026-07-13", [88.4, 87.9, 87.0]),
-                       waist_latest={"value_cm": 87.0, "date": "2026-08-02"},
-                       waist_trend_block={"state": "resolved", "reason": None,
-                                          "cm_per_4w": -1.21})
-        self.assertEqual(_HEX_LITERAL_RE.findall(html), [])
-
-    def test_the_bodyweight_row_is_unchanged_by_the_new_neighbour(self) -> None:
-        html = _vitals(_weekly_series("2026-07-13", [88.4, 87.9, 87.0]))
-        self.assertIn(">Bodyweight<", html)
-        self.assertIn(">VO2max<", html)
 
 
 if __name__ == "__main__":

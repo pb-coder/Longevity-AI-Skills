@@ -1,11 +1,4 @@
-"""`check_plan.py`: the plan checks without the HTML report.
-
-The report became opt-in, and every plan check used to live inside the
-renderer's ``main()``. Skipping the report would have skipped the core
-and arm floors, the set budget, rotation and the opener cross-check with
-it. These tests pin the fix: one shared check sequence, two callers that
-print the same thing, and a default path that writes no HTML.
-"""
+"""The assessment and workout plan checks run without writing files."""
 from __future__ import annotations
 
 import json
@@ -22,7 +15,6 @@ from test_w3a_enforcement import _PLAN_COMPLIANT, _PLAN_CORE_DEFICIENT
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = SKILLS_ROOT / "workout-coach" / "scripts"
 CHECK_PLAN = SCRIPTS / "check_plan.py"
-RENDER_DASHBOARD = SCRIPTS / "render_dashboard.py"
 
 _GOOD_COACH = {"headline": "Train as planned.", "cards": {}}
 
@@ -46,19 +38,10 @@ def _check(tmp: Path) -> subprocess.CompletedProcess:
         cwd=SKILLS_ROOT, capture_output=True, text=True)
 
 
-def _render(tmp: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(RENDER_DASHBOARD),
-         "--tracker", str(tmp / "tracker.json"),
-         "--coach", str(tmp / "coach.json"),
-         "--workout-md", str(tmp / "workout.md"),
-         "--out", str(tmp / "out.html"),
-         "--person", "TestPerson"],
-        cwd=SKILLS_ROOT, capture_output=True, text=True)
 
 
-class ParityWithTheRendererTests(unittest.TestCase):
-    """Same inputs, same exit code, same stderr, whichever script ran."""
+class PlanCheckFindingsTests(unittest.TestCase):
+    """Passing and rejected plans keep their diagnostic behavior."""
 
     CASES = {
         "passing plan": (
@@ -76,16 +59,13 @@ class ParityWithTheRendererTests(unittest.TestCase):
             _GOOD_COACH, _PLAN_COMPLIANT, 2),
     }
 
-    def test_every_case_prints_the_same_findings(self) -> None:
+    def test_each_case_returns_the_expected_result(self) -> None:
         for name, (tracker, coach, md, expected) in self.CASES.items():
             with self.subTest(case=name), tempfile.TemporaryDirectory() as td:
                 tmp = Path(td)
                 _write_inputs(tmp, tracker, coach, md)
                 checked = _check(tmp)
-                rendered = _render(tmp)
                 self.assertEqual(checked.returncode, expected, checked.stderr)
-                self.assertEqual(rendered.returncode, expected, rendered.stderr)
-                self.assertEqual(checked.stderr, rendered.stderr)
                 if expected:
                     self.assertTrue(checked.stderr.strip(),
                                     "a refusal must say why")
@@ -98,10 +78,8 @@ class ParityWithTheRendererTests(unittest.TestCase):
             _write_inputs(tmp, {"today": "2026-08-02", "target_working_sets": 4},
                           _GOOD_COACH, _PLAN_COMPLIANT)
             checked = _check(tmp)
-            rendered = _render(tmp)
         self.assertEqual(checked.returncode, 0, checked.stderr)
         self.assertIn("workout_md plan warning:", checked.stderr)
-        self.assertEqual(checked.stderr, rendered.stderr)
 
 
 class WritesNothingTests(unittest.TestCase):
@@ -130,31 +108,28 @@ class FileOrderTests(unittest.TestCase):
             now = time.time()
             os.utime(tmp / "coach.json", (now - coach_age, now - coach_age))
             os.utime(tmp / "workout.md", (now - plan_age, now - plan_age))
-            return _check(tmp), _render(tmp)
+            return _check(tmp)
 
     def test_a_plan_older_than_its_assessment_is_refused(self) -> None:
-        checked, rendered = self._run_with_mtimes(coach_age=0, plan_age=60)
+        checked = self._run_with_mtimes(coach_age=0, plan_age=60)
         self.assertEqual(checked.returncode, 2)
         self.assertIn("file order error:", checked.stderr)
-        # The report skips this on purpose: it may be asked for later,
-        # after a card's wording was edited.
-        self.assertEqual(rendered.returncode, 0, rendered.stderr)
 
     def test_equal_timestamps_are_refused(self) -> None:
-        checked, _ = self._run_with_mtimes(coach_age=30, plan_age=30)
+        checked = self._run_with_mtimes(coach_age=30, plan_age=30)
         self.assertEqual(checked.returncode, 2)
         self.assertIn("file order error:", checked.stderr)
 
 
 class OneSourceOfTruthTests(unittest.TestCase):
-    """Both scripts call the shared sequence; neither carries a copy."""
+    """The public CLI calls the shared sequence without copying it."""
 
     _VALIDATORS = ("validate_tracker_json(", "payload_spec_errors(",
                    "validate_coach_reads(", "validate_workout_md(",
                    "validate_workout_plan(")
 
-    def test_both_scripts_run_the_shared_sequence(self) -> None:
-        for script in (CHECK_PLAN, RENDER_DASHBOARD):
+    def test_cli_runs_the_shared_sequence(self) -> None:
+        for script in (CHECK_PLAN,):
             with self.subTest(script=script.name):
                 src = script.read_text(encoding="utf-8")
                 self.assertIn("run_plan_checks(j, args.coach, args.workout_md)", src)
@@ -226,10 +201,10 @@ class NoCardioInPlanDocsTests(unittest.TestCase):
         self.assertNotIn("add cardio sessions to the plan",
                          self._read("SKILL.md"))
 
-    def test_the_pipeline_checks_every_run_and_renders_on_request(self) -> None:
+    def test_the_pipeline_checks_every_run(self) -> None:
         skill = self._read("SKILL.md")
         self.assertIn("scripts/check_plan.py", skill)
-        self.assertIn("only when the user asked for the report", skill)
+        self.assertNotIn("scripts/render_dashboard.py", skill)
         self.assertIn("Tier A or B: stop here and ask", skill)
 
 

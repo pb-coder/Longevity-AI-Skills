@@ -21,7 +21,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from workout_coach.lib import render_validators
+from workout_coach.lib import plan_validators
 from workout_coach.lib.constants import (
     ARM_WEEK_SPEC,
     BLOCK_EMPHASIS_DEFAULT,
@@ -35,7 +35,7 @@ from workout_coach.lib.constants import (
     muscle_priority_tiers,
     muscle_volume_targets,
 )
-from workout_coach.lib.render_validators import (
+from workout_coach.lib.plan_validators import (
     MIN_CREDITED_CARRY_METRES,
     MIN_CREDITED_HOLD_SECONDS,
     arm_week_errors,
@@ -139,7 +139,7 @@ _PLAN_DEGENERATE_EQUIPMENT_FLAVOUR = _HEAD + "".join([
 
 
 class TimeAndDistanceWorkTests(unittest.TestCase):
-    """`render_validators` used to accept only `kg`, digit-x-digit or
+    """`plan_validators` used to accept only `kg`, digit-x-digit or
     `///` as evidence of work, so an isometric hold or a loaded carry
     scored zero sets."""
 
@@ -398,7 +398,7 @@ class CoreWeekSpecTests(unittest.TestCase):
             [e for e in core_week_errors(plan) if "pattern categories" in e], [])
 
     def test_fails_open_when_the_catalog_resolves_no_core_movement(self) -> None:
-        with patch.object(render_validators, "_core_pattern_categories",
+        with patch.object(plan_validators, "_core_pattern_categories",
                           return_value=(set(), {})):
             self.assertEqual(
                 core_week_errors(_PLAN_ONE_EXERCISE_EVERY_SESSION), [])
@@ -410,7 +410,7 @@ class CoreWeekSpecTests(unittest.TestCase):
         # Drift guard: the spec names one category by string. If the
         # catalog's CORE subsection is renamed, the loaded-flexion axis
         # would silently stop firing.
-        _, categories = render_validators._core_pattern_categories()
+        _, categories = plan_validators._core_pattern_categories()
         self.assertIn(CORE_WEEK_SPEC["flexion_category"], categories)
 
 
@@ -464,7 +464,7 @@ class FlexionSetFloorTests(unittest.TestCase):
                                 (9, 3), (10, 4), (12, 4), (15, 5), (24, 8)):
             with self.subTest(total_core_sets=total):
                 self.assertEqual(
-                    render_validators._required_flexion_sets(
+                    plan_validators._required_flexion_sets(
                         total, CORE_WEEK_SPEC),
                     expected)
 
@@ -475,9 +475,9 @@ class FlexionSetFloorTests(unittest.TestCase):
         self.assertEqual(floor, 3)
         # Below the crossover the absolute floor binds; above it, the share.
         self.assertEqual(
-            render_validators._required_flexion_sets(6, CORE_WEEK_SPEC), floor)
+            plan_validators._required_flexion_sets(6, CORE_WEEK_SPEC), floor)
         self.assertGreater(
-            render_validators._required_flexion_sets(24, CORE_WEEK_SPEC), floor)
+            plan_validators._required_flexion_sets(24, CORE_WEEK_SPEC), floor)
 
     def test_zero_core_sets_does_not_add_a_fourth_way_to_say_no_core(self) -> None:
         # A week with no core is already named three louder ways. "0 of 0
@@ -503,11 +503,11 @@ class FlexionSetFloorTests(unittest.TestCase):
         # structural and survives the relief.
         findings = dict(
             (msg, axis) for axis, msg
-            in render_validators._core_week_findings(
+            in plan_validators._core_week_findings(
                 _PLAN_EXPLOIT_MINIMAL_FLEXION))
         share = [m for m in findings if "core sets are flexion" in m]
         self.assertTrue(share, findings)
-        self.assertEqual(findings[share[0]], render_validators.AXIS_STRUCTURE)
+        self.assertEqual(findings[share[0]], plan_validators.AXIS_STRUCTURE)
 
         errors, _ = validate_workout_plan(_PLAN_EXPLOIT_MINIMAL_FLEXION,
                                           deload_week=True)
@@ -534,10 +534,10 @@ class FlexionSetFloorTests(unittest.TestCase):
                      "Cable Lateral Raise: 14kgx10 /// 14kgx10"),
         ])
         findings = dict((msg, axis) for axis, msg
-                        in render_validators._core_week_findings(plan))
+                        in plan_validators._core_week_findings(plan))
         absolute = [m for m in findings if "flexion sets across the plan" in m]
         self.assertTrue(absolute, findings)
-        self.assertEqual(findings[absolute[0]], render_validators.AXIS_VOLUME)
+        self.assertEqual(findings[absolute[0]], plan_validators.AXIS_VOLUME)
         self.assertFalse([m for m in findings if "core sets are flexion" in m],
                          "the share is met; only the absolute floor is not")
 
@@ -740,7 +740,7 @@ class ArmWeekSpecTests(unittest.TestCase):
             "Dumbbell Flat Bench Press: 50kgx8 /// 50kgx8",
             "Cable Lat Pulldown: 65kgx8 /// 65kgx8")
         self.assertEqual(arm_week_errors(plan), [])
-        errors = render_validators.muscle_floor_errors(plan, {
+        errors = plan_validators.muscle_floor_errors(plan, {
             "muscle_volume_targets": {"biceps": {"tier": "maintain"},
                                       "triceps": {"tier": "maintain"}}})
         self.assertTrue(any("0 direct biceps sets" in e for e in errors))

@@ -579,7 +579,7 @@ class TierCVolumeTextTests(unittest.TestCase):
 
     def test_the_text_states_the_scale_the_validator_applies(self) -> None:
         from workout_coach.lib.constants import SESSION_GATE_THRESHOLDS as T
-        from workout_coach.lib.render_validators import tier_budget_by_index
+        from workout_coach.lib.plan_validators import tier_budget_by_index
         rec = recommendation(recovery={"score": 3.5, "drivers": []})
         scale = T["tier_c_session_budget_scale"]
         text = rec["substitute"]["prescription"]

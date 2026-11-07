@@ -44,7 +44,6 @@ import re
 import unittest
 from datetime import date, timedelta
 
-from workout_coach.lib import render_cards_health as rch
 from workout_coach.lib import sessions
 from workout_coach.lib.sessions import (
     BODYWEIGHT_MEASUREMENT_SD_KG,
@@ -621,69 +620,6 @@ class TheGateOnlyGotTighterTests(unittest.TestCase):
 
 
 # ------------------------------------------------------------------- C8
-class TheTooltipStatesTheGateItActuallyHasTests(unittest.TestCase):
-    """The one sentence a non-technical user reads directly.
-
-    It used to say "the rate needs at least 56 days of measurements before
-    it can resolve a direction". The estimator had no such requirement --
-    it needed 4 readings inside a 56-day window, which the C1 fixture
-    satisfies over three days.
-    """
-
-    def _tooltip(self) -> str:
-        html = rch.card_vitals(
-            [{"week_start": "2026-07-13", "hrv_sdnn": 55, "waist_cm": 87.4},
-             {"week_start": "2026-07-20", "hrv_sdnn": 56, "waist_cm": 87.2}],
-            {"value": 48.0}, 0.3, {"kg": 78.4, "date": "2026-08-01"},
-            None, [77.9, 78.1], "")
-        row = next(r for r in html.split("<tr>") if ">Waist<" in r)
-        return re.search(r'data-tip="([^"]*)"', row).group(1)
-
-    def test_it_no_longer_claims_a_requirement_the_gate_does_not_have(self) -> None:
-        tip = self._tooltip()
-        self.assertNotIn("56 days of measurements", tip)
-
-    def test_it_names_each_of_the_three_things_the_gate_checks(self) -> None:
-        tip = self._tooltip()
-        self.assertIn("4 measurements", tip)      # sample size
-        self.assertIn("39 days", tip)             # span
-        self.assertIn("4 weeks old", tip)         # recency
-
-    def test_it_admits_the_sparkline_is_shorter_than_the_fit(self) -> None:
-        """The sparkline is built over 4 weeks and the rate is fitted over
-        up to 8. The reconciliation belongs in the payload builder, which
-        this build does not own; until then the tooltip must not let the
-        reader assume the line and the number cover the same period."""
-        tip = self._tooltip()
-        self.assertIn("last 4 weeks", tip)
-        self.assertIn("8", tip)
-
-    def test_both_new_reason_codes_render_their_own_words(self) -> None:
-        for reason, label in (("span_shorter_than_min", "span under"),
-                              ("readings_stale", "last measured over")):
-            with self.subTest(reason=reason):
-                self.assertIn(label, rch._WAIST_STATE_LABEL[reason])
-        for reason in ("span_shorter_than_min", "readings_stale"):
-            with self.subTest(bw=reason):
-                self.assertIn(reason, rch._BW_STATE_LABEL)
-        # Distinct wording, or the distinction is decorative.
-        self.assertEqual(len(set(rch._WAIST_STATE_LABEL.values())),
-                         len(rch._WAIST_STATE_LABEL))
-        self.assertEqual(len(set(rch._BW_STATE_LABEL.values())),
-                         len(rch._BW_STATE_LABEL))
-
-    def test_every_reason_the_estimator_can_emit_has_a_label(self) -> None:
-        """A new reason code with no label falls through to a generic
-        "trend unresolved", which is how the dashboard ends up saying less
-        than the estimator knows."""
-        emitted = set(re.findall(r'"(\w+)", \*tail',
-                                 inspect.getsource(sessions._trend_verdict)))
-        emitted.discard("no_readings")   # emitted, and mapped, on both
-        self.assertTrue(emitted, "reason codes could not be extracted")
-        for reason in emitted | {"no_readings"}:
-            with self.subTest(reason=reason):
-                self.assertIn(reason, rch._WAIST_STATE_LABEL)
-                self.assertIn(reason, rch._BW_STATE_LABEL)
 
 
 class ThresholdsStayTiedToTheirDerivationTests(unittest.TestCase):

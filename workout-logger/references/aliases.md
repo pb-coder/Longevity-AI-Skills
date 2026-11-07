@@ -91,6 +91,10 @@
 | Assisted Nordic, Nordic Regression | Assisted Nordic Hamstring Curl | NOT `Nordic Hamstring Curl` — the assisted entry is the rung below it |
 | Bed Back Extension, Bed Edge Back Extension | Bed-Edge Back Extension | — |
 | Neck Isometrics, Self Resisted Neck | Self-Resisted Neck Isometric | — |
+| Sitting Stomach Press Machine | Stomach Press Machine | — |
+| Duale Bauch Machine | Stomach Press Machine | — |
+| Cable Ab Crunch | Kneeling Cable Crunch | — |
+| Laying stomach machine | Stomach Press Machine | — |
 
 ## Deliberately NOT aliased
 

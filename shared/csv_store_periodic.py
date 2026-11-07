@@ -12,7 +12,6 @@ from .csv_store_common import (
     _read_periodic_records,
     _write_csv,
     _write_periodic_records,
-    replace_upsert_records,
     sparse_upsert_records,
 )
 from .person_paths import (
@@ -38,7 +37,6 @@ __all__ = [
     "read_swim_workouts",
     "upsert_swim_workouts",
     "read_swim_laps",
-    "upsert_swim_laps",
     "read_sleep_nights",
     "upsert_sleep_nights",
     "read_nutrition_phases",
@@ -163,68 +161,6 @@ def read_swim_laps(person: str) -> list[dict]:
         ))
     out.sort(key=lambda r: (r["date"], r.get("lap_num") or 0))
     return out
-
-
-def upsert_swim_laps(person: str, entries: Iterable[dict]) -> list[str]:
-    """Replace-on-match upsert into per-month
-    ``<person>/data/swimming/YYYY.MM.laps.csv``.
-
-    Each entry is routed to its month by ``date``. Dedupe within the
-    month by ``(date, workout_start, lap_num)``. Lap data is fully
-    Apple-sourced — there's no manual lap entry today — so re-imports
-    are treated as authoritative replacement rather than sparse-merge.
-    """
-    entries = list(entries or [])
-    if not entries:
-        return ["Swim Laps: 0 laps written / 0 updated"]
-
-    by_month_entries = _group_entries_by_month(entries)
-
-    total_written = 0
-    total_updated = 0
-    summaries: list[str] = []
-    spec = CsvTableSpec(
-        headers=SWIM_LAPS_HEADERS,
-        fields=["date"] + SWIM_LAPS_FIELDS,
-        key_fields=("date", "workout_start", "lap_num"),
-        sort_fields=("date", "workout_start", "lap_num"),
-        sort_reverse=False,
-        notes_field=None,
-    )
-
-    def _sanitize_lap(e: dict) -> dict | None:
-        if e.get("workout_start") is None or e.get("lap_num") is None:
-            return None
-        out = {"date": e["date"]}
-        for k in SWIM_LAPS_FIELDS:
-            out[k] = e.get(k)
-        out["workout_start"] = str(out["workout_start"])
-        out["lap_num"] = int(out["lap_num"])
-        return out
-
-    for ym, month_entries in sorted(by_month_entries.items()):
-        path = swim_laps_csv(person, ym)
-        existing = _read_periodic_records(
-            path,
-            SWIM_LAPS_FIELDS,
-            SWIM_LAPS_HEADERS,
-            string_fields={"workout_start", "stroke_decoded", "source"},
-            include_notes=False,
-        )
-        records, written, updated = replace_upsert_records(
-            existing, month_entries, spec, sanitize=_sanitize_lap,
-        )
-        ensure_swimming_dir(person)
-        _write_periodic_records(
-            path, SWIM_LAPS_HEADERS, SWIM_LAPS_FIELDS, records,
-            include_notes=False,
-        )
-        total_written += written
-        total_updated += updated
-        summaries.append(f"  {ym}: {written} written / {updated} updated")
-
-    return [f"Swim Laps: {total_written} laps written / "
-            f"{total_updated} updated across {len(by_month_entries)} month(s)"] + summaries
 
 
 # ============================================================ Sleep (per-night)

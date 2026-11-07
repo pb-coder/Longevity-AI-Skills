@@ -6,7 +6,7 @@ not drift.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 
 def build_auto_cardio_payload(
@@ -14,7 +14,6 @@ def build_auto_cardio_payload(
     *,
     eligible_types: set[str],
     type_to_exercise: Mapping[str, str],
-    machine_tag_for: Callable[[dict], str | None] | None = None,
 ) -> list[dict]:
     """Convert workout-session rows into ``upsert_monthly_cardio`` payloads."""
     payload: list[dict] = []
@@ -25,7 +24,6 @@ def build_auto_cardio_payload(
         tracker_name = type_to_exercise.get(apple_type)
         if not tracker_name:
             continue
-        machine_tag = machine_tag_for(workout) if machine_tag_for else None
         row = {
             "date":         workout.get("date"),
             # Forward the workout's start clock time (HH:MM:SS from both
@@ -43,7 +41,5 @@ def build_auto_cardio_payload(
             "elevation_m":  workout.get("elevation_m"),
             "elapsed_min":  workout.get("elapsed_min"),
         }
-        if machine_tag:
-            row["machine_tag"] = machine_tag
         payload.append(row)
     return payload

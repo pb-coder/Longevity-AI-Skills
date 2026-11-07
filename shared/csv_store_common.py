@@ -17,7 +17,6 @@ from tracker.csv_table import (
 
 __all__ = [
     "CsvTableSpec",
-    "ensure_data_dir_for",
     "replace_upsert_records",
     "sparse_upsert_records",
 ]
@@ -31,11 +30,6 @@ def _read_csv_rows(path: Path) -> tuple[list[str], list[list[str]]]:
 def _write_csv(path: Path, header: list[str], rows: list[list]) -> None:
     """Atomic CSV write through the central table writer."""
     _table_write_csv_atomic(path, header, rows)
-
-
-def ensure_data_dir_for(path: Path) -> None:
-    """Internal helper: create the parent directory of a CSV path."""
-    path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _date_to_year_month(date_str: str) -> str:

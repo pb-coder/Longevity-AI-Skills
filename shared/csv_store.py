@@ -17,7 +17,6 @@ from .csv_store_common import (  # noqa: F401
     _read_csv_rows,
     _serialize_value,
     _write_csv,
-    ensure_data_dir_for,
     replace_upsert_records,
     sparse_upsert_records,
 )
@@ -58,7 +57,6 @@ from .csv_store_periodic import (  # noqa: F401
     read_swim_workouts,
     upsert_nutrition_phases,
     upsert_sleep_nights,
-    upsert_swim_laps,
     upsert_swim_workouts,
 )
 from .csv_store_profile import (  # noqa: F401
@@ -75,7 +73,6 @@ from .csv_store_dense import _resolve_source  # noqa: F401,E402
 
 __all__ = [
     "CsvTableSpec",
-    "ensure_data_dir_for",
     "replace_upsert_records",
     "sparse_upsert_records",
     "BODY_COMPOSITION_FIELDS",
@@ -112,7 +109,6 @@ __all__ = [
     "read_swim_workouts",
     "upsert_nutrition_phases",
     "upsert_sleep_nights",
-    "upsert_swim_laps",
     "upsert_swim_workouts",
     "PROFILE_DEFAULTS",
     "PROFILE_KEYS",

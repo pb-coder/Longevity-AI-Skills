@@ -141,23 +141,27 @@ class StorageTests(unittest.TestCase):
 
         self.assertEqual(hhmm(datetime(2026, 5, 1, 8, 15, 37)), "08:15:37")
 
-    def test_swim_laps_replace_on_match(self) -> None:
-        base = {
-            "date": "2026-05-04",
-            "workout_start": "07:00:00",
-            "lap_num": 1,
-            "duration_sec": 30,
-            "swolf": 45,
-            "stroke_raw": 2,
-            "stroke_decoded": "Free",
-            "source": "xml",
-        }
-        csv_store.upsert_swim_laps("Test", [base])
-        changed = dict(base, swolf=46)
-        csv_store.upsert_swim_laps("Test", [changed])
+
+
+    def test_frozen_swim_lap_history_remains_readable(self) -> None:
+        import csv
+
+        path = person_paths.swim_laps_csv("Test", "2026.05")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        values = {"date": "2026-05-04", "workout_start": "07:00:00",
+                  "lap_num": 1, "duration_sec": 30, "swolf": 45,
+                  "stroke_decoded": "Free", "source": "xml"}
+        with path.open("w", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(csv_store.SWIM_LAPS_HEADERS)
+            writer.writerow([values.get(field, "") for field in
+                             ["date", *csv_store.SWIM_LAPS_FIELDS]])
+        before = path.read_bytes()
         rows = csv_store.read_swim_laps("Test")
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["swolf"], 46)
+        self.assertEqual(rows[0]["swolf"], 45)
+        self.assertEqual(rows[0]["workout_start"], "07:00:00")
+        self.assertEqual(path.read_bytes(), before)
 
 
 if __name__ == "__main__":

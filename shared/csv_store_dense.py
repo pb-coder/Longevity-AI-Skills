@@ -222,10 +222,8 @@ def read_body_composition(person: str, field: str = "waist_cm") -> list[dict]:
 
     ``field`` is one of ``BODY_COMPOSITION_FIELDS`` — ``waist_cm``,
     ``body_fat_pct``, ``lean_body_mass_kg`` or ``bodyweight_kg``. Each
-    entry is ``{"date": "YYYY-MM-DD", "value": <float>}``, the same shape
-    and ascending-date contract the coach's ``extract.read_bodyweight``
-    already returns for ``bodyweight_kg`` off this very CSV — so a trend
-    helper written against one works against all four.
+    entry is ``{"date": "YYYY-MM-DD", "value": <float>}``. All four fields
+    share this shape and ascending-date contract.
 
     Blank cells are skipped rather than yielded as ``0``: a column nobody
     has measured yet returns ``[]``, which reads as "no data" downstream

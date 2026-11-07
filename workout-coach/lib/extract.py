@@ -13,8 +13,6 @@ CSV readers:
   metadata into the per-session summary dict.
 - ``find_deloads(person)`` — dates whose TOTAL-row Notes contain the
   ``Deload Workout`` marker (case-insensitive).
-- ``read_bodyweight(person)`` — bodyweight series sourced from
-  ``health_metrics.csv`` col B, ASC.
 - ``read_health_metrics(person)`` — Health Metrics rows, ASC, with
   missing-key backfill, so a tracker whose CSV predates a schema
   widening still presents the full key surface.
@@ -210,23 +208,6 @@ def find_deloads(person: str) -> list[str]:
     return sorted(deloads)
 
 
-def read_bodyweight(person: str) -> list[dict]:
-    """Return bodyweight entries sorted ascending by date.
-
-    Sourced from the ``Bodyweight (kg)`` column on the per-person
-    ``health_metrics.csv``. Returns ``[{"date": ..., "kg": ..., "notes": None}]``.
-    Bodyweight no longer has a dedicated sheet — manual /log entries
-    flow through ``upsert_health_metrics`` (sparse-merge), so the same
-    source covers both manual and Apple-Watch readings.
-    """
-    out: list[dict] = []
-    for entry in read_health_metrics(person):
-        kg = entry.get("bodyweight_kg")
-        if kg is None:
-            continue
-        out.append({"date": entry["date"], "kg": kg, "notes": None})
-    out.sort(key=lambda e: e["date"])
-    return out
 
 
 def read_health_metrics(person: str) -> list[dict]:

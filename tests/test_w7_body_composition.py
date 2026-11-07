@@ -266,8 +266,8 @@ class ReadBodyCompositionTests(WarnStateTestCase):
         self.assertEqual(csv_store_dense.read_body_composition("Test", "lean_body_mass_kg"), [])
 
     def test_bodyweight_matches_the_existing_read_path(self) -> None:
-        # Same source column and ordering contract as the coach's
-        # extract.read_bodyweight, so a trend helper works on either.
+        # Bodyweight uses the same populated-reading and date-order rules
+        # as the other body-composition columns.
         csv_store.upsert_health_metrics("Test", [
             {"date": "2026-08-01", "bodyweight_kg": 79.5},
             {"date": "2026-07-25", "bodyweight_kg": 78.9},

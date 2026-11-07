@@ -49,24 +49,20 @@ from .monthly_csv import (  # noqa: E402
 )
 from .csv_store import (  # noqa: E402
     HEALTH_METRICS_HEADERS,
-    LIGHT_THERAPY_SESSIONS_HEADERS,
     SLEEP_NIGHTS_HEADERS,
     SWIM_LAPS_HEADERS,
     SWIM_WORKOUTS_HEADERS,
-    THERMAL_SESSIONS_HEADERS,
     WORKOUT_SESSIONS_HEADERS,
     migrate_health_metrics_header,
 )
 from .person_paths import (  # noqa: E402
     health_metrics_csv,
-    light_therapy_sessions_csv,
     monthly_csv as monthly_csv_path,
     monthly_dir,
     profile_csv,
     sleep_nights_csv,
     swim_laps_csv,
     swim_workouts_csv,
-    thermal_sessions_csv,
     workout_sessions_csv,
 )
 
@@ -155,11 +151,9 @@ def validate_csvs(person: str) -> list[str]:
     # Per-month swim CSVs. Workout aggregates are written on every
     # import; lap files are frozen history from the retired XML path.
     from .person_paths import (
-        list_light_therapy_session_months,
         list_sleep_night_months,
         list_swim_lap_months,
         list_swim_workout_months,
-        list_thermal_session_months,
     )
     for ym in list_swim_workout_months(person):
         targets[f"swimming/{ym}.workouts.csv"] = (
@@ -175,20 +169,6 @@ def validate_csvs(person: str) -> list[str]:
         targets[f"sleep/{ym}.nights.csv"] = (
             sleep_nights_csv(person, ym), SLEEP_NIGHTS_HEADERS, "desc"
         )
-    # Per-month thermal (sauna + cold) CSVs — manual /log only; absent
-    # until first sauna / cold session is logged.
-    for ym in list_thermal_session_months(person):
-        targets[f"thermal/{ym}.sessions.csv"] = (
-            thermal_sessions_csv(person, ym), THERMAL_SESSIONS_HEADERS, "desc"
-        )
-    # Per-month light-therapy (RLT / PBM / blue light) CSVs — manual
-    # /log only; absent until first light-therapy session is logged.
-    for ym in list_light_therapy_session_months(person):
-        targets[f"light_therapy/{ym}.sessions.csv"] = (
-            light_therapy_sessions_csv(person, ym),
-            LIGHT_THERAPY_SESSIONS_HEADERS, "desc"
-        )
-
     for label, (path, expected_header, order) in targets.items():
         if not path.exists():
             out.append(f"{label}: missing")

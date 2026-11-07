@@ -172,8 +172,6 @@ from workout_coach.lib.extract import (  # noqa: E402
     read_sleep_nights,
     read_swim_laps,
     read_swim_workouts,
-    read_light_therapy_sessions,
-    read_thermal_sessions,
     read_workout_sessions,
 )
 # The health analytics live in four focused modules, imported directly.
@@ -245,8 +243,6 @@ from workout_coach.lib.sleep import (  # noqa: E402
     sleep_summary,
 )
 from workout_coach.lib.swim import swim_summary  # noqa: E402
-from workout_coach.lib.thermal import thermal_summary  # noqa: E402
-from workout_coach.lib.light_therapy import light_therapy_summary  # noqa: E402
 from workout_coach.lib.nutrition_phase import nutrition_phase_summary  # noqa: E402
 
 
@@ -512,30 +508,12 @@ def _round_or_none(v: float | None, digits: int) -> float | None:
     return None if v is None else round(v, digits)
 
 
-def _bucket_recovery_sessions(thermal_sessions: list[dict] | None,
-                              light_sessions: list[dict] | None,
-                              start: date, end: date) -> float:
-    """Count recovery sessions (sauna/cold rows + light-therapy rows) whose
-    date falls in [start, end]. One thermal row = one protocol session
-    (a paired sauna+cold is a single row), matching the activity ring's
-    'sauna + cold + light' session semantics."""
-    n = 0
-    for src in (thermal_sessions or [], light_sessions or []):
-        for s in src:
-            d = _parse_iso_date(s.get("date"))
-            if d is not None and start <= d <= end:
-                n += 1
-    return float(n)
-
-
 def _build_week_over_week(today_d: date,
                           monthly_sessions: list[dict],
                           health_all: list[dict],
                           bw_all: list[dict],
                           max_hr: float | None = None,
-                          rest_hr: float | None = None,
-                          thermal_sessions: list[dict] | None = None,
-                          light_sessions: list[dict] | None = None) -> dict:
+                          rest_hr: float | None = None) -> dict:
     """Build the dashboard's this-week / last-week / 4-week-avg block.
 
     Buckets are calendar-ish windows anchored on ``today_d``: this-week
@@ -544,7 +522,7 @@ def _build_week_over_week(today_d: date,
     windows ending today. Bucketing by relative day rather than ISO
     week keeps the report stable when the coach runs mid-week.
 
-    The Zone-2 and recovery-session rows are computed on the SAME 7-day
+    The Zone-2 rows are computed on the SAME 7-day
     windows as the rest of the block so the dashboard's "This week at a
     glance" rings are window-consistent. (A prior bug rendered the Z2
     ring from a 28-day average divided by 4, which read far lower than
@@ -566,13 +544,6 @@ def _build_week_over_week(today_d: date,
         (cardio_hr_zones(monthly_sessions, today_d, max_hr, rest_hr,
                          window_days=28).get("z2") or 0.0) / 4.0
     )
-    rec_this = _bucket_recovery_sessions(thermal_sessions, light_sessions,
-                                         this_start, today_d)
-    rec_last = _bucket_recovery_sessions(thermal_sessions, light_sessions,
-                                         last_start, last_end)
-    rec_avg  = _bucket_recovery_sessions(thermal_sessions, light_sessions,
-                                         avg_start, today_d) / 4.0
-
     avg_strength = _bucket_strength_sessions(monthly_sessions, avg_start, today_d) / 4.0
     avg_cardio_sess = _bucket_cardio_sessions(monthly_sessions, avg_start, today_d) / 4.0
     avg_cardio_min = _bucket_cardio_min(monthly_sessions, avg_start, today_d) / 4.0
@@ -623,10 +594,6 @@ def _build_week_over_week(today_d: date,
             row(
                 "Zone 2 minutes", "cardio_z2_min",
                 z2_this, z2_last, z2_avg, 0, "min",
-            ),
-            row(
-                "Recovery sessions", "recovery_sessions",
-                rec_this, rec_last, rec_avg, 1, "sess",
             ),
             row(
                 "Sleep total", "sleep_total_h",
@@ -800,9 +767,6 @@ def main() -> int:
     swim_workouts_all = _clip_series(read_swim_workouts(person), today_d)
     swim_laps_all = _clip_series(read_swim_laps(person), today_d)
     sleep_nights_all = _clip_series(read_sleep_nights(person), today_d)
-    thermal_sessions_all = _clip_series(read_thermal_sessions(person), today_d)
-    light_therapy_sessions_all = _clip_series(
-        read_light_therapy_sessions(person), today_d)
     # Phases are keyed by ``start_date``; one that opens after ``today_d``
     # has not happened yet from this run's point of view. ``end_date`` needs
     # the same horizon and is the reason this reader is not a plain
@@ -1015,30 +979,6 @@ def main() -> int:
                 "n_nights":  len(sbd_vals),
                 "mean":      round(_mean_or_none(sbd_vals), 2),
             }
-    # Sauna frequency target reads from profile.csv (key
-    # ``sauna_target_per_week``) if set; otherwise the default 4×/week.
-    try:
-        sauna_target = int(profile.get("sauna_target_per_week") or 4)
-    except (TypeError, ValueError):
-        sauna_target = 4
-    thermal = thermal_summary(thermal_sessions_all, today_d,
-                              target_per_week=sauna_target)
-    # Light-therapy targets read from profile.csv if set; otherwise the
-    # module defaults (3×/wk, 10min/session).
-    try:
-        lt_target = int(profile.get("light_therapy_target_per_week") or 3)
-    except (TypeError, ValueError):
-        lt_target = 3
-    try:
-        lt_dose = int(profile.get("light_therapy_target_min_per_session") or 10)
-    except (TypeError, ValueError):
-        lt_dose = 10
-    light_therapy = light_therapy_summary(
-        light_therapy_sessions_all, today_d,
-        target_per_week=lt_target,
-        target_min_per_session=lt_dose,
-    )
-
     # ---- Nutrition phase (bulk / cut / maintain / recomp). Returns None
     # when no open phase. The summarizer needs estimated_1rm to detect
     # the "lifts stalled while bulking" stop-signal, so this call must
@@ -1131,8 +1071,6 @@ def main() -> int:
     week_over_week = _build_week_over_week(
         today_d, monthly_sessions, health_all, bw_all,
         max_hr=max_hr, rest_hr=rest_hr,
-        thermal_sessions=thermal_sessions_all,
-        light_sessions=light_therapy_sessions_all,
     )
 
     # ---- Longevity-trajectory derivations (Trajectory tab) ----
@@ -1342,19 +1280,10 @@ def main() -> int:
         # ---- Sleep summary (only present when XML tracker has nights in
         # the 28-day window; ``_compact`` drops None for HL or no-data). ----
         "sleep_summary": sleep,
-        # ---- Thermal summary (sauna + cold exposure, only present when
-        # at least one manual /log session in the 28-day window;
-        # ``_compact`` drops None when absent). ----
-        "thermal_summary": thermal,
-        # ---- Light-therapy summary (RLT / PBM / blue light, only
-        # present when at least one manual /log session in the 28-day
-        # window; ``_compact`` drops None when absent). ----
-        "light_therapy_summary": light_therapy,
         # ---- Nutrition phase (bulk / cut / maintain / recomp). Only
         # present when the person has an open phase in
         # nutrition_phases.csv; ``_compact`` drops None when absent so
-        # the renderer's card gate stays consistent with thermal /
-        # light_therapy. ----
+        # the renderer's card gate follows data presence. ----
         "nutrition_phase":      nutrition_phase,
         # ---- Daily activity (NEAT) — all-day movement beyond workouts.
         # ``assessment`` is now read off ``steps_daily_avg`` first;

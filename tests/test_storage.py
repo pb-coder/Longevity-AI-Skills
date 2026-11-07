@@ -50,18 +50,13 @@ class StorageTests(unittest.TestCase):
     def test_profile_roundtrips_targets_and_unknown_keys(self) -> None:
         csv_store.write_profile(
             "Test",
-            light_therapy_target_per_week=3,
-            light_therapy_target_min_per_session=12,
-            sauna_target_per_week=4,
+            swim_pool_length_default=25,
         )
         path = person_paths.profile_csv("Test")
         with path.open("a", encoding="utf-8", newline="") as f:
             f.write("custom_key,custom_value\n")
 
         profile = csv_store.read_profile("Test")
-        self.assertEqual(profile["light_therapy_target_per_week"], 3)
-        self.assertEqual(profile["light_therapy_target_min_per_session"], 12)
-        self.assertEqual(profile["sauna_target_per_week"], 4)
 
         csv_store.write_profile("Test", auto_cardio=False)
         self.assertIn("custom_key,custom_value", path.read_text(encoding="utf-8"))
@@ -103,119 +98,6 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(row["efficiency_pct"], 80.0)
         self.assertEqual(row["deep_h"], 1.2)
         self.assertEqual(row["notes"], "manual")
-
-    def test_thermal_defaults_and_heat_total_invariant(self) -> None:
-        csv_store.upsert_thermal_sessions(
-            "Test",
-            [{
-                "date": "2026-05-03",
-                "start": "18:30",
-                "heat_type": "dry",
-                "heat_round_durations_min": [12, 8],
-                "cold_type": "cold_air",
-                "cold_duration_sec": 300,
-            }],
-        )
-        row = csv_store.read_thermal_sessions("Test")[0]
-        self.assertEqual(row["heat_temp_c"], 90)
-        self.assertEqual(row["heat_rounds"], 2)
-        self.assertEqual(row["heat_total_min"], 20)
-
-    def test_thermal_unknown_enum_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            csv_store.upsert_thermal_sessions(
-                "Test",
-                [{
-                    "date": "2026-05-03",
-                    "start": "18:30",
-                    "heat_type": "mystery_sauna",
-                    "heat_round_durations_min": [10],
-                }],
-            )
-
-    def test_thermal_missing_start_preserves_same_shape_collisions(self) -> None:
-        csv_store.upsert_thermal_sessions(
-            "Test",
-            [{
-                "date": "2026-05-03",
-                "heat_type": "dry",
-                "heat_round_durations_min": [10],
-            }],
-        )
-        csv_store.upsert_thermal_sessions(
-            "Test",
-            [{
-                "date": "2026-05-03",
-                "cold_type": "cold_shower",
-                "cold_duration_sec": 60,
-            }],
-        )
-        csv_store.upsert_thermal_sessions(
-            "Test",
-            [{
-                "date": "2026-05-03",
-                "heat_type": "dry",
-                "heat_round_durations_min": [12],
-            }],
-        )
-        csv_store.upsert_thermal_sessions(
-            "Test",
-            [{
-                "date": "2026-05-03",
-                "heat_type": "dry",
-                "heat_round_durations_min": [12],
-            }],
-        )
-
-        rows = csv_store.read_thermal_sessions("Test")
-        self.assertEqual(len(rows), 3)
-        dry_rows = sorted(
-            [r for r in rows if r.get("heat_type") == "dry"],
-            key=lambda r: str(r.get("start") or ""),
-        )
-        cold = [r for r in rows if r.get("cold_type") == "cold_shower"][0]
-        self.assertEqual([r["heat_total_min"] for r in dry_rows], [10, 12])
-        self.assertEqual(dry_rows[1]["start"], "occurrence:2")
-        self.assertEqual(cold["cold_duration_sec"], 60)
-
-    def test_light_therapy_defaults_and_roundtrip(self) -> None:
-        csv_store.upsert_light_therapy_sessions(
-            "Test",
-            [{
-                "date": "2026-05-14",
-                "duration_min": 5,
-                "light_type": "red+ir",
-                "ambient_temp_c": 45,
-                "body_area": "full_body",
-            }],
-        )
-        row = csv_store.read_light_therapy_sessions("Test")[0]
-        self.assertEqual(row["duration_min"], 5)
-        self.assertEqual(row["light_type"], "red+ir")
-        self.assertEqual(row["ambient_temp_c"], 45)
-        self.assertEqual(row["modality"], "cabin")  # auto-defaulted from heated-cabin temp
-
-        # Sparse-merge: a later write only updates the column it touches.
-        csv_store.upsert_light_therapy_sessions(
-            "Test",
-            [{"date": "2026-05-14", "wavelength_nm": 660}],
-        )
-        row = csv_store.read_light_therapy_sessions("Test")[0]
-        self.assertEqual(row["wavelength_nm"], 660)
-        self.assertEqual(row["duration_min"], 5)
-        self.assertEqual(row["light_type"], "red+ir")
-
-    def test_light_therapy_unknown_enum_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            csv_store.upsert_light_therapy_sessions(
-                "Test",
-                [{"date": "2026-05-14", "duration_min": 10, "light_type": "ultraviolet"}],
-            )
-        with self.assertRaises(ValueError):
-            csv_store.upsert_light_therapy_sessions(
-                "Test",
-                [{"date": "2026-05-14", "duration_min": 10, "modality": "laser_pointer"}],
-            )
 
     def test_upsert_workout_sessions_reparsed_timestamp_is_idempotent(self) -> None:
         # Regression guard for a re-import duplication bug: the start key

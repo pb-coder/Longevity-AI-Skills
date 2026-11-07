@@ -3,15 +3,8 @@ from __future__ import annotations
 
 import re
 
-# Hardcoded mirror of the TypedDict surface in ``tracker.contracts``. Keyed by
-# contract name so the validator never has to import ``tracker.contracts`` (or
-# the stdlib ``typing`` module that comes with it) at runtime. The cumulative
-# import cost on the render cold path is ~4ms across ``typing`` + ``tracker``
-# + ``tracker.contracts``; switching to string-keyed metadata + a string
-# type-annotation surface lets ``tracker.validation`` import nothing beyond
-# ``re``. When a TypedDict field is added or removed in ``tracker.contracts``,
-# update the matching entry here -- ``test_tracker_validators.py`` exercises
-# the unknown-key warning paths.
+# Runtime key metadata mirrors ``tracker.contracts`` without importing typing.
+# Update both surfaces together; test_tracker_validators covers the boundary.
 _CONTRACT_DECLARED_KEYS: "dict[str, frozenset[str]]" = {
     "TrackerJSON": frozenset({
         "today", "data_source", "capabilities", "auto_cardio_enabled",
@@ -25,7 +18,7 @@ _CONTRACT_DECLARED_KEYS: "dict[str, frozenset[str]]" = {
         "synergist_credit_offset",
         "deloads", "auto_deload_candidates", "cardio_last_28d",
         "cardio_hr_zones_28d", "swim_summary", "sleep_summary",
-        "thermal_summary", "light_therapy_summary", "nutrition_phase",
+        "nutrition_phase",
         "daily_activity_28d", "energy_28d", "recovery", "training_load",
         "training_load_by_modality",
         "hr_at_volume_divergence", "age_years", "estimated_max_hr",
@@ -97,11 +90,11 @@ def _validate_nested_dict(obj, contract_name, label, errors, warnings):
 
 
 def validate_tracker_json(j):
-    """Validate tracker JSON before dashboard rendering.
+    """Validate tracker JSON before assessment and workout checks.
 
     Unknown keys are warnings so newer producer fields do not break older
-    renderers. Missing or invalid load-bearing fields are errors because the
-    renderer cannot produce a coherent dashboard without them.
+    consumers. Missing or invalid load-bearing fields are errors because
+    the plan checks rely on them.
     """
     errors = []
     warnings = []

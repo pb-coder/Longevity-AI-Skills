@@ -572,7 +572,7 @@ def _gate_tier(*,
     # `suppress_slow` so an over-recovered or just-rebounded athlete isn't
     # pinned in deload by a proxy signal).
     tier_b_fired = False
-    tier_b_kind = None  # zone_2 / reactive_deload_week / mobility_sauna
+    tier_b_kind = None  # zone_2 / reactive_deload_week / mobility
     # SLOW: high accumulated fatigue. Suppressed only by a served-deload
     # rebound (over-recovery can't coexist with TSB ≤ -15).
     if (tsb is not None and tsb <= T["tier_b_tsb_high_fatigue"]
@@ -634,7 +634,7 @@ def _gate_tier(*,
             zone2_hint = f" at ~{zone2_hr} bpm" if zone2_hr else ""
             substitute = {
                 "kind": "zone_2",
-                "prescription": f"Zone 2 cardio 45-60 min{zone2_hint} · mobility 15 min · sauna 15 min optional · no strength today",
+                "prescription": f"Zone 2 cardio 45-60 min{zone2_hint} · mobility 15 min · no strength today",
                 "duration_min": 60,
                 "notes": "Re-evaluate tomorrow. Resume strength once the recovery score and TSB both lift.",
             }

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import tempfile
 import subprocess
 import sys
 import unittest
@@ -43,12 +45,10 @@ class CliSemanticTests(unittest.TestCase):
         self.assertEqual(data["unknown_exercises"], [])
         self.assertIn("sleep_summary", data)
         self.assertIn("swim_summary", data)
-        self.assertIn("thermal_summary", data)
-        self.assertIn("light_therapy_summary", data)
-        self.assertEqual(data["light_therapy_summary"]["n_sessions_28d"], 1)
-        self.assertEqual(data["light_therapy_summary"]["dominant_light_type"], "red+ir")
-        self.assertEqual(data["light_therapy_summary"]["dominant_modality"], "cabin")
-        self.assertTrue(data["capabilities"]["light_therapy_log"])
+        self.assertNotIn("thermal_summary", data)
+        self.assertNotIn("light_therapy_summary", data)
+        self.assertNotIn("thermal_log", data["capabilities"])
+        self.assertNotIn("light_therapy_log", data["capabilities"])
         self.assertGreater(data["estimated_max_hr"], 150)
 
     def test_read_tracker_person_b_semantic_golden(self) -> None:
@@ -59,12 +59,41 @@ class CliSemanticTests(unittest.TestCase):
         self.assertEqual(data["unknown_exercises"], [])
         self.assertIn("sleep_summary", data)
         self.assertNotIn("swim_summary", data)
-        # person_b has no light_therapy/ folder yet → key absent.
         self.assertNotIn("light_therapy_summary", data)
         self.assertTrue(data["capabilities"]["hrv"])
         self.assertTrue(data["capabilities"]["per_workout_hr_strength"])
-        self.assertTrue(data["capabilities"]["light_therapy_log"])
+        self.assertNotIn("light_therapy_log", data["capabilities"])
         self.assertGreater(data["estimated_max_hr"], 150)
+
+    def test_retired_recovery_files_do_not_affect_coaching(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURE_ROOT / "person_b", root / "person_b")
+            env = os.environ.copy()
+            env["WORKOUT_TRACKER_ROOT"] = str(root)
+
+            def payload() -> dict:
+                proc = subprocess.run(
+                    [sys.executable, str(SKILLS_ROOT / "workout-coach" / "scripts" /
+                                         "read_tracker.py"), "--person", "person_b",
+                     "--today", "2026-05-17"],
+                    cwd=root, env=env, text=True, capture_output=True,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                return json.loads(proc.stdout)
+
+            before = payload()
+            data_dir = root / "person_b" / "data"
+            for name in ("thermal", "light_therapy"):
+                folder = data_dir / name
+                folder.mkdir()
+                # Even malformed archived files must never be consulted.
+                (folder / "2026.05.sessions.csv").write_text("retired archive\n")
+            with (data_dir / "profile.csv").open("a") as profile:
+                profile.write("\nsauna_target_per_week,99\n"
+                              "light_therapy_target_per_week,99\n"
+                              "light_therapy_target_min_per_session,999\n")
+            self.assertEqual(before, payload())
 
     def test_maintain_dry_run_is_read_only_and_explainable(self) -> None:
         maintain = str(SKILLS_ROOT / "shared" / "maintain.py")

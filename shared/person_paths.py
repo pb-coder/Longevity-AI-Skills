@@ -17,17 +17,13 @@ Layout (post-PR3a — pure CSV, no xlsx):
     │       ├── swimming/                  # per-workout aggregates; laps.csv is frozen history
     │       │   ├── YYYY.MM.workouts.csv
     │       │   └── YYYY.MM.laps.csv
-    │       ├── sleep/                     # XML / HealthAutoExport sleep nights
-    │       │   └── YYYY.MM.nights.csv
-    │       ├── thermal/                   # manual /log only; absent until first sauna / cold log
-    │       │   └── YYYY.MM.sessions.csv
-    │       └── light_therapy/             # manual /log only; absent until first RLT / PBM log
-    │           └── YYYY.MM.sessions.csv
+    │       └── sleep/                     # XML / HealthAutoExport sleep nights
+    │           └── YYYY.MM.nights.csv
     ├── <OtherPerson>/
-    │   └── (same; no swimming/, thermal/, or light_therapy/ until populated)
+    │   └── (same; optional stores appear when populated)
     ├── plans/                             # /coach output — dated per generation
     │   ├── <Person>/
-    │   │   ├── YYYY-MM-DD-assessment.html
+    │   │   ├── YYYY-MM-DD-coach_reads.json # structured assessment
     │   │   ├── YYYY-MM-DD-workout.md      # also the prescription record
     │   │   ├── block-YYYY-MM-DD.json      # training block: slots + anchor/rotating tags
     │   │   └── bench-log.json             # D5: why a prescribed exercise never happens
@@ -196,73 +192,13 @@ def list_sleep_night_months(person: str) -> list[str]:
     )
 
 
-def thermal_sessions_csv(person: str, year_month: str) -> Path:
-    """Per-month thermal (sauna + cold exposure) sessions CSV.
-
-    ``<person>/data/thermal/YYYY.MM.sessions.csv``. One row per heat
-    and/or cold protocol session. Manual-/log-only — Apple Health
-    doesn't expose sauna or cold-exposure sessions reliably.
-    """
-    return data_dir(person) / "thermal" / f"{year_month}.sessions.csv"
-
-
-def ensure_thermal_dir(person: str) -> Path:
-    """Create ``<person>/data/thermal/`` if missing and return it."""
-    d = data_dir(person) / "thermal"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def list_thermal_session_months(person: str) -> list[str]:
-    """Return ``YYYY.MM`` keys for which a per-month thermal-sessions CSV exists, ASC."""
-    d = data_dir(person) / "thermal"
-    if not d.exists():
-        return []
-    import re as _re
-    return sorted(
-        p.name[:-len(".sessions.csv")]
-        for p in d.glob("*.sessions.csv")
-        if _re.match(r"^\d{4}\.\d{2}\.sessions\.csv$", p.name)
-    )
-
-
-def light_therapy_sessions_csv(person: str, year_month: str) -> Path:
-    """Per-month light-therapy / photobiomodulation sessions CSV.
-
-    ``<person>/data/light_therapy/YYYY.MM.sessions.csv``. One row per
-    light-therapy session (RLT cabin, panel, mask, blue-light SAD lamp,
-    etc.). Manual-/log-only — Apple Health doesn't classify these.
-    """
-    return data_dir(person) / "light_therapy" / f"{year_month}.sessions.csv"
-
-
-def ensure_light_therapy_dir(person: str) -> Path:
-    """Create ``<person>/data/light_therapy/`` if missing and return it."""
-    d = data_dir(person) / "light_therapy"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def list_light_therapy_session_months(person: str) -> list[str]:
-    """Return ``YYYY.MM`` keys for which a per-month light-therapy CSV exists, ASC."""
-    d = data_dir(person) / "light_therapy"
-    if not d.exists():
-        return []
-    import re as _re
-    return sorted(
-        p.name[:-len(".sessions.csv")]
-        for p in d.glob("*.sessions.csv")
-        if _re.match(r"^\d{4}\.\d{2}\.sessions\.csv$", p.name)
-    )
-
-
 def nutrition_phases_csv(person: str) -> Path:
     """Per-person nutrition-phase tracker (bulk / cut / maintain / recomp).
 
     ``<person>/data/nutrition_phases.csv``. One row per phase, keyed by
     ``Start Date``. ``End Date`` blank ≡ the phase is still open. Manual
     /log only — no importer writes this file. Absent until the user
-    starts logging phases (mirrors thermal/light_therapy).
+    starts logging phases.
     """
     return data_dir(person) / "nutrition_phases.csv"
 
@@ -271,7 +207,7 @@ def plans_dir(person: str) -> Path:
     """Return the per-person plans folder, e.g. ``<root>/plans/<Person>``.
 
     Holds the coach's generated outputs — paired dated files
-    ``YYYY-MM-DD-assessment.html`` (rich dashboard) and
+    ``YYYY-MM-DD-coach_reads.json`` (assessment) and
     ``YYYY-MM-DD-workout.md`` (lean exercise list). Lives at the
     workout-tracker root (not inside ``<person>/data/``) so it stays
     visible alongside the import dropbox and is never touched by the
@@ -294,16 +230,6 @@ def workout_plan_md(person: str, date: str) -> Path:
     generated the plan, not the date the workout will be performed.
     """
     return plans_dir(person) / f"{date}-workout.md"
-
-
-def assessment_html(person: str, date: str) -> Path:
-    """Path to a dated assessment-dashboard HTML for ``person``.
-
-    Single self-contained file (inline CSS / SVG / optional inline JS,
-    no external requests) rendered by /coach alongside the matching
-    ``-workout.md``.
-    """
-    return plans_dir(person) / f"{date}-assessment.html"
 
 
 def list_workout_plans(person: str) -> list[tuple[str, Path]]:

@@ -74,17 +74,6 @@ SLEEP_HEADER = (
     "Last Segment End,Notes\n"
 )
 
-THERMAL_HEADER = (
-    "Date,Start,Heat Type,Heat Temp (°C),Heat Rounds,"
-    "Heat Round Durations (min),Heat Total (min),Cold Type,"
-    "Cold Duration (sec),Cold Temp (°C),Notes\n"
-)
-
-LIGHT_HEADER = (
-    "Date,Start,Duration (min),Light Type,Wavelength (nm),Body Area,"
-    "Modality,Ambient Temp (°C),Notes\n"
-)
-
 SWIM_WORKOUTS_HEADER = (
     "Date,Start,End,Duration (min),Distance (km),Pool Length (m),Laps,"
     "Strokes,SPL,Avg SWOLF,Stroke Mix,Location,Water Temp (°C),"
@@ -101,12 +90,10 @@ NUTRITION_HEADER = (
     "Target Protein (g/kg),Target Rate (kg/wk),Stop Conditions,Notes\n"
 )
 
-# Sleep / thermal / light / swim rows, grouped by the per-month file they
+# Sleep / swim rows, grouped by the per-month file they
 # land in. Each store's last entry is dated after ``LATEST_ANCHOR``.
 _SLEEP_DATES = ["2026-06-08", "2026-06-15", "2026-06-22", "2026-06-29",
                 "2026-07-03"]
-_THERMAL_DATES = ["2026-06-09", "2026-06-16", "2026-06-23", "2026-07-02"]
-_LIGHT_DATES = ["2026-06-10", "2026-06-17", "2026-06-24", "2026-07-01"]
 _SWIM_DATES = ["2026-06-11", "2026-06-18", "2026-06-25", "2026-07-04"]
 
 # Two closed phases plus one that opens after every anchor. The closing
@@ -190,23 +177,6 @@ def _write_fixture(root: Path) -> None:
         )
         (data / "sleep" / f"{ym}.nights.csv").write_text(
             SLEEP_HEADER + body, encoding="utf-8")
-
-    (data / "thermal").mkdir()
-    for ym, days in _months_of(_THERMAL_DATES).items():
-        body = "".join(
-            f"{d},18:00,dry,85,3,\"12,12,12\",36,cold_shower,90,12,\n"
-            for d in days
-        )
-        (data / "thermal" / f"{ym}.sessions.csv").write_text(
-            THERMAL_HEADER + body, encoding="utf-8")
-
-    (data / "light_therapy").mkdir()
-    for ym, days in _months_of(_LIGHT_DATES).items():
-        body = "".join(
-            f"{d},07:30,12,red,660,full_body,panel,22,\n" for d in days
-        )
-        (data / "light_therapy" / f"{ym}.sessions.csv").write_text(
-            LIGHT_HEADER + body, encoding="utf-8")
 
     (data / "swimming").mkdir()
     for ym, days in _months_of(_SWIM_DATES).items():
@@ -319,7 +289,7 @@ class PayloadHorizonTests(_FixtureCase):
 
         The horizon assertion is only worth anything for a store that has
         something on the far side of the horizon. Before this fixture grew,
-        the sleep / thermal / light-therapy / swim / nutrition stores did not
+        the sleep / swim / nutrition stores did not
         exist in it at all, so their clips could be deleted outright with
         every test still green. Assert on the fixture's own inputs — the
         payload cannot show a row it correctly dropped.
@@ -328,8 +298,6 @@ class PayloadHorizonTests(_FixtureCase):
             "monthly":      [d for d, _ in _SESSION_DATES],
             "deloads":      sorted(_DELOAD_DATES),
             "sleep":        _SLEEP_DATES,
-            "thermal":      _THERMAL_DATES,
-            "light":        _LIGHT_DATES,
             "swim":         _SWIM_DATES,
             "nutrition":    [p[0] for p in _NUTRITION_PHASES],
         }
@@ -360,8 +328,6 @@ class PayloadHorizonTests(_FixtureCase):
         """
         data = self.payload(LATEST_ANCHOR)
         self.assertEqual(data["sleep_summary"]["n_nights_28d"], 4)
-        self.assertEqual(data["thermal_summary"]["n_sessions_28d"], 3)
-        self.assertEqual(data["light_therapy_summary"]["n_sessions_28d"], 3)
         self.assertEqual(data["swim_summary"]["sessions"], 3)
         self.assertEqual(data["swim_summary"]["total_laps"], 36)
         # The deload marker on 2026-07-06 must not be listed; the one on

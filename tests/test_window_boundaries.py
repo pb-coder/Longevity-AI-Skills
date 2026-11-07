@@ -8,14 +8,12 @@ from pathlib import Path
 from workout_coach.lib import strength
 from workout_coach.lib.cardio import cardio_last_28d
 from workout_coach.lib.extract import load_exercises_db
-from workout_coach.lib.light_therapy import recent_light_therapy_sessions
 from workout_coach.lib.sleep import recent_sleep_nights
 from workout_coach.lib.strength import (
     hr_at_volume_divergence,
     weekly_volume_per_muscle,
 )
 from workout_coach.lib.swim import recent_swim_workouts
-from workout_coach.lib.thermal import recent_thermal_sessions
 
 _DB = load_exercises_db(
     Path(__file__).resolve().parents[1] / "shared" / "exercises-database.md"
@@ -38,9 +36,7 @@ class WindowBoundaryTests(unittest.TestCase):
         ]
 
         self.assertEqual([r["date"] for r in recent_sleep_nights(rows, today, 28)], ["2026-05-01", "2026-05-28"])
-        self.assertEqual([r["date"] for r in recent_thermal_sessions(rows, today, 28)], ["2026-05-01", "2026-05-28"])
         self.assertEqual([r["date"] for r in recent_swim_workouts(rows, today, 28)], ["2026-05-01", "2026-05-28"])
-        self.assertEqual([r["date"] for r in recent_light_therapy_sessions(rows, today, 28)], ["2026-05-01", "2026-05-28"])
 
     def test_cardio_last_28d_excludes_day_29(self) -> None:
         today = date(2026, 5, 28)

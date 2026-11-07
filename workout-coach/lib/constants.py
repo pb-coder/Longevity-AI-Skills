@@ -64,12 +64,6 @@ SOURCE_CAPABILITIES = {
         "sleep_regularity":   True,
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
-        # Thermal (sauna + cold exposure) is manual-/log-only, not
-        # source-dependent. The capability is True everywhere; the coach
-        # gates the report section on ``thermal_summary`` presence
-        # (data-presence gating, like ``sleep_summary`` and ``swim_summary``).
-        "thermal_log":        True,
-        "light_therapy_log":  True,
     },
     "health_export_kit": {
         # No all-day HRV in this format at all. The sleep-window value is a
@@ -90,8 +84,6 @@ SOURCE_CAPABILITIES = {
         "sleep_regularity":   True,
         "exercise_min_daily": True,
         "per_workout_hr_strength": True,
-        "thermal_log":        True,
-        "light_therapy_log":  True,
     },
 }
 

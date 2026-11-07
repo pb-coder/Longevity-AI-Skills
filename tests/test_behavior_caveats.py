@@ -7,24 +7,9 @@ from workout_coach.lib import sessions
 from workout_coach.lib.nutrition_phase import nutrition_phase_summary
 from workout_coach.lib.sleep import sleep_summary
 from workout_coach.lib.swim import swim_summary
-from workout_coach.lib.thermal import thermal_summary
 
 
 class BehaviorCaveatTests(unittest.TestCase):
-    def test_steam_does_not_count_toward_dry_hsp_band(self) -> None:
-        out = thermal_summary(
-            [
-                {"date": "2026-06-01", "heat_type": "steam", "heat_total_min": 30, "heat_temp_c": 45},
-                {"date": "2026-06-02", "heat_type": "dry", "heat_total_min": 20, "heat_temp_c": 85},
-            ],
-            date(2026, 6, 3),
-        )
-
-        heat = out["heat"]
-        self.assertEqual(heat["minutes_above_hsp_threshold_per_week"], 5.0)
-        self.assertEqual(heat["steam_minutes_per_week"], 7.5)
-        self.assertIn("dry/banya", heat["hsp_threshold_note"])
-
     def test_sleep_summary_marks_efficiency_as_derived_and_short_sleep_caveat(self) -> None:
         out = sleep_summary(
             [

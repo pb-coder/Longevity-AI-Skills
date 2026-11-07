@@ -3,7 +3,7 @@
 The implementation is split by data domain:
 - ``csv_store_profile``: profile key/value store.
 - ``csv_store_dense``: dense health metrics and workout sessions.
-- ``csv_store_periodic``: monthly/periodic swim, sleep, thermal, light, and nutrition stores.
+- ``csv_store_periodic``: monthly/periodic swim, sleep, and nutrition stores.
 
 Keep importing ``csv_store`` from scripts and tests; new code should place
 behavior in the focused modules above.
@@ -43,15 +43,6 @@ from .csv_store_dense import (  # noqa: F401
     upsert_workout_sessions,
 )
 from .csv_store_periodic import (  # noqa: F401
-    COLD_TYPES,
-    HEATED_CABIN_AMBIENT_TEMP_C,
-    HEAT_TYPES,
-    HEAT_TYPE_DEFAULT_TEMP_C,
-    LIGHT_BODY_AREAS,
-    LIGHT_MODALITIES,
-    LIGHT_THERAPY_SESSIONS_FIELDS,
-    LIGHT_THERAPY_SESSIONS_HEADERS,
-    LIGHT_TYPES,
     NUTRITION_PHASES_FIELDS,
     NUTRITION_PHASES_HEADERS,
     NUTRITION_PHASE_TYPES,
@@ -61,20 +52,14 @@ from .csv_store_periodic import (  # noqa: F401
     SWIM_LAPS_HEADERS,
     SWIM_WORKOUTS_FIELDS,
     SWIM_WORKOUTS_HEADERS,
-    THERMAL_SESSIONS_FIELDS,
-    THERMAL_SESSIONS_HEADERS,
-    read_light_therapy_sessions,
     read_nutrition_phases,
     read_sleep_nights,
     read_swim_laps,
     read_swim_workouts,
-    read_thermal_sessions,
-    upsert_light_therapy_sessions,
     upsert_nutrition_phases,
     upsert_sleep_nights,
     upsert_swim_laps,
     upsert_swim_workouts,
-    upsert_thermal_sessions,
 )
 from .csv_store_profile import (  # noqa: F401
     PROFILE_DEFAULTS,
@@ -112,15 +97,6 @@ __all__ = [
     "read_workout_sessions",
     "upsert_health_metrics",
     "upsert_workout_sessions",
-    "COLD_TYPES",
-    "HEATED_CABIN_AMBIENT_TEMP_C",
-    "HEAT_TYPES",
-    "HEAT_TYPE_DEFAULT_TEMP_C",
-    "LIGHT_BODY_AREAS",
-    "LIGHT_MODALITIES",
-    "LIGHT_THERAPY_SESSIONS_FIELDS",
-    "LIGHT_THERAPY_SESSIONS_HEADERS",
-    "LIGHT_TYPES",
     "NUTRITION_PHASES_FIELDS",
     "NUTRITION_PHASES_HEADERS",
     "NUTRITION_PHASE_TYPES",
@@ -130,20 +106,14 @@ __all__ = [
     "SWIM_LAPS_HEADERS",
     "SWIM_WORKOUTS_FIELDS",
     "SWIM_WORKOUTS_HEADERS",
-    "THERMAL_SESSIONS_FIELDS",
-    "THERMAL_SESSIONS_HEADERS",
-    "read_light_therapy_sessions",
     "read_nutrition_phases",
     "read_sleep_nights",
     "read_swim_laps",
     "read_swim_workouts",
-    "read_thermal_sessions",
-    "upsert_light_therapy_sessions",
     "upsert_nutrition_phases",
     "upsert_sleep_nights",
     "upsert_swim_laps",
     "upsert_swim_workouts",
-    "upsert_thermal_sessions",
     "PROFILE_DEFAULTS",
     "PROFILE_KEYS",
     "ensure_profile",

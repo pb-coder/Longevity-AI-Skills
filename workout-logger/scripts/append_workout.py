@@ -15,24 +15,12 @@ Input JSON is either a bare list of row dicts (legacy) or a wrapper object:
                   "deep_h": 1.2, "rem_h": 1.3, "core_h": null,
                   "unspecified_h": null, "awake_h": null,
                   "time_in_bed_h": 8.4, "efficiency_pct": null,
-                  "notes": null}, ... ],
-      "thermal": [ {"date": "YYYY-MM-DD", "start": "18:30",
-                    "heat_type": "dry", "heat_temp_c": 85,
-                    "heat_rounds": 2,
-                    "heat_round_durations_min": [12, 8],
-                    "cold_type": "cold_air",
-                    "cold_duration_sec": 300, "cold_temp_c": null,
-                    "notes": null}, ... ],
-      "light_therapy": [ {"date": "YYYY-MM-DD", "start": null,
-                          "duration_min": 5, "light_type": "red+ir",
-                          "wavelength_nm": null, "body_area": "full_body",
-                          "modality": "cabin", "ambient_temp_c": 45,
-                          "notes": null}, ... ]
+                  "notes": null}, ... ]
     }
 
-The wrapper form allows /log to capture the user's morning weight, sleep,
-sauna / cold exposure, and light-therapy sessions alongside the workout.
-``rows``, ``bodyweight``, ``sleep``, ``thermal``, and ``light_therapy``
+The wrapper form allows /log to capture the user's morning weight and sleep
+alongside the workout.
+``rows``, ``bodyweight``, and ``sleep``
 are all optional within the wrapper.
 
 - Bodyweight entries are upserted into the per-person Health Metrics CSV
@@ -43,19 +31,6 @@ are all optional within the wrapper.
   ``health_metrics.csv`` so the recovery score path picks them up
   without joining files. Both writes are sparse-merge — partial input
   is fine, missing keys preserve whatever was there before.
-- Thermal entries (sauna + cold exposure) are written to
-  ``<person>/data/thermal/YYYY.MM.sessions.csv`` via sparse-merge.
-  No mirror to health_metrics — heat / cold is per-event, not a
-  daily-snapshot metric. Multi-round saunas live on one row (per-round
-  minutes in ``heat_round_durations_min``); ``heat_total_min`` is
-  auto-derived inside the upsert. **Never prompted** — if the /log
-  message has no ``sauna`` or ``cold`` line, no row is written.
-- Light-therapy entries (RLT cabin, panel, blue-light SAD lamp, etc.)
-  are written to ``<person>/data/light_therapy/YYYY.MM.sessions.csv``
-  via sparse-merge. Independent of the thermal store — a session with
-  both sauna and RLT lands as two rows in two stores. **Never prompted**
-  — if the /log message has no ``rlt`` / ``red light`` / ``light therapy``
-  / ``pbm`` / ``blue light`` line, no row is written.
 
 Row dict schema:
     {
@@ -103,10 +78,8 @@ from shared.monthly_csv import (  # noqa: E402
 )
 from shared.csv_store import (  # noqa: E402
     upsert_health_metrics,
-    upsert_light_therapy_sessions,
     upsert_nutrition_phases,
     upsert_sleep_nights,
-    upsert_thermal_sessions,
     write_profile,
 )
 from shared.data_git import commit_data  # noqa: E402
@@ -278,136 +251,6 @@ def upsert_sleep(person: str, entries: list[dict]) -> list[str]:
     return out
 
 
-def upsert_thermal(person: str, entries: list[dict]) -> list[str]:
-    """Forward parsed sauna / cold-exposure entries to the thermal store.
-
-    Each entry has shape:
-
-        {
-          "date": "2026-05-12",
-          "start": "18:30",
-          "heat_type": "dry" | "steam" | "infrared" | "banya" | "none",
-          "heat_temp_c": 85,
-          "heat_rounds": 2,                          # optional; derived from durations
-          "heat_round_durations_min": [12, 8],       # per-round minutes
-          "cold_type": "none" | "cold_air" | "cold_shower" | "cold_plunge" | "cold_water",
-          "cold_duration_sec": 300,
-          "cold_temp_c": null,
-          "notes": null
-        }
-
-    Sparse-merge by ``(date, start)`` within the matching per-month CSV.
-    ``heat_total_min`` and (if absent) ``heat_rounds`` are derived from
-    ``heat_round_durations_min`` inside ``upsert_thermal_sessions``. No
-    mirror to health_metrics — heat / cold is a per-event session, not a
-    daily-snapshot metric.
-    """
-    if not entries:
-        return []
-    summary_parts: list[str] = []
-    for e in entries:
-        d = str(e.get("date") or "")[:10]
-        if not d:
-            continue
-        bits: list[str] = []
-        if e.get("heat_type") and e.get("heat_type") != "none":
-            durations = e.get("heat_round_durations_min") or []
-            if isinstance(durations, list) and durations:
-                total = sum(durations)
-                rounds = len(durations)
-                if rounds > 1:
-                    bits.append(f"{e['heat_type']} {'+'.join(str(int(x)) if float(x).is_integer() else str(x) for x in durations)}min")
-                else:
-                    bits.append(f"{e['heat_type']} {int(total) if float(total).is_integer() else total}min")
-            elif e.get("heat_total_min") is not None:
-                t = e["heat_total_min"]
-                bits.append(f"{e['heat_type']} {int(t) if float(t).is_integer() else t}min")
-            if e.get("heat_temp_c") is not None:
-                if bits:
-                    bits[-1] += f"@{e['heat_temp_c']}C"
-                else:
-                    bits.append(f"{e['heat_type']} @{e['heat_temp_c']}C")
-        if e.get("cold_type") and e.get("cold_type") != "none":
-            seg = e["cold_type"].replace("cold_", "")
-            if e.get("cold_duration_sec") is not None:
-                seg += f" {e['cold_duration_sec']}s"
-            bits.append(seg)
-        summary_parts.append(f"{d}({' / '.join(bits) or 'no heat/cold'})")
-    out = upsert_thermal_sessions(person, entries)
-    if summary_parts:
-        out.append(f"Thermal: forwarded {len(summary_parts)} session(s) "
-                   f"({', '.join(summary_parts)})")
-    return out
-
-
-def upsert_light_therapy(person: str, entries: list[dict]) -> list[str]:
-    """Forward parsed light-therapy (RLT / PBM / blue light) entries to
-    the per-month light-therapy store.
-
-    Each entry has shape:
-
-        {
-          "date": "2026-05-14",
-          "start": "14:30" | null,
-          "duration_min": 5,
-          "light_type": "red" | "near_ir" | "red+ir" | "far_ir"
-                        | "blue" | "green" | "white" | "other" | null,
-          "wavelength_nm": 660 | null,
-          "body_area": "full_body" | "face" | … | null,
-          "modality": "panel" | "mask" | "cabin" | … | null,
-          "ambient_temp_c": 45 | null,
-          "notes": null
-        }
-
-    Sparse-merge by ``(date, start)`` within the matching per-month CSV.
-    ``modality`` defaults to ``cabin`` inside the upsert when
-    ``ambient_temp_c`` is at/above the heated-cabin threshold and the
-    user didn't supply a modality.
-
-    Independent of the thermal store — a session that includes both
-    sauna and RLT lands as two rows in two stores.
-    """
-    if not entries:
-        return []
-    out = upsert_light_therapy_sessions(person, entries)
-    # Compose the user-facing summary AFTER the upsert so the printed
-    # line reflects auto-defaults (e.g. ``modality=cabin`` inferred from
-    # ``ambient_temp_c >= 30``) — not just the user's raw input.
-    HEATED_CABIN_TEMP = 30
-    summary_parts: list[str] = []
-    for e in entries:
-        d = str(e.get("date") or "")[:10]
-        if not d:
-            continue
-        bits: list[str] = []
-        lt = e.get("light_type") or "light"
-        dur = e.get("duration_min")
-        if dur is not None:
-            dur_str = f"{int(dur)}min" if float(dur).is_integer() else f"{dur}min"
-            bits.append(f"{lt} {dur_str}")
-        else:
-            bits.append(lt)
-        if e.get("ambient_temp_c") is not None:
-            bits[-1] += f"@{e['ambient_temp_c']}C"
-        # Mirror the upsert's auto-default so the summary doesn't lie.
-        modality = e.get("modality")
-        if modality is None and e.get("ambient_temp_c") is not None:
-            try:
-                if float(e["ambient_temp_c"]) >= HEATED_CABIN_TEMP:
-                    modality = "cabin"
-            except (TypeError, ValueError):
-                pass
-        if modality:
-            bits.append(modality)
-        if e.get("body_area"):
-            bits.append(e["body_area"])
-        summary_parts.append(f"{d}({' '.join(bits)})")
-    if summary_parts:
-        out.append(f"Light therapy: forwarded {len(summary_parts)} session(s) "
-                   f"({', '.join(summary_parts)})")
-    return out
-
-
 def upsert_nutrition_phase(person: str, entries: list[dict]) -> list[str]:
     """Forward parsed nutrition-phase entries (bulk / cut / maintain /
     recomp) to the flat per-person ``nutrition_phases.csv`` store.
@@ -480,15 +323,13 @@ def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
 def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
                   css_test: dict | None = None,
                   sleep: list[dict] | None = None,
-                  thermal: list[dict] | None = None,
-                  light_therapy: list[dict] | None = None,
                   nutrition_phase: list[dict] | None = None) -> list[str]:
-    """Apply rows + bodyweight + sleep + thermal + light_therapy + nutrition_phase + optional CSS test.
+    """Apply rows + bodyweight + sleep + nutrition_phase + optional CSS test.
 
     Routes per-set rows to the matching ``YYYY.MM.csv`` under
     ``<person>/data/monthly/``, then canonicalizes each touched month
     (sort, recompute Volume / Pace / TOTAL rows). Bodyweight, sleep,
-    thermal, light_therapy, nutrition_phase, and css_test flow through
+    nutrition_phase and css_test flow through
     the existing CSV helpers.
     """
     status: list[str] = []
@@ -513,10 +354,6 @@ def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
     status.extend(upsert_bodyweight(person, bodyweight))
     # Sleep dual-writes to sleep/YYYY.MM.nights.csv + health_metrics.csv.
     status.extend(upsert_sleep(person, sleep or []))
-    # Thermal (sauna + cold) writes to thermal/YYYY.MM.sessions.csv.
-    status.extend(upsert_thermal(person, thermal or []))
-    # Light therapy writes to light_therapy/YYYY.MM.sessions.csv.
-    status.extend(upsert_light_therapy(person, light_therapy or []))
     # Nutrition phase (bulk / cut / maintain / recomp) writes to the flat
     # <person>/data/nutrition_phases.csv. Independent of every other store.
     status.extend(upsert_nutrition_phase(person, nutrition_phase or []))
@@ -525,15 +362,15 @@ def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
     return status
 
 
-def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list[dict], list[dict], list[dict], list[dict]]:
-    """Return (rows, bodyweight, css_test, sleep, thermal, light_therapy, nutrition_phase).
+def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list[dict], list[dict]]:
+    """Return (rows, bodyweight, css_test, sleep, nutrition_phase).
 
     Accepts bare list (legacy — rows only) or wrapper dict. Wrapper
     dict accepts optional ``bodyweight``, ``css_test``, ``sleep``,
-    ``thermal``, ``light_therapy``, and ``nutrition_phase`` keys; all
+    and ``nutrition_phase`` keys; all
     are independent.
 
-    ``sleep`` / ``thermal`` / ``light_therapy`` entries each require
+    ``sleep`` entries each require
     ``date``; ``nutrition_phase`` entries require ``start_date``. Every
     other field is optional and falls through sparse-merge.
     """
@@ -544,13 +381,14 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
 
     css_test: dict | None = None
     sleep_entries: list[dict] = []
-    thermal_entries: list[dict] = []
-    light_therapy_entries: list[dict] = []
     nutrition_phase_entries: list[dict] = []
     if isinstance(data, list):
         rows = data
         bw = []
     elif isinstance(data, dict):
+        retired = {"thermal", "light_therapy"}.intersection(data)
+        if retired:
+            raise ValueError("Retired logging categories: " + ", ".join(sorted(retired)))
         rows = data.get("rows", []) or []
         bw_raw = data.get("bodyweight", []) or []
         # Accept a single dict as shorthand for a one-element list.
@@ -562,14 +400,6 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
         if isinstance(sleep_raw, dict):
             sleep_raw = [sleep_raw]
         sleep_entries = sleep_raw
-        thermal_raw = data.get("thermal", []) or []
-        if isinstance(thermal_raw, dict):
-            thermal_raw = [thermal_raw]
-        thermal_entries = thermal_raw
-        light_raw = data.get("light_therapy", []) or []
-        if isinstance(light_raw, dict):
-            light_raw = [light_raw]
-        light_therapy_entries = light_raw
         np_raw = data.get("nutrition_phase", []) or []
         if isinstance(np_raw, dict):
             np_raw = [np_raw]
@@ -600,17 +430,12 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
             )
     for e in sleep_entries:
         require_date(e, "sleep")
-    for e in thermal_entries:
-        require_date(e, "thermal")
-    for e in light_therapy_entries:
-        require_date(e, "light_therapy")
     for e in nutrition_phase_entries:
         if "start_date" not in e:
             raise ValueError(f"nutrition_phase entry missing start_date: {e!r}")
         require_date(e, "nutrition_phase", "start_date")
 
-    return (rows, bw, css_test, sleep_entries, thermal_entries,
-            light_therapy_entries, nutrition_phase_entries)
+    return (rows, bw, css_test, sleep_entries, nutrition_phase_entries)
 
 
 def main() -> int:
@@ -623,20 +448,20 @@ def main() -> int:
     args = ap.parse_args()
     ctx = TrackerContext(args.person)
 
-    (rows, bodyweight, css_test, sleep_entries,
-     thermal_entries, light_therapy_entries,
-     nutrition_phase_entries) = load_payload(args.payload)
+    try:
+        (rows, bodyweight, css_test, sleep_entries,
+         nutrition_phase_entries) = load_payload(args.payload)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
     if (not rows and not bodyweight and not css_test
-            and not sleep_entries and not thermal_entries
-            and not light_therapy_entries
+            and not sleep_entries
             and not nutrition_phase_entries):
-        print("No rows, bodyweight, sleep, thermal, light_therapy, nutrition_phase, or css_test entries to write.")
+        print("No rows, bodyweight, sleep, nutrition_phase, or css_test entries to write.")
         return 0
     try:
         for line in write_payload(ctx.person, rows, bodyweight, css_test,
                                   sleep=sleep_entries,
-                                  thermal=thermal_entries,
-                                  light_therapy=light_therapy_entries,
                                   nutrition_phase=nutrition_phase_entries):
             print(line)
     except (FileNotFoundError, ValueError) as e:

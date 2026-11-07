@@ -20,8 +20,7 @@ __all__ = [
 PROFILE_KEYS = (
     "source", "auto_cardio", "birthday", "sex",
     "swim_css_sec_per_100m", "swim_css_set_at", "swim_pool_length_default",
-    "light_therapy_target_per_week", "light_therapy_target_min_per_session",
-    "sauna_target_per_week", "session_target_min", "min_per_working_set",
+    "session_target_min", "min_per_working_set",
     "session_warmup_min", "strength_sessions_per_week",
     "muscle_priority_tiers",
 )
@@ -33,9 +32,6 @@ PROFILE_DEFAULTS = {
     "swim_css_sec_per_100m":               None,
     "swim_css_set_at":                     None,
     "swim_pool_length_default":            None,
-    "light_therapy_target_per_week":       None,
-    "light_therapy_target_min_per_session": None,
-    "sauna_target_per_week":               None,
     # Target strength-session length in minutes. Drives the coach's
     # working-set budget (duration is set-count-driven, not exercise-count
     # driven). Default 60; override per person.
@@ -192,18 +188,6 @@ def _read_profile_cached(person: str) -> dict:
                 i = _coerce_int(v)
                 if i is not None:
                     out["swim_pool_length_default"] = i
-            elif k == "light_therapy_target_per_week":
-                i = _coerce_int(v)
-                if i is not None:
-                    out["light_therapy_target_per_week"] = i
-            elif k == "light_therapy_target_min_per_session":
-                i = _coerce_int(v)
-                if i is not None:
-                    out["light_therapy_target_min_per_session"] = i
-            elif k == "sauna_target_per_week":
-                i = _coerce_int(v)
-                if i is not None:
-                    out["sauna_target_per_week"] = i
             elif k == "session_target_min":
                 i = _coerce_int(v)
                 if i is not None and 20 <= i <= 180:

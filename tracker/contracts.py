@@ -1,8 +1,8 @@
 """Typed contracts for the tracker command boundaries.
 
 The runtime still emits plain JSON-serializable dictionaries. These types
-document the load-bearing shapes at construction and rendering boundaries.
-Runtime validators in ``tracker.validation`` enforce the renderer seams; the
+document the load-bearing shapes at construction and validation boundaries.
+Runtime validators in ``tracker.validation`` enforce those boundaries; the
 TypedDicts themselves are not a substitute for wiring a static checker into CI.
 """
 from __future__ import annotations
@@ -156,15 +156,13 @@ class TrackerJSON(TypedDict, total=False):
     cardio_hr_zones_28d: dict[str, JsonValue]
     swim_summary: dict[str, JsonValue] | None
     sleep_summary: dict[str, JsonValue] | None
-    thermal_summary: dict[str, JsonValue] | None
-    light_therapy_summary: dict[str, JsonValue] | None
     nutrition_phase: dict[str, JsonValue] | None
     daily_activity_28d: dict[str, JsonValue]
     # Daily energy expenditure over 28 days: TDEE plus its active / basal
     # split, and the per-week OLS trend on each. ``None`` — and so absent
     # from the emitted JSON — when neither energy column carries a reading
-    # in the window, the same gate ``nutrition_phase`` uses. A renderer
-    # must gate its card on the key's presence rather than on a zero.
+    # in the window, the same gate ``nutrition_phase`` uses. Consumers
+    # must distinguish an absent measurement from a measured zero.
     energy_28d: dict[str, JsonValue] | None
     recovery: Recovery
     training_load: TrainingLoad
@@ -176,7 +174,7 @@ class TrackerJSON(TypedDict, total=False):
     bodyweight_latest: dict[str, JsonValue] | None
     bodyweight_trend_kg_per_week: float | None
     # The scalar above with its state: ``resolved`` / ``unresolved`` plus
-    # the ``reason`` and ``note`` that say WHY it is null. Renderers must
+    # the ``reason`` and ``note`` that say WHY it is null. Consumers must
     # read this instead of inventing an explanation for a missing number.
     bodyweight_trend: dict[str, JsonValue]
     bodyweight_weekly: list[float | None]
@@ -185,13 +183,13 @@ class TrackerJSON(TypedDict, total=False):
     # ``waist_trend_cm_per_4w`` mirrors ``bodyweight_trend``'s block shape
     # — ``state`` / ``reason`` / ``note`` — and is emitted even when
     # unresolved, because "not enough readings to say" is an answer and a
-    # renderer must not invent one.
+    # consumer must not invent one.
     waist_latest: dict[str, JsonValue] | None
     waist_trend_cm_per_4w: dict[str, JsonValue]
     # The other two body-composition columns of the 19-col schema, same
     # pair-of-keys shape as waist. ``*_latest`` is None until the column
     # carries a reading; the trend block is emitted regardless, because
-    # "never recorded" is an answer a renderer must not have to infer
+    # "never recorded" is an answer a consumer must not have to infer
     # from a missing key. Lean mass is scale-DERIVED from bodyweight and
     # body fat, so a resolved rate there restates those two.
     body_fat_latest: dict[str, JsonValue] | None

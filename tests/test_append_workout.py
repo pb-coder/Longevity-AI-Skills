@@ -54,14 +54,28 @@ class AppendWorkoutTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 append_workout.load_payload(str(payload))
 
-    def test_temp_only_thermal_summary_does_not_crash(self) -> None:
-        with patch.object(append_workout, "upsert_thermal_sessions", return_value=["ok"]):
-            status = append_workout.upsert_thermal(
-                "Test",
-                [{"date": "2026-06-01", "heat_type": "dry", "heat_temp_c": 90}],
-            )
+    def test_retired_payload_categories_fail_before_any_write(self) -> None:
+        for category in ("thermal", "light_therapy"):
+            with self.subTest(category=category), TemporaryDirectory() as td:
+                payload = Path(td) / "payload.json"
+                payload.write_text(json.dumps({
+                    "bodyweight": [{"date": "2026-06-01", "kg": 80}],
+                    category: [{"date": "2026-06-01"}],
+                }))
+                with self.assertRaisesRegex(ValueError, "Retired logging categories"):
+                    append_workout.load_payload(str(payload))
 
-        self.assertIn("dry @90C", status[-1])
+    def test_cli_rejects_retired_categories_without_writing_or_committing(self) -> None:
+        with TemporaryDirectory() as td:
+            payload = Path(td) / "payload.json"
+            payload.write_text(json.dumps({"thermal": [{"date": "2026-06-01"}]}))
+            with patch("sys.argv", ["append_workout.py", "--person", "Test", str(payload)]), \
+                 patch.object(append_workout, "write_payload") as write, \
+                 patch.object(append_workout, "commit_data") as commit, \
+                 patch("sys.stderr"):
+                self.assertEqual(append_workout.main(), 1)
+            write.assert_not_called()
+            commit.assert_not_called()
 
 
 if __name__ == "__main__":

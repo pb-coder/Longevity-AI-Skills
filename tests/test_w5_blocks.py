@@ -577,9 +577,8 @@ class RotationCandidateTests(unittest.TestCase):
 class MainPatternTests(unittest.TestCase):
     """Horizontal/vertical push and pull are offered even when untrained.
 
-    Nihad's Vertical Push vanished from the payload the day his last
-    shoulder press fell out of the 56-day window, and nothing else could
-    bring it back.
+    A vertical-push candidate must remain available after the last
+    shoulder press falls out of the 56-day window.
     """
 
     ROWS = [_set("2026-07-16", "Shoulder Press Machine", 55, 10),
@@ -1096,8 +1095,8 @@ class RotationCandidateSelectionTests(unittest.TestCase):
 
     def test_a_retired_movement_is_never_offered(self) -> None:
         # read_tracker passes `adherence.retired_movements` in through
-        # `exclude`: Fabian's retired Ab Wheel Rollout was still offered
-        # under Anti-Extension.
+        # `exclude`: a retired exercise must not be offered as a
+        # rotation candidate under its movement pattern.
         wheel = "Ab Wheel Rollout"
         plain = {c["exercise"] for c in rotation_candidates(
             self.ROWS, _DB, _CATALOG, self.E1RM, date(2026, 8, 2),

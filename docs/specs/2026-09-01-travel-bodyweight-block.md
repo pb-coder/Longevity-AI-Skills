@@ -1,7 +1,7 @@
 # Travel bodyweight block — design
 
 **Date:** 2026-09-01
-**Status:** DRAFT, awaiting <Person>'s review. Nothing implemented.
+**Status:** historical draft; not an active implementation contract. Current behavior is defined by the skill instructions and code.
 **Person:** <Person> (the other tracker is untouched by this)
 **Trigger:** 3-4 weeks away with no gym.
 
@@ -575,10 +575,7 @@ gym blocks, and no strength conclusion should be drawn from this block's data.
 
 ### 9.6 What travel mode does not change
 
-Sleep, heart rate variability, resting heart rate, wrist temperature, the
-recovery score, the longevity score, thermal and light therapy logging, the swim
-module, and every import path all keep working untouched. Travel mode is a
-planning and reporting concern only.
+Sleep, resting heart rate, recovery scoring, longevity scoring, swimming, and health imports are outside this proposal. Current source capability gates still apply. Travel mode is a planning concern; retired tracking and report features are not part of the proposal.
 
 ## 10. Coming back
 

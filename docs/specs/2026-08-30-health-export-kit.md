@@ -1,9 +1,9 @@
 # Health Export Kit — source spec
 
-**Status:** accepted, not yet implemented
+**Status:** implemented; historical source-format decision record
 **Date:** 2026-08-30
 **Replaces:** Health Auto Export (HAE), both the JSON and the deprecated localized-CSV reader
-**Implementation plan:** `Skills/docs/superpowers/plans/2026-08-30-health-export-kit-importer.md`
+**Current implementation:** `shared/import_health_export_kit.py`; the completed implementation checklist has been retired.
 
 ---
 

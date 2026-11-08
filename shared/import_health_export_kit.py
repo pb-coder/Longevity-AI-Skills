@@ -30,7 +30,10 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import json
+import os
+import shutil
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -582,17 +585,61 @@ def read_export(path: Path) -> dict:
 
 
 def resolve_export(pattern: str | None) -> Path | None:
-    """Newest matching export, by modification time."""
+    """Resolve an explicit path or a single unambiguous matching export."""
     if pattern:
         p = Path(pattern)
         if p.exists():
             return p
         matches = sorted((Path(m) for m in glob.glob(pattern)),
                          key=lambda x: x.stat().st_mtime, reverse=True)
+        if len(matches) > 1:
+            raise ValueError("multiple exports match; specify the exact --export path")
         return matches[0] if matches else None
     matches = sorted(WORKOUT_TRACKER_ROOT.glob(EXPORT_GLOB),
                      key=lambda x: x.stat().st_mtime, reverse=True)
+    if len(matches) > 1:
+        raise ValueError("multiple exports found; specify the exact --export path")
     return matches[0] if matches else None
+
+
+def archive_export(export_path: Path, month: str) -> Path:
+    """Copy and verify the source before removing it; never overwrite an archive."""
+    if len(month) != 7 or date.fromisoformat(month + "-01").isoformat()[:7] != month:
+        raise ValueError("invalid export archive month")
+    archive_dir = WORKOUT_TRACKER_ROOT / "archive" / "health-exports" / month
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    if export_path.parent.resolve() == archive_dir.resolve():
+        return export_path
+    digest = hashlib.sha256(export_path.read_bytes()).hexdigest()
+    dest = archive_dir / export_path.name
+    counter = 0
+    while True:
+        created = False
+        try:
+            # Exclusive creation avoids replacing an unrelated export with the same name.
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            created = True
+            with os.fdopen(fd, "wb") as output:
+                with export_path.open("rb") as source:
+                    shutil.copyfileobj(source, output)
+            if hashlib.sha256(dest.read_bytes()).hexdigest() != digest:
+                dest.unlink()
+                raise OSError("archived export verification failed")
+            break
+        except FileExistsError:
+            if hashlib.sha256(dest.read_bytes()).hexdigest() == digest:
+                break
+            counter += 1
+            dest = archive_dir / f"{export_path.stem}-{digest[:12]}-{counter}{export_path.suffix}"
+        except OSError:
+            # Keep the original if copying fails. A partial destination is not a backup.
+            if created and dest.exists():
+                dest.unlink(missing_ok=True)
+            raise
+    if hashlib.sha256(export_path.read_bytes()).hexdigest() != digest:
+        raise OSError("source export changed during archive; source retained")
+    export_path.unlink()
+    return dest
 
 
 def import_export(person: str,
@@ -611,6 +658,12 @@ def import_export(person: str,
     workouts = build_workout_payload(payload, since, until)
     swims = build_swim_payload(payload, since, until)
 
+    if not health and not nights:
+        raise EmptyImportError(
+            f"{export_path.name} yielded 0 health metric dates and 0 sleep "
+            f"nights in the selected window; nothing was written"
+        )
+
     if dry_run:
         return [
             f"Dry run: {export_path.name}",
@@ -621,12 +674,6 @@ def import_export(person: str,
             f"  swim workouts:      {len(swims)}",
             "  nothing written",
         ]
-
-    if not health and not nights:
-        raise EmptyImportError(
-            f"{export_path.name} yielded 0 health metric dates and 0 sleep "
-            f"nights in the selected window; nothing was written"
-        )
 
     out: list[str] = []
     profile, created = ensure_profile(person, default_source=SOURCE_NAME,
@@ -666,16 +713,15 @@ def import_export(person: str,
         person, sessions, allow_past_months=allow_past_months,
     ))
 
-    if not keep_export:
-        try:
-            export_path.unlink()
-            out.append(f"Deleted source export: {export_path.name}")
-        except OSError as e:
-            out.append(f"WARN: could not delete {export_path.name}: {e}")
-
     sha = commit_data(person, f"import: {export_path.name}")
     if sha:
         out.append(f"Committed {person} data: {sha}")
+    if not keep_export:
+        try:
+            archived = archive_export(export_path, payload["meta"]["rangeEnd"][:7])
+            out.append(f"Archived source export: {archived}")
+        except (OSError, ValueError) as e:
+            out.append(f"WARN: could not archive {export_path.name}; source retained when possible: {e}")
     return out
 
 
@@ -688,7 +734,7 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--person", required=True, help="Tracker owner, e.g. <Person>.")
     ap.add_argument("--export", default=None,
-                    help=f"Export path or glob. Defaults to the newest {EXPORT_GLOB}.")
+                    help=f"Export path or unambiguous glob. Default: a single {EXPORT_GLOB}.")
     ap.add_argument("--since", default=None, type=_parse_date,
                     help="Start date, YYYY-MM-DD. Default: the export's own range.")
     ap.add_argument("--until", default=None, type=_parse_date,
@@ -696,12 +742,16 @@ def main() -> int:
     ap.add_argument("--allow-past-months", action="store_true",
                     help="Allow monthly backfill into past YYYY.MM files.")
     ap.add_argument("--keep-export", action="store_true",
-                    help="Keep the file instead of deleting it after a successful import.")
+                    help="Leave the source in place instead of archiving it after import.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Parse and summarize; do not write anything.")
     args = ap.parse_args()
 
-    export_path = resolve_export(args.export)
+    try:
+        export_path = resolve_export(args.export)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
     if export_path is None or not export_path.exists():
         print(f"ERROR: Health Export Kit file not found: {args.export or EXPORT_GLOB}",
               file=sys.stderr)

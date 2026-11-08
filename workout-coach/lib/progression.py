@@ -521,11 +521,27 @@ def build_next_dose(rows: list[dict], catalog: dict, plans: list[dict],
         if meta.get("is_warmup") or meta.get("is_cardio"):
             continue
         full = history.get(key) or []
-        sessions = [s for s in full if s["date"] not in deload_set]
+        sessions = [s for s in full if s["date"] not in deload_set
+                    and not s.get("partial_load")]
         name = (sessions[-1]["exercise"] if sessions
                 else full[-1]["exercise"] if full
                 else meta.get("name") or block_names.get(key) or key)
         cls = exercise_class(name, catalog)
+
+        # A plate-only figure is not the total load. Do not silently fall
+        # back to an older session or propose an increase from that figure.
+        if full and full[-1].get("partial_load"):
+            blo, bhi, _ = _prescribed_range(key, today_s, plan_slots, block_slots)
+            lo, hi, _ = _normalise_range(blo, bhi, cls)
+            entries.append({
+                "exercise": name,
+                "load_kg": None,
+                "rep_range": _range_str(lo, hi) if lo is not None else None,
+                "action": "hold",
+                "basis": ("Latest session records plates without the bar weight; "
+                          "total load is unknown. Confirm the bar weight before progressing."),
+            })
+            continue
 
         if not sessions:
             # A range of last resort for a lift with no history: the newest
@@ -552,12 +568,34 @@ def build_next_dose(rows: list[dict], catalog: dict, plans: list[dict],
             })
             continue
 
+        # A structured machine context is comparable only to the exact same
+        # gym and machine. Never merge unknown identity with a named one.
+        machine_dependent = meta.get("equipment") not in GYM_INVARIANT_EQUIPMENT
+        has_structured = machine_dependent and any(
+            x.get("equipment_context") or x.get("context_ambiguous") for x in full)
+        current_context = full[-1].get("equipment_context") if full else None
+        if has_structured and (full[-1].get("context_ambiguous") or not current_context
+                               or not all(current_context)):
+            blo, bhi, _ = _prescribed_range(key, today_s, plan_slots, block_slots)
+            lo, hi, _ = _normalise_range(blo, bhi, cls)
+            entries.append({"exercise": name, "load_kg": None,
+                            "rep_range": _range_str(lo, hi) if lo is not None else None,
+                            "action": "hold", "basis": "Gym or machine identity is missing or conflicting; confirm both before comparing loads."})
+            continue
+        if has_structured:
+            sessions = [x for x in sessions if x.get("equipment_context") == current_context
+                        and not x.get("context_ambiguous")]
+            if not sessions:
+                entries.append({"exercise": name, "load_kg": None, "rep_range": None,
+                                "action": "hold", "basis": "No comparable working sets at this gym and machine."})
+                continue
+
         # The usual gym: the sessions not tagged as a different gym or
         # machine. Only a gym-dependent lift (machine, cable, Smith, landmine)
         # is ever tagged (`strength.is_context_change`), so this is every
         # session for a free weight. The tagged ones are the other gym.
-        usual = [s for s in sessions if not s["context_change"]]
-        other = next((s for s in reversed(sessions)
+        usual = sessions if has_structured else [s for s in sessions if not s["context_change"]]
+        other = None if has_structured else next((s for s in reversed(sessions)
                       if s["context_change"] and s["top_load_kg"]), None)
         last = usual[-1] if usual else sessions[-1]
         if cls is None or last["top_load_kg"] is None:
@@ -580,9 +618,11 @@ def build_next_dose(rows: list[dict], catalog: dict, plans: list[dict],
             source = f"{source}; bare {hi} read as {range_s}"
         inc, inc_basis = observed_increment(
             [x for x in jump_history.get(key, [])
-             if x["date"] not in deload_set],
+             if x["date"] not in deload_set and not x.get("partial_load")
+             and (not has_structured or (x.get("equipment_context") == current_context
+                                         and not x.get("context_ambiguous")))],
             equipment_increment_kg(meta.get("equipment"), key),
-            since=(None if meta.get("equipment") in GYM_INVARIANT_EQUIPMENT
+            since=(None if has_structured or meta.get("equipment") in GYM_INVARIANT_EQUIPMENT
                    else gym_since),
             is_noise=lambda jump, start, _e=meta.get("equipment"), _k=key:
                 is_reweigh_jump(jump, start, _e, _k))
@@ -737,7 +777,9 @@ def build_next_dose(rows: list[dict], catalog: dict, plans: list[dict],
         if note:
             basis = f"{note}; {basis}"
 
-        stalled = load_stall_sessions(full, deload_set,
+        stalled = load_stall_sessions([x for x in full if not x.get("partial_load")
+                                        and (not has_structured or (x.get("equipment_context") == current_context
+                                                                    and not x.get("context_ambiguous")))], deload_set,
                                       REP_CEILING_RANGE[cls][1])
         entry = {
             "exercise":         name,

@@ -60,7 +60,7 @@ def _write_csv_atomic(path: Path, rows: list[list[str]]) -> None:
 def read_monthly(person: str, year_month: str) -> list[dict]:
     """Return all rows (incl. TOTAL) from the per-month CSV as dicts.
 
-    Each dict has the 18 keys from ``MONTHLY_FIELDS``. TOTAL rows are
+    Each dict has the schema keys from ``MONTHLY_FIELDS``. TOTAL rows are
     distinguished by ``exercise == "TOTAL"``. Missing file → ``[]``.
     Coerces numeric columns to int/float; leaves duration/pace/notes/
     elapsed as strings.

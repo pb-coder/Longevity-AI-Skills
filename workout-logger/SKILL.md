@@ -83,15 +83,15 @@ line. Don't search the filesystem.
    Omit `bodyweight` entirely (or send `[]`) if the user didn't mention a weight. **Never prompt for it.** Omit `sleep` entirely if the user didn't include a sleep line — **never prompt for sleep**. Omit `css_test` unless the user explicitly typed `CSS test` — never infer it. Per-lap swim data (Stroke / SWOLF / per-lap pace) cannot be entered manually, and no import supplies it either — the export carries only a lap count, not per-lap detail, so `swimming/*.laps.csv` is never written and `Avg SWOLF` / `Stroke Mix` stay blank. Per-night segment metadata also can't be entered manually: `first_segment_start` / `last_segment_end` / `n_segments` come from the importer only, and stay blank on manually-entered nights.
 3. Run `python3 scripts/append_workout.py --person <Person> /tmp/workout_payload.json` (where `<Person>` is the resolved name, e.g. `<Person>` or `<OtherPerson>`). The script routes rows to the right `monthly/YYYY.MM.csv` under `<Person>/data/`, calls `canonicalize_monthly_csv` (sort + recompute Volume / Pace / SESSION + rebuild TOTAL rows), mirrors any bodyweight entries into `<Person>/data/health_metrics.csv` (sparse-merge — never overwrites other metrics on that date), dual-writes any sleep entries into both `<Person>/data/sleep/YYYY.MM.nights.csv` (rich per-night detail) and `<Person>/data/health_metrics.csv` (headline Total/Deep/REM/Time in Bed for the recovery score). Sleep Efficiency is auto-derived inside the upsert when both Total and Time in Bed are present.
 4. **Verify the write succeeded.** Capture the script's stdout and exit code:
-   - If the exit code is non-zero, print the exact stderr output and stop. Do not report success.
+   - If the exit code is non-zero, report the full output and stop. Exit 2 means unresolved set conflicts; other rows may already have been saved and committed.
    - If workout `rows` were present and the exit code is 0 but stdout does not contain the word `Appended`, print the exact stdout and stop with: "Unexpected script output — please check the tracker manually."
    - If no workout `rows` were present, a successful `Bodyweight:`, `Sleep Nights:`, `Nutrition Phases:`, or `CSS:` line confirms the write.
-   - If stdout contains `Appended`, the workout-row write is confirmed. Proceed.
+   - If stdout contains `Appended`, report the actual added, duplicate, replaced and conflict counts. Zero added rows may be an idempotent replay; do not claim they were newly logged. To correct an exact, unambiguous manual set, review it and use `--replace-conflicts`.
 5. Print the summary line before moving on to Apple Health refresh or verification: `N workouts, N exercises, N total sets, Wkg total volume`. If any session was marked as a deload, append ` (deload session)`. If one or more weights were logged, append ` | morning weight: 78.4kg` (or comma-separate multiple dates). The summary comes from the script's `Appended …` stdout line — extract N rows and dates from it. Do not skip this in test runs; if you are validating a `/log` flow, emit the same summary a real `/log` invocation would have emitted.
 
 6. **Apple Health refresh (automatic — no prompts at all).** After the summary, run `python3 Skills/shared/import_health_export_kit.py --person <Person>` unconditionally. See **Apple Health refresh** below for the source and store contract. No watchers or scheduled job are involved.
 
-   Capture stdout and append the importer's `Health Metrics:`, `Sleep Nights:`, `Swim Workouts:`, `Workout Sessions:`, and any `Auto-cardio:`, `Strength clustering warnings:`, `Profile:`, `Deleted source export:`, or `Committed <Person> data:` lines to the user-facing summary. Relay manual-wins warnings, skipped-negligible-swim lines, and nearby-swim notes. If no export exists, surface its one-line `ERROR: Health Export Kit file not found: health-export-json-*.json` and finish. A missing export means no fresh file was supplied.
+   Capture stdout and append the importer's `Health Metrics:`, `Sleep Nights:`, `Swim Workouts:`, `Workout Sessions:`, and any `Auto-cardio:`, `Strength clustering warnings:`, `Profile:`, `Archived source export:`, or `Committed <Person> data:` lines to the user-facing summary. Relay manual-wins warnings, skipped-negligible-swim lines, and nearby-swim notes. If no export exists, surface its one-line `ERROR: Health Export Kit file not found: health-export-json-*.json` and finish. A missing export means no fresh file was supplied.
 
 The tracker itself is the output. No markdown tables, no files presented, no narration.
 
@@ -117,15 +117,15 @@ It also creates / reads `<Person>/data/profile.csv`, a 2-column key/value file p
 
 **What the import cannot see.** Apple's 1-10 per-workout effort score is gone permanently — `metadata` is empty on every JSON workout — so there is no RIR / RPE intake from the import path at all. Treat that as a permanent property of the source, not a provisional gap waiting on a better export. Per-lap swim detail and SWOLF are permanently out of reach for the same reason. Daily HRV SDNN and Wrist Temp are also never written by this importer (a change from the retired zip importer, which wrote both): the export's only HRV signal is a two-to-four-reading sleep-window average with roughly four times the variance of the historical all-day series, and mixing the two would corrupt the recovery score's rolling baseline.
 
-**File naming.** Drop the app-generated `health-export-json-*.json` file into the workout tracker folder. Don't rename it — the resolver globs by pattern and picks the most recent by mtime.
+**File naming.** Drop the app-generated `health-export-json-*.json` file into the workout tracker folder. When multiple matching files exist, pass the intended file explicitly with `--export`.
 
 **Idempotency.** Re-running with the same export is a no-op. Sparse-merge upserts protect existing values — incoming `None` never overwrites a populated cell, so a partial export (e.g. just last week) won't erase older history.
 
-**The consumed export is deleted, not archived.** On success the importer deletes the export file it just read; `--keep-export` is the escape hatch when someone wants the file kept. `<root>/.processed/` is **retired and empty** — it is no longer the safety net, so don't describe it as one. Rollback is git instead: each person's `data/` directory is its own git repository (`shared/data_git.py`), and both `append_workout.py` and the importer commit automatically after every confirmed write — one commit per operation, message `log: <N> rows, <dates>` or `import: <export file name>`.
+**The consumed export is archived.** After successful writes the importer copies and verifies the source under `<root>/archive/health-exports/YYYY-MM/`, then removes the incoming copy. `--keep-export` leaves it in place. Collisions never overwrite a different export. Data history is separate: each person's `data/` directory is its own git repository (`shared/data_git.py`), and both `append_workout.py` and the importer commit automatically after every confirmed write — one commit per operation, message `log: <N> rows, <dates>` or `import: <export file name>`.
 
 **Auto-cardio.** When the importer ingests cardio workouts (Running, Hiking, Cycling, Swimming, HIIT) AND `auto_cardio` in `profile.csv` is True, those workouts also flow into the matching `<Person>/data/monthly/YYYY.MM.csv` as cardio rows carrying an `apple` / `gymkit:<Device>` value in the typed `Source` column. Manually-logged rows always win — the dedupe rule (date + exercise + duration ±1 min) skips Apple workouts that match an existing manual entry. Default: `auto_cardio = true`. Flip to `false` per-tracker by editing `profile.csv` if a user prefers manual-only logging.
 
-For an explicit manual import, supported flags are `--person`, `--export` (path or glob), `--since`, `--until`, `--allow-past-months`, `--dry-run`, and `--keep-export`. The default resolver picks the newest matching export by mtime. `/log` passes only `--person`.
+For an explicit manual import, supported flags are `--person`, `--export` (path or glob), `--since`, `--until`, `--allow-past-months`, `--dry-run`, and `--keep-export`. The default resolver accepts a single matching export; multiple matches require an explicit path. `/log` passes only `--person`.
 
 ## Bodyweight (opt-in)
 
@@ -221,6 +221,9 @@ Each row is a dict with these keys. `date` / `num` / `exercise` / `set` are requ
   "reps": 10,
   "kg": 52,
   "notes": null,
+  "gym": null,
+  "machine": null,
+  "load_basis": null,
   "distance_km": null,
   "duration_min": null,
   "pace": null,
@@ -231,10 +234,11 @@ Each row is a dict with these keys. `date` / `num` / `exercise` / `set` are requ
 Rules:
 - `num` restarts at 1 for each new date. All sets of the same exercise share a `num`.
 - `set` is 1, 2, 3 within an exercise.
-- Do NOT compute or include a `volume` field — `canonicalize_monthly_csv` recomputes Volume = reps × kg on every write and writes a literal sum on the TOTAL row. Skip the arithmetic.
+- Do NOT compute or include a `volume` field. The canonicalizer computes volume for known total loads; a plates-only load leaves exercise and session total volume blank because the total is unknown.
+- When supplied, put the gym and the specific machine in `gym` and `machine` on each relevant set. These are exact identifiers, not guessed labels. If the user states the number excludes the bar, set `load_basis` to `plates_only`; use `total` only when total weight is explicit, otherwise leave it null. Preserve legacy notes. Never invent bar weight or machine identity.
 - The cardio fields (`distance_km`, `duration_min`, `pace`, `avg_hr`) are cardio-only. Leave null for strength rows.
 - Manual `/log` rows do not include `laps`. The old `Laps` column was retired in 2026-05; swim lap counts now live exclusively on the imported `<Person>/data/swimming/YYYY.MM.workouts.csv`. There is no per-lap file — see "Apple Health refresh".
-- The monthly CSVs have 18 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed | Source`. SESSION is filled in by `canonicalize_monthly_csv` (per-month session number repeated on every row of the same date); leave it out of the row dict. Source is filled by the writer/importer.
+- Monthly CSV schema v2 appends `Gym | Machine | Load Basis` to the original 18 columns: `SESSION | Date | # | Exercise | Set | Reps | kg | Volume | Notes | Distance (km) | Duration (min) | Pace (min/km) | Avg HR | Active Cal | Total Cal | Elevation (m) | Elapsed | Source`. SESSION is filled in by `canonicalize_monthly_csv` (per-month session number repeated on every row of the same date); leave it out of the row dict. Source is filled by the writer/importer.
 - Sort rows in the JSON by date ascending, then `num`, then `set`. The script does not re-sort.
 
 ## Rules

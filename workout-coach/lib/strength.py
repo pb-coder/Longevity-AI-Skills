@@ -37,6 +37,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 
+from shared.workout_context import equipment_context, is_partial_bar_load, partial_load
 from .adherence import is_isolation
 from .constants import LOAD_EQUAL_TOLERANCE_KG, REP_CEILING_RANGE, VOLUME_LANDMARKS
 from .parsing import _parse_iso_date
@@ -191,8 +192,15 @@ def session_history(rows: list[dict], catalog: dict | None = None,
             continue
         names.setdefault(key, (r.get("exercise") or "").strip())
         day = by.setdefault(key, {}).setdefault(
-            r["date"], {"loads": [], "reps": [], "ctx": False})
-        day["loads"].append(float(r.get("kg") or 0))
+            r["date"], {"loads": [], "reps": [], "ctx": False, "partial_load": False, "contexts": set(), "missing_context": False})
+        partial = partial_load(r)
+        day["partial_load"] |= partial
+        context = equipment_context(r)
+        if context is None:
+            day["missing_context"] = True
+        else:
+            day["contexts"].add(context)
+        day["loads"].append(0.0 if partial else float(r.get("kg") or 0))
         day["reps"].append(int(r.get("reps") or 0))
         if is_context_change(r.get("notes"), meta):
             day["ctx"] = True
@@ -202,6 +210,8 @@ def session_history(rows: list[dict], catalog: dict | None = None,
         hist = []
         for d in sorted(days):
             rec = days[d]
+            if rec["partial_load"]:
+                rec["loads"] = [0.0] * len(rec["loads"])
             loaded = [(kg, reps) for kg, reps in zip(rec["loads"], rec["reps"])
                       if kg > 0]
             top = max((kg for kg, _ in loaded), default=None)
@@ -215,6 +225,10 @@ def session_history(rows: list[dict], catalog: dict | None = None,
                 "reps_at_top":    [reps for kg, reps in loaded
                                    if loads_equal(kg, top)],
                 "context_change": rec["ctx"],
+                "partial_load":  rec["partial_load"],
+                "equipment_context": next(iter(rec["contexts"])) if len(rec["contexts"]) == 1 else None,
+                "context_ambiguous": (len(rec["contexts"]) > 1 or
+                                      bool(rec["contexts"]) and rec["missing_context"]),
             })
         out[key] = hist
     return out
@@ -401,8 +415,11 @@ def estimated_1rm(rows: list[dict],
 
     by_ex: dict[str, list[dict]] = {}
     canonical_name: dict[str, str] = {}
+    partial_days = {(r.get("date"), (r.get("exercise") or "").strip().lower())
+                    for r in rows if partial_load(r)}
     for r in rows:
-        if not _is_working_set(r):
+        key = (r.get("exercise") or "").strip().lower()
+        if not _is_working_set(r) or (r.get("date"), key) in partial_days:
             continue
         kg = r.get("kg") or 0
         reps = r.get("reps") or 0
@@ -422,6 +439,23 @@ def estimated_1rm(rows: list[dict],
 
     out: dict[str, dict] = {}
     for key, entries in by_ex.items():
+        # Structured machine identities must not be pooled with unknown or
+        # different machines when estimating trends, stalls, or transfer.
+        meta = (catalog or {}).get(key) or {}
+        complete_history = sessions_by_ex.get(key, [])
+        if complete_history and complete_history[-1].get("partial_load"):
+            continue
+        hist = [h for h in complete_history if not h.get("partial_load")]
+        if meta.get("equipment") not in GYM_INVARIANT_EQUIPMENT and any(
+                h.get("equipment_context") or h.get("context_ambiguous") for h in hist):
+            latest = hist[-1]
+            ctx = latest.get("equipment_context")
+            if latest.get("context_ambiguous") or not ctx or not all(ctx):
+                continue
+            eligible = {h["date"] for h in hist if h.get("equipment_context") == ctx
+                        and not h.get("context_ambiguous")}
+            entries = [e for e in entries if e["date"] in eligible]
+            sessions_by_ex[key] = [h for h in hist if h["date"] in eligible]
         # Per date, keep the heaviest projected e1RM and remember the
         # (reps, kg) that produced it — needed for the history block and
         # for the confidence judgement. Track context-change as a date-

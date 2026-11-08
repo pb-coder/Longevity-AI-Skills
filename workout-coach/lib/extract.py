@@ -40,6 +40,7 @@ Profile / HR estimation:
 """
 from __future__ import annotations
 
+from shared.workout_context import partial_load
 from functools import lru_cache
 from pathlib import Path
 import re
@@ -105,7 +106,12 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
         if first_of_month < cutoff.replace(day=1):
             continue
 
-        for rd in read_monthly(person, ym):
+        month_rows = read_monthly(person, ym)
+        partial_groups = {(date_str(rd.get("date")), str(rd.get("num") or ""),
+                           str(rd.get("exercise") or "").strip().casefold())
+                          for rd in month_rows if partial_load(rd)}
+        partial_dates = {key[0] for key in partial_groups}
+        for rd in month_rows:
             session = rd.get("session")
             date_val = rd.get("date")
             num = rd.get("num")
@@ -128,7 +134,7 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
 
             if isinstance(exercise, str) and exercise.strip().upper() == TOTAL_LABEL:
                 if current_date is not None:
-                    if volume not in (None, ""):
+                    if volume not in (None, "") and current_date not in partial_dates:
                         session_totals[current_date] = to_float(volume)
                     notes_str = str(notes).strip() if notes else None
                     is_deload = bool(notes_str and DELOAD_MARKER in notes_str.lower())
@@ -150,7 +156,10 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
 
             reps_i = to_int_or_none(reps)
             kg_f = to_float(kg)
-            if volume in (None, ""):
+            partial = (current_date, str(num or ""), str(exercise).strip().casefold()) in partial_groups
+            if partial:
+                vol_f = None
+            elif volume in (None, ""):
                 vol_f = kg_f * (reps_i or 0)
             else:
                 vol_f = to_float(volume)
@@ -165,6 +174,8 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
                 "kg": kg_f,
                 "volume": vol_f,
                 "notes": (str(notes).strip() if notes else None),
+                "gym": rd.get("gym"), "machine": rd.get("machine"),
+                "load_basis": "plates_only" if partial else rd.get("load_basis"),
                 "distance_km": parse_distance_km(distance) if distance else None,
                 "duration_min": parse_duration_minutes(duration) if duration else None,
                 "pace": str(pace).strip() if pace else None,
@@ -179,9 +190,10 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
     rows.sort(key=lambda r: (r["date"], r["num"] or 0, r["set"] or 0))
 
     # Fill in session_totals for any date whose TOTAL row lacked a Volume.
+    partial_dates_all = {r["date"] for r in rows if partial_load(r)}
     cached_dates = set(session_totals.keys())
     for r in rows:
-        if r["date"] in cached_dates:
+        if r["date"] in cached_dates or r["date"] in partial_dates_all:
             continue
         session_totals[r["date"]] = session_totals.get(r["date"], 0.0) + r["volume"]
 

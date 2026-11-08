@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from decimal import Decimal, InvalidOperation
 
 from .monthly_csv_canonicalize import canonicalize_monthly_csv
 from .monthly_csv_io import _dict_to_row, _read_csv_rows, _row_to_dict, _write_csv_atomic
@@ -44,7 +45,8 @@ __all__ = [
 ]
 
 # ============================================================ upsert_rows
-def upsert_rows(person: str, year_month: str, rows: list[dict]) -> None:
+def upsert_rows(person: str, year_month: str, rows: list[dict], *,
+                replace_conflicts: bool = False, dry_run: bool = False) -> dict[str, int]:
     """Append a batch of dict-rows to the per-month CSV, then canonicalize.
 
     ``rows`` is a list of dicts using ``MONTHLY_FIELDS`` keys (subset
@@ -52,39 +54,97 @@ def upsert_rows(person: str, year_month: str, rows: list[dict]) -> None:
     the migrator. Caller is responsible for the row-shape contract;
     canonicalize handles sort + computed cells + TOTAL rebuild.
     """
+    result = {"added": 0, "skipped": 0, "conflicts": 0, "replaced": 0}
     if not rows:
-        return
+        return result
     path = monthly_csv_path(person, year_month)
-    ensure_monthly_dir(person)
+    if not dry_run:
+        ensure_monthly_dir(person)
     # Read-existing-or-empty, then append.
     header, existing = _read_csv_rows(path)
     out = list(existing)
-    seen = set()
-    for raw in existing:
+    def identity(row):
+        return (date_str(row.get("date")), str(row.get("num") or ""),
+                str(row.get("exercise") or "").strip().lower(),
+                str(row.get("set") or ""))
+
+    def value(value):
+        if value is None or value == "":
+            return ""
+        try:
+            return Decimal(str(value)).normalize()
+        except InvalidOperation:
+            return str(value).strip()
+
+    def same(existing_row, incoming):
+        if any(value(existing_row.get(k)) != value(incoming.get(k)) for k in ("reps", "kg")):
+            return False
+        for field in ("notes", "distance", "duration", "pace", "avg_hr", "gym", "machine", "load_basis"):
+            incoming_value = incoming.get(field)
+            if incoming_value is None or incoming_value == "":
+                continue
+            old_value = existing_row.get(field)
+            if field == "duration":
+                old_value = _parse_duration_minutes(old_value)
+                incoming_value = _parse_duration_minutes(incoming_value)
+            if value(old_value) != value(incoming_value):
+                return False
+        return True
+
+    index = {}
+    exercise_sets = {}
+    for i, raw in enumerate(existing):
         rd = _row_to_dict(raw)
-        seen.add((
-            date_str(rd.get("date")),
-            str(rd.get("num") or ""),
-            str(rd.get("exercise") or "").strip().lower(),
-            str(rd.get("set") or ""),
-            str(rd.get("reps") or ""),
-            str(rd.get("kg") or ""),
-        ))
+        key = identity(rd)
+        index.setdefault(key, []).append(i)
+        exercise_sets.setdefault((key[0], key[2], key[3]), []).append(i)
     for r in rows:
-        key = (
-            date_str(r.get("date")),
-            str(r.get("num") or ""),
-            str(r.get("exercise") or "").strip().lower(),
-            str(r.get("set") or ""),
-            str(r.get("reps") or ""),
-            str(r.get("kg") or ""),
-        )
-        if key in seen:
+        key = identity(r)
+        indices = index.get(key, [])
+        # Exercise numbers can change during canonicalization. A partial
+        # replay with a different number must not create duplicate sets.
+        # Without an exact identity, changed data is ambiguous and is not
+        # eligible for automatic replacement.
+        if not indices:
+            alternate = exercise_sets.get((key[0], key[2], key[3]), [])
+            if alternate:
+                if len(alternate) == 1 and same(_row_to_dict(out[alternate[0]]), r):
+                    result["skipped"] += 1
+                else:
+                    result["conflicts"] += 1
+                continue
+        matches = [_row_to_dict(out[i]) for i in indices]
+        # Existing duplicate identities are ambiguous even when one row
+        # matches the request; silently skipping would hide the other row.
+        if len(matches) > 1:
+            result["conflicts"] += 1
             continue
-        seen.add(key)
+        if any(same(m, r) for m in matches):
+            result["skipped"] += 1
+            continue
+        if indices:
+            # A correction is safe only when the identity names exactly one
+            # manual row. Preserve fields the correction did not provide.
+            if (replace_conflicts and len(indices) == 1
+                    and str(matches[0].get("source") or "manual").lower().split("@", 1)[0] == "manual"):
+                updated = matches[0]
+                for field in ("reps", "kg", "notes", "distance", "duration", "pace", "avg_hr", "gym", "machine", "load_basis"):
+                    if r.get(field) is not None:
+                        updated[field] = r[field]
+                out[indices[0]] = _dict_to_row(updated)
+                result["replaced"] += 1
+            else:
+                result["conflicts"] += 1
+            continue
         out.append(_dict_to_row(r))
+        index[key] = [len(out) - 1]
+        exercise_sets.setdefault((key[0], key[2], key[3]), []).append(len(out) - 1)
+        result["added"] += 1
+    if dry_run or not (result["added"] or result["replaced"]):
+        return result
     _write_csv_atomic(path, out)
     canonicalize_monthly_csv(person, year_month)
+    return result
 
 
 # ============================================================ upsert cardio

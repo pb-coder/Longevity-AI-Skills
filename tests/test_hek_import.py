@@ -12,6 +12,8 @@ import json
 import unittest
 from datetime import date
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from shared import import_health_export_kit as hek
 
@@ -43,6 +45,82 @@ def _payload(meta=None, daily=None, additional=None,
         "sleep": {"sessions": sessions or [], "streams": {}},
         "additional": additional or {},
     }
+
+
+class SourceLifecycleTests(unittest.TestCase):
+    def test_archive_preserves_collisions_and_original_data(self) -> None:
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "health-export-json-test.json"
+            archive = root / "archive" / "health-exports" / "2026-01"
+            archive.mkdir(parents=True)
+            (archive / source.name).write_text("existing")
+            source.write_text("new data")
+            with patch.object(hek, "WORKOUT_TRACKER_ROOT", root):
+                dest = hek.archive_export(source, "2026-01")
+            self.assertFalse(source.exists())
+            self.assertEqual(dest.read_text(), "new data")
+            self.assertEqual((archive / source.name).read_text(), "existing")
+
+    def test_archive_failure_keeps_source_and_existing_destination(self) -> None:
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "health-export-json-test.json"
+            source.write_text("source")
+            archive = root / "archive" / "health-exports" / "2026-01"
+            archive.mkdir(parents=True)
+            (archive / source.name).write_text("existing")
+            with patch.object(hek, "WORKOUT_TRACKER_ROOT", root), \
+                 patch.object(hek.shutil, "copyfileobj", side_effect=OSError("failed")):
+                with self.assertRaises(OSError):
+                    hek.archive_export(source, "2026-01")
+            self.assertEqual(source.read_text(), "source")
+            self.assertEqual((archive / source.name).read_text(), "existing")
+            self.assertEqual(list(archive.iterdir()), [archive / source.name])
+
+    def test_default_resolution_rejects_ambiguous_files(self) -> None:
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            for n in ("one", "two"):
+                (root / f"health-export-json-{n}.json").touch()
+            with patch.object(hek, "WORKOUT_TRACKER_ROOT", root):
+                with self.assertRaisesRegex(ValueError, "multiple exports"):
+                    hek.resolve_export(None)
+                self.assertEqual(hek.resolve_export(str(root / "health-export-json-one.json")),
+                                 root / "health-export-json-one.json")
+
+    def test_empty_import_fails_during_preflight(self) -> None:
+        with TemporaryDirectory() as td:
+            source = Path(td) / "empty.json"
+            source.write_text(json.dumps(_payload()))
+            with self.assertRaises(hek.EmptyImportError):
+                hek.import_export("Test", source, None, None, dry_run=True)
+            self.assertTrue(source.exists())
+
+    def test_successful_import_archives_even_if_history_commit_fails(self) -> None:
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "health-export-json-test.json"
+            source.write_text(FIXTURE.read_text())
+            with patch.object(hek, "WORKOUT_TRACKER_ROOT", root), \
+                 patch.multiple(hek, ensure_profile=unittest.mock.DEFAULT,
+                     upsert_health_metrics=unittest.mock.DEFAULT,
+                     upsert_sleep_nights=unittest.mock.DEFAULT,
+                     upsert_swim_workouts=unittest.mock.DEFAULT,
+                     upsert_workout_sessions=unittest.mock.DEFAULT,
+                     upsert_monthly_strength_session=unittest.mock.DEFAULT,
+                     cluster_strength_sessions=unittest.mock.DEFAULT,
+                     commit_data=unittest.mock.DEFAULT) as mocks:
+                mocks["ensure_profile"].return_value = ({"source": hek.SOURCE_NAME, "auto_cardio": False}, False)
+                for name in ("upsert_health_metrics", "upsert_sleep_nights", "upsert_swim_workouts",
+                             "upsert_workout_sessions", "upsert_monthly_strength_session"):
+                    mocks[name].return_value = []
+                mocks["cluster_strength_sessions"].return_value = ([], [])
+                mocks["commit_data"].return_value = None
+                result = hek.import_export("Test", source, None, None)
+            self.assertFalse(source.exists())
+            self.assertEqual(len(list((root / "archive" / "health-exports").rglob("*.json"))), 1)
+            self.assertTrue(any(line.startswith("Archived source export:") for line in result))
 
 
 class DailySumCoverageTests(unittest.TestCase):

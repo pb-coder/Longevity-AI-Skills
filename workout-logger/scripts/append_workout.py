@@ -65,8 +65,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
@@ -77,12 +79,14 @@ from shared.monthly_csv import (  # noqa: E402
     upsert_rows as monthly_upsert_rows,
 )
 from shared.csv_store import (  # noqa: E402
+    NUTRITION_PHASE_TYPES,
     upsert_health_metrics,
     upsert_nutrition_phases,
     upsert_sleep_nights,
     write_profile,
 )
 from shared.data_git import commit_data  # noqa: E402
+from shared.workout_context import LOAD_BASES  # noqa: E402
 from shared.person_paths import monthly_csv as monthly_csv_path  # noqa: E402
 
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -126,6 +130,9 @@ def _to_monthly_row(r: dict) -> dict:
         "total_cal":   None,
         "elevation_m": None,
         "elapsed":     None,
+        "gym":         r.get("gym"),
+        "machine":     r.get("machine"),
+        "load_basis":  r.get("load_basis"),
     }
 
 
@@ -311,7 +318,7 @@ def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
         try:
             kg = float(e["kg"])
         except (TypeError, ValueError):
-            continue
+            raise ValueError(f"bodyweight kg must be numeric: {e['kg']!r}") from None
         metric_entries.append({"date": d, "bodyweight_kg": kg})
     if not metric_entries:
         return []
@@ -323,7 +330,9 @@ def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
 def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
                   css_test: dict | None = None,
                   sleep: list[dict] | None = None,
-                  nutrition_phase: list[dict] | None = None) -> list[str]:
+                  nutrition_phase: list[dict] | None = None,
+                  replace_conflicts: bool = False,
+                  dry_run: bool = False) -> list[str]:
     """Apply rows + bodyweight + sleep + nutrition_phase + optional CSS test.
 
     Routes per-set rows to the matching ``YYYY.MM.csv`` under
@@ -342,13 +351,21 @@ def write_payload(person: str, rows: list[dict], bodyweight: list[dict],
             target = monthly_csv_path(person, ym)
             created = not target.exists()
             payload = [_to_monthly_row(r) for r in month_rows]
-            monthly_upsert_rows(person, ym, payload)
+            counts = monthly_upsert_rows(person, ym, payload,
+                                         replace_conflicts=replace_conflicts,
+                                         dry_run=dry_run)
             dates = sorted({r["date"] for r in month_rows})
             tag = " (new sheet)" if created else ""
             status.append(
-                f"Appended {len(month_rows)} row(s) to {ym}{tag} "
-                f"for {', '.join(dates)}"
+                f"{'Would append' if dry_run else 'Appended'} {counts['added']} row(s) to {ym}{tag} "
+                f"for {', '.join(dates)}; skipped {counts['skipped']} duplicate(s), "
+                f"replaced {counts['replaced']}, conflicts {counts['conflicts']}"
             )
+            if counts["conflicts"]:
+                status.append("WARN: conflicting sets were not changed; review them. --replace-conflicts only updates an exact, unambiguous manual set")
+
+    if dry_run:
+        return status
 
     # Bodyweight upserts the Health Metrics CSV.
     status.extend(upsert_bodyweight(person, bodyweight))
@@ -395,7 +412,7 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
         if isinstance(bw_raw, dict):
             bw_raw = [bw_raw]
         bw = bw_raw
-        css_test = data.get("css_test") or None
+        css_test = data.get("css_test")
         sleep_raw = data.get("sleep", []) or []
         if isinstance(sleep_raw, dict):
             sleep_raw = [sleep_raw]
@@ -407,20 +424,46 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
     else:
         raise ValueError("payload must be a list of rows or a dict wrapper")
 
+    for name, collection in (("rows", rows), ("bodyweight", bw), ("sleep", sleep_entries),
+                             ("nutrition_phase", nutrition_phase_entries)):
+        if not isinstance(collection, list):
+            raise ValueError(f"{name} must be a list")
+
     def require_date(e: dict, label: str, key: str = "date") -> None:
+        if not isinstance(e, dict):
+            raise ValueError(f"{label} entry must be an object: {e!r}")
         if key not in e:
             raise ValueError(f"{label} entry missing {key}: {e!r}")
         if not ISO_DATE_RE.match(str(e.get(key) or "")):
             raise ValueError(f"{label} {key} must be YYYY-MM-DD: {e!r}")
+        try:
+            date.fromisoformat(str(e[key]))
+        except ValueError:
+            raise ValueError(f"{label} {key} must be a real calendar date: {e!r}") from None
+
+    def require_number(value, label, *, positive=False, nonnegative=False):
+        try:
+            if isinstance(value, bool):
+                raise ValueError
+            n = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{label} must be numeric: {value!r}") from None
+        if not math.isfinite(n) or (positive and n <= 0) or (nonnegative and n < 0):
+            raise ValueError(f"{label} has an invalid value: {value!r}")
+        return n
 
     for r in rows:
-        if "date" not in r or "exercise" not in r or "set" not in r or "num" not in r:
-            raise ValueError(f"row missing required field: {r!r}")
         require_date(r, "row")
+        if "exercise" not in r or "set" not in r or "num" not in r:
+            raise ValueError(f"row missing required field: {r!r}")
+        for key in ("gym", "machine"):
+            if r.get(key) is not None and not isinstance(r[key], str):
+                raise ValueError(f"{key} must be a string")
+        if r.get("load_basis") not in (None, "") and (not isinstance(r["load_basis"], str) or r["load_basis"] not in LOAD_BASES):
+            raise ValueError("load_basis must be total or plates_only")
     for e in bw:
-        if "date" not in e or "kg" not in e:
-            raise ValueError(f"bodyweight entry missing date/kg: {e!r}")
         require_date(e, "bodyweight")
+        require_number(e.get("kg"), "bodyweight kg", positive=True)
     if css_test is not None:
         if not isinstance(css_test, dict):
             raise ValueError(f"css_test must be a dict: {css_test!r}")
@@ -428,12 +471,31 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
             raise ValueError(
                 f"css_test missing t400_sec / t200_sec: {css_test!r}"
             )
+        t400 = require_number(css_test["t400_sec"], "css_test t400_sec", positive=True)
+        t200 = require_number(css_test["t200_sec"], "css_test t200_sec", positive=True)
+        if t400 <= t200:
+            raise ValueError("css_test t400_sec must exceed t200_sec")
+        if css_test.get("date") is not None:
+            require_date(css_test, "css_test")
     for e in sleep_entries:
         require_date(e, "sleep")
+        for field in ("total_h", "core_h", "deep_h", "rem_h", "unspecified_h",
+                      "awake_h", "time_in_bed_h", "efficiency_pct"):
+            if e.get(field) is not None:
+                n = require_number(e[field], f"sleep {field}", nonnegative=True)
+                if field == "efficiency_pct" and n > 100:
+                    raise ValueError("sleep efficiency_pct must not exceed 100")
     for e in nutrition_phase_entries:
-        if "start_date" not in e:
-            raise ValueError(f"nutrition_phase entry missing start_date: {e!r}")
         require_date(e, "nutrition_phase", "start_date")
+        if e.get("end_date") is not None:
+            require_date(e, "nutrition_phase", "end_date")
+            if e["end_date"] < e["start_date"]:
+                raise ValueError("nutrition_phase end_date precedes start_date")
+        if e.get("phase_type") is not None and str(e["phase_type"]).strip().lower() not in NUTRITION_PHASE_TYPES:
+            raise ValueError(f"unknown phase_type: {e['phase_type']!r}")
+        for field in ("target_kcal_delta", "target_protein_g_per_kg", "target_rate_kg_per_wk"):
+            if e.get(field) is not None:
+                require_number(e[field], f"nutrition_phase {field}", nonnegative=field == "target_protein_g_per_kg")
 
     return (rows, bw, css_test, sleep_entries, nutrition_phase_entries)
 
@@ -443,6 +505,8 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--person", required=True,
                     help="Tracker owner (<Person> or <OtherPerson>).")
+    ap.add_argument("--replace-conflicts", action="store_true",
+                    help="Replace matching, unambiguous manual sets when reps or weight differ.")
     ap.add_argument("payload", type=str,
                     help="Path to payload JSON, or '-' to read from stdin.")
     args = ap.parse_args()
@@ -460,9 +524,11 @@ def main() -> int:
         print("No rows, bodyweight, sleep, nutrition_phase, or css_test entries to write.")
         return 0
     try:
-        for line in write_payload(ctx.person, rows, bodyweight, css_test,
-                                  sleep=sleep_entries,
-                                  nutrition_phase=nutrition_phase_entries):
+        status = write_payload(ctx.person, rows, bodyweight, css_test,
+                               sleep=sleep_entries,
+                               nutrition_phase=nutrition_phase_entries,
+                               replace_conflicts=args.replace_conflicts)
+        for line in status:
             print(line)
     except (FileNotFoundError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -477,7 +543,9 @@ def main() -> int:
     sha = commit_data(ctx.person, f"log: {len(rows)} rows, {span}")
     if sha:
         print(f"Committed {ctx.person} data: {sha}")
-    return 0
+    # Other rows can already have been written. Preserve their history, but
+    # make unresolved conflicts visible to callers through the exit code.
+    return 2 if any(line.startswith("WARN: conflicting sets") for line in status) else 0
 
 
 if __name__ == "__main__":

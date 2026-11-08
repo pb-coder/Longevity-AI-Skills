@@ -113,8 +113,10 @@ def _is_cardio_row(r: dict) -> bool:
     return False
 
 
-def progression_summary(rows: list[dict]) -> list[dict]:
-    """Last and previous best working set per exercise (warmups excluded)."""
+def progression_summary(rows: list[dict], catalog: dict | None = None) -> list[dict]:
+    """Last and previous comparable best sets, excluding uncertain loads."""
+    from .strength import GYM_INVARIANT_EQUIPMENT, session_history
+    histories = session_history(rows, catalog)
     by_ex: dict[str, list[dict]] = {}
     for r in rows:
         if _notes_has_warmup(r.get("notes")):
@@ -125,6 +127,20 @@ def progression_summary(rows: list[dict]) -> list[dict]:
 
     summary = []
     for canon_lower, sets in by_ex.items():
+        hist = histories.get(canon_lower) or []
+        if hist and hist[-1].get("partial_load"):
+            continue
+        valid = {h["date"] for h in hist if not h.get("partial_load")}
+        meta = (catalog or {}).get(canon_lower) or {}
+        if meta.get("equipment") not in GYM_INVARIANT_EQUIPMENT and any(
+                h.get("equipment_context") or h.get("context_ambiguous") for h in hist):
+            last_history = hist[-1]
+            ctx = last_history.get("equipment_context")
+            if last_history.get("context_ambiguous") or not ctx or not all(ctx):
+                continue
+            valid = {h["date"] for h in hist if not h.get("partial_load")
+                     and not h.get("context_ambiguous") and h.get("equipment_context") == ctx}
+        sets = [r for r in sets if r.get("date") in valid]
         # Group by date, pick heaviest (kg, then reps) per session.
         by_date: dict[str, dict] = {}
         for s in sets:

@@ -39,6 +39,7 @@ if __package__ in (None, ""):
     __package__ = "shared"
 from tracker import TrackerContext  # noqa: E402
 from tracker.csv_table import write_csv_atomic  # noqa: E402
+from .monthly_csv_schema import supported_monthly_header  # noqa: E402
 from .monthly_csv import (  # noqa: E402
     MONTHLY_HEADERS,
     TOTAL_LABEL,
@@ -213,7 +214,7 @@ def validate_csvs(person: str) -> list[str]:
             reader = csv.reader(f)
             header = next(reader, [])
             rows = list(reader)
-        if header != MONTHLY_HEADERS:
+        if not supported_monthly_header(header):
             out.append(
                 f"monthly/{ym}.csv: header mismatch — got {header}, "
                 f"expected {MONTHLY_HEADERS}"
@@ -266,7 +267,7 @@ def fix_distance_units(person: str, dry_run: bool = False) -> int:
             reader = csv.reader(f)
             header = next(reader, [])
             rows = list(reader)
-        if header != MONTHLY_HEADERS:
+        if not supported_monthly_header(header):
             continue
         try:
             ex_idx = header.index("Exercise")

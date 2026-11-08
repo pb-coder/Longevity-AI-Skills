@@ -40,6 +40,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(THIS_DIR.parent))
     __package__ = "shared"
 
+from .monthly_csv_schema import supported_monthly_header  # noqa: E402
 from .monthly_csv import (  # noqa: E402
     MONTHLY_HEADERS,
     _format_duration_mmss,
@@ -388,7 +389,7 @@ def canonicalize_csv(path: Path, canonical: set[str],
         reader = csv.reader(f)
         header = next(reader, [])
         rows = list(reader)
-    if header != MONTHLY_HEADERS:
+    if not supported_monthly_header(header):
         return report
 
     renamed = 0

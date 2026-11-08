@@ -35,8 +35,81 @@ class MonthlyCsvTests(unittest.TestCase):
             reader = csv.reader(f)
             return next(reader), list(reader)
 
+    def test_manual_replay_and_explicit_correction(self) -> None:
+        row = {"date": "2026-05-12", "num": 1, "exercise": "Hack Squat",
+               "set": 1, "reps": 10, "kg": 40, "notes": "original"}
+        self.assertEqual(monthly_csv.upsert_rows("Test", "2026.05", [row])["added"], 1)
+        replay = {**row, "kg": 40.0}
+        self.assertEqual(monthly_csv.upsert_rows("Test", "2026.05", [replay])["skipped"], 1)
+        corrected = {**row, "reps": 12, "notes": None}
+        self.assertEqual(monthly_csv.upsert_rows("Test", "2026.05", [corrected])["conflicts"], 1)
+        result = monthly_csv.upsert_rows("Test", "2026.05", [corrected], replace_conflicts=True)
+        self.assertEqual(result["replaced"], 1)
+        _, rows = self.read_rows(person_paths.monthly_csv("Test", "2026.05"))
+        self.assertEqual(rows[0][5:9], ["12", "40", "480", "original"])
+        self.assertEqual(len([r for r in rows if r[3] == "Hack Squat"]), 1)
+
+    def test_conflicts_do_not_replace_automatically_imported_rows(self) -> None:
+        row = {"date": "2026-05-12", "num": 1, "exercise": "Hack Squat",
+               "set": 1, "reps": 10, "kg": 40, "source": "apple"}
+        monthly_csv.upsert_rows("Test", "2026.05", [row])
+        result = monthly_csv.upsert_rows("Test", "2026.05", [{**row, "kg": 45}], replace_conflicts=True)
+        self.assertEqual(result["conflicts"], 1)
+
+    def test_hold_duration_and_notes_are_not_silently_discarded(self) -> None:
+        row = {"date": "2026-05-12", "num": 1, "exercise": "Dead Hang",
+               "set": 1, "reps": 0, "kg": 0, "duration": "0:30", "notes": "first"}
+        monthly_csv.upsert_rows("Test", "2026.05", [row])
+        self.assertEqual(monthly_csv.upsert_rows("Test", "2026.05", [{**row, "duration": 0.5}])["skipped"], 1)
+        changed = {**row, "duration": "0:45", "notes": "second"}
+        self.assertEqual(monthly_csv.upsert_rows("Test", "2026.05", [changed])["conflicts"], 1)
+        self.assertEqual(monthly_csv.upsert_rows("Test", "2026.05", [changed], replace_conflicts=True)["replaced"], 1)
+        _, rows = self.read_rows(person_paths.monthly_csv("Test", "2026.05"))
+        self.assertEqual(rows[0][8], "second")
+        self.assertEqual(rows[0][10], "0:45")
+
+    def test_renumbered_partial_replay_does_not_append_a_duplicate(self) -> None:
+        row = {"date": "2026-05-12", "num": 3, "exercise": "Hack Squat",
+               "set": 1, "reps": 10, "kg": 40}
+        monthly_csv.upsert_rows("Test", "2026.05", [row])
+        # Canonicalization renumbers the first movement to 1.
+        replay = monthly_csv.upsert_rows("Test", "2026.05", [row])
+        self.assertEqual(replay["skipped"], 1)
+        changed = monthly_csv.upsert_rows("Test", "2026.05", [{**row, "reps": 12}], replace_conflicts=True)
+        self.assertEqual(changed["conflicts"], 1)
+        _, rows = self.read_rows(person_paths.monthly_csv("Test", "2026.05"))
+        self.assertEqual(len([r for r in rows if r[3] == "Hack Squat"]), 1)
+
+    def test_dry_run_detects_conflicts_without_writing(self) -> None:
+        row = {"date": "2026-05-12", "num": 1, "exercise": "Hack Squat",
+               "set": 1, "reps": 10, "kg": 40}
+        monthly_csv.upsert_rows("Test", "2026.05", [row])
+        path = person_paths.monthly_csv("Test", "2026.05")
+        before = path.read_bytes()
+        result = monthly_csv.upsert_rows("Test", "2026.05", [{**row, "kg": 45}], dry_run=True)
+        self.assertEqual(result["conflicts"], 1)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_multiple_existing_rows_with_same_identity_are_a_conflict(self) -> None:
+        row = ["", "2026-05-12", "1", "Hack Squat", "1", "10", "40", "400", "",
+               "", "", "", "", "", "", "", "", "manual"]
+        conflicting = list(row)
+        conflicting[5] = "12"
+        path = self.write_month("2026.05", monthly_csv.MONTHLY_HEADERS[:18], [row, conflicting])
+        before = path.read_bytes()
+        incoming = {"date": "2026-05-12", "num": 1, "exercise": "Hack Squat",
+                    "set": 1, "reps": 10, "kg": 40}
+        for dry_run in (True, False):
+            for replace in (True, False):
+                with self.subTest(dry_run=dry_run, replace=replace):
+                    result = monthly_csv.upsert_rows("Test", "2026.05", [incoming],
+                                                     dry_run=dry_run, replace_conflicts=replace)
+                    self.assertEqual(result["conflicts"], 1)
+                    self.assertEqual(result["skipped"], 0)
+                    self.assertEqual(path.read_bytes(), before)
+
     def test_canonicalize_migrates_17_columns_rebuilds_total_and_is_idempotent(self) -> None:
-        old_header = monthly_csv.MONTHLY_HEADERS[:-1]
+        old_header = monthly_csv.MONTHLY_HEADERS[:17]
         row = [
             "", "2026-05-10", "1", "Dumbbell Row", "1", "10", "20", "",
             "", "", "", "", "", "", "", "", "",
@@ -52,9 +125,39 @@ class MonthlyCsvTests(unittest.TestCase):
         self.assertEqual(header, monthly_csv.MONTHLY_HEADERS)
         self.assertEqual(first, second)
         self.assertEqual(rows[0][7], "200")
-        self.assertEqual(rows[0][-1], "manual")
+        self.assertEqual(rows[0][monthly_csv.MONTHLY_HEADERS.index("Source")], "manual")
         self.assertEqual(rows[1][3], monthly_csv.TOTAL_LABEL)
         self.assertEqual(rows[1][7], "200")
+
+    def test_context_schema_roundtrips_with_legacy_rows_and_corrections(self) -> None:
+        from workout_coach.lib.extract import extract_rows
+        legacy = ["", "2026-05-10", "1", "Dumbbell Row", "1", "10", "20", "200", "",
+                  "", "", "", "", "", "", "", "", "manual"]
+        path = self.write_month("2026.05", monthly_csv.MONTHLY_HEADERS[:18], [legacy])
+        before = path.read_bytes()
+        data = monthly_csv.read_monthly("Test", "2026.05")
+        self.assertIsNone(data[0]["gym"])
+        self.assertEqual(path.read_bytes(), before)  # read does not migrate
+        row = {"date": "2026-05-12", "num": 1, "exercise": "Conventional Deadlift",
+               "set": 1, "reps": 8, "kg": 30, "gym": "Gym A", "machine": "Bar 1",
+               "load_basis": "plates_only"}
+        self.assertEqual(monthly_csv.upsert_rows("Test", "2026.05", [row])["added"], 1)
+        header, stored = self.read_rows(path)
+        self.assertEqual(header, monthly_csv.MONTHLY_HEADERS)
+        dead = next(r for r in stored if r[3] == "Conventional Deadlift")
+        self.assertEqual(dead[18:21], ["Gym A", "Bar 1", "plates_only"])
+        self.assertEqual(dead[7], "")  # the total load is unknown
+        extracted, totals, _ = extract_rows("Test", 3, date(2026, 5, 20))
+        dead_ex = next(r for r in extracted if r["exercise"] == "Conventional Deadlift")
+        self.assertEqual((dead_ex["gym"], dead_ex["machine"], dead_ex["load_basis"]),
+                         ("Gym A", "Bar 1", "plates_only"))
+        self.assertIsNone(dead_ex["volume"])
+        self.assertNotIn("2026-05-12", totals)
+        changed = {**row, "machine": "Bar 2"}
+        self.assertEqual(monthly_csv.upsert_rows("Test", "2026.05", [changed])["conflicts"], 1)
+        self.assertEqual(monthly_csv.upsert_rows("Test", "2026.05", [changed], replace_conflicts=True)["replaced"], 1)
+        self.assertEqual(next(r for r in monthly_csv.read_monthly("Test", "2026.05")
+                              if r["exercise"] == "Conventional Deadlift")["machine"], "Bar 2")
 
     def test_canonicalize_places_total_between_strength_and_cardio_rows(self) -> None:
         rows = [
@@ -296,7 +399,7 @@ class MonthlyCsvTests(unittest.TestCase):
         self.assertEqual(monthly_csv.date_str("2026-02-28 08:00:00"), "2026-02-28")
 
     def test_notes_to_source_migration_preserves_trailing_annotations(self) -> None:
-        old_header = monthly_csv.MONTHLY_HEADERS[:-1]
+        old_header = monthly_csv.MONTHLY_HEADERS[:17]
         row = [
             "", "2026-05-10", "1", "Outdoor Run", "1", "", "", "",
             "auto-imported from Apple | source: Matrix T7xi; felt strong",

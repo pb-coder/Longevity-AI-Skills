@@ -1,6 +1,7 @@
 """Monthly CSV canonicalization."""
 from __future__ import annotations
 
+from .workout_context import partial_load
 from .person_paths import ensure_monthly_dir, monthly_csv as monthly_csv_path
 from .monthly_csv_io import _dict_to_row, _read_csv_rows, _row_to_dict, _write_csv_atomic
 from .monthly_csv_schema import DELOAD_MARKER_TEXT, TOTAL_LABEL
@@ -25,7 +26,7 @@ __all__ = [
 
 # ============================================================ canonicalize
 def _build_data_row(session_num: int, rd: dict, kind: str,
-                    is_strength: bool) -> dict:
+                    is_strength: bool, partial: bool = False) -> dict:
     """Build a canonical data-row dict from a parsed row."""
     reps = _numeric_cell(rd.get("reps"))
     kg = _numeric_cell(rd.get("kg"))
@@ -34,7 +35,7 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
 
     # Volume = reps × kg (numeric) — replaces =F*G formula.
     if isinstance(reps, (int, float)) and isinstance(kg, (int, float)) \
-            and reps and kg:
+            and reps and kg and not partial:
         volume = round(reps * kg, 2)
     else:
         volume = None
@@ -65,6 +66,9 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
         # legacy-Notes migration helper (``manual`` for hand-logged
         # rows). TOTAL rows leave this blank.
         "source":      rd.get("source") or None,
+        "gym":         rd.get("gym") or None,
+        "machine":     rd.get("machine") or None,
+        "load_basis":  rd.get("load_basis") or None,
     }
 
     if is_strength and kind == "cardio":
@@ -270,8 +274,11 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
         # so it goes immediately after the last strength/other row and
         # before any auto-imported cardio rows — anchoring it visually
         # to the session it describes.
+        partial_exercises = {(str(rd.get("num") or ""), str(rd.get("exercise") or "").strip().casefold())
+                             for rd in sess["rows"] if partial_load(rd)}
         built = [
-            _build_data_row(session_num, rd, kinds[idx], is_strength)
+            _build_data_row(session_num, rd, kinds[idx], is_strength,
+                            (str(rd.get("num") or ""), str(rd.get("exercise") or "").strip().casefold()) in partial_exercises)
             for idx, rd in enumerate(sess["rows"])
         ]
         volume_sum = sum(
@@ -292,7 +299,7 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
                 out_rows.append(_dict_to_row(data_row))
             total_row = _build_total_row(
                 session_num, sess, hoist,
-                volume_sum if volume_sum else None,
+                volume_sum if volume_sum and not partial_exercises else None,
                 deload_present,
                 total_notes,
             )

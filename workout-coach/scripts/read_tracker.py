@@ -216,6 +216,7 @@ from workout_coach.lib.adherence import (  # noqa: E402
     last_strength_session_type,
     load_plans,
     retired_movements,
+    unavailable_movements,
 )
 from workout_coach.lib.blocks import (  # noqa: E402
     block_payload,
@@ -620,7 +621,7 @@ def main() -> int:
     # breath. The tiers go in so the 56-day pattern gate cannot hide the
     # emphasis categories the weekly spec forces the coach to add — they
     # sit at zero precisely because they are the gap.
-    retired = retired_movements(person)
+    retired = retired_movements(person) | unavailable_movements(person)
     rot_candidates = rotation_candidates(
         rows, db, catalog, e1rm, today_d,
         exclude={b["exercise"] for b in (adherence or {}).get("benched") or []}
@@ -922,8 +923,9 @@ def main() -> int:
     # ``min_per_working_set``. ----
     SESSION_WARMUP_MIN_DEFAULT = 20.0
     try:
+        overhead = profile.get("session_warmup_min")
         session_warmup_min = float(
-            profile.get("session_warmup_min") or SESSION_WARMUP_MIN_DEFAULT
+            SESSION_WARMUP_MIN_DEFAULT if overhead is None else overhead
         )
     except (TypeError, ValueError):
         session_warmup_min = SESSION_WARMUP_MIN_DEFAULT
@@ -984,7 +986,7 @@ def main() -> int:
         "monthly_sessions": monthly_sessions,
         "weekly_volume_per_muscle": weekly_volume,
         "estimated_1rm": e1rm,
-        "progression_summary": progression_summary(rows),
+        "progression_summary": progression_summary(rows, catalog),
         "stale_exercises": stale,
         "unknown_exercises": sorted(unknown_set),
         # ---- Prescription memory: what was asked for, versus what happened.
@@ -1092,6 +1094,10 @@ def main() -> int:
         # ---- Session-length budget (set-count driven, per-person target) ----
         "session_target_min":     session_target_min,
         "target_working_sets":    target_working_sets,
+        "session_time_model": {
+            "overhead_min": session_warmup_min,
+            "min_per_working_set": min_per_working_set,
+        },
         # ---- Longevity Trajectory tab ----
         "longevity_score":      longevity_score,
         "longevity_state":      longevity_state,

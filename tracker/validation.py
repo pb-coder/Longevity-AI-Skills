@@ -30,7 +30,7 @@ _CONTRACT_DECLARED_KEYS: "dict[str, frozenset[str]]" = {
         "health_metrics_weekly", "health_metrics_recent",
         "vo2max_latest", "vo2max_trend_per_4w",
         "session_recommendation",
-        "session_target_min", "target_working_sets", "longevity_score",
+        "session_target_min", "target_working_sets", "session_time_model", "longevity_score",
         "longevity_state", "vo2_percentile", "hr_recovery", "acwr",
         "sleep_regularity", "rem_anomaly", "movement_consistency", "rows",
     }),

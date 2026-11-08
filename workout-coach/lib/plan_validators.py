@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 from functools import lru_cache
-from math import ceil
+from math import ceil, isfinite
 import re
 
 
@@ -969,6 +969,60 @@ def workout_set_budget_warnings(text: str, target_working_sets,
             warnings.append(
                 f"{title}: {n} working sets vs budget {budget} "
                 f"({n - budget} over) — trim a set or two")
+    return warnings
+
+
+def workout_duration_warnings(text: str, payload: "dict | None") -> "list[str]":
+    """Flag estimates above the target using the same model as the set budget.
+
+    This is an estimate, not a timer: the fitted/default average cannot
+    predict individual rest, unilateral sets, or equipment availability.
+    Older tracker payloads without the model remain valid.
+    """
+    if not isinstance(payload, dict) or "session_time_model" not in payload:
+        return []
+    model = payload.get("session_time_model")
+    target = payload.get("session_target_min")
+    if not isinstance(model, dict):
+        return ["session time estimate unavailable: invalid time model"]
+    overhead = model.get("overhead_min")
+    pace = model.get("min_per_working_set")
+    values = (target, overhead, pace)
+    if (any(isinstance(v, bool) or not isinstance(v, (int, float))
+            or not isfinite(v) for v in values)
+            or target <= 0 or overhead < 0 or pace <= 0):
+        return ["session time estimate unavailable: invalid time model or target"]
+    warnings = []
+    for title, sets in count_working_sets_per_workout(text).items():
+        if not sets:
+            continue
+        estimate = overhead + sets * pace
+        if estimate > target:
+            warnings.append(
+                f"{title}: estimated {estimate:.1f} min vs {target:g} min target "
+                f"({sets} sets, {overhead:g} min overhead, {pace:g} min/set); "
+                "actual time varies with rest, unilateral work and equipment "
+                "[advisory: session duration]"
+            )
+    return warnings
+
+
+def adjacent_compound_warnings(text: str) -> "list[str]":
+    """Flag a compound repeated in consecutive workouts, not assumed dates."""
+    catalog = _pattern_catalog()
+    workouts = list(_iter_workout_exercise_bullets(text).items())
+    warnings = []
+    for (prev_title, prev), (title, current) in zip(workouts, workouts[1:]):
+        previous = {b["name"].lower(): b for b in prev if b["sets"] >= 2}
+        for bullet in current:
+            key = bullet["name"].lower()
+            if (bullet["sets"] >= 2 and key in previous
+                    and (catalog.get(key) or {}).get("is_compound")):
+                warnings.append(
+                    f"{bullet['name']} has multiple sets in consecutive workouts "
+                    f"({prev_title}; {title}); allow recovery between sessions "
+                    "[advisory: repeated compound]"
+                )
     return warnings
 
 
@@ -2232,6 +2286,10 @@ def validate_workout_plan(
     if target_working_sets:
         warnings += workout_set_budget_warnings(
             text, target_working_sets, budget_by_index=budget_by_index)
+
+    warnings += workout_duration_warnings(text, payload)
+    if payload is not None:
+        warnings += adjacent_compound_warnings(text)
 
     warnings += next_dose_drift_warnings(
         text, payload, plan_date=plan_date, deload_week=deload_week,

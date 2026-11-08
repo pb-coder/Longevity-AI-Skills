@@ -364,6 +364,19 @@ class PayloadHorizonTests(_FixtureCase):
         data = self.payload("2026-06-30")
         self.assertEqual(data["session_target_min"], 75)
         self.assertEqual(data["target_working_sets"], 22)
+        self.assertEqual(data["session_time_model"],
+                         {"overhead_min": 20.0, "min_per_working_set": 2.5})
+
+    def test_zero_configured_overhead_is_not_replaced_with_the_default(self) -> None:
+        profile = self.root / PERSON / "data" / "profile.csv"
+        original = profile.read_text(encoding="utf-8")
+        try:
+            profile.write_text(original + "session_warmup_min,0\n", encoding="utf-8")
+            data = self.payload("2026-06-30")
+            self.assertEqual(data["session_time_model"]["overhead_min"], 0)
+            self.assertEqual(data["target_working_sets"], 30)
+        finally:
+            profile.write_text(original, encoding="utf-8")
 
     def test_last_top_set_matches_the_anchor(self) -> None:
         data = self.payload("2026-05-17")

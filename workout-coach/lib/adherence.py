@@ -1182,7 +1182,7 @@ def _detect_substitutions(plan, sessions, match, prescribed, performed,
 
 # ------------------------------------------------------------- D5 bench
 BENCH_THRESHOLD = 2      # D5: two unperformed prescriptions and it is benched.
-_BENCH_DISPOSITIONS = ("pending", "retired", "retry")
+_BENCH_DISPOSITIONS = ("pending", "retired", "retry", "unavailable")
 
 
 def read_bench_log(person: str) -> dict:
@@ -1192,7 +1192,8 @@ def read_bench_log(person: str) -> dict:
 
         {"version": 1, "entries": [
             {"exercise", "benched_on", "asked_on", "answer",
-             "disposition": "pending" | "retired" | "retry"}]}
+             "disposition": "pending" | "retired" | "retry" | "unavailable",
+             "gym": str | null}], "current_gym": str | null}
     """
     from shared.person_paths import bench_log_json
     p = bench_log_json(person)
@@ -1225,10 +1226,58 @@ def retired_movements(person: str) -> set[str]:
             if (e.get("disposition") or "") == "retired"}
 
 
+def _active_unavailable(log: dict) -> set[str]:
+    """Names unavailable at the current gym; missing gym denotes an unnamed gym.
+
+    A named gym becomes active only after it is explicitly selected. An
+    unnamed current gym is distinct from every named gym; switching gyms
+    therefore never turns an old equipment restriction into a permanent one.
+    """
+    current = (log.get("current_gym") or "").strip().casefold()
+    return {key for key, entry in _bench_index(log).items()
+            if entry.get("disposition") == "unavailable"
+            and any((gym or "").strip().casefold() == current
+                    for gym in entry.get("unavailable_gyms", [entry.get("gym")]))}
+
+
+def unavailable_movements(person: str) -> set[str]:
+    """Exercise names unavailable in the currently selected gym."""
+    return _active_unavailable(read_bench_log(person))
+
+
+def set_current_gym(person: str, gym: str | None, *, rename_current: bool = False) -> dict:
+    """Select a gym, or rename the current gym and move its restrictions."""
+    log = read_bench_log(person)
+    target = (gym or "").strip() or None
+    if rename_current:
+        index = _bench_index(log)
+        for key in _active_unavailable(log):
+            entry = index[key]
+            current = (log.get("current_gym") or "").strip().casefold()
+            gyms = entry.get("unavailable_gyms", [entry.get("gym")])
+            entry["unavailable_gyms"] = [target if (g or "").strip().casefold() == current
+                                         else g for g in gyms]
+            entry.pop("gym", None)
+    log["current_gym"] = target
+    _write_bench_log(person, log)
+    return log
+
+
+def _write_bench_log(person: str, log: dict) -> None:
+    from shared.person_paths import bench_log_json, ensure_plans_dir
+    ensure_plans_dir(person)
+    path = bench_log_json(person)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(log, ensure_ascii=False, indent=2) + "\n",
+                   encoding="utf-8")
+    tmp.replace(path)
+
+
 def record_bench_response(person: str, exercise: str,
                           answer: str | None = None,
                           disposition: str = "pending",
-                          on_date: str | None = None) -> dict:
+                          on_date: str | None = None,
+                          gym: str | None = None) -> dict:
     """Persist the answer to the D5 "why does this never happen" question.
 
     Idempotent per exercise: an existing entry is updated in place. This
@@ -1236,8 +1285,8 @@ def record_bench_response(person: str, exercise: str,
     the next generation recomputes the same bench list and asks again.
 
     ``disposition`` routes the exercise:
-      * ``retired`` — never prescribe it again (no equipment, disliked,
-        contraindicated).
+      * ``retired`` — never prescribe it again (disliked or contraindicated).
+      * ``unavailable`` — exclude at the selected gym, not other gyms.
       * ``retry``   — the obstacle was circumstantial; it may return.
       * ``pending`` — asked, not yet answered.
     """
@@ -1257,14 +1306,21 @@ def record_bench_response(person: str, exercise: str,
         log.setdefault("entries", []).append(entry)
     entry["asked_on"] = entry.get("asked_on") or stamp
     entry["answer"] = answer if answer is not None else entry.get("answer")
+    previous = entry.get("disposition")
     entry["disposition"] = disposition
+    if disposition == "unavailable":
+        target = (gym or log.get("current_gym") or "").strip() or None
+        gyms = list(entry.get("unavailable_gyms", [entry.get("gym")])) if previous == "unavailable" else []
+        if not any((item or "").casefold() == (target or "").casefold() for item in gyms):
+            gyms.append(target)
+        entry["unavailable_gyms"] = gyms
+        entry.pop("gym", None)
+    else:
+        entry.pop("gym", None)
+        entry.pop("unavailable_gyms", None)
     log["version"] = 1
     log["entries"].sort(key=lambda e: (e.get("exercise") or "").lower())
-    path = bench_log_json(person)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(log, ensure_ascii=False, indent=2) + "\n",
-                   encoding="utf-8")
-    tmp.replace(path)
+    _write_bench_log(person, log)
     return log
 
 
@@ -1440,7 +1496,7 @@ def _bench_prompt(benched: list[dict], blocked: list[dict]) -> dict | None:
         "persist_with": (
             "python3 -m workout_coach.lib.adherence bench-record "
             "--person <Name> --exercise "
-            f"\"{top['exercise']}\" --disposition retired|retry "
+            f"\"{top['exercise']}\" --disposition retired|retry|unavailable "
             "--answer \"<their words>\""),
         "n_awaiting_answer": len(unasked_blocked) + len(unasked_benched),
     }
@@ -1598,6 +1654,7 @@ def build_adherence(person: str, rows: list[dict], db: dict, today_d: date,
 
     bench_log = read_bench_log(person)
     bench_idx = _bench_index(bench_log)
+    unavailable = _active_unavailable(bench_log)
 
     candidates, never = [], []
     for key, h in sorted(seen.items()):
@@ -1619,7 +1676,8 @@ def build_adherence(person: str, rows: list[dict], db: dict, today_d: date,
         if consec < BENCH_THRESHOLD or subs >= consec:
             continue
         stored = bench_idx.get(key) or {}
-        if stored.get("disposition") == "retry":
+        if stored.get("disposition") == "retry" or (
+                stored.get("disposition") == "unavailable" and key not in unavailable):
             continue
         candidates.append({
             "exercise":         h["name"],
@@ -1645,13 +1703,19 @@ def build_adherence(person: str, rows: list[dict], db: dict, today_d: date,
     candidates.sort(key=lambda b: (-b["_consec"], -b["prescribed_count"],
                                    b["exercise"]))
     retired = {k for k, e in bench_idx.items()
-               if (e.get("disposition") or "") == "retired"}
+               if (e.get("disposition") or "") == "retired"} | unavailable
     benched, blocked = _apply_route_guard(
         candidates, catalog, db, rows, latest, priority_tiers, retired)
     for b in benched + blocked:
         b.pop("_consec", None)
         b.pop("_key", None)
 
+    # Restrictions also apply to exercises absent from the recent plan.
+    found = {b["exercise"].strip().lower() for b in benched}
+    for key in sorted(unavailable - found):
+        entry = bench_idx[key]
+        benched.append({"exercise": entry["exercise"], "disposition": "unavailable",
+                        "answer": entry.get("answer"), "gym": bench_log.get("current_gym")})
     prompt = _bench_prompt(benched, blocked)
 
     # Which sessions keep going undone, across every closed window. Keyed
@@ -1800,6 +1864,14 @@ def _cli(argv: list[str] | None = None) -> int:
     p_rec.add_argument("--disposition", default="pending",
                        choices=list(_BENCH_DISPOSITIONS))
     p_rec.add_argument("--date", dest="on_date", default=None)
+    p_rec.add_argument("--gym", default=None,
+                       help="Gym for an unavailable exercise; defaults to current gym")
+    p_gym = sub.add_parser("set-gym", help="select the current gym")
+    p_gym.add_argument("--person", required=True)
+    p_gym.add_argument("--gym", default=None,
+                       help="Gym name; omit to select the unnamed gym")
+    p_gym.add_argument("--rename-current", action="store_true",
+                       help="Name the existing gym instead of switching gyms")
     args = ap.parse_args(argv)
 
     if args.cmd == "bench-list":
@@ -1807,8 +1879,11 @@ def _cli(argv: list[str] | None = None) -> int:
                   ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
         return 0
-    log = record_bench_response(args.person, args.exercise, args.answer,
-                                args.disposition, args.on_date)
+    if args.cmd == "set-gym":
+        log = set_current_gym(args.person, args.gym, rename_current=args.rename_current)
+    else:
+        log = record_bench_response(args.person, args.exercise, args.answer,
+                                    args.disposition, args.on_date, args.gym)
     json.dump(log, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
     return 0

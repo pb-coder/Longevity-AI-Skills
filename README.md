@@ -31,7 +31,17 @@ The repository root is `Skills/`. Private data and generated plans live beside i
 
 Each person's `data/` is its own git repository, committed once per confirmed write. Git history provides rollback. History failures warn without failing the write; automatic repacking is prohibited for synced folders. Existing historical swim lap CSVs remain readable but receive no new writes.
 
-`shared/import_health_export_kit.py` is the only importer. It reads `health-export-json-*.json`, updates supported health, workout, sleep, and swim fields, and deletes the consumed export after success (`--keep-export` preserves it). It does not supply daily HRV, wrist temperature, or per-lap swim detail; unavailable signals are omitted rather than treated as zero or requested from the user.
+`shared/import_health_export_kit.py` is the only importer. It reads `health-export-json-*.json`, updates supported health, workout, sleep, and swim fields, and archives the consumed export after success (`--keep-export` leaves the source in place). When more than one export is present, an explicit path is required. It does not supply daily HRV, wrist temperature, or per-lap swim detail; unavailable signals are omitted rather than treated as zero or requested from the user.
+
+## Monthly CSV schema migration
+
+Schema v2 appends three optional columns, `Gym`, `Machine`, and `Load Basis`, after the unchanged 18-column schema. Readers accept legacy 17- and 18-column rows and treat missing context as unknown. A touched month is rewritten atomically in v2 on its next successful update or maintenance pass; there is no automatic bulk migration or invented historical metadata. Back up data and keep its history before an explicit maintenance migration. Rollback to software predating v2 requires restoring a pre-migration backup: old writers can drop new fields.
+
+For each set, `gym` and `machine` are explicit labels; `load_basis` is `total` or `plates_only`. Blank means unknown and retains legacy interpretation. Partial-bar figures are never used as total load for progression or e1RM. When named machine contexts exist, only a fully specified matching gym and machine are comparable; mixed or incomplete contexts cannot progress automatically. Replays with changed metadata are conflicts unless explicitly corrected.
+
+## Paired import workflow
+
+`python3 shared/prepare_training.py --entry <Person> <export.json> <workout-payload.json>` previews a named pairing. Repeat `--entry` for multiple people; use `-` for an omitted input. Review the pairings and add `--apply` to log workouts and import the corresponding health exports. Each export path must be unique, and the caller supplies ownership because the export cannot prove it. All entries are preflighted before writes; if an application step fails, earlier completed writes are not rolled back. `--allow-past-months` is available when needed.
 
 ## Architecture and maintenance
 
@@ -54,4 +64,4 @@ Thermal (sauna/cold) and light-therapy tracking, adherence analytics, suggestion
 
 The unused coach JSON outputs `tier_history`, `bodyweight_weekly`, and `week_over_week` are retired. Use the current session recommendation, bodyweight trend, and existing aggregate inputs. The unused public swim-lap writer `upsert_swim_laps` is retired; historical lap readers remain supported and imported swim aggregates continue unchanged.
 
-Importer status now combines daily and sleep updates into one `Health Metrics:` line; its written/updated counts aggregate both passes. Stored CSV values and schemas are unchanged.
+Importer status combines daily and sleep updates into one `Health Metrics:` line; its written/updated counts aggregate both passes.

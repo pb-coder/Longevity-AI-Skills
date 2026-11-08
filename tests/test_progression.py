@@ -31,6 +31,7 @@ from workout_coach.lib.constants import (
 )
 from workout_coach.lib.extract import load_exercises_db
 from workout_coach.lib.progression import build_next_dose
+from workout_coach.lib.sessions import progression_summary
 from workout_coach.lib.strength import (
     estimated_1rm,
     exercise_class,
@@ -72,6 +73,77 @@ def entry(out: dict, exercise: str) -> dict:
     found = [e for e in out["exercises"] if e["exercise"] == exercise]
     assert len(found) == 1, (exercise, [e["exercise"] for e in out["exercises"]])
     return found[0]
+
+
+class PartialLoadTests(unittest.TestCase):
+    def test_partial_latest_load_never_becomes_a_progression_or_e1rm(self):
+        name = "Conventional Deadlift"
+        rows = (sets("2026-10-01", name, 50, [6, 6])
+                + sets("2026-10-10", name, 30, [8, 8], notes="weight excludes bar"))
+        e = entry(dose(rows), name)
+        self.assertEqual(e["action"], "hold")
+        self.assertIsNone(e["load_kg"])
+        self.assertIn("bar weight", e["basis"])
+        h = session_history(rows, _CATALOG)[name.lower()][-1]
+        self.assertTrue(h["partial_load"])
+        self.assertIsNone(h["top_load_kg"])
+        result = estimated_1rm(rows, catalog=_CATALOG)
+        self.assertNotIn(name, result)
+
+    def test_partial_only_history_has_no_e1rm(self):
+        name = "Conventional Deadlift"
+        rows = sets("2026-10-10", name, 30, [8, 8], notes="plates only")
+        self.assertNotIn(name, estimated_1rm(rows, catalog=_CATALOG))
+        self.assertIsNone(entry(dose(rows), name)["load_kg"])
+
+
+class StructuredContextTests(unittest.TestCase):
+    def test_progression_uses_exact_machine_context(self):
+        name = "Cable Seated Row"
+        rows = (sets("2026-09-15", name, 90, [10, 10])
+                + [{**r, "gym": "A", "machine": "one"} for r in sets("2026-10-01", name, 40, [10, 10])]
+                + [{**r, "gym": "A", "machine": "two"} for r in sets("2026-10-05", name, 70, [10, 10])]
+                + [{**r, "gym": "A", "machine": "one"} for r in sets("2026-10-10", name, 45, [10, 10])])
+        e = entry(dose(rows), name)
+        self.assertEqual(e["last_load_kg"], 45)
+        self.assertEqual(e["increment_kg"], 2.5)  # unrelated stacks cannot establish the step
+        result = estimated_1rm(rows, catalog=_CATALOG)
+        self.assertEqual(result[name]["prev_e1rm_kg"], 53.3)
+        self.assertEqual(result[name]["current_e1rm_kg"], 60.0)
+
+    def test_unknown_or_mixed_context_cannot_progress(self):
+        name = "Cable Seated Row"
+        for recent in ([{**r, "gym": "A"} for r in sets("2026-10-10", name, 45, [10, 10])],
+                       [{**r, "gym": "A", "machine": "one"} if i == 0 else r
+                        for i, r in enumerate(sets("2026-10-10", name, 45, [10, 10]))],
+                       sets("2026-10-10", name, 45, [10, 10])):
+            previous = [{**r, "gym": "A", "machine": "one"} for r in sets("2026-10-01", name, 40, [10, 10])]
+            e = entry(dose(previous + recent), name)
+            self.assertEqual(e["action"], "hold")
+            self.assertIsNone(e["load_kg"])
+
+    def test_summary_never_compares_different_machines(self):
+        name = "Cable Seated Row"
+        rows = ([{**r, "gym": "A", "machine": "one"} for r in sets("2026-10-01", name, 40, [10, 10])]
+                + [{**r, "gym": "A", "machine": "two"} for r in sets("2026-10-05", name, 70, [10, 10])]
+                + [{**r, "gym": "A", "machine": "one"} for r in sets("2026-10-10", name, 45, [10, 10])])
+        result = progression_summary(rows, _CATALOG)[0]
+        self.assertIn("45kg", result["last"])
+        self.assertIn("40kg", result["prev"])
+        self.assertNotIn("70kg", str(result))
+
+    def test_partial_latest_is_not_a_summary_or_rotation_reference(self):
+        name = "Conventional Deadlift"
+        rows = (sets("2026-10-01", name, 50, [6, 6])
+                + [{**r, "load_basis": "plates_only"} for r in sets("2026-10-10", name, 30, [8, 8])])
+        self.assertEqual(progression_summary(rows, _CATALOG), [])
+        self.assertNotIn(name, estimated_1rm(rows, catalog=_CATALOG))
+
+    def test_typed_partial_load_precedes_legacy_note(self):
+        name = "Conventional Deadlift"
+        rows = [{**r, "load_basis": "plates_only"} for r in sets("2026-10-10", name, 30, [8, 8])]
+        self.assertIsNone(entry(dose(rows), name)["load_kg"])
+        self.assertNotIn(name, estimated_1rm(rows, catalog=_CATALOG))
 
 
 class TopOfRangeAddsLoadTests(unittest.TestCase):

@@ -25,6 +25,9 @@ from workout_coach.lib.adherence import (
     reconcile_plan,
     record_bench_response,
     session_type_from_title,
+    retired_movements,
+    unavailable_movements,
+    set_current_gym,
 )
 from workout_coach.lib.blocks import load_pattern_catalog
 from workout_coach.lib.extract import load_exercises_db
@@ -529,6 +532,43 @@ class BenchTests(LedgerHarness):
         self.assertEqual(entry["disposition"], "retired")
         # The first question date is the one that matters for "ask once".
         self.assertEqual(entry["asked_on"], "2026-06-25")
+
+    def test_unavailable_is_scoped_to_current_gym_and_can_be_revisited(self) -> None:
+        set_current_gym(self.PERSON, "Gym One")
+        record_bench_response(self.PERSON, "Kneeling Cable Crunch",
+                              answer="no cable station", disposition="unavailable")
+        self.assertEqual(unavailable_movements(self.PERSON), {"kneeling cable crunch"})
+        self.assertEqual(retired_movements(self.PERSON), set())
+        rows = self._series(3)
+        current = build_adherence(self.PERSON, rows, _DB, date(2026, 6, 25), _CATALOG)
+        self.assertIn("Kneeling Cable Crunch", {b["exercise"] for b in current["benched"]})
+        self.assertIsNone(current["bench_prompt"])
+        set_current_gym(self.PERSON, "Gym Two")
+        self.assertEqual(unavailable_movements(self.PERSON), set())
+        other = build_adherence(self.PERSON, rows, _DB, date(2026, 6, 25), _CATALOG)
+        self.assertNotIn("Kneeling Cable Crunch", {b["exercise"] for b in other["benched"]})
+        record_bench_response(self.PERSON, "Kneeling Cable Crunch",
+                              answer="also absent here", disposition="unavailable")
+        self.assertEqual(unavailable_movements(self.PERSON), {"kneeling cable crunch"})
+        set_current_gym(self.PERSON, "gym one")
+        self.assertEqual(unavailable_movements(self.PERSON), {"kneeling cable crunch"})
+        set_current_gym(self.PERSON, "Gym Two")
+        self.assertEqual(unavailable_movements(self.PERSON), {"kneeling cable crunch"})
+
+    def test_unnamed_current_gym_does_not_block_a_new_named_gym(self) -> None:
+        record_bench_response(self.PERSON, "Barbell Hip Thrust",
+                              answer="unavailable here", disposition="unavailable")
+        self.assertEqual(unavailable_movements(self.PERSON), {"barbell hip thrust"})
+        set_current_gym(self.PERSON, "Another Gym")
+        self.assertEqual(unavailable_movements(self.PERSON), set())
+        set_current_gym(self.PERSON, None)
+        self.assertEqual(unavailable_movements(self.PERSON), {"barbell hip thrust"})
+        set_current_gym(self.PERSON, "Named Gym", rename_current=True)
+        self.assertEqual(unavailable_movements(self.PERSON), {"barbell hip thrust"})
+        set_current_gym(self.PERSON, "Another Gym")
+        self.assertEqual(unavailable_movements(self.PERSON), set())
+        set_current_gym(self.PERSON, "Named Gym")
+        self.assertEqual(unavailable_movements(self.PERSON), {"barbell hip thrust"})
 
     def test_an_unreadable_store_reads_as_empty_not_as_a_crash(self) -> None:
         self.pp.bench_log_json(self.PERSON).write_text("{ not json",

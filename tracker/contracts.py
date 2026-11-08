@@ -202,6 +202,7 @@ class TrackerJSON(TypedDict, total=False):
     session_recommendation: SessionRecommendation
     session_target_min: int
     target_working_sets: int
+    session_time_model: dict[str, float]
     longevity_score: dict[str, JsonValue]
     longevity_state: dict[str, JsonValue] | None
     vo2_percentile: float | None

@@ -206,6 +206,22 @@ class PlanParsingTests(unittest.TestCase):
         self.assertEqual(slots["Plank"]["prescribed_sets"], 2)
         self.assertEqual(slots["Plank"]["seconds"], 45.0)
 
+    def test_documented_set_formats_reach_the_ledger(self) -> None:
+        plan = parse_plan(
+            "## Workout 1: LOWER\n"
+            "- Suitcase Carry: 24kgx30m /// 24kgx30m\n"
+            "- Plank: 01:30 /// 01:30\n"
+            "- Cable Lat Pulldown: 65-70kgx8-10 /// 65-70kgx8-10\n",
+            "2026-08-02")
+        self.assertEqual(plan["parse_errors"], [])
+        slots = {s["exercise"]: s for s in plan["workouts"][0]["slots"]}
+        self.assertEqual(slots["Suitcase Carry"]["metres"], 30)
+        self.assertIsNone(slots["Suitcase Carry"]["rep_lo"])
+        self.assertEqual(slots["Plank"]["seconds"], 90)
+        self.assertEqual(slots["Cable Lat Pulldown"]["prescribed_sets"], 2)
+        self.assertEqual(slots["Cable Lat Pulldown"]["load_range_kg"], (65, 70))
+        self.assertIsNone(slots["Cable Lat Pulldown"]["load_kg"])
+
     def test_a_deload_plan_parses_and_is_flagged(self) -> None:
         # `## Deload Session 1: PUSH` is a real second heading the coach
         # emits, not a typo. Matching only `## Workout N:` dropped whole

@@ -2034,7 +2034,9 @@ def next_dose_drift_warnings(text: str, payload: "dict | None", *,
         return out
 
     def _dose_s(slot: dict) -> str:
+        load_range = slot.get("load_range_kg")
         out = (f"{slot['load_kg']:g}kg" if slot["load_kg"] is not None
+               else f"{load_range[0]:g}-{load_range[1]:g}kg" if load_range
                else "no load")
         return out + (f" x {slot['rep_target']}" if slot["rep_target"] else "")
 

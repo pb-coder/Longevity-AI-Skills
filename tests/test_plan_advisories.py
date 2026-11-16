@@ -59,6 +59,27 @@ class NextDoseDriftTests(unittest.TestCase):
     def test_a_plan_that_copies_the_dose_is_silent(self):
         self.assertEqual(drift(week(UPPER), nd(entry(BENCH, 52, "10-12"))), [])
 
+    def test_load_range_is_reported_without_inventing_a_point_load(self):
+        text = week(("Workout 1: UPPER A", [f"{BENCH}: 50-55kgx10-12"]))
+        out = drift(text, nd(entry(BENCH, 52, "10-12")))
+        self.assertEqual(len(out), 1)
+        self.assertIn("plan 50-55kg x 10-12 vs next_dose 52kg", out[0])
+
+    def test_mixed_point_and_range_use_the_dominant_load_in_either_order(self):
+        for spec in ("52kgx10-12 /// 40-45kgx10-12 /// 40-45kgx10-12",
+                     "40-45kgx10-12 /// 40-45kgx10-12 /// 52kgx10-12"):
+            with self.subTest(spec=spec):
+                out = drift(week(("Workout 1: UPPER A", [f"{BENCH}: {spec}"])),
+                            nd(entry(BENCH, 52, "10-12")))
+                self.assertEqual(len(out), 1)
+                self.assertIn("plan 40-45kg x 10-12", out[0])
+        for spec in ("40-45kgx10-12 /// 52kgx10-12 /// 52kgx10-12",
+                     "52kgx10-12 /// 52kgx10-12 /// 40-45kgx10-12"):
+            with self.subTest(spec=spec):
+                self.assertEqual(
+                    drift(week(("Workout 1: UPPER A", [f"{BENCH}: {spec}"])),
+                          nd(entry(BENCH, 52, "10-12"))), [])
+
     def test_a_different_load_is_named_with_both_values(self):
         # The original failure: next_dose says add_load, the plan repeats.
         text = week(("Workout 1: UPPER A",

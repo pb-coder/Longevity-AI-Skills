@@ -139,7 +139,8 @@ _PER_SIDE = r"(?:\s*(?:per|each|/)\s*(?:side|leg|arm|hand))?"
 
 # One prescribed set, e.g. ``90kgx8-10``, ``52kgx8``, ``16kgx8-10 per side``.
 _SET_LOAD_RE = re.compile(
-    r"^\s*(\d+(?:\.\d+)?)\s*kg\s*[x×]\s*(\d+)(?:\s*[-–]\s*(\d+))?", re.IGNORECASE)
+    r"^\s*(\d+(?:\.\d+)?)(?:\s*[-–]\s*(\d+(?:\.\d+)?))?"
+    r"\s*kg\s*[x×]\s*(\d+)(?:\s*[-–]\s*(\d+))?", re.IGNORECASE)
 # A multiplied carry / interval, e.g. ``3 x 30m @ 24kg`` or ``3 x 45s``.
 _SET_MULT_RE = re.compile(
     r"^\s*(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(m|s|sec|secs|min)\b"
@@ -499,12 +500,29 @@ def _parse_set_item(item: str) -> dict | None:
     is_warmup = bool(_WARMUP_TOKEN_RE.search(raw))
     body = _WARMUP_TOKEN_RE.sub("", raw).strip()
 
+    # Carries must be recognised before loaded repetitions: 24kgx30m
+    # denotes metres, not 30 reps. A load range is not a point load.
+    carry = re.match(
+        r"^\s*(\d+(?:\.\d+)?)\s*kg\s*[x×]\s*(\d+(?:\.\d+)?)\s*m\b",
+        body, re.IGNORECASE)
+    if carry:
+        return {"sets": 1, "load_kg": float(carry.group(1)), "rep_lo": None,
+                "rep_hi": None, "seconds": None, "metres": float(carry.group(2)),
+                "is_warmup": is_warmup}
+    clock = re.match(r"^\s*(\d+):([0-5]\d)\b", body)
+    if clock:
+        return {"sets": 1, "load_kg": None, "rep_lo": None, "rep_hi": None,
+                "seconds": int(clock.group(1)) * 60 + int(clock.group(2)),
+                "metres": None, "is_warmup": is_warmup}
     m = _SET_LOAD_RE.match(body)
     if m:
-        lo = int(m.group(2))
-        hi = int(m.group(3)) if m.group(3) else lo
-        return {"sets": 1, "load_kg": float(m.group(1)), "rep_lo": lo,
-                "rep_hi": hi, "seconds": None, "metres": None,
+        lo = int(m.group(3))
+        hi = int(m.group(4)) if m.group(4) else lo
+        load = float(m.group(1))
+        load_hi = float(m.group(2)) if m.group(2) else load
+        return {"sets": 1, "load_kg": load if load == load_hi else None,
+                "load_range_kg": (load, load_hi) if load != load_hi else None,
+                "rep_lo": lo, "rep_hi": hi, "seconds": None, "metres": None,
                 "is_warmup": is_warmup}
 
     m = _SET_MULT_RE.match(body)
@@ -575,7 +593,12 @@ def _slot_from_bullet(exercise: str, spec: str, position: int) -> dict:
     items = [i for _x, i in parsed if i and i["sets"]]
     working = [i for i in items if not i["is_warmup"]]
     warmups = [i for i in items if i["is_warmup"]]
-    loads = [i["load_kg"] for i in working if i["load_kg"] is not None]
+    # Pick one dominant load across point and range prescriptions. Counting
+    # them independently can combine a minority point with a majority range.
+    loads = [load for i in working
+             for load in [i.get("load_range_kg") or i["load_kg"]] * i["sets"]
+             if load is not None]
+    dominant_load = _mode(loads)
     lo = [i["rep_lo"] for i in working if i["rep_lo"] is not None]
     hi = [i["rep_hi"] for i in working if i["rep_hi"] is not None]
     rep_lo = _mode(lo)
@@ -585,7 +608,8 @@ def _slot_from_bullet(exercise: str, spec: str, position: int) -> dict:
         "position":        position,
         "prescribed_sets": sum(i["sets"] for i in working),
         "warmup_sets":     sum(i["sets"] for i in warmups),
-        "load_kg":         _mode(loads),
+        "load_kg":         None if isinstance(dominant_load, tuple) else dominant_load,
+        "load_range_kg":   dominant_load if isinstance(dominant_load, tuple) else None,
         "rep_lo":          rep_lo,
         "rep_hi":          rep_hi,
         "rep_target":      (f"{rep_lo}-{rep_hi}" if rep_lo is not None

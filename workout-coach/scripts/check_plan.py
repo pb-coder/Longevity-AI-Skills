@@ -7,7 +7,7 @@ Inputs:
 
 Runs the shared plan checks, prints warnings and errors to stderr, and
 writes nothing. Exit 0 means the plan passed every blocking check; exit
-2 means fix the plan and rerun. The assessment must be saved before the
+2 means fix the plan and rerun; exit 3 means rotation needs review. The assessment must be saved before the
 workout markdown because the plan builds on the saved assessment.
 """
 from __future__ import annotations
@@ -40,6 +40,8 @@ def main(argv=None) -> int:
     ap.add_argument("--tracker", required=True, help="Path to tracker JSON, or - for stdin")
     ap.add_argument("--coach", required=True, help="Path to coach_reads.json")
     ap.add_argument("--workout-md", required=True, help="Path to the workout markdown")
+    ap.add_argument("--accept-rotation-advisories", action="store_true",
+                    help="Continue after reviewing and documenting evidence-based rotation exceptions")
     args = ap.parse_args(argv)
 
     if args.tracker == "-":
@@ -52,7 +54,8 @@ def main(argv=None) -> int:
         print(f"file order error: {problem}", file=sys.stderr)
         return 2
 
-    checks = run_plan_checks(j, args.coach, args.workout_md)
+    checks = run_plan_checks(j, args.coach, args.workout_md,
+                             accept_rotation_advisories=args.accept_rotation_advisories)
     if checks.exit_code:
         return checks.exit_code
     print(f"plan checks passed: {args.workout_md} "

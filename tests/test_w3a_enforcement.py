@@ -1183,13 +1183,12 @@ class RotationIsAdvisoryTests(unittest.TestCase):
 
     _BASE = {"today": "2026-08-02", "target_working_sets": 24}
 
-    def test_a_rotation_only_violation_renders(self) -> None:
+    def test_a_rotation_only_violation_requires_review(self) -> None:
         proc = _run_checks(dict(self._BASE, block=_ROTATION_PREV_BLOCK),
                            _PLAN_COMPLIANT)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.returncode, 3, proc.stderr)
         self.assertNotIn("workout_md validation error:", proc.stderr)
-        # Demoted, not dropped: the finding still reaches stderr, and it
-        # is tagged so a reader can tell it is not a gate.
+        # Still advisory, but it now requires a separate review decision.
         self.assertIn("workout_md plan warning:", proc.stderr)
         self.assertIn("unchanged from the previous block", proc.stderr)
         self.assertIn(plan_validators.ROTATION_ADVISORY_TAG, proc.stderr)

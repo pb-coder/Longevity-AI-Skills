@@ -20,6 +20,7 @@ from typing import TextIO
 
 from tracker.validation import validate_tracker_json
 from .plan_validators import (
+    ROTATION_ADVISORY_TAG,
     is_cadence_deload_week,
     is_deload_week,
     payload_spec_errors,
@@ -34,21 +35,24 @@ from .plan_validators import (
 class PlanCheckResult:
     """Outcome of `run_plan_checks`.
 
-    ``exit_code`` is 0 (every blocking check passed) or 2 (a blocking
-    check failed; the messages are already printed).
+    ``exit_code`` is 0 (accepted), 2 (blocking error), or 3 (rotation
+    advisories require an explicit decision).
     """
     exit_code: int
     warnings: list = field(default_factory=list)
     errors: list = field(default_factory=list)
+    rotation_review_required: bool = False
 
 
 def run_plan_checks(j: dict, coach_path, workout_md_path,
-                    *, stream: "TextIO | None" = None) -> PlanCheckResult:
+                    *, stream: "TextIO | None" = None,
+                    accept_rotation_advisories: bool = False) -> PlanCheckResult:
     """Run every plan check, print each finding, return the outcome.
 
     ``j`` is the parsed tracker JSON (the caller parses it because the
     CLI also accepts it on stdin). ``coach_path`` and
-    ``workout_md_path`` are read here, in stage order.
+    ``workout_md_path`` are read here, in stage order. Accept rotation
+    advisories only after reviewing each specific finding and its evidence.
     """
     out = stream if stream is not None else sys.stderr
     result = PlanCheckResult(exit_code=0)
@@ -108,12 +112,10 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
     # an unrelated missing key silently disabling the checks that matter
     # most.
     #
-    # ROTATION IS ADVISORY THIS RELEASE and this module does not decide
-    # that. `validate_workout_plan` routes rotation findings by the one
-    # named constant `plan_validators.BLOCK_ROTATION_ENFORCED`, so they
-    # arrive here in `plan_warnings` and no rotation finding can produce
-    # an exit 2. Nothing below needs to change when stage two flips it:
-    # the findings simply arrive in `plan_errors` instead.
+    # Rotation findings remain heuristic advisories, not hard prescription
+    # errors. They require an explicit review decision (exit 3) unless the
+    # caller accepts them; hard errors still take precedence (exit 2).
+    # If rotation becomes enforced, findings arrive in plan_errors instead.
     #
     # A FULL-BLOCK deload (the gate's Tier A/B, i.e. a load policy of
     # ``reduce``, or a `DELOAD_WEEK_LABELS` label) demotes the VOLUME findings
@@ -156,6 +158,12 @@ def run_plan_checks(j: dict, coach_path, workout_md_path,
         payload=j,
     )
     warn("workout_md plan warning", plan_warnings)
+    result.rotation_review_required = any(
+        ROTATION_ADVISORY_TAG in warning for warning in plan_warnings)
     if plan_errors:
         return fail("workout_md validation error", plan_errors)
+    if result.rotation_review_required and not accept_rotation_advisories:
+        result.exit_code = 3
+        print("rotation review required: resolve the listed findings or document "
+              "evidence-based exceptions before using --accept-rotation-advisories", file=out)
     return result

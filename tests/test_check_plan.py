@@ -132,7 +132,7 @@ class OneSourceOfTruthTests(unittest.TestCase):
         for script in (CHECK_PLAN,):
             with self.subTest(script=script.name):
                 src = script.read_text(encoding="utf-8")
-                self.assertIn("run_plan_checks(j, args.coach, args.workout_md)", src)
+                self.assertIn("run_plan_checks(j, args.coach, args.workout_md,", src)
                 for name in self._VALIDATORS:
                     self.assertNotIn(name, src,
                                      f"{script.name} calls {name} directly")

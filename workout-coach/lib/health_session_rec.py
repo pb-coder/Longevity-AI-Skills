@@ -753,9 +753,7 @@ def _gate_tier(*,
         # The TSB entry goes FIRST: it is what put the day in this tier, and
         add("tsb", tsb, T["tier_e_tsb_high"],
             f"Freshness (TSB) {tsb:+.1f} ≥ {T['tier_e_tsb_high']:.0f}: "
-            + ("recent training load is low, which may or may not mean fitness is bleeding off"
-               if gap else
-               "fitness is bleeding off, you've been over-recovered"))
+            "recent logged strength load is below its longer-term level; check that recent sessions have been imported")
         if gap:
             # TSB alone is a training-LOAD signal: it rises when sessions
             # stop, whatever the body is doing. With no recovery score to
@@ -771,12 +769,12 @@ def _gate_tier(*,
             "headline": (
                 "Train as planned. Recovery data is missing, so this rests on freshness (TSB) alone and over-recovery is unconfirmed."
                 if gap else
-                "Train as planned, but you've been over-recovered, fitness is bleeding off."),
+                "Train as planned. Logged strength freshness is high; check recent data coverage before increasing work."),
             "substitute": {
                 "kind": "normal_strength",
-                "prescription": "resume normal training load · don't sit in the taper any longer",
+                "prescription": "execute the planned session; loads follow next_dose",
                 "duration_min": None,
-                "notes": "If TSB stays above +10 for another week without a race, you're losing CTL needlessly.",
+                "notes": "High freshness reflects recorded training load; recent unimported sessions can change this read.",
             },
             "rationale": rationale[:3],
             "override_allowed": True,

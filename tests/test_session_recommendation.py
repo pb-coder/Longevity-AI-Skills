@@ -536,7 +536,18 @@ class LoadPolicyTests(unittest.TestCase):
 
     def test_over_recovered_with_a_real_score_keeps_its_call(self) -> None:
         rec = recommendation(training_load={"tsb": 10.5})
-        self.assertIn("you've been over-recovered", rec["headline"])
+        self.assertEqual((rec["tier"], rec["label"]), ("E", "over_recovered"))
+        self.assertIn("Logged strength freshness is high", rec["headline"])
+        self.assertIn("recent data coverage", rec["headline"])
+
+    def test_high_freshness_does_not_assert_unmeasured_fitness_loss(self) -> None:
+        for score in (None, 7):
+            rec = recommendation(recovery={"score": score, "drivers": []},
+                                 training_load={"tsb": 20})
+            text = str(rec)
+            self.assertNotIn("fitness is bleeding off", text)
+            self.assertNotIn("losing CTL needlessly", text)
+            self.assertIn("unimported sessions", text)
 
     def test_below_the_floor_is_not_called_green(self) -> None:
         rec = recommendation(recovery={"score": 5.0, "drivers": []},

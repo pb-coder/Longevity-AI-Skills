@@ -56,6 +56,13 @@ def _parse_iso_date(s) -> date | None:
     """
     if not s:
         return None
+    # Tracker rows use canonical dates. Avoid the general strptime parser
+    # on that hot path, retaining its legacy unpadded-date compatibility.
+    if isinstance(s, str) and len(s) == 10 and s[4] == s[7] == "-":
+        try:
+            return date.fromisoformat(s)
+        except ValueError:
+            pass
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except (ValueError, TypeError):

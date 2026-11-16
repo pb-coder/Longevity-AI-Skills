@@ -119,13 +119,13 @@ It also creates / reads `<Person>/data/profile.csv`, a 2-column key/value file p
 
 **File naming.** Drop the app-generated `health-export-json-*.json` file into the workout tracker folder. When multiple matching files exist, pass the intended file explicitly with `--export`.
 
-**Idempotency.** Re-running with the same export is a no-op. Sparse-merge upserts protect existing values — incoming `None` never overwrites a populated cell, so a partial export (e.g. just last week) won't erase older history.
+**Import conflicts.** Before any import write or archive, the importer checks populated health, sleep, swim, and workout-session cells that would change. It stops on conflicts and leaves the export in place. Review counts and all old/new values with `--dry-run`; use `--overwrite-existing` only when the replacements are intended. The store does not record field-level provenance, so a conflict does not show which value is newer. Empty fields can still be filled. Replaying equivalent values is conflict-free, including numeric formatting differences. A change to a populated sleep efficiency is reported even when recalculated from other fields, because it may be a manual override.
 
 **The consumed export is archived.** After successful writes the importer copies and verifies the source under `<root>/archive/health-exports/YYYY-MM/`, then removes the incoming copy. `--keep-export` leaves it in place. Collisions never overwrite a different export. Data history is separate: each person's `data/` directory is its own git repository (`shared/data_git.py`), and both `append_workout.py` and the importer commit automatically after every confirmed write — one commit per operation, message `log: <N> rows, <dates>` or `import: <export file name>`.
 
 **Auto-cardio.** When the importer ingests cardio workouts (Running, Hiking, Cycling, Swimming, HIIT) AND `auto_cardio` in `profile.csv` is True, those workouts also flow into the matching `<Person>/data/monthly/YYYY.MM.csv` as cardio rows carrying an `apple` / `gymkit:<Device>` value in the typed `Source` column. Manually-logged rows always win — the dedupe rule (date + exercise + duration ±1 min) skips Apple workouts that match an existing manual entry. Default: `auto_cardio = true`. Flip to `false` per-tracker by editing `profile.csv` if a user prefers manual-only logging.
 
-For an explicit manual import, supported flags are `--person`, `--export` (path or glob), `--since`, `--until`, `--allow-past-months`, `--dry-run`, and `--keep-export`. The default resolver accepts a single matching export; multiple matches require an explicit path. `/log` passes only `--person`.
+For an explicit manual import, supported flags are `--person`, `--export` (path or glob), `--since`, `--until`, `--allow-past-months`, `--dry-run`, `--keep-export`, and `--overwrite-existing`. The default resolver accepts a single matching export; multiple matches require an explicit path. `/log` passes only `--person` and reports a conflict without overriding it.
 
 ## Bodyweight (opt-in)
 
@@ -146,7 +146,7 @@ Sleep entries are dual-written by `append_workout.py`:
 - **Rich detail** → `<person>/data/sleep/YYYY.MM.nights.csv` via the sparse-merge `upsert_sleep_nights`. Captures all 6 stages Apple exposes (Total, Core, Deep, REM, Unspecified, Awake) plus Time in Bed, derived Sleep Efficiency, and first/last segment clock times. Manual entries leave the segment-metadata columns blank — only the importer populates those, including `N Segments`.
 - **Headline mirror** → `<person>/data/health_metrics.csv`, columns Sleep Total / Sleep Deep / Sleep REM / Time in Bed. Sparse-merge protects every other metric on the same date. This is the path the coach's `recovery_score` already reads, so a manual sleep entry flows into the recovery score on the next `/coach` run.
 
-If the user supplies only partial sleep info (e.g. just `sleep 7h30`), sparse-merge keeps the existing Apple-imported deep/REM/in-bed values on that date untouched and only updates the field(s) the user provided. A subsequent Apple import replaces any sleep fields it supplies, including a manually entered total; the CSV does not record field-level provenance. Fields absent from the import remain unchanged.
+If the user supplies only partial sleep info (e.g. just `sleep 7h30`), sparse-merge keeps the existing Apple-imported deep/REM/in-bed values on that date untouched and only updates the field(s) the user provided. A subsequent Apple import that would change the manually entered total reports a conflict and stops before writing unless explicitly overridden. Fields absent from the import remain unchanged.
 
 Sleep Efficiency is auto-derived inside the upsert when both `total_h` and `time_in_bed_h` are present and `efficiency_pct` wasn't supplied as a manual override.
 

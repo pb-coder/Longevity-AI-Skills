@@ -33,6 +33,8 @@ Each person's `data/` is its own git repository, committed once per confirmed wr
 
 `shared/import_health_export_kit.py` is the only importer. It reads `health-export-json-*.json`, updates supported health, workout, sleep, and swim fields, and archives the consumed export after success (`--keep-export` leaves the source in place). When more than one export is present, an explicit path is required. It does not supply daily HRV, wrist temperature, or per-lap swim detail; unavailable signals are omitted rather than treated as zero or requested from the user.
 
+Imports now stop before writing or archiving if they would change populated health, sleep, swim, or workout-session fields. Run the importer with `--dry-run` to review conflict counts and all changed values; use `--overwrite-existing` only to apply the reviewed replacements. Existing fields do not record their source or freshness, so conflicts do not establish which value is newer. Blank fields can still be filled and equivalent numeric values do not conflict. This is an intentional change to the previous overwrite behavior.
+
 ## Monthly CSV schema migration
 
 Schema v2 appends three optional columns, `Gym`, `Machine`, and `Load Basis`, after the unchanged 18-column schema. Readers accept legacy 17- and 18-column rows and treat missing context as unknown. A touched month is rewritten atomically in v2 on its next successful update or maintenance pass; there is no automatic bulk migration or invented historical metadata. Back up data and keep its history before an explicit maintenance migration. Rollback to software predating v2 requires restoring a pre-migration backup: old writers can drop new fields.
@@ -42,6 +44,8 @@ For each set, `gym` and `machine` are explicit labels; `load_basis` is `total` o
 ## Paired import workflow
 
 `python3 shared/prepare_training.py --entry <Person> <export.json> <workout-payload.json>` previews a named pairing. Repeat `--entry` for multiple people; use `-` for an omitted input. Review the pairings and add `--apply` to log workouts and import the corresponding health exports. Each export path must be unique, and the caller supplies ownership because the export cannot prove it. All entries are preflighted before writes; if an application step fails, earlier completed writes are not rolled back. `--allow-past-months` is available when needed.
+
+The preview reports import conflicts for every entry, including conflicts created by manual sleep or bodyweight in the paired payload. Applying requires `--overwrite-existing` if any import has conflicts; this option is passed to each importer.
 
 ## Architecture and maintenance
 

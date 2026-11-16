@@ -1076,7 +1076,7 @@ class ImportBatchingTests(unittest.TestCase):
             export = Path(tmp) / "export.json"
             export.write_text(json.dumps(payload))
             call = dict(person="Batch", export_path=export, since=None, until=None,
-                        allow_past_months=True, keep_export=True)
+                        allow_past_months=True, keep_export=True, overwrite_existing=True)
             hek.import_export(**call)
             self.assertEqual(person_paths.health_metrics_csv("Batch").read_bytes(), expected)
             before = {p.relative_to(person_paths.data_dir("Batch")): p.read_bytes()

@@ -34,11 +34,12 @@ def _load_logger():
     return module
 
 
-def preflight(entries: list[list[str]]) -> list[tuple[str, Path | None, Path | None]]:
+def preflight(entries: list[list[str]], *, reject_import_conflicts: bool = False) -> list[tuple[str, Path | None, Path | None]]:
     """Check every entry before any writing; do not infer file ownership."""
     logger = _load_logger()
     people, exports, workouts = set(), set(), set()
     prepared = []
+    conflicting_people = []
     for person, export, workout in entries:
         if not person or person in ('.', '..') or Path(person).name != person or '\\' in person:
             raise ValueError(f'Invalid person name: {person!r}')
@@ -51,14 +52,7 @@ def preflight(entries: list[list[str]]) -> list[tuple[str, Path | None, Path | N
         workout_path = None if workout == '-' else Path(workout).resolve(strict=True)
         if not export_path and not workout_path:
             raise ValueError(f'No input supplied for {person}')
-        if export_path:
-            if not export_path.is_file() or export_path in exports:
-                raise ValueError(f'Export is not a unique file: {export_path}')
-            exports.add(export_path)
-            preview = import_export(person, export_path, None, None, dry_run=True)
-            print(f'{person} | export: {export_path}')
-            for line in preview:
-                print(f'  {line}')
+        bodyweight, sleep = [], []
         if workout_path:
             if not workout_path.is_file() or workout_path in workouts:
                 raise ValueError(f'Workout payload is not a unique file: {workout_path}')
@@ -75,7 +69,25 @@ def preflight(entries: list[list[str]]) -> list[tuple[str, Path | None, Path | N
                 raise ValueError(f'Workout conflicts for {person}; review before applying')
             if any((bodyweight, css, sleep, nutrition)):
                 print('  Other payload categories have basic structure/date checks only; conflicts and values are not fully previewed.')
+        if export_path:
+            if not export_path.is_file() or export_path in exports:
+                raise ValueError(f'Export is not a unique file: {export_path}')
+            exports.add(export_path)
+            projection = {}
+            if bodyweight:
+                projection['projected_bodyweight'] = bodyweight
+            if sleep:
+                projection['projected_sleep'] = sleep
+            preview = import_export(person, export_path, None, None, dry_run=True, **projection)
+            print(f'{person} | export: {export_path}')
+            for line in preview:
+                print(f'  {line}')
+            if any(line.startswith('Import conflicts:') for line in preview):
+                conflicting_people.append(person)
         prepared.append((person, export_path, workout_path))
+    if conflicting_people and reject_import_conflicts:
+        raise ValueError('Import conflicts for ' + ', '.join(conflicting_people) +
+                         '; review the preview and use --overwrite-existing to apply')
     return prepared
 
 
@@ -85,9 +97,11 @@ def main() -> int:
                         metavar=('PERSON', 'EXPORT', 'WORKOUT_JSON'))
     parser.add_argument('--apply', action='store_true', help='Apply after preflight')
     parser.add_argument('--allow-past-months', action='store_true')
+    parser.add_argument('--overwrite-existing', action='store_true',
+                        help='Allow imports to replace populated values after review')
     args = parser.parse_args()
     try:
-        entries = preflight(args.entry)
+        entries = preflight(args.entry, reject_import_conflicts=args.apply and not args.overwrite_existing)
     except (OSError, ValueError, TypeError, KeyError, EmptyImportError) as exc:
         print(f'Preflight failed: {exc}', file=sys.stderr)
         return 1
@@ -105,6 +119,8 @@ def main() -> int:
             cmd = [sys.executable, str(IMPORTER), '--person', person, '--export', str(export)]
             if args.allow_past_months:
                 cmd.append('--allow-past-months')
+            if args.overwrite_existing:
+                cmd.append('--overwrite-existing')
             commands.append(cmd)
         for cmd in commands:
             result = subprocess.run(cmd, check=False)

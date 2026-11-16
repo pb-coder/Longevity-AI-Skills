@@ -62,6 +62,7 @@ from shared.csv_store import (
     write_profile,
 )
 from shared.data_git import commit_data
+from shared.import_conflicts import find_import_conflicts, format_import_conflicts
 from shared.monthly_csv_upsert import (
     upsert_monthly_cardio,
     upsert_monthly_strength_session,
@@ -649,7 +650,10 @@ def import_export(person: str,
                   *,
                   allow_past_months: bool = False,
                   dry_run: bool = False,
-                  keep_export: bool = False) -> list[str]:
+                  keep_export: bool = False,
+                  overwrite_existing: bool = False,
+                  projected_bodyweight=(),
+                  projected_sleep=()) -> list[str]:
     """Parse one export and write every store it feeds. One import, one commit."""
     payload = read_export(export_path)
 
@@ -664,6 +668,9 @@ def import_export(person: str,
             f"nights in the selected window; nothing was written"
         )
 
+    conflicts = find_import_conflicts(person, [*health, *headline], nights, swims, workouts,
+                                      bodyweight=projected_bodyweight, sleep=projected_sleep)
+    conflict_lines = format_import_conflicts(conflicts)
     if dry_run:
         return [
             f"Dry run: {export_path.name}",
@@ -672,10 +679,16 @@ def import_export(person: str,
             f"  sleep nights:       {len(nights)}",
             f"  workouts:           {len(workouts)}",
             f"  swim workouts:      {len(swims)}",
+            *conflict_lines,
             "  nothing written",
         ]
 
-    out: list[str] = []
+    if conflicts and not overwrite_existing:
+        raise ValueError("\n".join(conflict_lines + [
+            "Import stopped before writes; review and use --overwrite-existing to apply these changes."
+        ]))
+
+    out: list[str] = conflict_lines
     profile, created = ensure_profile(person, default_source=SOURCE_NAME,
                                       default_auto_cardio=True)
     if created:
@@ -743,6 +756,8 @@ def main() -> int:
                     help="Allow monthly backfill into past YYYY.MM files.")
     ap.add_argument("--keep-export", action="store_true",
                     help="Leave the source in place instead of archiving it after import.")
+    ap.add_argument("--overwrite-existing", action="store_true",
+                    help="Allow replacement of populated values after reviewing the conflict preview.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Parse and summarize; do not write anything.")
     args = ap.parse_args()
@@ -762,6 +777,7 @@ def main() -> int:
             args.person, export_path, args.since, args.until,
             allow_past_months=args.allow_past_months,
             dry_run=args.dry_run, keep_export=args.keep_export,
+            overwrite_existing=args.overwrite_existing,
         )
     except EmptyImportError as e:
         print(f"ERROR: {e}", file=sys.stderr)

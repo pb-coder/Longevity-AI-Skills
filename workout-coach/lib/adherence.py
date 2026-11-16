@@ -431,9 +431,7 @@ def session_type_from_title(title: str | None, slots=None,
     if slots is None:
         return named
     content = session_type_from_content(slots, db)
-    if content is None or content == "upper":
-        return named
-    if named is None or named == "upper":
+    if content in ("lower", "full") and named in (None, "upper"):
         return content
     return named
 

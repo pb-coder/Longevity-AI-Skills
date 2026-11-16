@@ -5,7 +5,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from .monthly_csv_canonicalize import canonicalize_monthly_csv
+from .monthly_csv_canonicalize import _canonicalize_rows, canonicalize_monthly_csv
 from .monthly_csv_io import _dict_to_row, _read_csv_rows, _row_to_dict, _write_csv_atomic
 from .monthly_csv_schema import (
     CARDIO_DUPLICATE_DURATION_TOLERANCE_MIN,
@@ -142,8 +142,7 @@ def upsert_rows(person: str, year_month: str, rows: list[dict], *,
         result["added"] += 1
     if dry_run or not (result["added"] or result["replaced"]):
         return result
-    _write_csv_atomic(path, out)
-    canonicalize_monthly_csv(person, year_month)
+    _write_csv_atomic(path, _canonicalize_rows(out, person, year_month))
     return result
 
 
@@ -411,8 +410,7 @@ def upsert_monthly_cardio(person: str,
             # Combine existing (with any in-place metadata refreshes) + new rows.
             all_dicts = existing_dicts + new_rows_to_append
             out = [_dict_to_row(rd) for rd in all_dicts]
-            _write_csv_atomic(path, out)
-            canonicalize_monthly_csv(person, month_key)
+            _write_csv_atomic(path, _canonicalize_rows(out, person, month_key))
 
         total_appended += appended
         total_skipped += skipped_dup

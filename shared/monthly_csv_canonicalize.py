@@ -155,6 +155,13 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
     header, raw_rows = _read_csv_rows(path)
     if not header:
         return
+    out_rows = _canonicalize_rows(raw_rows, person, year_month)
+    ensure_monthly_dir(person)
+    _write_csv_atomic(path, out_rows)
+
+
+def _canonicalize_rows(raw_rows: list[list[str]], person: str, year_month: str) -> list[list[str]]:
+    """Canonicalize already loaded rows before a single atomic write."""
 
     # Parse rows into session blocks.
     sessions: list[dict] = []
@@ -310,5 +317,4 @@ def canonicalize_monthly_csv(person: str, year_month: str) -> None:
             for data_row in strength_built + cardio_built:
                 out_rows.append(_dict_to_row(data_row))
 
-    ensure_monthly_dir(person)
-    _write_csv_atomic(path, out_rows)
+    return out_rows

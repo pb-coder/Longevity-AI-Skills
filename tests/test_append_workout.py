@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -18,6 +21,43 @@ spec.loader.exec_module(append_workout)
 
 
 class AppendWorkoutTests(unittest.TestCase):
+    def test_bodyweight_note_survives_write_and_later_import(self) -> None:
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            payload = root / "payload.json"
+            payload.write_text(json.dumps({"bodyweight": [
+                {"date": "2026-05-28", "kg": 80, "notes": "evening, not fasted"},
+                {"date": "2026-05-29", "kg": 81, "notes": "after dinner"},
+            ]}))
+            env = dict(os.environ, WORKOUT_TRACKER_ROOT=td)
+            seed = subprocess.run([sys.executable, "-c", "from shared.csv_store import upsert_health_metrics; "
+                "upsert_health_metrics('Person', [{'date': '2026-05-29', 'resting_hr': 60, "
+                "'notes': 'measurement note'}])"],
+                cwd=SKILLS_ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(seed.returncode, 0, seed.stderr)
+            result = subprocess.run([sys.executable, str(APPEND_PATH), "--person", "Person",
+                                     str(payload)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # Importing another metric must preserve the existing annotation.
+            code = ("from shared.csv_store import upsert_health_metrics; "
+                    "upsert_health_metrics('Person', [{'date': '2026-05-28', 'resting_hr': 60}])")
+            imported = subprocess.run([sys.executable, "-c", code], cwd=SKILLS_ROOT, env=env,
+                                  capture_output=True, text=True)
+            self.assertEqual(imported.returncode, 0, imported.stderr)
+            code = ("from shared.csv_store import read_health_metrics; "
+                    "print([r['notes'] for r in read_health_metrics('Person')])")
+            after_import = subprocess.run([sys.executable, "-c", code], cwd=SKILLS_ROOT, env=env,
+                                          capture_output=True, text=True)
+            self.assertEqual(after_import.returncode, 0, after_import.stderr)
+            self.assertEqual(after_import.stdout.strip(), "['measurement note; after dinner', 'evening, not fasted']")
+            replay = subprocess.run([sys.executable, str(APPEND_PATH), "--person", "Person",
+                                     str(payload)], env=env, capture_output=True, text=True)
+            self.assertEqual(replay.returncode, 0, replay.stderr)
+            read = subprocess.run([sys.executable, "-c", code], cwd=SKILLS_ROOT, env=env,
+                                  capture_output=True, text=True)
+            self.assertEqual(read.returncode, 0, read.stderr)
+            self.assertEqual(read.stdout.strip(), "['measurement note; after dinner', 'evening, not fasted']")
+
     def test_write_payload_canonicalizes_touched_month_once(self) -> None:
         rows = [
             {

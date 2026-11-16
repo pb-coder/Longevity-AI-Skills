@@ -319,7 +319,7 @@ def upsert_bodyweight(person: str, entries: list[dict]) -> list[str]:
             kg = float(e["kg"])
         except (TypeError, ValueError):
             raise ValueError(f"bodyweight kg must be numeric: {e['kg']!r}") from None
-        metric_entries.append({"date": d, "bodyweight_kg": kg})
+        metric_entries.append({"date": d, "bodyweight_kg": kg, "notes": e.get("notes")})
     if not metric_entries:
         return []
     upsert_health_metrics(person, metric_entries)

@@ -296,7 +296,8 @@ def upsert_health_metrics(person: str, entries: Iterable[dict]) -> list[str]:
 
     Identical semantics to the old xlsx upsert: missing or None fields
     in ``entries`` never overwrite a populated cell, the rightmost
-    ``Notes`` column is preserved, the file is sorted DESC by date on
+    ``Notes`` column preserves existing annotations and appends distinct
+    supplied annotations, the file is sorted DESC by date on
     every write. Returns one summary string for the importer to print.
     """
     entries = list(entries or [])
@@ -320,7 +321,7 @@ def upsert_health_metrics(person: str, entries: Iterable[dict]) -> list[str]:
         seen_dates.add(d)
         cur = by_date.get(d)
         if cur is None:
-            new_record = {"date": d, "notes": None}
+            new_record = {"date": d, "notes": e.get("notes") or None}
             for key in fields:
                 v = e.get(key)
                 new_record[key] = v if v is not None else None
@@ -329,6 +330,14 @@ def upsert_health_metrics(person: str, entries: Iterable[dict]) -> list[str]:
             continue
         # Sparse-merge: incoming None never erases existing values.
         changed = False
+        note = e.get("notes")
+        if note:
+            existing_note = cur.get("notes") or ""
+            # Notes may contain semicolons themselves. Match a whole
+            # appended annotation, including its delimiter boundaries.
+            if f"; {note}; " not in f"; {existing_note}; ":
+                cur["notes"] = f"{existing_note}; {note}" if existing_note else note
+                changed = True
         for key in fields:
             v = e.get(key)
             if v is None:

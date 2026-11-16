@@ -256,8 +256,7 @@ def compute_load_policy(rec: dict, recovery: dict | None,
     # ``progress`` whatever strength TSB says: the TSB is still stated, so
     # the coach can say out loud what was overridden. A lift still has to
     # earn its bump from the log.
-    policy = ("progress" if overridden
-              else "reduce" if (by_tier or by_tsb) else "progress")
+    policy = "reduce" if not overridden and (by_tier or by_tsb) else "progress"
 
     why: list[str] = []
     if overridden:
@@ -294,9 +293,7 @@ def compute_load_policy(rec: dict, recovery: dict | None,
                        f"x{T['tier_c_session_budget_scale']:g}; that is "
                        f"volume, not load")
     floor = T["tier_d_recovery_score_min"]
-    if overridden:
-        pass
-    elif score is not None and tier in ("D", "E") and score < floor:
+    if not overridden and score is not None and tier in ("D", "E") and score < floor:
         why.append(f"recovery {score:.1f}/10 is under the {floor:g} green "
                    f"line but the gate did not downgrade it")
     if score is None and tsb is None:
@@ -528,17 +525,16 @@ def _gate_tier(*,
             "threshold": threshold, "note": note,
         })
 
+    # Each triggered tier returns before the next tier is evaluated, so
+    # rationale is empty until a condition in the current tier adds evidence.
     # ---- TIER A: illness / acute rest ----
-    tier_a_fired = False
     if (wrist_temp_dev is not None and wrist_temp_dev >= T["tier_a_wrist_temp_dev_c"]
             and hrv_z is not None and hrv_z <= T["tier_a_hrv_z_paired_with_temp"]):
-        tier_a_fired = True
         add("wrist_temp_c", wrist_temp_dev, T["tier_a_wrist_temp_dev_c"],
             f"+{wrist_temp_dev:.2f}°C vs 60-day baseline (pre-illness range per Oura)")
         add("hrv_sdnn_z", round(hrv_z, 2), T["tier_a_hrv_z_paired_with_temp"],
             "autonomic suppression alongside temperature rise")
     if rhr_streak >= T["tier_a_rhr_sustained_days"]:
-        tier_a_fired = True
         add("rhr_sustained_days", rhr_streak, T["tier_a_rhr_sustained_days"],
             f"RHR sustained ≥+{T['tier_a_rhr_dev_bpm']:.0f} bpm above the pre-elevation baseline for {rhr_streak} consecutive days")
     # NOTE: rhr_z is the INVERTED recovery z (positive = RHR below baseline =
@@ -547,11 +543,10 @@ def _gate_tier(*,
     if (recovery_score is not None and recovery_score < T["tier_a_recovery_score_crash"]
             and hrv_z is not None and hrv_z <= T["tier_a_hrv_z_crash"]
             and rhr_z is not None and rhr_z <= -T["tier_a_rhr_z_crash"]):
-        tier_a_fired = True
         add("recovery_crash", recovery_score, T["tier_a_recovery_score_crash"],
             f"Recovery {recovery_score:.1f}/10 with HRV z {hrv_z:+.2f} and RHR z {rhr_z:+.2f}: autonomic crash triad")
 
-    if tier_a_fired:
+    if rationale:
         return {
             "tier": "A",
             "label": "rest",
@@ -571,33 +566,28 @@ def _gate_tier(*,
     # Triggers split into ACUTE (always fire) and SLOW (gated by
     # `suppress_slow` so an over-recovered or just-rebounded athlete isn't
     # pinned in deload by a proxy signal).
-    tier_b_fired = False
-    tier_b_kind = None  # zone_2 / reactive_deload_week / mobility
+    tier_b_kind = None  # zone_2 / reactive_deload_week
     # SLOW: high accumulated fatigue. Suppressed only by a served-deload
     # rebound (over-recovery can't coexist with TSB ≤ -15).
     if (tsb is not None and tsb <= T["tier_b_tsb_high_fatigue"]
             and not deload_served):
-        tier_b_fired = True
         tier_b_kind = tier_b_kind or "zone_2"
         add("tsb", tsb, T["tier_b_tsb_high_fatigue"],
             f"Freshness (TSB) {tsb:+.1f} ≤ {T['tier_b_tsb_high_fatigue']:.0f}: high accumulated fatigue")
     # SLOW: sustained HRV suppression.
     if (hrv_z is not None and hrv_z <= T["tier_b_hrv_z_sustained"]
             and not suppress_slow):
-        tier_b_fired = True
         tier_b_kind = tier_b_kind or "zone_2"
         add("hrv_sdnn_z", round(hrv_z, 2), T["tier_b_hrv_z_sustained"],
             f"HRV z {hrv_z:+.2f} sustained below 60-day baseline (Altini maladaptation signal)")
     # ACUTE: MRV breach forces the week-long deload regardless of context.
     if n_over_mrv >= T["tier_b_muscles_over_mrv_count"]:
-        tier_b_fired = True
         tier_b_kind = "reactive_deload_week"
         names = ", ".join(over_mrv_muscles[:5])
         add("muscles_over_mrv", n_over_mrv, T["tier_b_muscles_over_mrv_count"],
             f"{n_over_mrv} muscles over MRV ({names}): RP MRV-breach protocol triggers a reactive deload")
     # SLOW: an auto-deload candidate is stale once a deload was already served.
     if unmarked_deload_recent and not deload_served:
-        tier_b_fired = True
         tier_b_kind = tier_b_kind or "reactive_deload_week"
         add("auto_deload_candidate", "yes", None,
             "auto-deload candidate flagged in the last 7 days; the data already looked like a deload was needed")
@@ -607,7 +597,6 @@ def _gate_tier(*,
     # fire. Genuine high-load ramps still trip this.
     if (wow_pct is not None and wow_pct >= T["tier_b_wow_spike_pct"]
             and wow_spike_corroborated):
-        tier_b_fired = True
         tier_b_kind = tier_b_kind or "zone_2"
         add("wow_change_pct", round(wow_pct, 1), T["tier_b_wow_spike_pct"],
             f"week-over-week training stress +{wow_pct:.0f}% with negative strength freshness and high acute load: sharp ramp into red, cap the next 7 days at +10%")
@@ -615,12 +604,11 @@ def _gate_tier(*,
     # Flat loads on isolations / comeback lifts no longer force a deload.
     if (stalled >= T["tier_b_stalled_lifts_count"]
             and stalled_corroborated and not suppress_slow):
-        tier_b_fired = True
         tier_b_kind = tier_b_kind or "reactive_deload_week"
         add("stalled_lifts", stalled, T["tier_b_stalled_lifts_count"],
             f"{stalled} top lifts stalled at/near best for ≥2 sessions and not progressing, with a corroborating fatigue signal: Tuchscherer reactive-deload trigger")
 
-    if tier_b_fired:
+    if tier_b_kind is not None:
         if tier_b_kind == "reactive_deload_week":
             substitute = {
                 "kind": "reactive_deload_week",
@@ -650,40 +638,32 @@ def _gate_tier(*,
         }
 
     # ---- TIER C: downgrade (modified strength is fine) ----
-    tier_c_fired = False
     if (recovery_score is not None
             and T["tier_c_recovery_score_lo"] <= recovery_score <= T["tier_c_recovery_score_hi"]
             and soft_dip_actionable):
-        tier_c_fired = True
         _why = ("genuinely low" if recovery_genuinely_low
                 else "moderate, and freshness is negative (carrying load)")
         add("recovery_score", recovery_score, T["tier_c_recovery_score_hi"],
             f"Recovery {recovery_score:.1f}/10: {_why}")
     if (hrv_z is not None and T["tier_c_hrv_z_lo"] < hrv_z <= T["tier_c_hrv_z_hi"]
             and not over_recovered and soft_dip_actionable):
-        tier_c_fired = True
         add("hrv_sdnn_z", round(hrv_z, 2), T["tier_c_hrv_z_hi"],
             f"HRV z {hrv_z:+.2f} below baseline, corroborated by low recovery or negative freshness")
     if sleep_last_night is not None and sleep_last_night < T["tier_c_sleep_total_h_floor"]:
-        tier_c_fired = True
         add("sleep_last_night_h", round(sleep_last_night, 2), T["tier_c_sleep_total_h_floor"],
             f"last night {sleep_last_night:.2f}h, below the {T['tier_c_sleep_total_h_floor']:.0f}h floor")
     elif sleep_7d_mean is not None and sleep_7d_mean < T["tier_c_sleep_7d_mean_floor"]:
-        tier_c_fired = True
         add("sleep_7d_mean_h", round(sleep_7d_mean, 2), T["tier_c_sleep_7d_mean_floor"],
             f"7-day sleep mean {sleep_7d_mean:.2f}h below the {T['tier_c_sleep_7d_mean_floor']:.0f}h floor")
     if sri is not None and sri < T["tier_c_sri_floor"]:
-        tier_c_fired = True
         add("sleep_regularity_index", round(sri, 1), T["tier_c_sri_floor"],
             f"SRI {sri:.0f} below UK Biobank bottom-quintile cutoff ({T['tier_c_sri_floor']:.0f})")
     # rhr_z is inverted (positive = RHR below baseline = good). RHR ELEVATED
     # above baseline is the unfavorable case, so test the negative tail.
     if rhr_z is not None and rhr_z <= -T["tier_c_rhr_z_floor"]:
-        tier_c_fired = True
         add("rhr_z", round(rhr_z, 2), -T["tier_c_rhr_z_floor"],
             f"RHR z {rhr_z:+.2f}: resting HR elevated above baseline")
     if n_over_mrv >= T["tier_c_muscles_over_mrv_count"]:
-        tier_c_fired = True
         names = ", ".join(over_mrv_muscles[:5])
         add("muscles_over_mrv", n_over_mrv, T["tier_c_muscles_over_mrv_count"],
             f"{n_over_mrv} muscle(s) over MRV ({names}): modify the affected groups")
@@ -710,12 +690,11 @@ def _gate_tier(*,
         and hr_creep_corroborated
     )
     if hr_creep_actionable:
-        tier_c_fired = True
         names = ", ".join(hr_creep_muscles[:5])
         add("hr_at_volume_divergence", len(hr_creep_muscles), 2,
             f"HR rising at constant volume on {names} with no confounder, plus moderate recovery: don't add sets on those groups")
 
-    if tier_c_fired:
+    if rationale:
         rebound_by_session = _expected_tier_c_rebound_by_session(
             deloads=deloads,
             today_d=today_d,

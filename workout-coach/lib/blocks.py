@@ -2048,8 +2048,12 @@ def rotation_candidates(rows: list[dict], db: dict, catalog: dict,
 def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
                   today_d: date, deloads: list[str] | None = None,
                   adherence: dict | None = None,
-                  e1rm: dict | None = None) -> dict:
+                  e1rm: dict | None = None, *,
+                  plans: list[dict] | None = None) -> dict:
     """The ``block`` payload: current block, boundary state, what to rotate.
+
+    ``plans``, when supplied, is the oldest-first, date-filtered series
+    from ``load_plans``; at most its last three entries are used.
 
     When no artifact exists yet the block is bootstrapped from a plan and
     marked ``source: "derived_from_plan"`` — the coach then has a
@@ -2086,7 +2090,8 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
     # Three newest plans: the newest two bootstrap a block (see WHICH
     # PLAN above), and the one before the newest is the PRIOR GENERATION
     # the deload cadence needs to tell a crossing from a standing debt.
-    plans = load_plans(person, today_d, limit=3, db=db)
+    plans = (load_plans(person, today_d, limit=3, db=db)
+             if plans is None else plans[-3:])
     stored = read_block(person)
     source = "artifact"
     undiffable_reason = None

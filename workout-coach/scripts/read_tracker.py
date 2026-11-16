@@ -599,15 +599,15 @@ def main() -> int:
     # the same payload demands mid-MAV volume on it hands the coach two
     # instructions it cannot both obey.
     priority_tiers, priority_unknown = muscle_priority_tiers(profile)
+    plans_parsed = load_plans(person, today_d, limit=8, db=db)
     adherence = build_adherence(person, rows, db, today_d, catalog,
-                                priority_tiers=priority_tiers)
-    plans_parsed = load_plans(person, today_d, limit=8)
+                                priority_tiers=priority_tiers, plans=plans_parsed)
     # ``adherence`` feeds the block so benched slots are withdrawn from it.
     # ``e1rm`` feeds it ``stalled_sessions``, which is what lets the
     # rotation validator DERIVE ``stall_3_sessions`` instead of demanding
     # a field the plan markdown cannot express.
     block = block_payload(person, rows, db, catalog, today_d, deloads,
-                          adherence=adherence, e1rm=e1rm)
+                          adherence=adherence, e1rm=e1rm, plans=plans_parsed)
     # Starting loads for movements with no history. Until this existed the
     # payload named only the ~46 exercises already logged, and the active
     # load rule is "copy last session's load forward" — so there was no

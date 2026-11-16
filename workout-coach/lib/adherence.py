@@ -790,19 +790,18 @@ def load_plans(person: str, today_d: date, limit: int | None = None,
     but not all of it).
     """
     from shared.person_paths import list_workout_plans
+    eligible = [(plan_date, path) for plan_date, path in list_workout_plans(person)
+                if (d := _parse_iso_date(plan_date)) is not None and d <= today_d]
+    if limit is not None and limit > 0:
+        eligible = eligible[-limit:]
     out: list[dict] = []
-    for plan_date, path in list_workout_plans(person):
-        d = _parse_iso_date(plan_date)
-        if d is None or d > today_d:
-            continue
+    for plan_date, path in eligible:
         try:
             out.append(parse_plan_file(path, plan_date, db))
         except OSError as exc:                       # pragma: no cover - io
             out.append({"plan_date": plan_date, "workouts": [],
                         "parse_errors": [f"{plan_date}: unreadable ({exc})"],
                         "parse_notes": []})
-    if limit is not None and limit > 0:
-        out = out[-limit:]
     return out
 
 
@@ -1530,7 +1529,8 @@ def _bench_prompt(benched: list[dict], blocked: list[dict]) -> dict | None:
 def build_adherence(person: str, rows: list[dict], db: dict, today_d: date,
                     catalog: dict | None = None,
                     history: int = 8,
-                    priority_tiers: dict | None = None) -> dict | None:
+                    priority_tiers: dict | None = None, *,
+                    plans: list[dict] | None = None) -> dict | None:
     """The ``adherence`` payload block for ``person``.
 
     Headline numbers describe the MOST RECENT plan's window — that is the
@@ -1538,6 +1538,9 @@ def build_adherence(person: str, rows: list[dict], db: dict, today_d: date,
     ``benched`` and ``never_performed`` are computed across the last
     ``history`` plans, because a single window cannot tell a movement
     skipped once from one skipped every time it has ever been asked for.
+
+    ``plans``, when supplied, is the oldest-first, date-filtered series
+    from ``load_plans``; the last ``history`` entries are used.
 
     ``priority_tiers`` is ``constants.muscle_priority_tiers(profile)[0]``.
     It is what stops the bench from contradicting D8 — see
@@ -1565,7 +1568,10 @@ def build_adherence(person: str, rows: list[dict], db: dict, today_d: date,
     # ``db`` is threaded so the session-type classifier reads the catalog
     # this caller already parsed rather than loading a second copy — and
     # so every `session_type` in the ledger is the content-checked answer.
-    plans = load_plans(person, today_d, limit=history, db=db)
+    if plans is None:
+        plans = load_plans(person, today_d, limit=history, db=db)
+    elif history is not None and history > 0:
+        plans = plans[-history:]
     if not plans:
         return None
     windows = plan_windows(plans, today_d)

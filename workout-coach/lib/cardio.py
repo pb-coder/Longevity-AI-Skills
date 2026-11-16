@@ -235,20 +235,19 @@ def training_load_summary(trimps: list[dict], today_d: date) -> dict:
     ctl_alpha = 1.0 / 42.0  # ~time constant 42d
     atl_alpha = 1.0 / 7.0
     ctl = atl = 0.0
-    history: list[tuple[date, float, float]] = []
+    week_ago = today_d - timedelta(days=7)
+    week_ago_ctl = None
     cur = start
     while cur <= today_d:
         load = by_date.get(cur, 0.0)
         ctl = ctl + ctl_alpha * (load - ctl)
         atl = atl + atl_alpha * (load - atl)
-        history.append((cur, ctl, atl))
+        if cur <= week_ago:
+            week_ago_ctl = ctl
         cur += timedelta(days=1)
     today_ctl, today_atl = ctl, atl
-    week_ago_ctl = next(
-        (h[1] for h in reversed(history)
-         if h[0] <= today_d - timedelta(days=7)),
-        today_ctl
-    )
+    if week_ago_ctl is None:
+        week_ago_ctl = today_ctl
     return {
         "ctl":      round(today_ctl, 1),
         "atl":      round(today_atl, 1),

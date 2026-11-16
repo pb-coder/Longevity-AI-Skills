@@ -963,12 +963,12 @@ def workout_set_budget_warnings(text: str, target_working_sets,
         if n < budget - low_tol:
             warnings.append(
                 f"{title}: {n} working sets vs budget {budget} "
-                f"({budget - n} under) — confirm this is an "
-                f"intentional deload/downgrade, else add sets to the main lifts")
+                f"({budget - n} under) — review against weekly targets, "
+                f"recovery and the session time model; do not add filler sets")
         elif n > budget + high_tol:
             warnings.append(
                 f"{title}: {n} working sets vs budget {budget} "
-                f"({n - budget} over) — trim a set or two")
+                f"({n - budget} over) — review duration and weekly floors before reducing sets")
     return warnings
 
 
@@ -1959,6 +1959,86 @@ def _cadence_deload_index(workouts: "list[dict]") -> "int | None":
     return workouts[0]["index"] if workouts else None
 
 
+def stalled_lift_findings(text: str, payload: "dict | None", *,
+                          plan_date: "str | None" = None,
+                          deload_week: bool = False,
+                          cadence_deload: bool = False) -> "tuple[list[str], list[str]]":
+    """Check every working set of an eligible three-session stall.
+
+    A set at the stalled load does not constitute a deload. If reference
+    loads from two gyms make an intermediate load ambiguous, report it for
+    review; a free-text heading or cue cannot declare a full deload.
+    """
+    nd = (payload or {}).get("next_dose") or {}
+    if deload_week or nd.get("load_policy") == "reduce":
+        return [], []
+    entries = {}
+    for entry in nd.get("exercises") or []:
+        if not isinstance(entry, dict) or not isinstance(entry.get("exercise"), str):
+            continue
+        count = entry.get("stalled_sessions")
+        if (entry.get("action") in ("add_reps", "hold")
+                and isinstance(count, (int, float)) and not isinstance(count, bool)
+                and isfinite(count) and count >= 3):
+            entries[entry["exercise"].strip().lower()] = entry
+    if not entries:
+        return [], []
+
+    from .adherence import parse_plan, _parse_set_item
+    from .strength import loads_equal
+
+    parsed = parse_plan(text, plan_date or "")
+    workouts = parsed.get("workouts") or []
+    skip = _cadence_deload_index(workouts) if cadence_deload else None
+    errors, warnings = [], []
+    if parsed.get("parse_errors"):
+        warnings.append("stall response could not be fully checked: the plan contains "
+                        "unparsed headings or prescription items")
+    for workout in workouts:
+        if workout["index"] == skip:
+            continue
+        for slot in workout["slots"]:
+            entry = entries.get(slot["exercise"].strip().lower())
+            if entry is None or not slot["prescribed_sets"]:
+                continue
+            def valid_load(value):
+                return (isinstance(value, (int, float)) and not isinstance(value, bool)
+                        and isfinite(value) and value > 0)
+
+            # `load_kg` may already be reduced by progression. The last
+            # recorded load is the stall baseline; old payloads omit it.
+            last = entry.get("last_load_kg")
+            baseline = last if valid_load(last) else entry.get("load_kg")
+            reference = [v for v in (baseline, entry.get("other_gym_load_kg"))
+                         if valid_load(v)]
+            unchanged = False
+            ambiguous = not reference
+            for token in slot["raw"].split("///"):
+                item = _parse_set_item(token)
+                if not item:
+                    ambiguous = True
+                    continue
+                if item["is_warmup"] or not item["sets"]:
+                    continue
+                load_range = item.get("load_range_kg")
+                load = max(load_range) if load_range else item["load_kg"]
+                if load is None or not reference:
+                    ambiguous = True
+                elif load > max(reference) or loads_equal(load, max(reference)):
+                    unchanged = True
+                elif load > min(reference) or loads_equal(load, min(reference)):
+                    ambiguous = True
+            where = f"{slot['exercise']} (Workout {workout['index']}: {workout['title']})"
+            if unchanged and reference:
+                errors.append(f"{where}: stalled for {entry['stalled_sessions']} sessions; "
+                              "a working set retains or exceeds a recorded gym load. "
+                              "Use a same-pattern variation or lower every working load")
+            elif ambiguous:
+                warnings.append(f"{where}: stalled lift's working load or gym is ambiguous; "
+                                "verify that every set is deloaded or use a same-pattern variation")
+    return errors, warnings
+
+
 def next_dose_drift_warnings(text: str, payload: "dict | None", *,
                              plan_date: "str | None" = None,
                              deload_week: bool = False,
@@ -2225,7 +2305,8 @@ def validate_workout_plan(
 
     Blocking checks cover per-session core dose and placement, weekly core
     distribution, arm diversity and placement, and weekly direct-set muscle
-    floors. Missing muscle targets warn instead. With a payload, recovery
+    floors, and repeated stalled lifts at the same load. Missing muscle targets
+    warn instead. With a payload, recovery
     scores in the opener are cross-checked against decision thresholds.
 
     Advisories cover working-set budgets, next-dose drift, missing main
@@ -2293,6 +2374,11 @@ def validate_workout_plan(
     if payload is not None:
         warnings += adjacent_compound_warnings(text)
 
+    stall_errors, stall_warnings = stalled_lift_findings(
+        text, payload, plan_date=plan_date, deload_week=deload_week,
+        cadence_deload=cadence_deload)
+    errors += stall_errors
+    warnings += stall_warnings
     warnings += next_dose_drift_warnings(
         text, payload, plan_date=plan_date, deload_week=deload_week,
         cadence_deload=cadence_deload)

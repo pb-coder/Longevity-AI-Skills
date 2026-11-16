@@ -122,7 +122,7 @@ def health_metrics_weekly(health_all: list[dict],
         # Monday of the ISO week — readable anchor for the LLM.
         monday = datetime.fromisocalendar(wk[0], wk[1], 1).date()
         entry: dict = {"week_start": monday.strftime("%Y-%m-%d"),
-                       "n_days": max(len(v) for v in by_week[wk].values())}
+                       "n_days": max((len(v) for v in by_week[wk].values()), default=0)}
         for k in keys:
             vals = by_week[wk].get(k)
             if not vals:

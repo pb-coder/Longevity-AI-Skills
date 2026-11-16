@@ -53,6 +53,7 @@ from .csv_store import (  # noqa: E402
     SLEEP_NIGHTS_HEADERS,
     SWIM_LAPS_HEADERS,
     SWIM_WORKOUTS_HEADERS,
+    WORKOUT_SESSIONS_FIELDS,
     WORKOUT_SESSIONS_HEADERS,
     migrate_health_metrics_header,
 )
@@ -448,8 +449,6 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
     Returns 0 on success.
     """
     from .csv_store import read_workout_sessions  # noqa
-    import csv
-
     path = workout_sessions_csv(person)
     if not path.exists():
         print(f"workout_sessions.csv not found for {person}: {path}")
@@ -463,21 +462,6 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
     already = 0
     untouched = 0
     out_rows: list[list] = []
-    fields = list(headers[1:])  # everything except Date
-    field_keys: list[str] = []
-    # Map header → internal field key (same order as csv_store
-    # WORKOUT_SESSIONS_FIELDS; explicit map for clarity).
-    HEADER_TO_FIELD = {
-        "Start": "start", "End": "end", "Apple Type": "apple_type",
-        "Duration (min)": "duration_min",
-        "Avg HR (bpm)": "avg_hr", "Max HR (bpm)": "max_hr",
-        "Min HR (bpm)": "min_hr",
-        "Active Cal (kcal)": "active_cal", "Distance (km)": "distance_km",
-        "Source": "source", "Incidental": "incidental", "Notes": "notes",
-    }
-    for h in fields:
-        field_keys.append(HEADER_TO_FIELD.get(h, h.lower().replace(" ", "_")))
-
     for rec in rows:
         notes = (rec.get("notes") or "")
         already_flagged = rec.get("incidental") is True
@@ -496,16 +480,7 @@ def migrate_incidental_flag(person: str, dry_run: bool = False) -> int:
         else:
             untouched += 1
         # Build the output row in HEADER order.
-        out_row = [rec.get("date")]
-        for key in field_keys:
-            v = rec.get(key)
-            if v is None:
-                out_row.append("")
-            elif isinstance(v, bool):
-                out_row.append("true" if v else "false")
-            else:
-                out_row.append(v)
-        out_rows.append(out_row)
+        out_rows.append([rec.get("date")] + [rec.get(key) for key in WORKOUT_SESSIONS_FIELDS])
 
     summary = (
         f"workout_sessions.csv ({person}): {migrated} migrated to incidental=True, "

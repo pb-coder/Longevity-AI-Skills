@@ -149,6 +149,18 @@ def _range_str(lo: int, hi: int) -> str:
     return str(lo) if lo == hi else f"{lo}-{hi}"
 
 
+def _recorded_equipment_limit(sessions: list[dict]) -> tuple[float | None, str | None]:
+    """Keep an explicit cap until comparable logged work exceeds it."""
+    limit, recorded = None, None
+    for session in sessions:
+        declared = session.get("load_limit_kg")
+        if declared is not None:
+            limit, recorded = declared, session["date"]
+        if limit is not None and (session.get("top_load_kg") or 0) > limit:
+            limit, recorded = None, None
+    return limit, recorded
+
+
 def _fit_distance(slot: dict, session: dict) -> tuple:
     """How far ``session`` is from ``slot``'s dose: (load gap in kg, reps
     outside the range), smaller is closer. Only used to break a tie between
@@ -494,8 +506,8 @@ def build_next_dose(rows: list[dict], catalog: dict, plans: list[dict],
     # from the whole history. No further age limit: the note is what marks a
     # change of equipment, and a limit would throw away the monthly jumps of
     # a slowly progressing lift (`INCREMENT_HISTORY_MONTHS`).
-    gym_since = max((d for d in context_change_days(jump_source)
-                     if d <= today_s), default=None)
+    gym_change_dates = {d for d in context_change_days(jump_source) if d <= today_s}
+    gym_since = max(gym_change_dates, default=None)
 
     plan_slots = [(p["plan_date"], plan_doses(p, catalog), p,
                    {w["index"]: plan_doses({"workouts": [w]}, catalog)
@@ -609,6 +621,18 @@ def build_next_dose(rows: list[dict], catalog: dict, plans: list[dict],
                 "exercise": name,
                 "last_prescription": _last_prescription(key, plans, today_s)})
             continue
+
+        # A cap belongs to this equipment, not to a movement across gyms.
+        # Match the reference session's context: a later gym visit by another
+        # lift cannot erase the limit on the very load being copied here.
+        limit_since = max((d for d in gym_change_dates if d <= last["date"]), default=None)
+        limit_sessions = [s for s in jump_history.get(key, [])
+                          if not s.get("partial_load") and not s.get("context_ambiguous")
+                          and (s.get("equipment_context") == current_context if has_structured
+                               else not s.get("equipment_context") and not s["context_change"]
+                               and (limit_since is None or s["date"] >= limit_since))]
+        limit, limit_date = (_recorded_equipment_limit(limit_sessions)
+                             if machine_dependent else (None, None))
 
         plo, phi, source = _prescribed_range(
             key, last["date"], plan_slots, block_slots, last, rows, catalog)
@@ -777,6 +801,13 @@ def build_next_dose(rows: list[dict], catalog: dict, plans: list[dict],
         if note:
             basis = f"{note}; {basis}"
 
+        if limit is not None and new_load > limit:
+            new_load = load
+            action = "hold"
+            basis = (f"Equipment limit {limit:g}kg recorded on {limit_date}; "
+                     f"the next increment would exceed it. Hold {load:g}kg "
+                     "or choose another variation; do not add load on this equipment.")
+
         stalled = load_stall_sessions([x for x in full if not x.get("partial_load")
                                         and (not has_structured or (x.get("equipment_context") == current_context
                                                                     and not x.get("context_ambiguous")))], deload_set,
@@ -796,6 +827,9 @@ def build_next_dose(rows: list[dict], catalog: dict, plans: list[dict],
             "increment_kg":     inc,
             "increment_basis":  inc_basis,
         }
+        if limit is not None:
+            entry["load_limit_kg"] = limit
+            entry["load_limit_date"] = limit_date
         if usual and other is not None:
             other_load = _working_load(other)[0]
             if not loads_equal(other_load, load):

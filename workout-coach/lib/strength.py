@@ -37,7 +37,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 
-from shared.workout_context import equipment_context, is_partial_bar_load, partial_load
+from shared.workout_context import equipment_context, equipment_limit_reached, is_partial_bar_load, partial_load
 from .adherence import is_isolation
 from .constants import LOAD_EQUAL_TOLERANCE_KG, REP_CEILING_RANGE, VOLUME_LANDMARKS
 from .parsing import _parse_iso_date
@@ -192,7 +192,7 @@ def session_history(rows: list[dict], catalog: dict | None = None,
             continue
         names.setdefault(key, (r.get("exercise") or "").strip())
         day = by.setdefault(key, {}).setdefault(
-            r["date"], {"loads": [], "reps": [], "ctx": False, "partial_load": False, "contexts": set(), "missing_context": False})
+            r["date"], {"loads": [], "reps": [], "ctx": False, "partial_load": False, "contexts": set(), "missing_context": False, "load_limits": []})
         partial = partial_load(r)
         day["partial_load"] |= partial
         context = equipment_context(r)
@@ -201,6 +201,9 @@ def session_history(rows: list[dict], catalog: dict | None = None,
         else:
             day["contexts"].add(context)
         day["loads"].append(0.0 if partial else float(r.get("kg") or 0))
+        if (not partial and meta.get("equipment") not in GYM_INVARIANT_EQUIPMENT
+                and equipment_limit_reached(r.get("notes")) and day["loads"][-1] > 0):
+            day["load_limits"].append(day["loads"][-1])
         day["reps"].append(int(r.get("reps") or 0))
         if is_context_change(r.get("notes"), meta):
             day["ctx"] = True
@@ -229,6 +232,7 @@ def session_history(rows: list[dict], catalog: dict | None = None,
                 "equipment_context": next(iter(rec["contexts"])) if len(rec["contexts"]) == 1 else None,
                 "context_ambiguous": (len(rec["contexts"]) > 1 or
                                       bool(rec["contexts"]) and rec["missing_context"]),
+                "load_limit_kg": min(rec["load_limits"]) if rec["load_limits"] and not rec["partial_load"] else None,
             })
         out[key] = hist
     return out

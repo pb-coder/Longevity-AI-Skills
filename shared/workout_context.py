@@ -1,7 +1,20 @@
 """Structured workout load and equipment metadata, with legacy-note support."""
 from __future__ import annotations
 
+import re
+
 LOAD_BASES = frozenset({"total", "plates_only"})
+
+
+def equipment_limit_reached(notes: str | None) -> bool:
+    """Recognize an explicit equipment-limit annotation, not exertion."""
+    for clause in re.split(r"[;.!?\n]", str(notes or "").casefold()):
+        if re.search(r"\b(?:not|never|no|almost|near)\b", clause):
+            continue
+        if re.search(r"\b(?:machine|stack)\s+(?:(?:limit|maximum|max)\s+"
+                     r"(?:reached|hit)|(?:is\s+)?maxed\s+out)\b", clause):
+            return True
+    return False
 
 
 def is_partial_bar_load(notes: str | None) -> bool:

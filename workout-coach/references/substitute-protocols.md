@@ -154,7 +154,7 @@ Normal session, with one-line warning at the top of the markdown:
 > Today's call: <session_recommendation.headline>
 
 
-Fitness is bleeding off if this continues.
+Logged load is low; a stale import can make freshness misleading, so fitness loss is unconfirmed.
 
 ## Workout 1: <…>
 [normal Phase 2 templating]

@@ -227,25 +227,17 @@ def read_health_metrics(person: str) -> list[dict]:
 
     Reads ``<person>/data/health_metrics.csv`` via ``csv_store``. Each
     entry has one key per ``HEALTH_METRICS_FIELDS_BY_SOURCE[source]``
-    field, plus ``date`` and ``notes``. Keys absent from the active
-    source's slim schema (HL drops resting_hr, hrv_sdnn, etc.) are
-    surfaced as None so downstream capability checks don't KeyError.
+    field, plus ``date`` and ``notes``. The store reader supplies None
+    for columns absent from older CSV headers.
     """
     rows = _csv_store.read_health_metrics(person)
     if not rows:
         return []
-    # One source, one field list. The padding loop below is kept because
-    # a tracker whose CSV predates a schema widening still reads short,
-    # and trend helpers want a uniform shape either way.
+    # Header compatibility belongs to the store reader.
     active_keys = _csv_store.HEALTH_METRICS_FIELDS
-    missing_keys: list[str] = []
     out = []
     for entry in rows:
-        # csv_store returns floats / ints / None already; pad missing
-        # keys so trend helpers see a uniform shape.
         rec = dict(entry)
-        for k in missing_keys:
-            rec.setdefault(k, None)
         # Coerce numeric strings (in case a hand-edited CSV slipped a
         # locale-formatted value through).
         for k in active_keys:

@@ -1,8 +1,7 @@
 """Shared importer transforms.
 
 Parsers stay source-specific, but transforms that turn canonical workout rows
-into tracker write payloads belong here so Apple XML and HealthAutoExport do
-not drift.
+into tracker write payloads belong here rather than in the source parser.
 """
 from __future__ import annotations
 
@@ -26,8 +25,8 @@ def build_auto_cardio_payload(
             continue
         row = {
             "date":         workout.get("date"),
-            # Forward the workout's start clock time (HH:MM:SS from both
-            # importers). ``upsert_monthly_cardio`` uses it as the row
+            # Forward the workout's start clock time (HH:MM:SS).
+            # ``upsert_monthly_cardio`` uses it as the row
             # identity for same-day same-exercise cardio so two distinct
             # sessions whose durations fall within the +/-1 min tolerance
             # are disambiguated instead of silently collapsed into one row.

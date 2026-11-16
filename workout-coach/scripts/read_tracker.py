@@ -515,10 +515,8 @@ def main() -> int:
     # Every dataset lives in a CSV under <person>/data/. The lib readers
     # below all take the person string and resolve the matching file.
     health_all = _clip_series(read_health_metrics(person), today_d)
-    # Per-day rows go into health_metrics_recent. ``bodyweight_kg`` is dropped
-    # because it duplicates the dedicated ``bodyweight_recent`` series — the
-    # coach reads daily metrics for HRV / VO2max / sleep / wrist temp, not
-    # weight. Keeping it here costs ~600 bytes for no signal.
+    # Bodyweight has dedicated latest/trend outputs; keep the optional
+    # daily-health detail focused on the other signals.
     health_recent = [
         {k: v for k, v in entry.items() if k != "bodyweight_kg"}
         for entry in health_all[-30:]
@@ -543,7 +541,8 @@ def main() -> int:
         open_ended_keys=("end_date",))
 
     bw_all = sorted(
-        ({"date": entry["date"], "kg": entry["bodyweight_kg"], "notes": None}
+        ({"date": entry["date"], "kg": entry["bodyweight_kg"],
+          "notes": entry.get("notes")}
          for entry in health_all if entry.get("bodyweight_kg") is not None),
         key=lambda entry: entry["date"],
     )
@@ -830,10 +829,6 @@ def main() -> int:
         weekly_health, lean_mass_readings, "kg", "lean_mass_kg",
         today_d, weeks=4)
 
-    # ---- Week-over-week comparison block (used by the assessment HTML
-    # dashboard's bottom card). Composes existing extracts; no new data
-    # sources. ----
-
     # ---- Longevity-trajectory derivations (Trajectory tab) ----
     longevity_state = read_longevity_state(person, today_d)
     # Sex resolves from ``profile.csv`` first (the operational tracker)
@@ -898,8 +893,6 @@ def main() -> int:
     policy = session_recommendation["load_policy"]
     if policy.get("policy", "progress") != "progress":
         next_dose = _next_dose(policy)
-
-    # 14-day tier history strip (Trajectory tab — spot fatigue spirals).
 
     # ---- Session-length budget. Strength-session duration is driven by total
     # WORKING SETS (rest dominates), not exercise count. So the coach budgets
@@ -1085,12 +1078,9 @@ def main() -> int:
         "health_metrics_recent": health_recent if args.include_daily_health else None,
         "vo2max_latest": latest_metric(health_all, "vo2max"),
         "vo2max_trend_per_4w": metric_trend_per_4w(health_all, "vo2max"),
-        # ---- Week-over-week comparison (this-week / last-week / 4-wk avg
-        # for the assessment dashboard's bottom card). ----
         # ---- Recovery gate: 5-tier session recommendation. SKILL.md Phase 2
         # MUST honor this before generating any workout. ----
         "session_recommendation": session_recommendation,
-        # 14-day rolling tier classifications (Trajectory tab).
         # ---- Session-length budget (set-count driven, per-person target) ----
         "session_target_min":     session_target_min,
         "target_working_sets":    target_working_sets,

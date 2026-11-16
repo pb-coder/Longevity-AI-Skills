@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import os
 import shutil
 import tempfile
@@ -101,6 +102,32 @@ class CliSemanticTests(unittest.TestCase):
                               "light_therapy_target_per_week,99\n"
                               "light_therapy_target_min_per_session,999\n")
             self.assertEqual(before, payload())
+
+    def test_bodyweight_trend_excludes_annotated_evening_readings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(FIXTURE_ROOT / "person_a", root / "person_a")
+            with (root / "person_a/data/health_metrics.csv").open("w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Date", "Bodyweight (kg)", "Notes"])
+                writer.writerows([
+                    ["2026-04-20", 70, ""], ["2026-04-27", 70.1, ""],
+                    ["2026-05-04", 70, ""], ["2026-05-11", 70.1, ""],
+                    ["2026-05-17", 75, "evening, after meal"],
+                ])
+            env = os.environ.copy()
+            env["WORKOUT_TRACKER_ROOT"] = str(root)
+            proc = subprocess.run(
+                [sys.executable, str(SKILLS_ROOT / "workout-coach/scripts/read_tracker.py"),
+                 "--person", "person_a", "--today", "2026-05-17"],
+                cwd=root, env=env, text=True, capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["bodyweight_trend"]["n_readings"], 4)
+            # Latest is still the recorded measurement; only trend evidence
+            # excludes observations with incompatible measurement context.
+            self.assertEqual(data["bodyweight_latest"], {"date": "2026-05-17", "kg": 75.0})
 
     def test_maintain_dry_run_is_read_only_and_explainable(self) -> None:
         maintain = str(SKILLS_ROOT / "shared" / "maintain.py")

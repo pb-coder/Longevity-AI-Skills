@@ -2273,7 +2273,7 @@ def tier_budget_by_index(session_recommendation: "dict | None",
 
     def _budget_for(idx: int) -> int:
         # Tier A is a rest call, but the user may choose lighter strength
-        # when asked (`substitute-protocols.md`, option 2). A rest-day plan
+        # when the historical recommendation led to a lighter block. A rest-day plan
         # has no workout headings, so this budget is only ever read on
         # that lighter plan. It used to be 0, which the budget check
         # reads as "no budget" and skips, so a lighter Tier A week had

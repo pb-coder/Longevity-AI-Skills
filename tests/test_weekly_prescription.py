@@ -1,10 +1,11 @@
 import copy
+import json
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
-from workout_coach.lib.weekly_prescription import publish_week, render_week, validate_week
+from workout_coach.lib.weekly_prescription import PublishError, publish_week, render_week, validate_week
 from workout_coach.lib.adherence import load_plans, plan_windows
 
 class WeeklyTests(unittest.TestCase):
@@ -13,6 +14,64 @@ class WeeklyTests(unittest.TestCase):
         p = patch('shared.person_paths.WORKOUT_TRACKER_ROOT', Path(self.tmp.name)); p.start(); self.addCleanup(p.stop)
         self.doc = {'week_start':'2026-11-23','week_end':'2026-11-29','as_of':'2026-11-19', 'sessions':[{'id':'a','date':'2026-11-23','type':'Upper','duration_min':60,'goal':'Press practice','exercises':[{'name':'Flat Barbell Bench Press','sets':[{'reps':'8-10','load_kg':40},{'reps':8,'load_kg':40}]}]}]}
         self.tracker = {'weekly_plan':dict(week_start='2026-11-23',week_end='2026-11-29',as_of='2026-11-19',session_count=1,session_target_min=60)}
+
+    def test_amendment_uses_authoritative_sessions_and_is_retry_safe(self):
+        second = copy.deepcopy(self.doc['sessions'][0])
+        second.update(id='b', date='2026-11-27')
+        self.doc['sessions'].append(second)
+        snapshot = self.tracker['weekly_plan']
+        snapshot.update(session_count=2, observed_revision=0)
+        original = publish_week('Person', self.doc, self.tracker)
+        snapshot.update(as_of='2026-11-25', observed_revision=1)
+        self.tracker['existing_week'] = {'revision': 1, 'prescription': {'sessions': []}}
+        replacement = copy.deepcopy(second)
+        replacement['exercises'][0]['sets'][1]['load_kg'] = 42
+        amendment = {'replacements': [replacement]}
+
+        revised = publish_week('Person', amendment, self.tracker, amend=True)
+        self.assertEqual(revised['revision'], 2)
+        self.assertEqual(publish_week('Person', amendment, self.tracker, amend=True), revised)
+        record = json.loads(Path(revised['prescription_path']).read_text())
+        self.assertEqual(record['prescription']['sessions'], [self.doc['sessions'][0], replacement])
+        self.assertTrue(Path(original['prescription_path']).is_file())
+
+        replacement['exercises'][0]['sets'][1]['load_kg'] = 44
+        with self.assertRaises(PublishError) as failure:
+            publish_week('Person', amendment, self.tracker, amend=True)
+        self.assertEqual(failure.exception.kind, 'stale_snapshot')
+        folder = Path(revised['prescription_path']).parent
+        self.assertEqual(len(list(folder.glob('*.json'))), 2)
+
+        snapshot['observed_revision'] = 2
+        self.tracker['existing_week']['revision'] = 2
+        historical = {**self.doc['sessions'][0], 'goal': 'Changed past session'}
+        with self.assertRaises(PublishError) as failure:
+            publish_week('Person', {'replacements': [historical]}, self.tracker, amend=True)
+        self.assertEqual(failure.exception.kind, 'history_conflict')
+
+    def test_guarded_draft_rejects_stale_snapshot_and_allows_intentional_reversion(self):
+        snapshot = self.tracker['weekly_plan']
+        snapshot['observed_revision'] = 0
+        original = publish_week('Person', self.doc, self.tracker)
+        self.assertEqual(publish_week('Person', self.doc, self.tracker), original)
+        changed = copy.deepcopy(self.doc)
+        changed['sessions'][0]['goal'] = 'Changed before lifting'
+        with self.assertRaises(PublishError) as failure:
+            publish_week('Person', changed, self.tracker)
+        self.assertEqual(failure.exception.kind, 'stale_snapshot')
+
+        snapshot['observed_revision'] = 1
+        self.assertEqual(publish_week('Person', changed, self.tracker)['revision'], 2)
+        snapshot['observed_revision'] = 2
+        self.assertEqual(publish_week('Person', self.doc, self.tracker)['revision'], 3)
+
+    def test_validation_points_to_the_failed_set(self):
+        self.doc['sessions'][0]['exercises'][0]['sets'][1]['load_kg'] = -1
+        with self.assertRaises(PublishError) as failure:
+            publish_week('Person', self.doc, self.tracker)
+        self.assertEqual(failure.exception.kind, 'validation')
+        self.assertEqual(failure.exception.issues, ['sessions[0].exercises[0].sets[1]: invalid set dose'])
+
     def test_replay_future_and_projection(self):
         result = publish_week('Person',self.doc,self.tracker)
         self.assertEqual(result,publish_week('Person',self.doc,self.tracker))
@@ -153,7 +212,6 @@ class WeeklyTests(unittest.TestCase):
         result = publish_week('Person', revised, self.tracker)
         self.assertEqual(result['revision'], 2)
         from workout_coach.lib.adherence import weekly_plan_for_history
-        import json
         record = json.loads(Path(result['prescription_path']).read_text())
         self.assertEqual(len(weekly_plan_for_history(record)['workouts']), 1)
         self.assertEqual(len(weekly_plan_for_history(record, include_prior_slots=True)['workouts']), 2)

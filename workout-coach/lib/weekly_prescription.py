@@ -17,6 +17,15 @@ from .extract import load_exercises_db
 from .exercise_fit import excluded_for_session, validate_person
 
 
+class PublishError(ValueError):
+    """An actionable publication failure, with individual repair messages."""
+
+    def __init__(self, issues: list[str], *, kind: str = "validation") -> None:
+        super().__init__("; ".join(issues))
+        self.issues = issues
+        self.kind = kind
+
+
 def _date(value):
     try:
         return date.fromisoformat(value) if isinstance(value, str) else None
@@ -107,8 +116,8 @@ def validate_week(doc: dict, tracker: dict) -> tuple[list[str], list[str]]:
     doses = {x.get('exercise'): x for x in (tracker.get('next_dose') or {}).get('exercises', []) if isinstance(x, dict)}
     ids, dates = set(), []
     days = snapshot.get('training_days') or []
-    for i, session in enumerate(sessions, 1):
-        label = f'session {i}'
+    for i, session in enumerate(sessions):
+        label = f"sessions[{i}]"
         if not isinstance(session, dict):
             errors.append(f'{label}: must be an object')
             continue
@@ -139,24 +148,25 @@ def validate_week(doc: dict, tracker: dict) -> tuple[list[str], list[str]]:
             continue
         gym = session.get('gym', fit.get('default_gym'))
         working = 0
-        for ex in exercises:
+        for j, ex in enumerate(exercises):
+            exercise_label = f"{label}.exercises[{j}]"
             if not isinstance(ex, dict):
-                errors.append(f'{label}: invalid exercise')
+                errors.append(f'{exercise_label}: invalid exercise')
                 continue
-            _fields(ex, {'name', 'sets', 'cue', 'machine', 'load_basis', 'variant'}, label, errors)
+            _fields(ex, {'name', 'sets', 'cue', 'machine', 'load_basis', 'variant'}, exercise_label, errors)
             name = ex.get('name')
             if not isinstance(name, str) or name not in names:
-                errors.append(f'{label}: unknown or noncanonical exercise {name!r}')
+                errors.append(f'{exercise_label}.name: unknown or noncanonical exercise {name!r}')
                 continue
             meta = catalog.get(name.lower(), {})
             if meta.get('is_cardio'):
-                errors.append(f'{label}: cardio exercise is not a strength prescription')
+                errors.append(f'{exercise_label}.name: cardio exercise is not a strength prescription')
             variant = ex.get('variant')
             for key in ('cue', 'machine', 'variant'):
                 if key in ex and not _text(ex[key], cue=key == 'cue'):
-                    errors.append(f'{label}: {key} must be plain single-line text')
+                    errors.append(f'{exercise_label}.{key}: must be plain single-line text')
             if ex.get('load_basis') not in (None, 'total', 'plates_only'):
-                errors.append(f'{label}: invalid load_basis')
+                errors.append(f'{exercise_label}.load_basis: invalid load_basis')
             if not historical and start and end and as_of:
                 day = sd or None
                 excluded = excluded_for_session(fit, day, gym, variant=variant)
@@ -166,21 +176,22 @@ def validate_week(doc: dict, tracker: dict) -> tuple[list[str], list[str]]:
                     fit, day, gym, variant=variant, possible_between=(max(as_of, start), end),
                 )
                 if name in excluded:
-                    errors.append(f'{label}: excluded exercise {name!r}')
+                    errors.append(f'{exercise_label}.name: excluded exercise {name!r}')
                 elif name in possible:
-                    errors.append(f'{label}: {name} eligibility needs date, gym or variant confirmation')
+                    errors.append(f'{exercise_label}: {name} eligibility needs date, gym or variant confirmation')
             sets = ex.get('sets')
             if not isinstance(sets, list) or not sets:
-                errors.append(f'{label}: sets required')
+                errors.append(f'{exercise_label}.sets: sets required')
                 continue
-            for item in sets:
+            for k, item in enumerate(sets):
+                set_label = f"{exercise_label}.sets[{k}]"
                 if not isinstance(item, dict):
-                    errors.append(f'{label}: each set must be an object')
+                    errors.append(f'{set_label}: each set must be an object')
                     continue
-                _fields(item, {'reps', 'seconds', 'metres', 'load_kg', 'assistance_kg', 'warmup'}, label, errors)
+                _fields(item, {'reps', 'seconds', 'metres', 'load_kg', 'assistance_kg', 'warmup'}, set_label, errors)
                 units = [k for k in ('reps', 'seconds', 'metres') if k in item]
                 if len(units) != 1:
-                    errors.append(f'{label}: each set needs exactly one dose')
+                    errors.append(f'{set_label}: each set needs exactly one dose')
                     continue
                 unit = units[0]
                 value = item[unit]
@@ -192,7 +203,7 @@ def validate_week(doc: dict, tracker: dict) -> tuple[list[str], list[str]]:
                 if (not valid or any(not _number(item[k], zero=True) for k in ('load_kg', 'assistance_kg') if k in item)
                         or ('load_kg' in item and 'assistance_kg' in item)
                         or ('warmup' in item and not isinstance(item['warmup'], bool))):
-                    errors.append(f'{label}: invalid set dose')
+                    errors.append(f'{set_label}: invalid set dose')
                 if not item.get('warmup') and not meta.get('is_warmup'):
                     working += 1
             reference = doses.get(name)
@@ -201,14 +212,14 @@ def validate_week(doc: dict, tracker: dict) -> tuple[list[str], list[str]]:
                 context = reference.get('equipment_context')
                 chosen_context = equipment_context({'gym': gym, 'machine': ex.get('machine')})
                 if loads and context and chosen_context != equipment_context(context):
-                    warnings.append(f'{label}: {name} has no comparable reference for this setup')
+                    warnings.append(f'session {i + 1}: {name} has no comparable reference for this setup')
                 elif loads and reference['load_kg'] not in loads and reference.get('other_gym_load_kg') not in loads:
-                    warnings.append(f'{label}: {name} dose differs from reference; review equipment context')
+                    warnings.append(f'session {i + 1}: {name} dose differs from reference; review equipment context')
         if not working:
             errors.append(f'{label}: at least one strength working set required')
         budget = tracker.get('target_working_sets')
         if not historical and isinstance(budget, int) and working > budget + 2:
-            warnings.append(f'{label}: {working} working sets exceed the estimated time budget of {budget}')
+            warnings.append(f'session {i + 1}: {working} working sets exceed the estimated time budget of {budget}')
     if dates != sorted(dates) or len(dates) != len(set(dates)):
         errors.append('scheduled session dates must be unique and ordered')
     if days:
@@ -253,14 +264,54 @@ def latest_published_weeks(person: str, as_of: date, *,
     return [selected[k] for k in sorted(selected)]
 
 
-def publish_week(person: str, doc: dict, tracker: dict) -> dict:
+def _apply_amendment(base: dict, changes: dict, as_of: str) -> dict:
+    """Replace existing slots by ID, preserving all untouched sessions."""
+    replacements = changes.get("replacements") if isinstance(changes, dict) else None
+    if not isinstance(replacements, list) or not replacements or set(changes) != {"replacements"}:
+        raise PublishError(["amendment must contain a nonempty replacements list"])
+
+    by_id = {}
+    known = {session["id"] for session in base["sessions"]}
+    for i, replacement in enumerate(replacements):
+        session_id = replacement.get("id") if isinstance(replacement, dict) else None
+        if not isinstance(session_id, str) or session_id not in known or session_id in by_id:
+            raise PublishError([f"replacements[{i}].id: expected a unique existing session ID"])
+        by_id[session_id] = replacement
+    return {
+        **base,
+        "as_of": as_of,
+        "sessions": [by_id.get(session["id"], session) for session in base["sessions"]],
+    }
+
+
+def publish_week(person: str, doc: dict, tracker: dict, *, amend: bool = False) -> dict:
     validate_person(person)
-    errors, warnings = validate_week(doc, tracker)
-    owner = (tracker.get('weekly_plan') or {}).get('person')
+    snapshot = tracker.get("weekly_plan") if isinstance(tracker, dict) else None
+    if not isinstance(snapshot, dict):
+        raise PublishError(["tracker must contain a weekly_plan snapshot"])
+    owner = snapshot.get("person")
     if owner is not None and owner != person:
-        errors.append('person differs from tracker weekly_plan')
-    if errors:
-        raise ValueError('; '.join(errors))
+        raise PublishError(["person differs from tracker weekly_plan"])
+    expected = snapshot.get("observed_revision")
+    if amend:
+        if not all(_date(snapshot.get(key)) for key in ("week_start", "week_end", "as_of")):
+            raise PublishError(["amendment requires a valid weekly_plan period and as_of"])
+        existing = tracker.get("existing_week")
+        if not isinstance(existing, dict):
+            raise PublishError(["amendment requires an observed published week"], kind="history_conflict")
+        if expected is None:
+            expected = existing.get("revision")
+        if type(expected) is not int or expected < 1:
+            raise PublishError(["amendment requires a valid observed revision"])
+        window, warnings = snapshot, []
+    else:
+        errors, warnings = validate_week(doc, tracker)
+        if errors:
+            raise PublishError(errors)
+        window = doc
+    if expected is not None and (type(expected) is not int or expected < 0):
+        raise PublishError(["weekly_plan.observed_revision must be a nonnegative integer"])
+
     folder = weekly_plans_dir(person)
     folder.mkdir(parents=True, exist_ok=True)
     with (folder / '.publish.lockfile').open('a') as lock:
@@ -268,37 +319,59 @@ def publish_week(person: str, doc: dict, tracker: dict) -> dict:
         same_week = []
         for path, record in read_week_revisions(person):
             if record is None:
-                if path.name.startswith(doc['week_start'] + '-r'):
-                    raise ValueError(f'corrupt weekly history: {path.name}')
+                if path.name.startswith(window['week_start'] + '-r'):
+                    raise PublishError([f'corrupt weekly history: {path.name}'], kind="history_conflict")
                 warnings.append(f'ignored corrupt unrelated weekly history: {path.name}')
                 continue
             old = record['prescription']
-            if old['week_start'] == doc['week_start']:
+            if old['week_start'] == window['week_start']:
                 same_week.append((path, record))
-            elif old['week_start'] <= doc['week_end'] and doc['week_start'] <= old['week_end']:
-                raise ValueError('weekly prescription overlaps another published week')
+            elif old['week_start'] <= window['week_end'] and window['week_start'] <= old['week_end']:
+                raise PublishError(["weekly prescription overlaps another published week"], kind="history_conflict")
+
+        same_week.sort(key=lambda item: item[1]["revision"])
+        latest = same_week[-1][1] if same_week else None
+        current_revision = latest["revision"] if latest else 0
+        if amend:
+            if latest is None:
+                raise PublishError(["no published week to amend"], kind="history_conflict")
+            doc = _apply_amendment(latest["prescription"], doc, snapshot["as_of"])
+        already_current = latest is not None and latest["prescription"] == doc
+        if expected is not None and expected != current_revision and not already_current:
+            raise PublishError(
+                [f"week changed from revision {expected} to {current_revision}. Refresh the tracker snapshot."],
+                kind="stale_snapshot",
+            )
+        if amend:
+            errors, draft_warnings = validate_week(doc, tracker)
+            if errors:
+                raise PublishError(errors)
+            warnings.extend(draft_warnings)
+
         content = json.dumps(doc, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
         digest = hashlib.sha256(content.encode()).hexdigest()[:16]
         rendered = render_week(doc)
-        same_week.sort(key=lambda x: x[1]['revision'])
-        for path, record in same_week:
+        # An intentional reversion is a new revision. For guarded writes,
+        # only the current revision can be an idempotent replay.
+        replay_candidates = same_week[-1:] if expected is not None else same_week
+        for path, record in replay_candidates:
             if record['digest'] == digest and record['prescription'] == doc:
                 md = path.with_suffix('.md')
                 if not md.exists() or md.read_text(encoding='utf-8') != rendered:
                     write_text_atomic(md, rendered)
                 return {'prescription_path': str(path), 'workout_md_path': str(md), 'revision': record['revision'], 'warnings': warnings}
         old_done = {}
-        if same_week:
-            previous = same_week[-1][1]['prescription']
+        if latest is not None:
+            previous = latest['prescription']
             if doc['as_of'] < previous['as_of']:
-                raise ValueError('revision as_of cannot precede the preceding revision')
+                raise PublishError(["revision as_of cannot precede the preceding revision"], kind="history_conflict")
             old_done = {s['id']: s for s in previous['sessions'] if s.get('date') and s['date'] < doc['as_of']}
             new = {s['id']: s for s in doc['sessions']}
             if any(new.get(k) != v for k, v in old_done.items()):
-                raise ValueError('past dated sessions must remain unchanged in revisions')
+                raise PublishError(["past dated sessions must remain unchanged in revisions"], kind="history_conflict")
         if any(s.get('date') and s['date'] < doc['as_of'] and old_done.get(s['id']) != s for s in doc['sessions']):
-            raise ValueError('new sessions cannot be dated before as_of')
-        revision = max((r['revision'] for _, r in same_week), default=0) + 1
+            raise PublishError(["new sessions cannot be dated before as_of"], kind="history_conflict")
+        revision = current_revision + 1
         stem = f"{doc['week_start']}-r{revision:04d}-{digest}"
         md, path = folder / f'{stem}.md', folder / f'{stem}.json'
         record = {'schema_version': 1, 'revision': revision, 'digest': digest, 'prescription': doc}

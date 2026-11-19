@@ -7,7 +7,8 @@ import re
 # Update both surfaces together; test_tracker_validators covers the boundary.
 _CONTRACT_DECLARED_KEYS: "dict[str, frozenset[str]]" = {
     "TrackerJSON": frozenset({
-        "today", "data_source", "capabilities", "auto_cardio_enabled",
+        "today", "weekly_plan", "observation_coverage", "existing_week", "exercise_fit",
+        "data_source", "capabilities", "auto_cardio_enabled",
         "monthly_sessions", "weekly_volume_per_muscle", "estimated_1rm",
         "progression_summary", "stale_exercises", "unknown_exercises",
         "adherence", "next_dose", "block", "rotation_candidates",

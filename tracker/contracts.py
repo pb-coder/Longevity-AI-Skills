@@ -105,6 +105,10 @@ class CoachReads(TypedDict, total=False):
 
 class TrackerJSON(TypedDict, total=False):
     today: str
+    weekly_plan: dict[str, JsonValue] | None
+    observation_coverage: dict[str, JsonValue] | None
+    existing_week: dict[str, JsonValue] | None
+    exercise_fit: dict[str, JsonValue] | None
     data_source: str
     capabilities: dict[str, bool]
     auto_cardio_enabled: bool
@@ -137,7 +141,7 @@ class TrackerJSON(TypedDict, total=False):
     # (emphasis = MEV, otherwise MV). A muscle with no floor is ABSENT, not
     # 0: core (``core_week_spec`` carries its dose), erectors, forearms,
     # MV-0 muscles, and muscles with no direct catalog exercise.
-    muscle_floors: dict[str, int]
+    muscle_floors: dict[str, int] | None
     # The session count to plan this week (``--sessions``, else profile.csv;
     # absent when neither is set). The weekly ``muscle_floors`` are already
     # scaled by it.
@@ -199,7 +203,7 @@ class TrackerJSON(TypedDict, total=False):
     health_metrics_recent: list[dict[str, JsonValue]] | None
     vo2max_latest: dict[str, JsonValue] | None
     vo2max_trend_per_4w: float | None
-    session_recommendation: SessionRecommendation
+    session_recommendation: SessionRecommendation | None
     session_target_min: int
     target_working_sets: int
     session_time_model: dict[str, float]

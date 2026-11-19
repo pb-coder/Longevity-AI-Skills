@@ -125,6 +125,7 @@ from __future__ import annotations
 import json
 import sys
 from datetime import date, datetime, timedelta
+from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -146,6 +147,7 @@ if TYPE_CHECKING:
 # still get loaded later via ``workout_coach.lib.extract``; the facade
 # itself is the only thing skipped.
 from shared.csv_store_profile import read_profile  # noqa: E402
+from shared.health_import_receipts import read_health_import_receipts  # noqa: E402
 from shared.person_paths import monthly_dir  # noqa: E402
 from workout_coach.lib.constants import (  # noqa: E402
     ARM_WEEK_SPEC,
@@ -224,6 +226,7 @@ from workout_coach.lib.blocks import (  # noqa: E402
     rotation_candidates,
     withhold_owed_stalls,
 )
+from workout_coach.lib.exercise_fit import exercise_fit_summary  # noqa: E402
 from workout_coach.lib.cardio import (  # noqa: E402
     auto_deload_candidates,
     cardio_hr_zones,
@@ -242,7 +245,11 @@ from workout_coach.lib.sleep import (  # noqa: E402
     sleep_summary,
 )
 from workout_coach.lib.swim import swim_summary  # noqa: E402
-from workout_coach.lib.nutrition_phase import nutrition_phase_summary  # noqa: E402
+from workout_coach.lib.nutrition_phase import (  # noqa: E402
+    nutrition_phase_summary,
+    weekly_nutrition_review,
+)
+from workout_coach.lib.weekly_review import observation_coverage, week_context  # noqa: E402
 
 
 def _clip_series(entries: list[dict] | None, today_d: date,
@@ -408,6 +415,10 @@ class _Args:
     # ``strength_sessions_per_week`` for the payload field of that name, and
     # through it the weekly floors (`constants.floor_scale`).
     sessions: int | None = None
+    weekly: bool = False
+    week_start: str | None = None
+    training_days: str | None = None
+    minutes: int | None = None
 
 
 def _parse_args(argv: list[str]) -> _Args:
@@ -426,12 +437,16 @@ def _parse_args(argv: list[str]) -> _Args:
         "--include-daily-health": "include_daily_health",
         "--pretty": "pretty",
         "--override-gate": "override_gate",
+        "--weekly": "weekly",
     }
     value_aliases = {
         "--person": "person",
         "--months": "months",
         "--today": "today",
         "--sessions": "sessions",
+        "--week-start": "week_start",
+        "--training-days": "training_days",
+        "--minutes": "minutes",
     }
 
     def _bail(msg: str) -> None:
@@ -446,7 +461,8 @@ def _parse_args(argv: list[str]) -> _Args:
                 "usage: read_tracker.py --person NAME [--months N] "
                 "[--today YYYY-MM-DD] [--include-rows] "
                 "[--include-1rm-history] [--include-daily-health] [--pretty] "
-                "[--override-gate] [--sessions N]"
+                "[--override-gate] [--sessions N] "
+                "[--weekly [--week-start YYYY-MM-DD] [--training-days DATE,DATE,...] [--minutes N]]"
             )
             raise SystemExit(0)
         if "=" in tok and tok.startswith("--"):
@@ -465,13 +481,15 @@ def _parse_args(argv: list[str]) -> _Args:
             attr = value_aliases[key]
             if value is None or (consumed == 2 and value.startswith("--")):
                 _bail(f"argument {key}: expected a value")
-            if attr in ("months", "sessions"):
+            if attr in ("months", "sessions", "minutes"):
                 try:
                     setattr(a, attr, int(value))
                 except (TypeError, ValueError):
                     _bail(f"argument --{attr}: invalid int value: {value!r}")
                 if attr == "sessions" and not 1 <= a.sessions <= 14:
                     _bail("argument --sessions: expected a count from 1 to 14")
+                if attr == "minutes" and a.minutes < 1:
+                    _bail("argument --minutes: expected positive minutes")
             else:
                 setattr(a, attr, value)
             i += consumed
@@ -480,6 +498,10 @@ def _parse_args(argv: list[str]) -> _Args:
 
     if not a.person:
         _bail("the following arguments are required: --person")
+    if a.weekly and a.override_gate:
+        _bail("--override-gate is available only for the dated session analysis")
+    if not a.weekly and any(value is not None for value in (a.week_start, a.training_days, a.minutes)):
+        _bail("--week-start, --training-days and --minutes require --weekly")
     return a
 
 
@@ -509,6 +531,29 @@ def main() -> int:
                if (_parse_iso_date(d) or today_d) <= today_d]
 
     profile = read_profile(person)
+    session_target_min = args.minutes or profile.get("session_target_min") or 60
+    sessions_per_week = args.sessions or profile.get("strength_sessions_per_week")
+    weekly = None
+    existing_week = None
+    if args.weekly:
+        from workout_coach.lib.weekly_prescription import latest_published_weeks
+
+        published = latest_published_weeks(person, today_d)
+        try:
+            weekly = week_context(
+                today_d, args.week_start, args.training_days,
+                args.sessions if args.training_days is not None else sessions_per_week,
+                session_target_min, published,
+            )
+        except ValueError as exc:
+            print(f"read_tracker: error: {exc}", file=sys.stderr)
+            return 2
+        weekly["person"] = person
+        existing_week = next((record for record in published
+                              if record["prescription"]["week_start"] == weekly["week_start"]), None)
+        if existing_week is not None and args.sessions is None and args.training_days is None:
+            weekly["session_count"] = len(existing_week["prescription"]["sessions"])
+        sessions_per_week = weekly["session_count"]
     data_source = profile.get("source") or DEFAULT_DATA_SOURCE
     capabilities = SOURCE_CAPABILITIES.get(data_source, SOURCE_CAPABILITIES[DEFAULT_DATA_SOURCE])
 
@@ -526,6 +571,11 @@ def main() -> int:
     swim_workouts_all = _clip_series(read_swim_workouts(person), today_d)
     swim_laps_all = _clip_series(read_swim_laps(person), today_d)
     sleep_nights_all = _clip_series(read_sleep_nights(person), today_d)
+    week_coverage = observation_coverage(
+        today_d, health_all, sleep_nights_all, workout_sessions_all,
+        (row for row in rows if _is_working_set(row)), capabilities,
+        read_health_import_receipts(person),
+    ) if weekly is not None else None
     # Phases are keyed by ``start_date``; one that opens after ``today_d``
     # has not happened yet from this run's point of view. ``end_date`` needs
     # the same horizon and is the reason this reader is not a plain
@@ -602,12 +652,45 @@ def main() -> int:
     plans_parsed = load_plans(person, today_d, limit=8, db=db)
     adherence = build_adherence(person, rows, db, today_d, catalog,
                                 priority_tiers=priority_tiers, plans=plans_parsed)
-    # ``adherence`` feeds the block so benched slots are withdrawn from it.
-    # ``e1rm`` feeds it ``stalled_sessions``, which is what lets the
-    # rotation validator DERIVE ``stall_3_sessions`` instead of demanding
-    # a field the plan markdown cannot express.
-    block = block_payload(person, rows, db, catalog, today_d, deloads,
-                          adherence=adherence, e1rm=e1rm, plans=plans_parsed)
+    fit = None
+    retired = retired_movements(person)
+    block_adherence = adherence
+    rotation_excluded = retired | unavailable_movements(person)
+    if weekly is not None:
+        swaps = (
+            {"exercise": swap["prescribed"], "date": swap["date"], "outcome": "swapped"}
+            for swap in (adherence or {}).get("substitutions") or []
+        )
+        try:
+            fit = exercise_fit_summary(
+                person, weekly["week_start"], weekly["week_end"],
+                history=chain((row for row in rows if _is_working_set(row)), swaps),
+                as_of=today_d,
+            )
+        except ValueError as exc:
+            print(f"read_tracker: error: {exc}", file=sys.stderr)
+            return 2
+        # Scope-specific exclusions are enforced at publication, where the
+        # planned date and equipment are available.
+        retired |= {
+            rule["exercise"].casefold() for rule in fit["restrictions"]
+            if rule.get("location") is None and not any(rule.get(key) for key in (
+                "location_scoped", "variant", "start_date", "end_date",
+            ))
+        }
+        rotation_excluded = retired
+        block_adherence = {**(adherence or {}), "benched": sorted(retired)}
+    else:
+        retired = rotation_excluded
+        rotation_excluded = rotation_excluded | {
+            b["exercise"] for b in (adherence or {}).get("benched") or []
+        }
+
+    block = block_payload(
+        person, rows, db, catalog, today_d, deloads,
+        adherence=block_adherence, e1rm=e1rm, plans=plans_parsed,
+        block_as_of=today_d if weekly is not None else None,
+    )
     # Starting loads for movements with no history. Until this existed the
     # payload named only the ~46 exercises already logged, and the active
     # load rule is "copy last session's load forward" — so there was no
@@ -620,11 +703,9 @@ def main() -> int:
     # breath. The tiers go in so the 56-day pattern gate cannot hide the
     # emphasis categories the weekly spec forces the coach to add — they
     # sit at zero precisely because they are the gap.
-    retired = retired_movements(person) | unavailable_movements(person)
     rot_candidates = rotation_candidates(
         rows, db, catalog, e1rm, today_d,
-        exclude={b["exercise"] for b in (adherence or {}).get("benched") or []}
-        | retired,
+        exclude=rotation_excluded,
         priority_tiers=priority_tiers)
 
     # ---- The next load of every lift, in two passes around the gate. ----
@@ -747,10 +828,13 @@ def main() -> int:
     # when no open phase. The summarizer needs estimated_1rm to detect
     # the "lifts stalled while bulking" stop-signal, so this call must
     # happen AFTER the e1rm calculation above. ----
-    nutrition_phase = nutrition_phase_summary(
-        nutrition_phases_all, bw_all, today_d, estimated_1rm=e1rm,
-        tdee_kcal=measured_tdee,
-    )
+    if weekly is not None:
+        nutrition_phase = weekly_nutrition_review(nutrition_phases_all, bw_all, today_d)
+    else:
+        nutrition_phase = nutrition_phase_summary(
+            nutrition_phases_all, bw_all, today_d, estimated_1rm=e1rm,
+            tdee_kcal=measured_tdee,
+        )
     nutrition_phase_start = (
         ((nutrition_phase or {}).get("current") or {}).get("start_date")
     )
@@ -857,42 +941,31 @@ def main() -> int:
         phase_type=((nutrition_phase or {}).get("current") or {}).get("phase_type"),
     )
 
-    # ---- Session recommendation (the 5-tier gate that SKILL.md Phase 2
-    # MUST honor before generating any workout). This is the deterministic
-    # single source of truth so the LLM can't rationalize past it.
-    session_recommendation = compute_session_recommendation(
-        recovery=recovery,
-        training_load=strength_training_load,
-        acwr=acwr,
-        weekly_volume=weekly_volume,
-        sleep_regularity=sleep_regularity,
-        sleep_summary=sleep,
-        estimated_1rm=e1rm,
-        hr_at_volume_divergence=hr_volume_div,
-        deloads=deloads,
-        auto_deload_candidates=auto_deloads,
-        health_all=health_all,
-        today_d=today_d,
-        estimated_max_hr=max_hr,
-        bodyweight_trend=bw_trend,
-    )
-
-    # Explicit user override of the recovery gate (SKILL.md override
-    # protocol). The gate stays the deterministic default; this only fires
-    # when the user, having SEEN the call, asks to train normally. We
-    # normalize a restrictive A/B/C tier to green so the dashboard's
-    # "Today's call" and the per-workout set budget both reflect a full
-    # session, while preserving the original rationale for honesty.
-    if args.override_gate:
-        session_recommendation = apply_user_override(
-            session_recommendation, recovery, strength_training_load)
-
-    # Pass two: the same dose under the gate's load policy, computed after the
-    # gate (and after an override) because the policy is the gate's output.
-    # Under ``progress`` it is pass one, byte for byte, so it is not recomputed.
-    policy = session_recommendation["load_policy"]
-    if policy.get("policy", "progress") != "progress":
-        next_dose = _next_dose(policy)
+    session_recommendation = None
+    if weekly is None:
+        # The dated session diagnostic has no authority over the weekly plan.
+        session_recommendation = compute_session_recommendation(
+            recovery=recovery,
+            training_load=strength_training_load,
+            acwr=acwr,
+            weekly_volume=weekly_volume,
+            sleep_regularity=sleep_regularity,
+            sleep_summary=sleep,
+            estimated_1rm=e1rm,
+            hr_at_volume_divergence=hr_volume_div,
+            deloads=deloads,
+            auto_deload_candidates=auto_deloads,
+            health_all=health_all,
+            today_d=today_d,
+            estimated_max_hr=max_hr,
+            bodyweight_trend=bw_trend,
+        )
+        if args.override_gate:
+            session_recommendation = apply_user_override(
+                session_recommendation, recovery, strength_training_load)
+        policy = session_recommendation["load_policy"]
+        if policy["policy"] != "progress":
+            next_dose = _next_dose(policy)
 
     # ---- Session-length budget. Strength-session duration is driven by total
     # WORKING SETS (rest dominates), not exercise count. So the coach budgets
@@ -924,7 +997,6 @@ def main() -> int:
         session_warmup_min = SESSION_WARMUP_MIN_DEFAULT
     if not (0.0 <= session_warmup_min <= 45.0):
         session_warmup_min = SESSION_WARMUP_MIN_DEFAULT
-    session_target_min = profile.get("session_target_min") or 60
     # Per-person pace (min per working set incl. rest). Default 3.3 was the
     # old one-size constant and is too slow for trainees who rest short,
     # which silently capped their sessions and their
@@ -936,8 +1008,9 @@ def main() -> int:
         min_per_working_set = 3.3
     if not (1.5 <= min_per_working_set <= 6.0):
         min_per_working_set = 3.3
+    min_working_sets = 1 if weekly is not None else 8
     target_working_sets = max(
-        8, round((session_target_min - session_warmup_min) / min_per_working_set)
+        min_working_sets, round((session_target_min - session_warmup_min) / min_per_working_set)
     )
 
     # ---- Priority tiers (D8) and the distribution-shaped weekly specs the
@@ -951,13 +1024,13 @@ def main() -> int:
     # (n - 0.5) / n on a cadence deload week (one halved session), where they
     # stay blocking. A full-block deload makes them advisory in the check, not
     # smaller here.
-    sessions_per_week = args.sessions or profile.get("strength_sessions_per_week")
     floors = muscle_floors(
         priority_tiers,
         servable={meta["primary"] for meta in db.values()
                   if meta.get("primary")},
         sessions_per_week=sessions_per_week,
-        cadence_deload=cadence_deload_week(session_recommendation, block))
+        cadence_deload=cadence_deload_week(session_recommendation, block),
+    ) if weekly is None else None
     last_session, last_session_reason = last_strength_session_type(
         rows, plans_parsed, db, today_d)
     if priority_unknown:
@@ -972,6 +1045,10 @@ def main() -> int:
 
     out: TrackerJSON = {
         "today": today_d.strftime("%Y-%m-%d"),
+        "weekly_plan": weekly,
+        "observation_coverage": week_coverage,
+        "existing_week": existing_week,
+        "exercise_fit": fit,
         "data_source": data_source,
         "capabilities": capabilities,
         "auto_cardio_enabled": bool(profile.get("auto_cardio")),

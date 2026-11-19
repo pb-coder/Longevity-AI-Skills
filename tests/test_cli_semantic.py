@@ -73,6 +73,44 @@ class CliSemanticTests(unittest.TestCase):
         self.assertNotIn("light_therapy_log", data["capabilities"])
         self.assertGreater(data["estimated_max_hr"], 150)
 
+    def test_weekly_reader_has_explicit_future_window_and_no_daily_gate(self) -> None:
+        reader = str(SKILLS_ROOT / "workout-coach" / "scripts" / "read_tracker.py")
+        before = self.run_cmd(
+            reader, "--person", "person_a", "--today", "2026-05-17", "--weekly",
+            "--training-days", "2026-05-18,2026-05-22", "--minutes", "35",
+        )
+        self.assertEqual(before.returncode, 0, before.stderr)
+        body = json.loads(before.stdout)
+        self.assertEqual(body["weekly_plan"], {
+            "as_of": "2026-05-17", "week_start": "2026-05-18", "week_end": "2026-05-24",
+            "training_days": ["2026-05-18", "2026-05-22"],
+            "session_count": 2, "session_target_min": 35, "person": "person_a",
+        })
+        self.assertNotIn("session_recommendation", body)
+        self.assertNotIn("muscle_floors", body)
+        self.assertEqual(body["next_dose"]["load_policy"], "progress")
+        self.assertEqual(body["observation_coverage"]["unrecorded_training"], "unknown")
+        self.assertEqual(body["observation_coverage"]["health_imports"], {"state": "unknown"})
+
+        later = self.run_cmd(
+            reader, "--person", "person_a", "--today", "2026-05-27",
+            "--weekly", "--sessions", "2", "--minutes", "35",
+        )
+        self.assertEqual(later.returncode, 0, later.stderr)
+        stale = json.loads(later.stdout)
+        self.assertEqual(stale["target_working_sets"], body["target_working_sets"])
+        self.assertEqual(stale["next_dose"]["load_policy"], "progress")
+        self.assertNotIn("session_recommendation", stale)
+
+    def test_weekly_reader_rejects_days_outside_the_plan(self) -> None:
+        proc = self.run_cmd(
+            str(SKILLS_ROOT / "workout-coach" / "scripts" / "read_tracker.py"),
+            "--person", "person_a", "--today", "2026-05-17", "--weekly",
+            "--training-days", "2026-05-17",
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("available planning period", proc.stderr)
+
     def test_retired_recovery_files_do_not_affect_coaching(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

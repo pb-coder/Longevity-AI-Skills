@@ -26,7 +26,9 @@ The cardio side of the analytics layer:
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from datetime import date, timedelta
+from statistics import median
 
 
 from .health_windowing import _values_in_window
@@ -324,17 +326,7 @@ def auto_deload_candidates(monthly_sessions: list[dict],
                            deloads_logged: list[str],
                            today_d: date,
                            window_weeks: int = 8) -> list[str]:
-    """Detect strength-session weeks where volume + HR both dropped enough
-    to look like a deload that the user didn't mark.
-
-    Heuristic per week:
-    - Median session volume ≤ 0.65 × prior 4-week median.
-    - AND median session avg_hr ≤ prior_4wk_median - 8 bpm.
-    - AND not already in ``deloads_logged``.
-
-    Conservative — designed to surface candidates the user likely forgot
-    to flag, not to second-guess intent.
-    """
+    """Flag unmarked sessions with low volume and HR relative to the previous 28 days."""
     cutoff = today_d - timedelta(days=max(window_weeks * 7 - 1, 0))
     strength = []
     for s in monthly_sessions:
@@ -353,27 +345,24 @@ def auto_deload_candidates(monthly_sessions: list[dict],
     if len(strength) < 6:
         return []
     strength.sort(key=lambda p: p[0])
-
-    def median(xs):
-        s = sorted(xs)
-        n = len(s)
-        return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+    dates = [day.toordinal() for day, _, _ in strength]
+    marked = set(deloads_logged)
 
     candidates: list[str] = []
-    for i, (d, vol, hr) in enumerate(strength):
-        prior = [p for p in strength[:i]
-                 if (d - p[0]).days <= 28 and (d - p[0]).days > 0]
-        if len(prior) < 4:
+    for d, vol, hr in strength:
+        day = d.isoformat()
+        if day in marked:
             continue
-        prior_vol = median([p[1] for p in prior])
-        prior_hr = median([p[2] for p in prior])
-        if prior_vol <= 0:
+        day_number = d.toordinal()
+        first = bisect_left(dates, day_number - 28)
+        end = bisect_left(dates, day_number, lo=first)
+        if end - first < 4:
             continue
-        date_str_form = d.strftime("%Y-%m-%d")
-        if date_str_form in deloads_logged:
-            continue
-        if vol <= 0.65 * prior_vol and hr <= prior_hr - 8:
-            candidates.append(date_str_form)
+        prior = strength[first:end]
+        prior_vol = median(value for _, value, _ in prior)
+        if (prior_vol > 0 and vol <= 0.65 * prior_vol
+                and hr <= median(value for _, _, value in prior) - 8):
+            candidates.append(day)
     return candidates
 
 

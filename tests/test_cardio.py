@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from workout_coach.lib.cardio import cardio_hr_zones, training_load_summary, trimp_per_session
+from workout_coach.lib.cardio import (
+    auto_deload_candidates, cardio_hr_zones, training_load_summary, trimp_per_session,
+)
 
 
 class CardioTests(unittest.TestCase):
@@ -51,6 +53,21 @@ class CardioTests(unittest.TestCase):
 
         self.assertEqual(trimps[0]["trimp"], 50.2)
         self.assertEqual(load, {"ctl": 1.0, "atl": 2.8, "tsb": -1.8, "trend_7d": 0.0})
+
+    def test_deload_baseline_includes_day_28_and_excludes_same_day(self) -> None:
+        sessions = [
+            {"date": f"2026-05-{day:02d}", "session_kind": "strength",
+             "volume": 100, "avg_hr": 150}
+            for day in (1, 8, 15, 22)
+        ]
+        target = {"date": "2026-05-29", "session_kind": "strength", "volume": 50, "avg_hr": 130}
+        sessions.extend((target, dict(target)))
+        today = date(2026, 5, 29)
+        self.assertEqual(auto_deload_candidates(sessions, [], today), ["2026-05-29"] * 2)
+        self.assertEqual(auto_deload_candidates(sessions, ["2026-05-29"], today), [])
+
+        sessions[0]["date"] = "2026-04-30"
+        self.assertEqual(auto_deload_candidates(sessions, [], today), [])
 
 
 if __name__ == "__main__":

@@ -815,38 +815,46 @@ def load_plans(person: str, today_d: date, limit: int | None = None,
             out.append({"plan_date": plan_date, "workouts": [],
                         "parse_errors": [f"{plan_date}: unreadable ({exc})"],
                         "parse_notes": []})
-    # Weekly JSON is the authority. Convert its typed sets directly into the
-    # ledger shape; the gym-facing Markdown is never read as source data.
+    # Weekly JSON is the authority. Select newest candidates before adapting
+    # their sets, while still trying older revisions when a candidate is corrupt.
     from .weekly_prescription import read_week_revisions
 
+    candidates = [(plan["plan_date"], 0, plan, None) for plan in out]
     today_s = today_d.isoformat()
     for _, record in read_week_revisions(person) if revisions is None else revisions:
         if record is None:
             continue
         doc = record["prescription"]
-        if max(doc["week_start"], doc["as_of"]) > today_s:
-            continue
-        try:
-            out.append(weekly_plan_for_history(record, db))
-        except (ValueError, KeyError, TypeError):
-            # A corrupt optional artifact must not supersede valid history.
-            continue
-    out.sort(key=lambda p: (p["plan_date"], p.get("weekly_revision", 0)))
+        day = max(doc["week_start"], doc["as_of"])
+        if day <= today_s:
+            try:
+                revision = record["revision"]
+            except (KeyError, TypeError):
+                continue
+            candidates.append((day, revision, None, record))
+    candidates.sort(key=lambda candidate: candidate[:2])
     deduped = []
     successor_by_week = {}
-    for plan in reversed(out):
-        if plan.get("weekly_revision"):
-            week = plan["week_start"]
-            day = plan["plan_date"]
-            successor = successor_by_week.get(week)
-            if successor is not None and successor[0] == day:
+    for day, revision, plan, record in reversed(candidates):
+        week = record["prescription"]["week_start"] if record is not None and revision else None
+        successor = successor_by_week.get(week)
+        if successor is not None and successor[0] == day:
+            continue
+        if record is not None:
+            try:
+                plan = weekly_plan_for_history(record, db)
+            except (ValueError, KeyError, TypeError):
+                # A corrupt optional artifact must not supersede valid history.
                 continue
+        if week is not None:
             successor_by_week[week] = (day, {w["session_id"] for w in plan["workouts"]})
             if successor is not None:
                 _bound_revision_workouts(plan, *successor)
         deduped.append(plan)
+        if limit is not None and limit > 0 and len(deduped) >= limit:
+            break
     deduped.reverse()
-    return deduped[-limit:] if limit is not None and limit > 0 else deduped
+    return deduped
 
 
 def _bound_revision_workouts(plan: dict, boundary: str, successor_ids: set[str]) -> None:

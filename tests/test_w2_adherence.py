@@ -12,8 +12,9 @@ import importlib
 import os
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from workout_coach.lib.adherence import (
     BENCH_THRESHOLD,
@@ -841,6 +842,29 @@ class RouteGuardTests(LedgerHarness):
 
 
 class WindowTests(LedgerHarness):
+    def test_limited_weekly_history_only_adapts_selected_valid_revisions(self) -> None:
+        from workout_coach.lib import adherence
+
+        revisions = []
+        for i in range(20):
+            day = (date(2026, 1, 5) + timedelta(days=7 * i)).isoformat()
+            record = {"schema_version": 1, "revision": 1, "prescription": {
+                "week_start": day, "week_end": day, "as_of": day,
+                "sessions": [{"id": "a", "type": "Upper", "exercises": [
+                    {"name": "Dip", "sets": [{"reps": 10}]}]}],
+            }}
+            revisions.append((Path(str(i)), record))
+        corrupt = {**revisions[-1][1], "revision": 2, "schema_version": 2}
+        revisions.append((Path("corrupt"), corrupt))
+        today = date(2026, 6, 1)
+        full = load_plans(self.PERSON, today, db=_DB, revisions=revisions)
+        with patch.object(adherence, "weekly_plan_for_history",
+                          wraps=adherence.weekly_plan_for_history) as convert:
+            limited = load_plans(self.PERSON, today, limit=3, db=_DB,
+                                 revisions=revisions)
+        self.assertEqual(limited, full[-3:])
+        self.assertEqual(convert.call_count, 4)  # Three plans and one corrupt candidate.
+
     def test_a_window_ends_where_the_next_plan_begins(self) -> None:
         for d in ("2026-06-01", "2026-06-08", "2026-06-15"):
             self.write_plan(d, "## Workout 1: UPPER A\n- Dip: 10 /// 10\n")

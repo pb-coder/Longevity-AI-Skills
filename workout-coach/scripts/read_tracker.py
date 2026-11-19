@@ -294,6 +294,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     for flag in ("include-rows", "include-1rm-history", "include-daily-health",
                  "pretty", "override-gate", "weekly"):
         parser.add_argument(f"--{flag}", action="store_true")
+    projection = parser.add_mutually_exclusive_group()
+    projection.add_argument("--for-coach", action="store_true",
+                            help="Return planning evidence for --weekly.")
+    projection.add_argument("--field", action="append", default=[], metavar="NAME",
+                            help="Return a selected top-level field. Repeat for multiple fields.")
     parser.add_argument("--sessions", type=int)
     parser.add_argument("--week-start")
     parser.add_argument("--training-days")
@@ -305,6 +310,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("argument --sessions: expected a count from 1 to 14")
     if args.minutes is not None and args.minutes < 1:
         parser.error("argument --minutes: expected positive minutes")
+    if args.for_coach and not args.weekly:
+        parser.error("--for-coach requires --weekly")
+    if args.for_coach and (args.include_rows or args.include_1rm_history or args.include_daily_health):
+        parser.error("--for-coach cannot be combined with detail flags")
     if args.weekly and args.override_gate:
         parser.error("--override-gate is available only for the dated session analysis")
     if not args.weekly and any(value is not None for value in
@@ -714,33 +723,40 @@ def main() -> int:
         weekly_health, lean_mass_readings, "kg", "lean_mass_kg",
         today_d, weeks=4)
 
-    # ---- Longevity-trajectory derivations (Trajectory tab) ----
-    longevity_state = read_longevity_state(person, today_d)
-    # Sex resolves from ``profile.csv`` first (the operational tracker)
-    # then falls back to the longevity profile .md. profile.csv keeps
-    # the basic dashboard functional without a longevity profile.
-    sex = profile.get("sex") or (longevity_state or {}).get("sex")
-    vo2_latest_block = latest_metric(health_all, "vo2max")
-    vo2_value = (vo2_latest_block or {}).get("value") if vo2_latest_block else None
-    vo2_percentile = vo2_percentile_age_sex(vo2_value, sex, age_years)
+    vo2_latest = latest_metric(health_all, "vo2max")
     hr_recovery = compute_hr_recovery_summary(health_all, today_d)
     acwr = compute_acwr(trimps, today_d)
     sleep_regularity = compute_sleep_regularity_index(sleep_nights_all, today_d, window_days=14)
-    rem_anomaly = flag_rem_sleep_anomalies(sleep_nights_all, today_d)
-    movement_consistency = compute_movement_consistency_days(health_all, today_d)
-    longevity_score = compute_longevity_score(
-        vo2_percentile=vo2_percentile,
-        recovery=recovery,
-        sleep_summary=sleep,
-        sleep_regularity=sleep_regularity,
-        acwr=acwr,
-        cardio_zones=cardio_zones,
-        movement_consistency=movement_consistency,
-        bodyweight_trend_kg_per_week=bw_trend,
-        estimated_1rm=e1rm,
-        capabilities=capabilities,
-        phase_type=((nutrition_phase or {}).get("current") or {}).get("phase_type"),
-    )
+
+    full_report = not args.field and not args.for_coach
+    want_score = full_report or "longevity_score" in args.field
+    want_percentile = want_score or "vo2_percentile" in args.field
+    sex = profile.get("sex")
+    longevity_state = None
+    if full_report or "longevity_state" in args.field or (want_percentile and not sex):
+        longevity_state = read_longevity_state(person, today_d)
+        sex = sex or (longevity_state or {}).get("sex")
+    vo2_percentile = (vo2_percentile_age_sex((vo2_latest or {}).get("value"), sex, age_years)
+                      if want_percentile else None)
+    rem_anomaly = (flag_rem_sleep_anomalies(sleep_nights_all, today_d)
+                   if full_report or "rem_anomaly" in args.field else None)
+    movement_consistency = (compute_movement_consistency_days(health_all, today_d)
+                            if want_score or "movement_consistency" in args.field else None)
+    longevity_score = None
+    if want_score:
+        longevity_score = compute_longevity_score(
+            vo2_percentile=vo2_percentile,
+            recovery=recovery,
+            sleep_summary=sleep,
+            sleep_regularity=sleep_regularity,
+            acwr=acwr,
+            cardio_zones=cardio_zones,
+            movement_consistency=movement_consistency,
+            bodyweight_trend_kg_per_week=bw_trend,
+            estimated_1rm=e1rm,
+            capabilities=capabilities,
+            phase_type=((nutrition_phase or {}).get("current") or {}).get("phase_type"),
+        )
 
     session_recommendation = None
     if weekly is None:
@@ -900,7 +916,7 @@ def main() -> int:
         "lean_mass_trend_kg_per_4w":  lean_mass_trend_block,
         "health_metrics_weekly": weekly_health,
         "health_metrics_recent": health_recent if args.include_daily_health else None,
-        "vo2max_latest": latest_metric(health_all, "vo2max"),
+        "vo2max_latest": vo2_latest,
         "vo2max_trend_per_4w": metric_trend_per_4w(health_all, "vo2max"),
         "session_recommendation": session_recommendation,
         "session_target_min":     session_target_min,
@@ -919,6 +935,15 @@ def main() -> int:
         "movement_consistency": movement_consistency,
         "rows": rows if args.include_rows else None,
     }
+    if args.field:
+        unknown = sorted(set(args.field) - out.keys())
+        if unknown:
+            print(f"read_tracker: error: unknown field(s): {', '.join(unknown)}", file=sys.stderr)
+            return 2
+        out = {key: out[key] for key in args.field}
+    if args.for_coach:
+        from workout_coach.lib.coach_context import coach_context
+        out = coach_context(out)
     if args.pretty:
         json.dump(_compact(out), sys.stdout, ensure_ascii=False, indent=2)
     else:

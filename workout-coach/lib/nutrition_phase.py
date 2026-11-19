@@ -271,8 +271,9 @@ def _coach_action_hint(status: str, triggered: list[str], weeks_in_phase: float,
     same way it honors the 5-tier session_recommendation gate. Tokens:
 
       - ``continue``         — phase is on-track, hold course
-      - ``add_calories``     — observed rate below target, surplus too small
-      - ``slow_intake``      — observed rate above target, dial back surplus
+      - ``add_calories``     — gain slower than intended
+      - ``slow_intake``      — gain too fast or loss too slow
+      - ``ease_deficit``     — loss faster than intended
       - ``consider_ending``  — at least one stop signal triggered, but not yet
                                 terminal (e.g. one bad week)
       - ``end_now``          — multiple stop signals OR a single hard one
@@ -280,9 +281,9 @@ def _coach_action_hint(status: str, triggered: list[str], weeks_in_phase: float,
     """
     if not triggered:
         if status == "too_slow":
-            return "add_calories"
+            return "slow_intake" if phase_type == "cut" else "add_calories"
         if status == "too_fast":
-            return "slow_intake"
+            return "ease_deficit" if phase_type == "cut" else "slow_intake"
         if status == "regressing":
             # Regressing means losing on a bulk or gaining on a cut — the
             # opposite of the intended direction. This is the same class of
@@ -386,7 +387,7 @@ def nutrition_phase_summary(phases: list[dict],
               insufficient_data
       stop_signals_triggered: list of strings (always present, [] when none)
       coach_action_hint: continue / add_calories / slow_intake /
-                        consider_ending / end_now
+              ease_deficit / consider_ending / end_now
       history: prior phases as [{start_date, end_date, phase_type,
         duration_days, target_rate_kg_per_wk, notes}], DESC by start.
         Provides "have I done this before?" signal. [] when none.

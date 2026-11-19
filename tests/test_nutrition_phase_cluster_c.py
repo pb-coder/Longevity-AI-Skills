@@ -241,12 +241,16 @@ class TestW15SingleRateImplementation(unittest.TestCase):
         result = nutrition_phase_summary(phases, self._series(), self.TODAY)
         self.assertEqual(result["actuals"]["rate_kg_per_wk_14d"], -1.05)
         self.assertEqual(result["status"], "too_fast")
-        self.assertEqual(result["coach_action_hint"], "slow_intake")
+        self.assertEqual(result["coach_action_hint"], "ease_deficit")
         # With the outer-span rate (-0.90) the same data classified as
         # on_track / continue, i.e. the pre-committed "loss faster than
         # 0.5 kg/wk" off-ramp fired late.
         from workout_coach.lib.nutrition_phase import _classify_status
         self.assertEqual(_classify_status("cut", -0.90, -0.5), "on_track")
+
+    def test_a_slow_cut_does_not_use_the_slow_gain_action(self) -> None:
+        self.assertEqual(_coach_action_hint("too_slow", [], 2, phase_type="cut"), "slow_intake")
+        self.assertEqual(_coach_action_hint("too_slow", [], 2, phase_type="bulk"), "add_calories")
 
     def test_it_is_not_a_second_copy_of_the_arithmetic(self) -> None:
         # Structural: swap the shared helper for a sentinel. A private

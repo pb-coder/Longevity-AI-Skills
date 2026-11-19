@@ -31,14 +31,18 @@ Each person's data directory has its own local Git history. Keep those histories
 From the workspace root, read a private snapshot:
 
 ```sh
-python3 Skills/workout-coach/scripts/read_tracker.py --person "<Person>" --weekly --months 6
+python3 Skills/workout-coach/scripts/read_tracker.py --person "<Person>" --weekly --for-coach --months 6
 ```
 
 By default, a weekend review plans for the upcoming Monday. A weekday review reuses the current published week when there is one. Otherwise it chooses a new seven-day period. Set `--week-start` explicitly when planning further ahead. Use `--sessions`, `--training-days` or `--minutes` to represent this week's real availability. Dated revisions can supply just the remaining training days. The snapshot keeps earlier dated slots and reports the required total.
 
-The [coach instructions](../workout-coach/SKILL.md) define the structured draft. `publish_week.py` verifies the draft against a weekly snapshot, writes one revision under `plans/<Person>/weekly/`, and returns both output paths. The versioned JSON is the training prescription and the Markdown is the gym-facing view. The workout lists the full intended sessions and their doses. Session adjustments can be discussed separately when requested. The tracker still reads historical Markdown, and `check_plan.py` remains available for historical assessments and plans. The dated diagnostic from `read_tracker.py` without `--weekly` retains its legacy daily gate.
+The skill's host interprets the request and chooses the training. Local commands compute tracker metrics, validate the structured prescription, write revisions and render Markdown. The planning view keeps the evidence used for those decisions and includes 28 days of individual session summaries. Full reports keep their existing interface. Use repeatable `--field NAME` in place of `--for-coach` to read just the metrics needed for a progress review. [Coach instructions](../workout-coach/SKILL.md)
+
+`publish_week.py` uses `--draft` for a complete prescription and `--amend` to replace specific sessions by ID in a published week. Both validate against the supplied snapshot. Planning snapshots record the observed revision so a concurrent change prompts a refresh. The command writes the versioned JSON and gym-facing Markdown under `plans/<Person>/weekly/` and returns both paths. The workout lists the full intended sessions and their doses. Session adjustments can be discussed separately when requested. The tracker still reads historical Markdown, and `check_plan.py` remains available for historical assessments and plans. The dated diagnostic from `read_tracker.py` without `--weekly` retains its legacy daily gate.
 
 Log what you actually did. Adherence matches logged sets to prescriptions from the relevant period. It uses scheduled dates and exercise overlap when possible. Flexible dates or incomplete logs can leave attribution uncertain. Earlier dated prescriptions remain in their original revision when the rest of the week changes. When you actively start a new training block, persist it with `PYTHONPATH=Skills python3 -m workout_coach.lib.blocks write --person "<Person>" --from-week YYYY-MM-DD`.
+
+For `/log`, the host parses the free-text entry. The local exercise resolver handles all distinct names in one call. Unknown names can be logged as entered and flagged for review. Catalog edits require approval, and exercise research runs on request. The append command reports what was written. [Logger instructions](../workout-logger/SKILL.md)
 
 ## Optional coaching profile
 

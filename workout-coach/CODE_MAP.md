@@ -5,8 +5,9 @@ Public scripts are in `scripts/`; implementation imports use `workout_coach.lib.
 | Responsibility | Owner |
 |---|---|
 | Tracker JSON CLI | `scripts/read_tracker.py` |
+| Model-facing planning projection | `lib/coach_context.py` |
 | Weekly calendar and observation coverage | `lib/weekly_review.py` |
-| Weekly prescription validation, publication, and Markdown view | `lib/weekly_prescription.py`, `scripts/publish_week.py` |
+| Weekly prescription validation, amendments, publication, and Markdown view | `lib/weekly_prescription.py`, `scripts/publish_week.py` |
 | Private coaching profile and exercise restrictions | `lib/exercise_fit.py`, `scripts/coach_profile.py` |
 | Phase and weight trend decisions | `lib/nutrition_phase.py` |
 | Legacy assessment and Markdown validation | `scripts/check_plan.py`, `lib/plan_checks.py`, `lib/plan_validators.py` |

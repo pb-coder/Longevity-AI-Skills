@@ -11,18 +11,20 @@ description: >
 Resolve the person from the request and current context. Ask only when two trackers are plausible and a wrong choice would use someone else's data.
 
 - **Plan the week.** This is the default for `/coach` and requests such as “plan my next workout.” Publish the full intended training week. Each session has a single prescription.
-- **Review progress.** Use the same weekly tracker read for a progress or nutrition review and answer the question in chat. Publish a plan when the user asks for one.
+- **Review progress.** Read the tracker fields needed for the question and answer in chat. Publish a plan when the user asks for one.
 - **Adjust a particular session.** For an explicit request about a session, answer in chat using the person's current report and comparable logs. A one-off change belongs with the session as performed. Revise the week when the user asks to change the plan itself.
 
 ## Read the week
 
-Run this from the tracking workspace:
+For a weekly plan or a session adjustment, run this from the tracking workspace:
 
 ```sh
-python3 Skills/workout-coach/scripts/read_tracker.py --person "<Person>" --weekly --months 6
+python3 Skills/workout-coach/scripts/read_tracker.py --person "<Person>" --weekly --for-coach --months 6
 ```
 
-Save the JSON to a private temporary file when preparing a plan. Use `--week-start YYYY-MM-DD` for an explicit range, `--training-days YYYY-MM-DD,YYYY-MM-DD` for specific dates, `--sessions N` for a session-count change, and `--minutes N` for this week's available time per session. Weekends default to the upcoming Monday. On a weekday, an existing active week takes precedence. Otherwise the snapshot supplies the next available seven-day range. `--today` is the date of the evidence review. The week has its own start and end.
+When preparing a plan, write the result to a unique private temporary file and reuse that snapshot for publication. Use `--week-start YYYY-MM-DD` for an explicit range, `--training-days YYYY-MM-DD,YYYY-MM-DD` for specific dates, `--sessions N` for a session-count change, and `--minutes N` for this week's available time per session. Weekends default to the upcoming Monday. On a weekday, an existing active week takes precedence. Otherwise the snapshot supplies the next available seven-day range. `--today` is the date of the evidence review. The week has its own start and end.
+
+The planning snapshot keeps the saved prescription, exercise fit and progression references, with 28 days of individual session summaries. For a targeted review, use repeatable `--field` with `--weekly` in place of `--for-coach`. A nutrition review can request `--field nutrition_phase --field observation_coverage`. Add `--months 6 --field monthly_sessions` when the question needs older sessions. Use the computed evidence for trend and dose estimates.
 
 Use the dates returned by `weekly_plan`. `existing_week` contains the latest published revision for that period, even when it begins in the future. If the user is revisiting their plan and circumstances are the same, link to the saved plan. For a revision, preserve IDs for the same sessions and retain earlier dated prescriptions verbatim. The date remains the originally intended date and does not imply completion. With dated plans, `--training-days` can describe just the remaining days. With flexible sessions, use the logged work and any user report to clarify what already happened. If the user gives a new count, treat it as the total for the week including retained sessions.
 
@@ -87,7 +89,9 @@ python3 Skills/workout-coach/scripts/publish_week.py \
   --person "<Person>" --tracker /path/to/private-tracker.json --draft /path/to/private-draft.json
 ```
 
-Resolve errors before publication. Review warnings against the actual time budget, scope and comparable setup. The command returns the Markdown and authoritative JSON paths and revision under `plans/<Person>/weekly/`. The JSON is the history record. The Markdown is generated from it. Identical submissions return the saved revision.
+When the user changes existing sessions while keeping the same IDs and order, pass `--amend` in place of `--draft`. Supply `{"replacements": [...]}` with one complete session object per changed ID. The publisher copies the other sessions from disk. Use a complete draft for a new week or changes to the session count or order.
+
+Resolve errors before publication. For `validation`, repair the draft at the locations listed in `issues`. For `stale_snapshot`, refresh the same week, review any intervening changes, and reapply the requested changes if they still fit. Report an unresolved history conflict or I/O failure. Review warnings against the actual time budget, scope and comparable setup. The command returns the Markdown and authoritative JSON paths and revision under `plans/<Person>/weekly/`. The JSON is the history record. The Markdown is generated from it. Retrying the current prescription returns the saved revision.
 
 When the user explicitly starts a new block, persist it from the published week:
 

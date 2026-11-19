@@ -6,13 +6,13 @@ import hashlib
 import json
 import math
 import re
-import tempfile
 from datetime import date, timedelta
 from pathlib import Path
 
 from shared.exercises_database import DATABASE_PATH, _all_canonical_names
-from shared.person_paths import plans_dir
+from shared.person_paths import weekly_plans_dir
 from shared.workout_context import equipment_context
+from tracker.atomic_io import write_text_atomic
 from .extract import load_exercises_db
 from .exercise_fit import excluded_for_session, validate_person
 
@@ -220,37 +220,36 @@ def validate_week(doc: dict, tracker: dict) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
-def _atomic_write(path: Path, content: str) -> None:
-    with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=path.parent, delete=False) as f:
-        temp = Path(f.name)
+def read_week_revisions(person: str) -> list[tuple[Path, dict | None]]:
+    """Read authoritative envelopes once. A null record marks invalid history."""
+    revisions = []
+    for path in sorted(weekly_plans_dir(person).glob("*.json")):
         try:
-            f.write(content)
-            f.flush()
-        except BaseException:
-            temp.unlink(missing_ok=True)
-            raise
-    try:
-        temp.replace(path)
-    finally:
-        temp.unlink(missing_ok=True)
-
-
-def latest_published_weeks(person: str, as_of: date) -> list[dict]:
-    """Latest committed revision per week known on as_of, including future weeks."""
-    selected: dict[str, dict] = {}
-    for path in sorted((plans_dir(person) / 'weekly').glob('*.json')):
-        try:
-            record = json.loads(path.read_text(encoding='utf-8'))
-            doc = record['prescription']
-            created = _date(doc['as_of'])
-            if record['schema_version'] != 1 or not created or created > as_of:
-                continue
-            week = doc['week_start']
-            prior = selected.get(week)
-            if prior is None or (doc['as_of'], record['revision']) > (prior['prescription']['as_of'], prior['revision']):
-                selected[week] = record
+            record = json.loads(path.read_text(encoding="utf-8"))
+            doc = record["prescription"]
+            if (record["schema_version"] != 1 or type(record["revision"]) is not int
+                    or not all(_date(doc[k]) for k in ("as_of", "week_start", "week_end"))
+                    or not isinstance(doc["sessions"], list)):
+                record = None
         except (OSError, ValueError, KeyError, TypeError):
+            record = None
+        revisions.append((path, record))
+    return revisions
+
+
+def latest_published_weeks(person: str, as_of: date, *,
+                           revisions: list[tuple[Path, dict | None]] | None = None) -> list[dict]:
+    """Latest revision per week known on as_of, including future weeks."""
+    selected: dict[str, dict] = {}
+    as_of_s = as_of.isoformat()
+    for _, record in read_week_revisions(person) if revisions is None else revisions:
+        if record is None or record["prescription"]["as_of"] > as_of_s:
             continue
+        doc = record["prescription"]
+        week = doc["week_start"]
+        prior = selected.get(week)
+        if prior is None or (doc["as_of"], record["revision"]) > (prior["prescription"]["as_of"], prior["revision"]):
+            selected[week] = record
     return [selected[k] for k in sorted(selected)]
 
 
@@ -262,34 +261,31 @@ def publish_week(person: str, doc: dict, tracker: dict) -> dict:
         errors.append('person differs from tracker weekly_plan')
     if errors:
         raise ValueError('; '.join(errors))
-    folder = plans_dir(person) / 'weekly'
+    folder = weekly_plans_dir(person)
     folder.mkdir(parents=True, exist_ok=True)
     with (folder / '.publish.lockfile').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        existing = []
-        for path in sorted(folder.glob('*.json')):
-            try:
-                record = json.loads(path.read_text(encoding='utf-8'))
-                old = record['prescription']
-                if record['schema_version'] != 1 or not isinstance(record['revision'], int):
-                    raise ValueError('invalid revision envelope')
-                existing.append((path, record))
-            except (OSError, ValueError, KeyError, TypeError):
+        same_week = []
+        for path, record in read_week_revisions(person):
+            if record is None:
                 if path.name.startswith(doc['week_start'] + '-r'):
                     raise ValueError(f'corrupt weekly history: {path.name}')
                 warnings.append(f'ignored corrupt unrelated weekly history: {path.name}')
                 continue
-            if old['week_start'] != doc['week_start'] and old['week_start'] <= doc['week_end'] and doc['week_start'] <= old['week_end']:
+            old = record['prescription']
+            if old['week_start'] == doc['week_start']:
+                same_week.append((path, record))
+            elif old['week_start'] <= doc['week_end'] and doc['week_start'] <= old['week_end']:
                 raise ValueError('weekly prescription overlaps another published week')
         content = json.dumps(doc, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
         digest = hashlib.sha256(content.encode()).hexdigest()[:16]
-        same_week = [(p, r) for p, r in existing if r['prescription']['week_start'] == doc['week_start']]
+        rendered = render_week(doc)
         same_week.sort(key=lambda x: x[1]['revision'])
         for path, record in same_week:
             if record['digest'] == digest and record['prescription'] == doc:
                 md = path.with_suffix('.md')
-                if not md.exists() or md.read_text(encoding='utf-8') != render_week(doc):
-                    _atomic_write(md, render_week(doc))
+                if not md.exists() or md.read_text(encoding='utf-8') != rendered:
+                    write_text_atomic(md, rendered)
                 return {'prescription_path': str(path), 'workout_md_path': str(md), 'revision': record['revision'], 'warnings': warnings}
         old_done = {}
         if same_week:
@@ -306,6 +302,6 @@ def publish_week(person: str, doc: dict, tracker: dict) -> dict:
         stem = f"{doc['week_start']}-r{revision:04d}-{digest}"
         md, path = folder / f'{stem}.md', folder / f'{stem}.json'
         record = {'schema_version': 1, 'revision': revision, 'digest': digest, 'prescription': doc}
-        _atomic_write(md, render_week(doc))
-        _atomic_write(path, json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False) + '\n')
+        write_text_atomic(md, rendered)
+        write_text_atomic(path, json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False) + '\n')
         return {'prescription_path': str(path), 'workout_md_path': str(md), 'revision': revision, 'warnings': warnings}

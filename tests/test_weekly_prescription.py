@@ -109,6 +109,18 @@ class WeeklyTests(unittest.TestCase):
         self.assertEqual(ids, [['a'], ['b']])
         self.assertEqual([w['plan_date'] for w in plans], ['2026-11-23', '2026-11-25'])
 
+    def test_flexible_slot_carried_through_three_revisions_counts_once(self):
+        self.doc["sessions"][0]["date"] = None
+        for revision, as_of in enumerate(("2026-11-19", "2026-11-24", "2026-11-25"), 1):
+            self.doc["as_of"] = self.tracker["weekly_plan"]["as_of"] = as_of
+            self.doc["sessions"][0]["reason"] = f"Revision {revision}"
+            publish_week("Person", self.doc, self.tracker)
+
+        plans = load_plans("Person", date(2026, 11, 29))
+        self.assertEqual([len(plan["workouts"]) for plan in plans], [0, 0, 1])
+        self.assertTrue(all(plan["parse_notes"] for plan in plans[:2]))
+        self.assertEqual(plans[-1]["workouts"][0]["session_id"], "a")
+
     def test_training_days_and_owner(self):
         self.tracker['weekly_plan']['training_days'] = ['2026-11-24']
         self.assertTrue(validate_week(self.doc,self.tracker)[0])

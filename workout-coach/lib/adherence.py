@@ -1,43 +1,8 @@
-"""Prescription ledger: what the coach ASKED for, versus what happened.
+"""Reconcile published weekly prescriptions and historical plans with logged sets.
 
-Every other module in this package reads the tracker — the record of
-what was performed. None of them read ``plans/<Person>/<date>-workout.md``,
-so until this module existed the system had no memory of its own
-prescriptions. Generation N could not differ from N−1 because it never
-saw N−1; a movement could be prescribed six times and performed zero
-times without anything noticing; and the 2026-07-25 "move the laggards
-out of the tail" fix shipped with no way to find out whether it worked.
-It did not.
-
-What this module adds is one closed loop:
-
-    plan markdown  ──parse──▶  prescription  ──reconcile──▶  adherence
-         ▲                                                        │
-         └────────────────  next generation reads  ◀──────────────┘
-
-Public surface:
-
-- ``parse_plan(text, plan_date)`` / ``parse_plan_file(path)`` — the plan
-  markdown into per-workout, per-slot prescriptions.
-- ``session_type_from_title(title, slots, db)`` — ``lower`` / ``upper``
-  / ``full`` / ``None`` for a workout, off its heading AND its bullets.
-  Pass the bullets: a heading is coach free text and was choosing its own
-  core budget (R-13).
-- ``session_type_from_content(slots, db)`` /
-  ``session_content_regions(slots, db)`` — the content half on its own.
-- ``plan_doses(plan, db)`` — the one prescription per exercise a plan
-  carries. ``progression.next_dose`` reads the rep range off it.
-- ``session_workout_candidates(plan, rows, day, db)`` — which workout(s) of
-  a plan a logged session was credited to, for a lift the plan prescribes
-  more than once.
-- ``load_plans(person, today_d, limit)`` — the dated plan series, parsed,
-  oldest first, never past the ``--today`` horizon.
-- ``reconcile_plan(plan, window, rows, db, catalog)`` — one plan against
-  the logs inside its own window.
-- ``build_adherence(person, rows, db, today_d, catalog, history)`` — the
-  ``adherence`` payload block, including the D5 bench list.
-- ``read_bench_log(person)`` / ``record_bench_response(...)`` — the D5
-  answer store, so "ask once" means once and not once per run.
+Weekly records and legacy Markdown share the same ledger representation.
+``load_plans`` resolves their effective periods before adherence and
+progression use them. The bench log preserves explicit exercise and gym decisions.
 
 CLI (how an answer gets persisted; see ``record_bench_response``). Run
 from the ``Skills/`` directory so the package facade resolves::
@@ -52,6 +17,8 @@ import json
 import re
 from datetime import date, timedelta
 from pathlib import Path
+
+from tracker.atomic_io import write_text_atomic
 
 from .parsing import _parse_iso_date
 from .sessions import _is_working_set
@@ -428,9 +395,10 @@ def session_type_from_title(title: str | None, slots=None,
     ``None``.
     """
     named = _session_type_from_name(title)
-    if slots is None:
-        return named
-    content = session_type_from_content(slots, db)
+    return _resolved_session_type(named, session_type_from_content(slots, db)) if slots is not None else named
+
+
+def _resolved_session_type(named: str | None, content: str | None) -> str | None:
     if content in ("lower", "full") and named in (None, "upper"):
         return content
     return named
@@ -585,10 +553,17 @@ def _slot_from_bullet(exercise: str, spec: str, position: int) -> dict:
     nothing" and "this bullet prescribes something nobody read", and
     ``parse_plan`` turns the second into a reported error.
     """
-    raw_items = [x for x in re.split(r"///", spec) if x.strip()]
+    raw_items = [x for x in spec.split("///") if x.strip()]
     parsed = [(x, _parse_set_item(x)) for x in raw_items]
-    unparsed = [x.strip() for x, i in parsed if i is None]
     items = [i for _x, i in parsed if i and i["sets"]]
+    return {
+        **_summarize_slot(exercise, position, items),
+        "unparsed": [x.strip() for x, i in parsed if i is None],
+        "raw": spec.strip(),
+    }
+
+
+def _summarize_slot(exercise: str, position: int, items: list[dict]) -> dict:
     working = [i for i in items if not i["is_warmup"]]
     warmups = [i for i in items if i["is_warmup"]]
     # Pick one dominant load across point and range prescriptions. Counting
@@ -619,9 +594,20 @@ def _slot_from_bullet(exercise: str, spec: str, position: int) -> dict:
                                   if i["metres"] is not None]),
         "notes":           [],
         "anchor_change_hint": None,
-        "unparsed":        unparsed,
-        "raw":             spec.strip(),
+        "unparsed":        [],
+        "raw":             "",
     }
+
+
+def _classify_workout(workout: dict, db: dict | None) -> dict:
+    named = _session_type_from_name(workout["title"])
+    regions = session_content_regions(workout["slots"], db)
+    content = regions["verdict"]
+    resolved = _resolved_session_type(named, content)
+    workout.update(session_type=resolved, session_type_heading=named, session_type_content=content,
+                   session_type_basis=("heading" if content is None else
+                                       "content_override" if resolved != named else "heading_corroborated"))
+    return regions
 
 
 def parse_plan(text: str, plan_date: str, db: dict | None = None) -> dict:
@@ -681,10 +667,6 @@ def parse_plan(text: str, plan_date: str, db: dict | None = None) -> dict:
                 "label":        m.group(2),
                 "title":        m.group(3).strip(),
                 "session":      session_key(m.group(3), idx),
-                # Provisional: the heading's own claim. Re-resolved
-                # against the bullets once they have all been read — see
-                # the content pass after the loop.
-                "session_type": _session_type_from_name(m.group(3)),
                 "is_deload":    m.group(1).lower().startswith("deload"),
                 "slots":        [],
             }
@@ -729,23 +711,9 @@ def parse_plan(text: str, plan_date: str, db: dict | None = None) -> dict:
                 f"working sets — read as a duration or cue, not as work")
         current["slots"].append(slot)
 
-    # THE CONTENT PASS (R-13). The heading was read before its bullets
-    # existed; now they do, so the claim gets checked. `session_type` is
-    # overwritten with the resolved answer because every consumer already
-    # reads that key and none of them should be reading an unchecked one;
-    # the heading's own claim survives beside it so the two can be
-    # compared, and `session_type_basis` says which produced the answer.
     for w in workouts:
-        named = w["session_type"]
-        regions = session_content_regions(w["slots"], db)
-        resolved = session_type_from_title(w["title"], w["slots"], db)
-        w["session_type"] = resolved
-        w["session_type_heading"] = named
-        w["session_type_content"] = regions["verdict"]
-        w["session_type_basis"] = (
-            "heading" if regions["verdict"] is None
-            else "content_override" if resolved != named
-            else "heading_corroborated")
+        regions = _classify_workout(w, db)
+        named, resolved = w["session_type_heading"], w["session_type"]
         if resolved != named:
             notes.append(
                 f"{plan_date} {w['title']}: heading reads as "
@@ -784,55 +752,49 @@ def weekly_plan_for_history(record: dict, db: dict | None = None, *,
     if record["schema_version"] != 1:
         raise ValueError("unsupported weekly prescription schema")
     doc = record["prescription"]
-    start = max(_parse_iso_date(doc["week_start"]), _parse_iso_date(doc["as_of"]))
+    start = max(doc["week_start"], doc["as_of"])
     workouts = []
     for idx, session in enumerate(doc["sessions"], 1):
-        if not include_prior_slots and record["revision"] > 1 and session.get("date") and session["date"] < start.isoformat():
+        if (not include_prior_slots and record["revision"] > 1
+                and session.get("date") and session["date"] < start):
             continue
-        slots = []
-        for position, exercise in enumerate(session["exercises"], 1):
-            working = [x for x in exercise["sets"] if not x.get("warmup")]
-            lo, hi = [], []
-            for item in working:
-                if "reps" in item:
-                    parts = str(item["reps"]).split("-")
-                    lo.append(int(parts[0])); hi.append(int(parts[-1]))
-            low, high = _mode(lo), _mode(hi)
-            loads = [x["load_kg"] for x in working if "load_kg" in x]
-            slot = {"exercise": exercise["name"], "position": position,
-                    "prescribed_sets": len(working), "warmup_sets": len(exercise["sets"]) - len(working),
-                    # Legacy progression has no prescription-context comparison;
-                    # do not supply a context-specific load as comparable.
-                    "load_kg": (None if session.get("gym") or exercise.get("machine")
-                                or exercise.get("load_basis") == "plates_only" else _mode(loads)),
-                    "load_range_kg": None,
-                    "rep_lo": low, "rep_hi": high,
-                    "rep_target": (f"{low}-{high}" if low is not None and high != low else str(low) if low is not None else None),
-                    "seconds": _mode([x["seconds"] for x in working if "seconds" in x]),
-                    "metres": _mode([x["metres"] for x in working if "metres" in x]),
-                    "notes": [exercise["cue"]] if exercise.get("cue") else [],
-                    "anchor_change_hint": None, "unparsed": [], "raw": "",
-                    "structured_sets": exercise["sets"], "gym": session.get("gym"),
-                    "machine": exercise.get("machine"), "load_basis": exercise.get("load_basis")}
-            slots.append(slot)
         title = session["type"]
-        named = _session_type_from_name(title)
-        regions = session_content_regions(slots, db)
-        resolved = session_type_from_title(title, slots, db)
-        workouts.append({"index": idx, "label": str(idx), "title": title,
-            "session": session_key(title, idx), "session_type": resolved,
-            "session_type_heading": named, "session_type_content": regions["verdict"],
-            "session_type_basis": "heading" if regions["verdict"] is None else
-                "content_override" if resolved != named else "heading_corroborated",
-            "is_deload": False, "slots": slots, "session_id": session["id"],
-            "scheduled_date": session.get("date")})
-    return {"plan_date": start.isoformat(), "effective_end": doc["week_end"],
-                "weekly_revision": record["revision"], "week_start": doc["week_start"],
-                "is_deload": False, "workouts": workouts, "parse_errors": [], "parse_notes": []}
+        workout = {
+            "index": idx, "label": str(idx), "title": title, "session": session_key(title, idx),
+            "is_deload": False, "session_id": session["id"], "scheduled_date": session.get("date"),
+            "slots": [_weekly_slot(exercise, position, session.get("gym"))
+                      for position, exercise in enumerate(session["exercises"], 1)],
+        }
+        _classify_workout(workout, db)
+        workouts.append(workout)
+    return {"plan_date": start, "effective_end": doc["week_end"],
+            "weekly_revision": record["revision"], "week_start": doc["week_start"],
+            "is_deload": False, "workouts": workouts, "parse_errors": [], "parse_notes": []}
+
+
+def _weekly_slot(exercise: dict, position: int, gym: str | None) -> dict:
+    # The ledger's generic load cannot represent a machine-specific comparison.
+    machine = exercise.get("machine")
+    basis = exercise.get("load_basis")
+    comparable = not (gym or machine or basis == "plates_only")
+    items = []
+    for item in exercise["sets"]:
+        low, _, high = str(item.get("reps", "")).partition("-")
+        items.append({
+            "sets": 1, "is_warmup": item.get("warmup", False),
+            "load_kg": item.get("load_kg") if comparable else None,
+            "rep_lo": int(low) if low else None, "rep_hi": int(high or low) if low else None,
+            "seconds": item.get("seconds"), "metres": item.get("metres"),
+        })
+    slot = _summarize_slot(exercise["name"], position, items)
+    slot.update(notes=[exercise["cue"]] if exercise.get("cue") else [],
+                structured_sets=exercise["sets"], gym=gym, machine=machine, load_basis=basis)
+    return slot
 
 
 def load_plans(person: str, today_d: date, limit: int | None = None,
-               db: dict | None = None) -> list[dict]:
+               db: dict | None = None, *,
+               revisions: list[tuple[Path, dict | None]] | None = None) -> list[dict]:
     """Parsed plan series for ``person``, oldest first.
 
     Plans dated after ``today_d`` are dropped: a backtest must not see a
@@ -855,44 +817,54 @@ def load_plans(person: str, today_d: date, limit: int | None = None,
                         "parse_notes": []})
     # Weekly JSON is the authority. Convert its typed sets directly into the
     # ledger shape; the gym-facing Markdown is never read as source data.
-    from shared.person_paths import plans_dir
-    for path in sorted((plans_dir(person) / "weekly").glob("*.json")):
+    from .weekly_prescription import read_week_revisions
+
+    today_s = today_d.isoformat()
+    for _, record in read_week_revisions(person) if revisions is None else revisions:
+        if record is None:
+            continue
+        doc = record["prescription"]
+        if max(doc["week_start"], doc["as_of"]) > today_s:
+            continue
         try:
-            record = json.loads(path.read_text(encoding="utf-8"))
-            if record["schema_version"] != 1:
-                continue
-            doc = record["prescription"]
-            start = max(_parse_iso_date(doc["week_start"]), _parse_iso_date(doc["as_of"]))
-            if start > today_d:
-                continue
             out.append(weekly_plan_for_history(record, db))
-        except (OSError, ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError):
             # A corrupt optional artifact must not supersede valid history.
             continue
     out.sort(key=lambda p: (p["plan_date"], p.get("weekly_revision", 0)))
     deduped = []
-    for plan in out:
-        if (deduped and plan.get("weekly_revision") and deduped[-1].get("weekly_revision")
-                and plan["plan_date"] == deduped[-1]["plan_date"]
-                and plan.get("week_start") == deduped[-1].get("week_start")):
-            deduped[-1] = plan
-        else:
-            deduped.append(plan)
-    for i, plan in enumerate(deduped):
-        if not plan.get("weekly_revision"):
-            continue
-        successor = next((p for p in deduped[i + 1:] if p.get("weekly_revision")
-                          and p.get("week_start") == plan.get("week_start")), None)
-        if successor:
-            successor_ids = {w["session_id"] for w in successor["workouts"]}
-            boundary = successor["plan_date"]
-            ambiguous = any(not w.get("scheduled_date") and w["session_id"] in successor_ids for w in plan["workouts"])
-            plan["workouts"] = [w for w in plan["workouts"] if not
-                ((w.get("scheduled_date") and w["scheduled_date"] >= boundary) or
-                 (not w.get("scheduled_date") and w["session_id"] in successor_ids))]
-            if ambiguous:
-                plan["parse_notes"].append("Flexible sessions retained in a later revision cannot be attributed to an earlier revision reliably")
+    successor_by_week = {}
+    for plan in reversed(out):
+        if plan.get("weekly_revision"):
+            week = plan["week_start"]
+            day = plan["plan_date"]
+            successor = successor_by_week.get(week)
+            if successor is not None and successor[0] == day:
+                continue
+            successor_by_week[week] = (day, {w["session_id"] for w in plan["workouts"]})
+            if successor is not None:
+                _bound_revision_workouts(plan, *successor)
+        deduped.append(plan)
+    deduped.reverse()
     return deduped[-limit:] if limit is not None and limit > 0 else deduped
+
+
+def _bound_revision_workouts(plan: dict, boundary: str, successor_ids: set[str]) -> None:
+    retained = []
+    ambiguous = False
+    for workout in plan["workouts"]:
+        scheduled = workout.get("scheduled_date")
+        if scheduled and scheduled >= boundary:
+            continue
+        if not scheduled and workout["session_id"] in successor_ids:
+            ambiguous = True
+            continue
+        retained.append(workout)
+    plan["workouts"] = retained
+    if ambiguous:
+        plan["parse_notes"].append(
+            "Flexible sessions retained in a later revision cannot be attributed to an earlier revision reliably"
+        )
 
 
 # A plan nominally covers one week. Below that the newest window has not
@@ -1390,13 +1362,8 @@ def set_current_gym(person: str, gym: str | None, *, rename_current: bool = Fals
 
 
 def _write_bench_log(person: str, log: dict) -> None:
-    from shared.person_paths import bench_log_json, ensure_plans_dir
-    ensure_plans_dir(person)
-    path = bench_log_json(person)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(log, ensure_ascii=False, indent=2) + "\n",
-                   encoding="utf-8")
-    tmp.replace(path)
+    from shared.person_paths import bench_log_json
+    write_text_atomic(bench_log_json(person), json.dumps(log, ensure_ascii=False, indent=2) + "\n")
 
 
 def record_bench_response(person: str, exercise: str,

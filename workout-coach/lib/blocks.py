@@ -51,6 +51,8 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
+from tracker.atomic_io import write_text_atomic
+
 # ``session_key`` / ``session_type_from_title`` are defined in
 # ``adherence`` because they parse a PLAN HEADING, which is that
 # module's grammar. They are imported rather than restated here: block
@@ -451,17 +453,13 @@ def write_block(person: str, block: dict) -> Path:
     the reader's feet, and the render validator's "is this a self-diff"
     guard has to be able to tell the two apart.
     """
-    from shared.person_paths import block_json, ensure_plans_dir
+    from shared.person_paths import block_json
     started = block.get("started") or block.get("block_id")
     if not started:
         raise ValueError("block needs a 'started' date")
     block = {**block, "source": "artifact"}
-    ensure_plans_dir(person)
     path = block_json(person, started)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(block, ensure_ascii=False, indent=2) + "\n",
-                   encoding="utf-8")
-    tmp.replace(path)
+    write_text_atomic(path, json.dumps(block, ensure_ascii=False, indent=2) + "\n")
     return path
 
 

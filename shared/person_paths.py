@@ -1,42 +1,4 @@
-"""Per-person path resolver.
-
-Single source of truth for where a person's CSV store lives. Used by
-every script that needs to find files.
-
-Layout (post-PR3a — pure CSV, no xlsx):
-
-    Workout Tracker/                       ← WORKOUT_TRACKER_ROOT
-    ├── <Person>/
-    │   └── data/
-    │       ├── health_metrics.csv
-    │       ├── workout_sessions.csv
-    │       ├── profile.csv
-    │       ├── monthly/
-    │       │   ├── 2026.05.csv
-    │       │   └── …                      # one CSV per YYYY.MM
-    │       ├── swimming/                  # per-workout aggregates; laps.csv is frozen history
-    │       │   ├── YYYY.MM.workouts.csv
-    │       │   └── YYYY.MM.laps.csv
-    │       └── sleep/                     # XML / HealthAutoExport sleep nights
-    │           └── YYYY.MM.nights.csv
-    ├── <OtherPerson>/
-    │   └── (same; optional stores appear when populated)
-    ├── plans/                             # /coach output — dated per generation
-    │   ├── <Person>/
-    │   │   ├── YYYY-MM-DD-coach_reads.json # structured assessment
-    │   │   ├── YYYY-MM-DD-workout.md      # also the prescription record
-    │   │   ├── block-YYYY-MM-DD.json      # training block: slots + anchor/rotating tags
-    │   │   └── bench-log.json             # D5: why a prescribed exercise never happens
-    │   └── <OtherPerson>/
-    │       └── …
-    ├── Skills/
-    │   └── shared/                        ← this file
-    ├── HealthAutoExport*.zip              (transient; deleted on success)
-
-Every importer / logger / coach / maintain script accepts ``--person
-<Name>`` (e.g. ``--person <Person>``) and resolves the rest via this
-module. No raw filesystem paths in the CLI surface.
-"""
+"""Private tracker paths. See docs/WORKFLOW.md for the workspace layout."""
 from __future__ import annotations
 
 import os
@@ -204,15 +166,7 @@ def nutrition_phases_csv(person: str) -> Path:
 
 
 def plans_dir(person: str) -> Path:
-    """Return the per-person plans folder, e.g. ``<root>/plans/<Person>``.
-
-    Holds the coach's generated outputs — paired dated files
-    ``YYYY-MM-DD-coach_reads.json`` (assessment) and
-    ``YYYY-MM-DD-workout.md`` (lean exercise list). Lives at the
-    workout-tracker root (not inside ``<person>/data/``) so it stays
-    visible alongside the import dropbox and is never touched by the
-    CSV importers.
-    """
+    """Private weekly, legacy, and block artifacts alongside the tracker data."""
     return WORKOUT_TRACKER_ROOT / "plans" / person
 
 
@@ -223,25 +177,12 @@ def ensure_plans_dir(person: str) -> Path:
     return d
 
 
-def workout_plan_md(person: str, date: str) -> Path:
-    """Path to a dated workout-plan markdown for ``person``.
-
-    ``date`` is an ISO ``YYYY-MM-DD`` string — the date the coach
-    generated the plan, not the date the workout will be performed.
-    """
-    return plans_dir(person) / f"{date}-workout.md"
+def weekly_plans_dir(person: str) -> Path:
+    return plans_dir(person) / "weekly"
 
 
 def list_workout_plans(person: str) -> list[tuple[str, Path]]:
-    """Every generated plan for ``person`` as ``(YYYY-MM-DD, path)``, ASC.
-
-    The plan markdowns are the ONLY record of what the coach actually
-    prescribed — the payload records what was logged, never what was
-    asked for. Reconciling the two is what
-    ``workout_coach.lib.adherence`` does, so it needs the dated series,
-    not just the newest file. Sorting is lexicographic, which is
-    chronological for ISO dates.
-    """
+    """Historical Markdown prescriptions in generation-date order."""
     import re as _re
     d = plans_dir(person)
     if not d.exists():
@@ -280,12 +221,6 @@ def list_blocks(person: str) -> list[tuple[str, Path]]:
             out.append((m.group(1), p))
     out.sort(key=lambda t: t[0])
     return out
-
-
-def latest_block_json(person: str) -> Path | None:
-    """Newest persisted block artifact, or ``None`` before the first one."""
-    blocks = list_blocks(person)
-    return blocks[-1][1] if blocks else None
 
 
 def bench_log_json(person: str) -> Path:

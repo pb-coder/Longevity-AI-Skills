@@ -5,14 +5,13 @@ No observation of completion or omission establishes comfort or exclusion.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from datetime import date
 from pathlib import Path
 
 from shared.data_git import commit_data
 from shared.exercises_database import lookup
 from shared.person_paths import data_dir
+from tracker.atomic_io import write_text_atomic
 from .adherence import read_bench_log
 
 
@@ -120,19 +119,7 @@ def save_profile(person: str, profile: dict) -> Path:
                 return path
         except ValueError:
             pass  # An explicit replacement can repair malformed JSON.
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = json.dumps(profile, indent=2, ensure_ascii=False) + "\n"
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
-                                         prefix=".coach-profile-", delete=False) as file:
-            temporary = file.name
-            file.write(content)
-        os.replace(temporary, path)
-        temporary = None
-    finally:
-        if temporary is not None:
-            os.unlink(temporary)
+    write_text_atomic(path, json.dumps(profile, indent=2, ensure_ascii=False) + "\n")
     commit_data(person, "coach: update profile")
     return path
 

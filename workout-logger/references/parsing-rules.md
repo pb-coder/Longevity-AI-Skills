@@ -70,26 +70,11 @@ All equivalent: `8 x 56kg` · `56kg x 8` · `8x56k` · `8 @ 56` · `56 for 8`
 
 Assign the larger number to kg and smaller to reps unless context makes it obvious (e.g. `50 jumping jacks` → 50 reps, 0 kg).
 
-## Name Matching Priority
+## Exercise names and context
 
-The output name must ALWAYS be a canonical name from `../../shared/exercises-database.md`, in the exact casing it appears there. Never pass through the user's original casing. Work down this ladder — stop at the first hit:
+Extract the typed exercise name and any explicit equipment or variant before running the [batch resolver](../SKILL.md#flow). Use the canonical name it returns when it matches the movement. Keep meaningful qualifiers the user supplied. Treat `alias_note` conditions as part of the match. For example, loaded `Abdominal crunch` can map to `Ab Crunch Machine` when the load implies a machine. A load-free entry needs bodyweight context or confirmation.
 
-1. **Exact match** (case-insensitive) → use database casing, no Notes annotation.
-2. **Known alias** → check `aliases.md`, use canonical name, no Notes annotation.
-   If the alias table's Notes column says to flag ambiguity or names a
-   context requirement, honor that before resolving. Example:
-   `Abdominal crunch: 30kgx10` can resolve to `Ab Crunch Machine` because
-   the load implies a machine; `Abdominal crunch: 20 reps` is bodyweight
-   context and should be treated as ambiguous rather than silently mapped
-   to the machine.
-3. **Substring match** → input contained in canonical name or vice versa, resolved with equipment context (e.g. `incline press` + no equipment word + user context → `Incline Chest Press Machine`). No Notes annotation.
-4. **Equipment-qualified fuzzy** → if the input contains an equipment word (`cable`, `dumbbell`, `machine`, `barbell`), prefer the canonical name that has both that equipment word and the highest string-similarity to the rest. Use it and add Notes: `fuzzy match from: "user's input"`.
-5. **difflib fuzzy match** → apply `difflib.get_close_matches(user_input.lower(), [name.lower() for name in canonical_names], n=1, cutoff=0.7)`. If there's a hit, use that canonical name (in its database casing) and add Notes: `fuzzy match from: "user's input"`. You can do the ratio in your head for obvious cases; for borderline ones run the inline snippet.
-6. **No close match** → user's name in title case, and add Notes: `(not in database)` so it stands out on review.
-
-**Mental shortcut for the fuzzy step:** if you'd reliably recognize the typo as the canonical exercise at a glance (`flat benchpres` → `Flat Bench Press`, `squatt` → `Squat`), treat it as a fuzzy match with high confidence. If you'd genuinely not know which exercise the user meant, fall through to step 6 rather than guessing.
-
-Never invent exercise names. Fuzzy match only picks from the canonical list.
+Where the movement is clear and the equipment is omitted, use the established defaults for bare curls (dumbbell), squats and deadlifts (barbell), pushdowns (cable), and bench press (barbell). Bare `Push-Up`, `Plank`, `Side Plank`, and load-free `Crunch` retain their standard bodyweight meanings. For a loaded crunch, use the equipment context or ask. Ask which variant a bare `Bulgarian Split Squat` refers to. Preserve the typed name if the evidence is insufficient to identify an exercise. The logger skill governs when a suggested fuzzy match or catalog addition needs approval.
 
 ## Session-level flags
 

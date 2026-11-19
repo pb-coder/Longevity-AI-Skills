@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import unittest
+import json
+import subprocess
+import sys
+from pathlib import Path
+from unittest.mock import patch
 
 from shared.exercises_database import (
     is_known_name,
     known_name_set,
     lookup,
+    fuzzy_match,
+    resolve_names,
     validate_database,
 )
 
@@ -57,6 +64,44 @@ class ExercisesDatabaseTests(unittest.TestCase):
                       "Resistance Band Pull-Apart"):
             self.assertIsNone(lookup(typed), typed)
             self.assertFalse(is_known_name(typed, names), typed)
+
+    def test_batch_matches_existing_lookup_and_fuzzy_with_one_catalog_read(self) -> None:
+        from shared import exercises_database as db
+
+        names = ["HANGING LEG RAISE", "farmer walk", "belt squad", "belt squad", ""]
+        with patch.object(db, "parse_database", wraps=db.parse_database) as catalog, \
+             patch.object(db, "parse_aliases", wraps=db.parse_aliases) as aliases:
+            results = resolve_names(names)
+        self.assertEqual(catalog.call_count, 1)
+        self.assertEqual(aliases.call_count, 1)
+        self.assertEqual([r["input"] for r in results], names[:3] + [""])
+        for result in results:
+            name = result["input"]
+            canonical = lookup(name)
+            if canonical:
+                self.assertEqual(result["status"], "known")
+                self.assertEqual(result["canonical"], canonical)
+            else:
+                matches = fuzzy_match(name, k=1)
+                expected = {"canonical": matches[0][0], "similarity": matches[0][1]} if matches else None
+                self.assertEqual(result, {"input": name, "status": "unknown", "candidate": expected})
+
+    def test_batch_keeps_contextual_alias_guidance(self) -> None:
+        result, = resolve_names(["Abdominal crunch"])
+        self.assertEqual(result["canonical"], "Ab Crunch Machine")
+        self.assertIn("only when load/equipment context implies", result["alias_note"])
+
+    def test_batch_cli_validates_input_and_outputs_json(self) -> None:
+        script = Path(__file__).resolve().parents[1] / "shared" / "exercises_database.py"
+        def run(value):
+            return subprocess.run([sys.executable, str(script), "resolve-batch"],
+                                  input=value, text=True, capture_output=True)
+        result = run(json.dumps(["HANGING LEG RAISE", "HANGING LEG RAISE"]))
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), [{"input": "HANGING LEG RAISE", "status": "known", "canonical": "Hanging Leg Raise"}])
+        self.assertEqual(run('{"name": "x"}').returncode, 2)
+        self.assertEqual(run('[1]').returncode, 2)
+        self.assertEqual(run('{').returncode, 2)
 
     def test_validate_database_is_clean(self) -> None:
         self.assertEqual(validate_database(), [])

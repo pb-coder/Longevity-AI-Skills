@@ -143,17 +143,4 @@ in a plan (right answer: the equipment is not owned), and the one historical
 logged row surfaces in `unknown_exercises` (right answer: it is honest about
 what the catalog does not cover).
 
-## Modifier Handling
-
-When user input includes a modifier not in the canonical name (e.g. "hanging", "incline", "seated"), use the closest canonical name and put the modifier in Notes. Do not invent new exercise names.
-
-## Equipment Defaults
-
-When equipment is missing, default to the most common variant:
-
-| Context | Default |
-|---|---|
-| Curls | Dumbbell |
-| Squats, Deadlifts | Barbell |
-| Pushdowns | Cable |
-| Bench Press (ambiguous) | Barbell |
+See [exercise name parsing](parsing-rules.md#exercise-names-and-context) for equipment defaults and variant handling.

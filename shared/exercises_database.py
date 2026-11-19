@@ -12,6 +12,7 @@ Public surface:
 - ``parse_database()`` → structured dict (muscle → section → list of entries).
 - ``parse_aliases()`` → list of alias rows.
 - ``lookup(name)`` → canonical name (alias-aware, case-insensitive) or None.
+- ``resolve_names(names)`` → distinct exact resolutions or fuzzy suggestions.
 - ``known_name_set()`` → normalized canonical + alias-input names.
 - ``is_known_name(name)`` → True when a name is canonical or an alias input.
 - ``fuzzy_match(name, k=3)`` → top-K (canonical, similarity_0_to_1) pairs.
@@ -22,8 +23,9 @@ Public surface:
 - ``validate_database()`` → re-parses both files and returns a list of
   issues (empty list = clean).
 
-CLI (the workout-logger agent invokes these at /log time):
+CLI:
 
+    python3 exercises_database.py resolve-batch          # reads JSON array
     python3 exercises_database.py lookup "Belt Squat Machine"
     python3 exercises_database.py fuzzy "belt squad" --k 5
     python3 exercises_database.py propose --from-stdin    # reads JSON
@@ -37,6 +39,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Iterator
 
 _REPO = Path(__file__).resolve().parent.parent  # Skills/
 DATABASE_PATH = _REPO / "shared" / "exercises-database.md"
@@ -215,7 +218,6 @@ def parse_aliases() -> list[dict]:
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
         # Aliases table is 3 cells: user_input | canonical | notes.
-        # The Equipment Defaults table is 2 cells: context | default. Skip.
         if len(cells) != 3:
             continue
         # Skip the header row of any subsequent 3-cell table.
@@ -237,6 +239,14 @@ def _normalize_for_match(name: str) -> str:
     return n.rstrip(".:;,")
 
 
+def _exact_entries(canonical_names: list[str]) -> Iterator[tuple[str, str, str]]:
+    for canonical in canonical_names:
+        yield _normalize_for_match(canonical), canonical, ""
+    for row in parse_aliases():
+        for name in row["inputs"]:
+            yield _normalize_for_match(name), row["canonical"], row["notes"]
+
+
 def lookup(name: str) -> str | None:
     """Resolve a user-typed exercise name to its canonical form.
 
@@ -249,15 +259,9 @@ def lookup(name: str) -> str | None:
     if not name or not name.strip():
         return None
     target = _normalize_for_match(name)
-
-    for canonical in _all_canonical_names():
-        if _normalize_for_match(canonical) == target:
+    for key, canonical, _ in _exact_entries(_all_canonical_names()):
+        if key == target:
             return canonical
-
-    for row in parse_aliases():
-        for inp in row["inputs"]:
-            if _normalize_for_match(inp) == target:
-                return row["canonical"]
     return None
 
 
@@ -306,7 +310,8 @@ def _per_token_match_avg(query_tokens: list[str],
     return total / len(query_tokens)
 
 
-def fuzzy_match(name: str, k: int = 3) -> list[tuple[str, float]]:
+def fuzzy_match(name: str, k: int = 3, *,
+                canonical_names: list[str] | None = None) -> list[tuple[str, float]]:
     """Return top-K (canonical, similarity_0_to_1) pairs against the database.
 
     Blends ``difflib.SequenceMatcher`` whole-string ratio (30%) with a
@@ -324,7 +329,7 @@ def fuzzy_match(name: str, k: int = 3) -> list[tuple[str, float]]:
     target = _normalize_for_match(name)
     target_tokens = target.split()
     scored: list[tuple[str, float]] = []
-    for canonical in _all_canonical_names():
+    for canonical in (canonical_names if canonical_names is not None else _all_canonical_names()):
         norm_canonical = _normalize_for_match(canonical)
         canonical_tokens = norm_canonical.split()
         seq_ratio = difflib.SequenceMatcher(None, target, norm_canonical).ratio()
@@ -333,6 +338,40 @@ def fuzzy_match(name: str, k: int = 3) -> list[tuple[str, float]]:
         scored.append((canonical, blended))
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:k]
+
+
+def resolve_names(names: list[str]) -> list[dict]:
+    """Resolve distinct typed names in order, with suggestions for unknowns.
+
+    This is read-only: a fuzzy candidate is never accepted as an alias. The
+    caller must obtain approval before proposing catalog changes.
+    """
+    if not names:
+        return []
+    canonical_names = _all_canonical_names()
+    exact = {}
+    for key, canonical, note in _exact_entries(canonical_names):
+        exact.setdefault(key, (canonical, note))
+
+    results = []
+    seen = set()
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        match = exact.get(_normalize_for_match(name)) if name.strip() else None
+        if match is not None:
+            canonical, note = match
+            result = {"input": name, "status": "known", "canonical": canonical}
+            if note and note != "—":
+                result["alias_note"] = note
+            results.append(result)
+            continue
+        candidates = fuzzy_match(name, k=1, canonical_names=canonical_names)
+        candidate = ({"canonical": candidates[0][0], "similarity": candidates[0][1]}
+                     if candidates else None)
+        results.append({"input": name, "status": "unknown", "candidate": candidate})
+    return results
 
 
 # ============================================================ Validation
@@ -670,6 +709,8 @@ def _cli() -> int:
     p_fuzzy.add_argument("name")
     p_fuzzy.add_argument("--k", type=int, default=3)
 
+    sub.add_parser("resolve-batch", help="Resolve a JSON array of names from stdin.")
+
     p_validate = sub.add_parser("validate", help="Re-parse + report issues.")
 
     p_propose = sub.add_parser(
@@ -697,6 +738,17 @@ def _cli() -> int:
     if args.cmd == "fuzzy":
         for name, score in fuzzy_match(args.name, k=args.k):
             print(f"{score:.3f}\t{name}")
+        return 0
+
+    if args.cmd == "resolve-batch":
+        try:
+            names = json.load(sys.stdin)
+            if not isinstance(names, list) or any(not isinstance(n, str) for n in names):
+                raise ValueError("expected a JSON array of strings")
+        except ValueError as exc:
+            print(f"resolve-batch: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(resolve_names(names), ensure_ascii=False))
         return 0
 
     if args.cmd == "validate":

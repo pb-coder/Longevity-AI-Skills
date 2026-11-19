@@ -778,6 +778,59 @@ def parse_plan_file(path: Path, plan_date: str | None = None,
     return parse_plan(path.read_text(encoding="utf-8"), plan_date, db)
 
 
+def weekly_plan_for_history(record: dict, db: dict | None = None, *,
+                            include_prior_slots: bool = False) -> dict:
+    """Adapt a published weekly record directly to the legacy ledger shape."""
+    if record["schema_version"] != 1:
+        raise ValueError("unsupported weekly prescription schema")
+    doc = record["prescription"]
+    start = max(_parse_iso_date(doc["week_start"]), _parse_iso_date(doc["as_of"]))
+    workouts = []
+    for idx, session in enumerate(doc["sessions"], 1):
+        if not include_prior_slots and record["revision"] > 1 and session.get("date") and session["date"] < start.isoformat():
+            continue
+        slots = []
+        for position, exercise in enumerate(session["exercises"], 1):
+            working = [x for x in exercise["sets"] if not x.get("warmup")]
+            lo, hi = [], []
+            for item in working:
+                if "reps" in item:
+                    parts = str(item["reps"]).split("-")
+                    lo.append(int(parts[0])); hi.append(int(parts[-1]))
+            low, high = _mode(lo), _mode(hi)
+            loads = [x["load_kg"] for x in working if "load_kg" in x]
+            slot = {"exercise": exercise["name"], "position": position,
+                    "prescribed_sets": len(working), "warmup_sets": len(exercise["sets"]) - len(working),
+                    # Legacy progression has no prescription-context comparison;
+                    # do not supply a context-specific load as comparable.
+                    "load_kg": (None if session.get("gym") or exercise.get("machine")
+                                or exercise.get("load_basis") == "plates_only" else _mode(loads)),
+                    "load_range_kg": None,
+                    "rep_lo": low, "rep_hi": high,
+                    "rep_target": (f"{low}-{high}" if low is not None and high != low else str(low) if low is not None else None),
+                    "seconds": _mode([x["seconds"] for x in working if "seconds" in x]),
+                    "metres": _mode([x["metres"] for x in working if "metres" in x]),
+                    "notes": [exercise["cue"]] if exercise.get("cue") else [],
+                    "anchor_change_hint": None, "unparsed": [], "raw": "",
+                    "structured_sets": exercise["sets"], "gym": session.get("gym"),
+                    "machine": exercise.get("machine"), "load_basis": exercise.get("load_basis")}
+            slots.append(slot)
+        title = session["type"]
+        named = _session_type_from_name(title)
+        regions = session_content_regions(slots, db)
+        resolved = session_type_from_title(title, slots, db)
+        workouts.append({"index": idx, "label": str(idx), "title": title,
+            "session": session_key(title, idx), "session_type": resolved,
+            "session_type_heading": named, "session_type_content": regions["verdict"],
+            "session_type_basis": "heading" if regions["verdict"] is None else
+                "content_override" if resolved != named else "heading_corroborated",
+            "is_deload": False, "slots": slots, "session_id": session["id"],
+            "scheduled_date": session.get("date")})
+    return {"plan_date": start.isoformat(), "effective_end": doc["week_end"],
+                "weekly_revision": record["revision"], "week_start": doc["week_start"],
+                "is_deload": False, "workouts": workouts, "parse_errors": [], "parse_notes": []}
+
+
 def load_plans(person: str, today_d: date, limit: int | None = None,
                db: dict | None = None) -> list[dict]:
     """Parsed plan series for ``person``, oldest first.
@@ -796,11 +849,50 @@ def load_plans(person: str, today_d: date, limit: int | None = None,
     for plan_date, path in eligible:
         try:
             out.append(parse_plan_file(path, plan_date, db))
-        except OSError as exc:                       # pragma: no cover - io
+        except OSError as exc:
             out.append({"plan_date": plan_date, "workouts": [],
                         "parse_errors": [f"{plan_date}: unreadable ({exc})"],
                         "parse_notes": []})
-    return out
+    # Weekly JSON is the authority. Convert its typed sets directly into the
+    # ledger shape; the gym-facing Markdown is never read as source data.
+    from shared.person_paths import plans_dir
+    for path in sorted((plans_dir(person) / "weekly").glob("*.json")):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if record["schema_version"] != 1:
+                continue
+            doc = record["prescription"]
+            start = max(_parse_iso_date(doc["week_start"]), _parse_iso_date(doc["as_of"]))
+            if start > today_d:
+                continue
+            out.append(weekly_plan_for_history(record, db))
+        except (OSError, ValueError, KeyError, TypeError):
+            # A corrupt optional artifact must not supersede valid history.
+            continue
+    out.sort(key=lambda p: (p["plan_date"], p.get("weekly_revision", 0)))
+    deduped = []
+    for plan in out:
+        if (deduped and plan.get("weekly_revision") and deduped[-1].get("weekly_revision")
+                and plan["plan_date"] == deduped[-1]["plan_date"]
+                and plan.get("week_start") == deduped[-1].get("week_start")):
+            deduped[-1] = plan
+        else:
+            deduped.append(plan)
+    for i, plan in enumerate(deduped):
+        if not plan.get("weekly_revision"):
+            continue
+        successor = next((p for p in deduped[i + 1:] if p.get("weekly_revision")
+                          and p.get("week_start") == plan.get("week_start")), None)
+        if successor:
+            successor_ids = {w["session_id"] for w in successor["workouts"]}
+            boundary = successor["plan_date"]
+            ambiguous = any(not w.get("scheduled_date") and w["session_id"] in successor_ids for w in plan["workouts"])
+            plan["workouts"] = [w for w in plan["workouts"] if not
+                ((w.get("scheduled_date") and w["scheduled_date"] >= boundary) or
+                 (not w.get("scheduled_date") and w["session_id"] in successor_ids))]
+            if ambiguous:
+                plan["parse_notes"].append("Flexible sessions retained in a later revision cannot be attributed to an earlier revision reliably")
+    return deduped[-limit:] if limit is not None and limit > 0 else deduped
 
 
 # A plan nominally covers one week. Below that the newest window has not
@@ -827,6 +919,12 @@ def plan_windows(plans: list[dict], today_d: date) -> list[tuple[dict, date, dat
             end = _parse_iso_date(plans[i + 1]["plan_date"]) or (today_d + timedelta(days=1))
         else:
             end = today_d + timedelta(days=1)
+        if plan.get("effective_end"):
+            declared_end = _parse_iso_date(plan["effective_end"])
+            if declared_end:
+                end = min(end, declared_end + timedelta(days=1), today_d + timedelta(days=1))
+        if end <= start:
+            continue
         out.append((plan, start, end))
     return out
 
@@ -911,8 +1009,12 @@ def _match_sessions(plan: dict, sessions: dict[str, list[dict]]) -> dict:
             out[d] = None
             continue
         best_idx, best_cov = None, 0.0
-        for idx, cov in _workout_coverages(plan, names).items():
-            if cov > best_cov:
+        coverages = _workout_coverages(plan, names)
+        for idx, cov in coverages.items():
+            workout = next((w for w in plan["workouts"] if w["index"] == idx), {})
+            incumbent = next((w for w in plan["workouts"] if w["index"] == best_idx), {})
+            if cov > best_cov or (cov == best_cov and cov >= _SESSION_MATCH_MIN_COVERAGE
+                    and workout.get("scheduled_date") == d and incumbent.get("scheduled_date") != d):
                 best_idx, best_cov = idx, cov
         out[d] = best_idx if best_cov >= _SESSION_MATCH_MIN_COVERAGE else None
     return out
@@ -936,7 +1038,10 @@ def session_workout_candidates(plan: dict, rows: list[dict], day: str,
     best = max(cov.values(), default=0.0)
     if best < _SESSION_MATCH_MIN_COVERAGE:
         return []
-    return [i for i, c in cov.items() if c == best]
+    candidates = [i for i, c in cov.items() if c == best]
+    dated = [w["index"] for w in plan.get("workouts", [])
+             if w["index"] in candidates and w.get("scheduled_date") == day]
+    return dated or candidates
 
 
 def last_strength_session_type(rows: list[dict], plans: list[dict],

@@ -827,6 +827,8 @@ def build_next_dose(rows: list[dict], catalog: dict, plans: list[dict],
             "increment_kg":     inc,
             "increment_basis":  inc_basis,
         }
+        if has_structured:
+            entry["equipment_context"] = {"gym": current_context[0], "machine": current_context[1]}
         if limit is not None:
             entry["load_limit_kg"] = limit
             entry["load_limit_date"] = limit_date

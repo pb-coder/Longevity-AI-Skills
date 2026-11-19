@@ -426,10 +426,12 @@ def block_from_plan(plan: dict, catalog: dict, start_date: str | None = None,
     return block
 
 
-def read_block(person: str) -> dict | None:
-    """Newest persisted block for ``person``, or ``None`` before the first."""
-    from shared.person_paths import latest_block_json
-    p = latest_block_json(person)
+def read_block(person: str, *, as_of: date | None = None) -> dict | None:
+    """Newest persisted block effective by the given date, if supplied."""
+    from shared.person_paths import list_blocks
+
+    p = next((path for started, path in reversed(list_blocks(person))
+              if as_of is None or started <= as_of.isoformat()), None)
     if p is None or not p.exists():
         return None
     try:
@@ -2049,7 +2051,8 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
                   today_d: date, deloads: list[str] | None = None,
                   adherence: dict | None = None,
                   e1rm: dict | None = None, *,
-                  plans: list[dict] | None = None) -> dict:
+                  plans: list[dict] | None = None,
+                  block_as_of: date | None = None) -> dict:
     """The ``block`` payload: current block, boundary state, what to rotate.
 
     ``plans``, when supplied, is the oldest-first, date-filtered series
@@ -2092,7 +2095,7 @@ def block_payload(person: str, rows: list[dict], db: dict, catalog: dict,
     # the deload cadence needs to tell a crossing from a standing debt.
     plans = (load_plans(person, today_d, limit=3, db=db)
              if plans is None else plans[-3:])
-    stored = read_block(person)
+    stored = read_block(person, as_of=block_as_of) if block_as_of else read_block(person)
     source = "artifact"
     undiffable_reason = None
     if stored is None and plans:
@@ -2273,8 +2276,9 @@ def _cli(argv: list[str] | None = None) -> int:
     p_show.add_argument("--person", required=True)
     p_write = sub.add_parser("write", help="persist a block derived from a plan")
     p_write.add_argument("--person", required=True)
-    p_write.add_argument("--from-plan", dest="from_plan", required=True,
-                         help="plan date (YYYY-MM-DD) to derive slots from")
+    source = p_write.add_mutually_exclusive_group(required=True)
+    source.add_argument("--from-plan", help="legacy plan date (YYYY-MM-DD)")
+    source.add_argument("--from-week", help="effective date of a published weekly plan (YYYY-MM-DD)")
     args = ap.parse_args(argv)
 
     if args.cmd == "show":
@@ -2284,14 +2288,31 @@ def _cli(argv: list[str] | None = None) -> int:
         return 0
 
     today = date.today()
+    db = load_exercises_db(DATABASE_PATH)
+    catalog = load_pattern_catalog(db)
+    if args.from_week is not None:
+        from .adherence import weekly_plan_for_history
+        from .weekly_prescription import latest_published_weeks
+
+        published = latest_published_weeks(args.person, today)
+        record = next((item for item in published
+                       if item["prescription"]["week_start"] == args.from_week), None)
+        if record is None:
+            print(f"ERROR: no published week starting {args.from_week} for that person", file=sys.stderr)
+            return 1
+        previous = read_block(args.person, as_of=date.fromisoformat(args.from_week) - timedelta(days=1))
+        plan = weekly_plan_for_history(record, db=db, include_prior_slots=True)
+        block = block_from_plan(plan, catalog, start_date=args.from_week, prev_block=previous)
+        print(f"wrote {write_block(args.person, block)}")
+        return 0
+
     plan_d = _parse_iso_date(args.from_plan)
-    plans = [p for p in load_plans(args.person, max(today, plan_d or today))
-             if p["plan_date"] == args.from_plan]
+    plans = [p for p in load_plans(args.person, max(today, plan_d or today), db=db)
+             if not p.get("weekly_revision") and p["plan_date"] == args.from_plan]
     if not plans:
         print(f"ERROR: no plan dated {args.from_plan} for that person",
               file=sys.stderr)
         return 1
-    catalog = load_pattern_catalog(load_exercises_db(DATABASE_PATH))
     block = block_from_plan(plans[0], catalog, prev_block=read_block(args.person))
     path = write_block(args.person, block)
     print(f"wrote {path}")

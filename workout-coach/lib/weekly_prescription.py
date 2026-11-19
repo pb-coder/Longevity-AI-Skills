@@ -1,0 +1,311 @@
+"""Validated, immutable weekly prescriptions and their Markdown projection."""
+from __future__ import annotations
+
+import fcntl
+import hashlib
+import json
+import math
+import re
+import tempfile
+from datetime import date, timedelta
+from pathlib import Path
+
+from shared.exercises_database import DATABASE_PATH, _all_canonical_names
+from shared.person_paths import plans_dir
+from shared.workout_context import equipment_context
+from .extract import load_exercises_db
+from .exercise_fit import excluded_for_session, validate_person
+
+
+def _date(value):
+    try:
+        return date.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
+def _dose(item):
+    unit = next(k for k in ('reps', 'seconds', 'metres') if k in item)
+    suffix = {'reps': '', 'seconds': 's', 'metres': 'm'}[unit]
+    result = f"{item[unit]}{suffix}"
+    if item.get('load_kg') is not None:
+        result = (f"{item['load_kg']}kgx{result}" if unit != 'seconds'
+                  else f"1 x {result} @ {item['load_kg']}kg")
+    if item.get('assistance_kg') is not None:
+        result += f" assisted {item['assistance_kg']}kg"
+    if item.get('warmup'):
+        result += ' (warmup)'
+    return result
+
+
+def render_week(doc):
+    lines = [f"# Workout plan — {doc['week_start']} to {doc['week_end']}", '']
+    for i, session in enumerate(doc['sessions'], 1):
+        label = session['type'] + (f" · {session['date']}" if session.get('date') else '')
+        if session.get('gym'):
+            label += f" · {session['gym']}"
+        lines += [f"## Workout {i}: {label}", '']
+        for exercise in session['exercises']:
+            setup = [exercise[key] for key in ('machine', 'variant') if exercise.get(key)]
+            if exercise.get('load_basis') == 'plates_only':
+                setup.append('plates only')
+            label = exercise['name'] + (f" ({', '.join(setup)})" if setup else '')
+            lines.append(f"- {label}: " + ' /// '.join(_dose(s) for s in exercise['sets']))
+            if exercise.get('cue'):
+                lines.append(f"  — {exercise['cue']}")
+        lines.append('')
+    return '\n'.join(lines)
+
+
+_MARKDOWN_CONTROLS = re.compile(r"[\x00-\x1f\x7f`*_<>\[\]#]")
+_FALLBACK_LANGUAGE = re.compile(
+    r"\b(?:if|unless|otherwise|skip|shorten|postpone|alternative|instead|tired|fatigue"
+    r"|walk|walking|sore|exhausted|easier|bad day)\b", re.IGNORECASE,
+)
+
+
+def _text(value, limit=160, *, cue=False):
+    return (
+        isinstance(value, str) and 0 < len(value.strip()) <= limit
+        and not _MARKDOWN_CONTROLS.search(value)
+        and (not cue or not _FALLBACK_LANGUAGE.search(value))
+    )
+
+
+def _number(value, *, zero=False):
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and (value >= 0 if zero else value > 0))
+
+
+def _fields(obj, allowed, where, errors):
+    extra = set(obj) - allowed
+    if extra:
+        errors.append(f"{where}: unknown fields {sorted(map(str, extra))}")
+
+
+def validate_week(doc: dict, tracker: dict) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(doc, dict) or not isinstance(tracker, dict):
+        return ['draft and tracker must be JSON objects'], warnings
+    _fields(doc, {'week_start', 'week_end', 'as_of', 'sessions'}, 'draft', errors)
+    snapshot = tracker.get('weekly_plan')
+    if not isinstance(snapshot, dict):
+        return errors + ['tracker must contain a weekly_plan snapshot'], warnings
+    start, end, as_of = (_date(doc.get(k)) for k in ('week_start', 'week_end', 'as_of'))
+    if not start or not end or not as_of or end != start + timedelta(days=6) or as_of > end:
+        errors.append('week must cover seven dates and as_of must not follow its end')
+    for k in ('week_start', 'week_end', 'as_of'):
+        if doc.get(k) != snapshot.get(k):
+            errors.append(f'{k} differs from tracker weekly_plan')
+    sessions = doc.get('sessions')
+    if not isinstance(sessions, list) or len(sessions) != snapshot.get('session_count'):
+        return errors + ['session count differs from tracker weekly_plan'], warnings
+    names = set(_all_canonical_names())
+    catalog = load_exercises_db(DATABASE_PATH)
+    fit = tracker.get('exercise_fit') or {}
+    doses = {x.get('exercise'): x for x in (tracker.get('next_dose') or {}).get('exercises', []) if isinstance(x, dict)}
+    ids, dates = set(), []
+    days = snapshot.get('training_days') or []
+    for i, session in enumerate(sessions, 1):
+        label = f'session {i}'
+        if not isinstance(session, dict):
+            errors.append(f'{label}: must be an object')
+            continue
+        _fields(session, {'id', 'date', 'type', 'duration_min', 'gym', 'goal', 'reason', 'exercises'}, label, errors)
+        sid = session.get('id')
+        if not isinstance(sid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', sid) or sid in ids:
+            errors.append(f'{label}: stable unique id required')
+        else:
+            ids.add(sid)
+        for key in ('type', 'goal', 'reason', 'gym'):
+            limit = 80 if key in ('type', 'gym') else 300
+            if (key == 'type' or key in session) and not _text(session.get(key), limit, cue=key == 'type'):
+                errors.append(f'{label}: {key} must be plain single-line text')
+        raw_date = session.get('date')
+        sd = _date(raw_date) if raw_date is not None else None
+        if raw_date is not None and (not sd or not start or not end or not start <= sd <= end or sd.isoformat() != raw_date):
+            errors.append(f'{label}: date outside week or malformed')
+        if sd:
+            dates.append(sd)
+        historical = bool(sd and as_of and sd < as_of)
+        duration = session.get('duration_min')
+        target = snapshot.get('session_target_min')
+        if not _number(duration) or (not historical and _number(target) and duration > target):
+            errors.append(f'{label}: positive finite duration within available time required')
+        exercises = session.get('exercises')
+        if not isinstance(exercises, list) or not exercises:
+            errors.append(f'{label}: exercises required')
+            continue
+        gym = session.get('gym', fit.get('default_gym'))
+        working = 0
+        for ex in exercises:
+            if not isinstance(ex, dict):
+                errors.append(f'{label}: invalid exercise')
+                continue
+            _fields(ex, {'name', 'sets', 'cue', 'machine', 'load_basis', 'variant'}, label, errors)
+            name = ex.get('name')
+            if not isinstance(name, str) or name not in names:
+                errors.append(f'{label}: unknown or noncanonical exercise {name!r}')
+                continue
+            meta = catalog.get(name.lower(), {})
+            if meta.get('is_cardio'):
+                errors.append(f'{label}: cardio exercise is not a strength prescription')
+            variant = ex.get('variant')
+            for key in ('cue', 'machine', 'variant'):
+                if key in ex and not _text(ex[key], cue=key == 'cue'):
+                    errors.append(f'{label}: {key} must be plain single-line text')
+            if ex.get('load_basis') not in (None, 'total', 'plates_only'):
+                errors.append(f'{label}: invalid load_basis')
+            if not historical and start and end and as_of:
+                day = sd or None
+                excluded = excluded_for_session(fit, day, gym, variant=variant)
+                if not fit.get('restrictions') and gym == fit.get('default_gym'):
+                    excluded = fit.get('excluded') or []
+                possible = excluded_for_session(
+                    fit, day, gym, variant=variant, possible_between=(max(as_of, start), end),
+                )
+                if name in excluded:
+                    errors.append(f'{label}: excluded exercise {name!r}')
+                elif name in possible:
+                    errors.append(f'{label}: {name} eligibility needs date, gym or variant confirmation')
+            sets = ex.get('sets')
+            if not isinstance(sets, list) or not sets:
+                errors.append(f'{label}: sets required')
+                continue
+            for item in sets:
+                if not isinstance(item, dict):
+                    errors.append(f'{label}: each set must be an object')
+                    continue
+                _fields(item, {'reps', 'seconds', 'metres', 'load_kg', 'assistance_kg', 'warmup'}, label, errors)
+                units = [k for k in ('reps', 'seconds', 'metres') if k in item]
+                if len(units) != 1:
+                    errors.append(f'{label}: each set needs exactly one dose')
+                    continue
+                unit = units[0]
+                value = item[unit]
+                valid = (isinstance(value, (str, int)) and not isinstance(value, bool)
+                         and bool(re.fullmatch(r'[1-9]\d*(?:-[1-9]\d*)?', str(value)))) if unit == 'reps' else _number(value)
+                if unit == 'reps' and valid and '-' in str(value):
+                    lo, hi = map(int, str(value).split('-'))
+                    valid = lo <= hi
+                if (not valid or any(not _number(item[k], zero=True) for k in ('load_kg', 'assistance_kg') if k in item)
+                        or ('load_kg' in item and 'assistance_kg' in item)
+                        or ('warmup' in item and not isinstance(item['warmup'], bool))):
+                    errors.append(f'{label}: invalid set dose')
+                if not item.get('warmup') and not meta.get('is_warmup'):
+                    working += 1
+            reference = doses.get(name)
+            if not historical and reference and reference.get('load_kg') is not None:
+                loads = [x.get('load_kg') for x in sets if isinstance(x, dict) and not x.get('warmup') and x.get('load_kg') is not None]
+                context = reference.get('equipment_context')
+                chosen_context = equipment_context({'gym': gym, 'machine': ex.get('machine')})
+                if loads and context and chosen_context != equipment_context(context):
+                    warnings.append(f'{label}: {name} has no comparable reference for this setup')
+                elif loads and reference['load_kg'] not in loads and reference.get('other_gym_load_kg') not in loads:
+                    warnings.append(f'{label}: {name} dose differs from reference; review equipment context')
+        if not working:
+            errors.append(f'{label}: at least one strength working set required')
+        budget = tracker.get('target_working_sets')
+        if not historical and isinstance(budget, int) and working > budget + 2:
+            warnings.append(f'{label}: {working} working sets exceed the estimated time budget of {budget}')
+    if dates != sorted(dates) or len(dates) != len(set(dates)):
+        errors.append('scheduled session dates must be unique and ordered')
+    if days:
+        planned_days = sorted(d.isoformat() for d in dates if not as_of or d >= as_of)
+        available_days = sorted(d for d in days if not as_of or (_date(d) and _date(d) >= as_of))
+        upcoming_count = sum(not s.get('date') or not as_of or (_date(s.get('date')) and _date(s.get('date')) >= as_of) for s in sessions if isinstance(s, dict))
+        if len(available_days) != upcoming_count or planned_days != available_days:
+            errors.append('session dates must match all supplied training days')
+    return errors, warnings
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=path.parent, delete=False) as f:
+        temp = Path(f.name)
+        try:
+            f.write(content)
+            f.flush()
+        except BaseException:
+            temp.unlink(missing_ok=True)
+            raise
+    try:
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def latest_published_weeks(person: str, as_of: date) -> list[dict]:
+    """Latest committed revision per week known on as_of, including future weeks."""
+    selected: dict[str, dict] = {}
+    for path in sorted((plans_dir(person) / 'weekly').glob('*.json')):
+        try:
+            record = json.loads(path.read_text(encoding='utf-8'))
+            doc = record['prescription']
+            created = _date(doc['as_of'])
+            if record['schema_version'] != 1 or not created or created > as_of:
+                continue
+            week = doc['week_start']
+            prior = selected.get(week)
+            if prior is None or (doc['as_of'], record['revision']) > (prior['prescription']['as_of'], prior['revision']):
+                selected[week] = record
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return [selected[k] for k in sorted(selected)]
+
+
+def publish_week(person: str, doc: dict, tracker: dict) -> dict:
+    validate_person(person)
+    errors, warnings = validate_week(doc, tracker)
+    owner = (tracker.get('weekly_plan') or {}).get('person')
+    if owner is not None and owner != person:
+        errors.append('person differs from tracker weekly_plan')
+    if errors:
+        raise ValueError('; '.join(errors))
+    folder = plans_dir(person) / 'weekly'
+    folder.mkdir(parents=True, exist_ok=True)
+    with (folder / '.publish.lockfile').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        existing = []
+        for path in sorted(folder.glob('*.json')):
+            try:
+                record = json.loads(path.read_text(encoding='utf-8'))
+                old = record['prescription']
+                if record['schema_version'] != 1 or not isinstance(record['revision'], int):
+                    raise ValueError('invalid revision envelope')
+                existing.append((path, record))
+            except (OSError, ValueError, KeyError, TypeError):
+                if path.name.startswith(doc['week_start'] + '-r'):
+                    raise ValueError(f'corrupt weekly history: {path.name}')
+                warnings.append(f'ignored corrupt unrelated weekly history: {path.name}')
+                continue
+            if old['week_start'] != doc['week_start'] and old['week_start'] <= doc['week_end'] and doc['week_start'] <= old['week_end']:
+                raise ValueError('weekly prescription overlaps another published week')
+        content = json.dumps(doc, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+        digest = hashlib.sha256(content.encode()).hexdigest()[:16]
+        same_week = [(p, r) for p, r in existing if r['prescription']['week_start'] == doc['week_start']]
+        same_week.sort(key=lambda x: x[1]['revision'])
+        for path, record in same_week:
+            if record['digest'] == digest and record['prescription'] == doc:
+                md = path.with_suffix('.md')
+                if not md.exists() or md.read_text(encoding='utf-8') != render_week(doc):
+                    _atomic_write(md, render_week(doc))
+                return {'prescription_path': str(path), 'workout_md_path': str(md), 'revision': record['revision'], 'warnings': warnings}
+        old_done = {}
+        if same_week:
+            previous = same_week[-1][1]['prescription']
+            if doc['as_of'] < previous['as_of']:
+                raise ValueError('revision as_of cannot precede the preceding revision')
+            old_done = {s['id']: s for s in previous['sessions'] if s.get('date') and s['date'] < doc['as_of']}
+            new = {s['id']: s for s in doc['sessions']}
+            if any(new.get(k) != v for k, v in old_done.items()):
+                raise ValueError('past dated sessions must remain unchanged in revisions')
+        if any(s.get('date') and s['date'] < doc['as_of'] and old_done.get(s['id']) != s for s in doc['sessions']):
+            raise ValueError('new sessions cannot be dated before as_of')
+        revision = max((r['revision'] for _, r in same_week), default=0) + 1
+        stem = f"{doc['week_start']}-r{revision:04d}-{digest}"
+        md, path = folder / f'{stem}.md', folder / f'{stem}.json'
+        record = {'schema_version': 1, 'revision': revision, 'digest': digest, 'prescription': doc}
+        _atomic_write(md, render_week(doc))
+        _atomic_write(path, json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False) + '\n')
+        return {'prescription_path': str(path), 'workout_md_path': str(md), 'revision': revision, 'warnings': warnings}

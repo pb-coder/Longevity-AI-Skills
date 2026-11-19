@@ -497,3 +497,150 @@ def nutrition_phase_summary(phases: list[dict],
         "coach_action_hint":       hint,
         "history":                 history,
     }
+
+
+def weekly_nutrition_review(phases: list[dict], bodyweight_series: list[dict],
+                            today_d: date) -> dict | None:
+    """Review a declared phase using dated, current-phase measurements.
+
+    The rate range reflects endpoint spread, not a statistical confidence
+    interval. No intake change is made from a scale trend alone.
+    """
+    import math
+    from statistics import mean
+
+    phase = _current_open_phase(phases)
+    if phase is None:
+        return None
+    start = _parse_iso_date(phase.get("start_date"))
+    kind = phase.get("phase_type")
+    result = {
+        "current": {"start_date": phase.get("start_date"), "phase_type": kind},
+        "targets": {"rate_percent_per_week": None, "rate_kg_per_wk": None,
+                    "basis": None, "kcal_delta": phase.get("target_kcal_delta"),
+                    "protein_g_per_kg": phase.get("target_protein_g_per_kg"),
+                    "stop_conditions": phase.get("stop_conditions")},
+        "actuals": {"first_measurement_date": None, "latest_measurement_date": None,
+                    "measurement_count": 0, "span_days": 0,
+                    "rate_kg_per_wk": None, "rate_percent_per_week": None,
+                    "rate_range_percent_per_week": None},
+        "status": "insufficient_data", "coach_action_hint": "defer",
+        "decision_reason": None,
+    }
+    if start is None or start > today_d:
+        result["decision_reason"] = "The phase start date is missing or in the future."
+        return result
+    if kind not in ("cut", "bulk", "gain", "maintain", "recomp"):
+        result["decision_reason"] = "The phase intention is missing or unrecognized."
+        return result
+
+    # One observation per date: duplicate records do not create independent
+    # evidence. Conflicting same-day readings make that date unusable.
+    by_date = {}
+    for entry in bodyweight_series:
+        d = _parse_iso_date(entry.get("date"))
+        try:
+            kg = float(entry.get("kg"))
+        except (TypeError, ValueError):
+            continue
+        if d is None or not start <= d <= today_d or not math.isfinite(kg) or kg <= 0:
+            continue
+        by_date.setdefault(d, set()).add(kg)
+    points = sorted((d, next(iter(values))) for d, values in by_date.items()
+                    if len(values) == 1)
+    recent = [(d, kg) for d, kg in points if d >= today_d - timedelta(days=14)]
+    actual = result["actuals"]
+    if recent:
+        actual.update(first_measurement_date=recent[0][0].isoformat(),
+                      latest_measurement_date=recent[-1][0].isoformat(),
+                      measurement_count=len(recent),
+                      span_days=(recent[-1][0] - recent[0][0]).days)
+
+    # Reference weight comes from the beginning of the phase, not a prior
+    # phase or an assumed weight. Legacy kg targets are converted explicitly.
+    reference = phase.get("reference_weight_kg")
+    if reference is not None:
+        try:
+            reference = float(reference)
+            if not math.isfinite(reference) or reference <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            result["decision_reason"] = "The declared reference weight must be positive and finite."
+            return result
+    else:
+        reference = points[0][1] if points else None
+    target_pct = phase.get("target_rate_percent_per_week")
+    target_kg = phase.get("target_rate_kg_per_wk")
+    try:
+        if target_pct is not None:
+            target_pct = float(target_pct)
+            if not math.isfinite(target_pct):
+                raise ValueError
+            target_kg = target_pct * reference / 100 if reference else None
+            basis = "declared_percent"
+        elif target_kg is not None:
+            target_kg = float(target_kg)
+            if not math.isfinite(target_kg):
+                raise ValueError
+            target_pct = target_kg / reference * 100 if reference else None
+            basis = "legacy_kg_converted" if reference else "legacy_kg_needs_reference"
+        else:
+            raise ValueError
+    except (TypeError, ValueError):
+        result["decision_reason"] = "An explicit signed phase target is required."
+        return result
+    result["targets"].update(rate_percent_per_week=round(target_pct, 3) if target_pct is not None else None,
+                             rate_kg_per_wk=round(target_kg, 3) if target_kg is not None else None,
+                             basis=basis, reference_weight_kg=reference)
+    if ((kind == "cut" and (target_pct is None or target_pct >= 0)) or
+        (kind in ("bulk", "gain") and (target_pct is None or target_pct <= 0)) or
+        (kind in ("maintain", "recomp") and target_pct != 0)):
+        result["decision_reason"] = "The target is unresolved or its sign conflicts with the declared phase."
+        return result
+    if points and (today_d - points[-1][0]).days > 7:
+        result["decision_reason"] = "The latest comparable weigh-in is more than seven days old."
+        return result
+    if reference is None or len(recent) < 4 or actual["span_days"] < 7:
+        result["decision_reason"] = "The current phase needs at least four distinct weigh-in dates spanning seven days."
+        return result
+    rate = smoothed_rate_per_week(recent)
+    if rate is None:
+        result["decision_reason"] = "The available measurements do not resolve a trend."
+        return result
+    # Compare disjoint endpoint groups; spread indicates sensitivity to
+    # normal fluctuations. A range crossing a target boundary defers action.
+    n = min(3, len(recent) // 2)
+    first, last = recent[:n], recent[-n:]
+    first_day = mean(d.toordinal() for d, _ in first)
+    last_day = mean(d.toordinal() for d, _ in last)
+    span = last_day - first_day
+    if span <= 0:
+        result["decision_reason"] = "The measurement dates do not resolve a trend."
+        return result
+    lower = (min(v for _, v in last) - max(v for _, v in first)) / span * 7 / reference * 100
+    upper = (max(v for _, v in last) - min(v for _, v in first)) / span * 7 / reference * 100
+    pct = rate / reference * 100
+    actual.update(rate_kg_per_wk=round(rate, 3), rate_percent_per_week=round(pct, 3),
+                  rate_range_percent_per_week=[round(lower, 3), round(upper, 3)])
+    if kind in ("maintain", "recomp"):
+        result.update(status="review", coach_action_hint="review_trend",
+                      decision_reason="Review the trend against the agreed weight band and longer-term progress.")
+        return result
+    bounds = sorted((target_pct * 0.6, target_pct * 1.4))
+    if lower >= bounds[0] and upper <= bounds[1]:
+        result.update(status="on_track", coach_action_hint="continue",
+                      decision_reason="The observed range is within the target review band.")
+    elif upper < bounds[0] or lower > bounds[1]:
+        faster = upper < bounds[0] if kind == "cut" else lower > bounds[1]
+        if kind == "cut":
+            hint = "review_ease_deficit" if faster else "review_cut_consistency"
+            reason = ("Loss is faster than intended; review whether to ease the deficit." if faster else
+                      "Loss is slower than intended; review coverage, consistency and the target before changing intake.")
+        else:
+            hint = "review_reduce_surplus" if faster else "review_gain_consistency"
+            reason = ("Gain is faster than intended; review the trend and other evidence before reducing a surplus." if faster else
+                      "Gain is slower than intended; review training progress and consistency before changing intake.")
+        result.update(status="too_fast" if faster else "too_slow", coach_action_hint=hint, decision_reason=reason)
+    else:
+        result.update(status="unresolved", decision_reason="Measurement spread overlaps a target boundary; wait for more comparable readings.")
+    return result

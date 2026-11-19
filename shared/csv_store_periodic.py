@@ -311,12 +311,14 @@ NUTRITION_PHASES_HEADERS = [
     "Start Date", "End Date", "Phase Type",
     "Target Surplus/Deficit (kcal)", "Target Protein (g/kg)",
     "Target Rate (kg/wk)", "Stop Conditions", "Notes",
+    "Target Rate (%/wk)", "Reference Weight (kg)",
 ]
 
 NUTRITION_PHASES_FIELDS = [
     "start_date", "end_date", "phase_type",
     "target_kcal_delta", "target_protein_g_per_kg",
     "target_rate_kg_per_wk", "stop_conditions", "notes",
+    "target_rate_percent_per_week", "reference_weight_kg",
 ]
 
 
@@ -349,6 +351,8 @@ def read_nutrition_phases(person: str) -> list[dict]:
             "target_rate_kg_per_wk": _parse_value(row[5]) if len(row) > 5 else None,
             "stop_conditions": (row[6] or None) if len(row) > 6 else None,
             "notes": (row[7] or None) if len(row) > 7 else None,
+            "target_rate_percent_per_week": _parse_value(row[8]) if len(row) > 8 else None,
+            "reference_weight_kg": _parse_value(row[9]) if len(row) > 9 else None,
         }
         out.append(rec)
     out.sort(key=lambda r: r["start_date"], reverse=True)
@@ -394,6 +398,8 @@ def upsert_nutrition_phases(person: str, entries: Iterable[dict]) -> list[str]:
             "target_rate_kg_per_wk":   e.get("target_rate_kg_per_wk"),
             "stop_conditions":         e.get("stop_conditions"),
             "notes":                   e.get("notes"),
+            "target_rate_percent_per_week": e.get("target_rate_percent_per_week"),
+            "reference_weight_kg": e.get("reference_weight_kg"),
         }
         prev = by_start.get(start)
         if prev is None:
@@ -419,6 +425,8 @@ def upsert_nutrition_phases(person: str, entries: Iterable[dict]) -> list[str]:
             r.get("target_rate_kg_per_wk") if r.get("target_rate_kg_per_wk") is not None else "",
             r.get("stop_conditions") or "",
             r.get("notes") or "",
+            r.get("target_rate_percent_per_week") if r.get("target_rate_percent_per_week") is not None else "",
+            r.get("reference_weight_kg") if r.get("reference_weight_kg") is not None else "",
         ])
 
     ensure_data_dir(person)

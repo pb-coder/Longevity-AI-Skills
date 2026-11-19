@@ -493,9 +493,11 @@ def load_payload(source: str) -> tuple[list[dict], list[dict], dict | None, list
                 raise ValueError("nutrition_phase end_date precedes start_date")
         if e.get("phase_type") is not None and str(e["phase_type"]).strip().lower() not in NUTRITION_PHASE_TYPES:
             raise ValueError(f"unknown phase_type: {e['phase_type']!r}")
-        for field in ("target_kcal_delta", "target_protein_g_per_kg", "target_rate_kg_per_wk"):
+        for field in ("target_kcal_delta", "target_protein_g_per_kg", "target_rate_kg_per_wk",
+                      "target_rate_percent_per_week", "reference_weight_kg"):
             if e.get(field) is not None:
-                require_number(e[field], f"nutrition_phase {field}", nonnegative=field == "target_protein_g_per_kg")
+                require_number(e[field], f"nutrition_phase {field}", nonnegative=field == "target_protein_g_per_kg",
+                               positive=field == "reference_weight_kg")
 
     return (rows, bw, css_test, sleep_entries, nutrition_phase_entries)
 

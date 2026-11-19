@@ -53,9 +53,8 @@ from workout_coach.lib.parsing import _compact, _parse_iso_date  # noqa: E402
 from workout_coach.lib.extract import (  # noqa: E402
     _age_from_birthday,
     estimate_max_hr,
-    extract_rows,
-    find_deloads,
     load_exercises_db,
+    read_coach_training,
     read_health_metrics,
     read_workout_sessions,
 )
@@ -327,7 +326,9 @@ def main() -> int:
         print(f"ERROR: monthly CSVs not found: {md}", file=sys.stderr)
         return 1
 
-    rows, session_totals, session_summaries = extract_rows(person, args.months, today_d)
+    (rows, session_totals, session_summaries), increment_rows, deload_dates = read_coach_training(
+        person, today_d, args.months, INCREMENT_HISTORY_MONTHS,
+    )
     # Enforce the ``--today`` horizon on every series before any analytics
     # run. See ``_clip_series``: the readers hand back whole files, so
     # without this a run dated 2026-06-01 reported a 2026-07-29 top set and
@@ -336,7 +337,7 @@ def main() -> int:
     rows = _clip_series(rows, today_d)
     session_totals = _clip_date_map(session_totals, today_d)
     session_summaries = _clip_date_map(session_summaries, today_d)
-    deloads = [d for d in find_deloads(person)
+    deloads = [d for d in deload_dates
                if (_parse_iso_date(d) or today_d) <= today_d]
 
     profile = read_profile(person)
@@ -514,9 +515,7 @@ def main() -> int:
     # The load step of each lift is learned from a longer stretch of the log
     # than the analytics window, so a lift that steps once a month still
     # shows its jumps.
-    jump_rows = rows if args.months >= INCREMENT_HISTORY_MONTHS else \
-        _clip_series(extract_rows(person, INCREMENT_HISTORY_MONTHS,
-                                  today_d)[0], today_d)
+    jump_rows = rows if args.months >= INCREMENT_HISTORY_MONTHS else _clip_series(increment_rows, today_d)
 
     def _next_dose(load_policy: dict) -> dict:
         return build_next_dose(

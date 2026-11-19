@@ -7,12 +7,12 @@ max_hr) and never re-open the source files.
 
 CSV readers:
 
-- ``extract_rows(person, months_back, today_d)`` — walk every per-month
-  CSV in ``<person>/data/monthly/``, return
+- ``extract_rows(person, months_back, today_d)`` — read the selected month
+  CSVs, return
   ``(rows, session_totals, session_summaries)``. Folds TOTAL-row
   metadata into the per-session summary dict.
-- ``find_deloads(person)`` — dates whose TOTAL-row Notes contain the
-  ``Deload Workout`` marker (case-insensitive).
+- ``read_coach_training`` — both workout lookbacks and marked deload dates
+  from one pass over the files.
 - ``read_health_metrics(person)`` — Health Metrics rows, ASC, with
   missing-key backfill, so a tracker whose CSV predates a schema
   widening still presents the full key surface.
@@ -35,11 +35,13 @@ Profile / HR estimation:
 """
 from __future__ import annotations
 
-from shared.workout_context import partial_load
+from collections.abc import Iterator
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 import re
-from datetime import date, timedelta
+
+from shared.workout_context import partial_load
 
 from .constants import (
     DELOAD_MARKER,
@@ -66,7 +68,8 @@ from shared.monthly_csv import (
 from shared import csv_store as _csv_store
 
 
-def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dict], dict, dict]:
+def extract_rows(person: str, months_back: int, today_d: date, *,
+                 month_rows: dict[str, list[dict]] | None = None) -> tuple[list[dict], dict, dict]:
     """Return (rows, session_totals, session_summaries).
 
     Reads per-month CSVs from ``<person>/data/monthly/YYYY.MM.csv``.
@@ -86,7 +89,7 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
     row) are absent from this dict.
     """
     cutoff = today_d - timedelta(days=months_back * 31)
-    yms = sorted(list_year_months(person), reverse=True)
+    yms = sorted(list_year_months(person) if month_rows is None else month_rows, reverse=True)
 
     rows: list[dict] = []
     session_totals: dict[str, float] = {}
@@ -101,12 +104,12 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
         if first_of_month < cutoff.replace(day=1):
             continue
 
-        month_rows = read_monthly(person, ym)
+        month = read_monthly(person, ym) if month_rows is None else month_rows[ym]
         partial_groups = {(date_str(rd.get("date")), str(rd.get("num") or ""),
                            str(rd.get("exercise") or "").strip().casefold())
-                          for rd in month_rows if partial_load(rd)}
+                          for rd in month if partial_load(rd)}
         partial_dates = {key[0] for key in partial_groups}
-        for rd in month_rows:
+        for rd in month:
             session = rd.get("session")
             date_val = rd.get("date")
             num = rd.get("num")
@@ -195,24 +198,35 @@ def extract_rows(person: str, months_back: int, today_d: date) -> tuple[list[dic
     return rows, session_totals, session_summaries
 
 
-def find_deloads(person: str) -> list[str]:
-    """Return YYYY-MM-DD dates whose TOTAL row Notes contain 'Deload Workout'.
+def _deload_dates(rows: list[dict]) -> Iterator[str]:
+    for row in rows:
+        exercise = row.get("exercise")
+        notes = row.get("notes")
+        if (isinstance(exercise, str) and exercise.strip().upper() == TOTAL_LABEL
+                and notes and DELOAD_MARKER in str(notes).lower()):
+            day = date_str(row.get("date"))
+            if day:
+                yield day
 
-    Reads each per-month CSV; checks each TOTAL row's Notes for the
-    deload marker (case-insensitive substring).
-    """
+
+def read_coach_training(person: str, today_d: date, months: int,
+                        increment_months: int) -> tuple[tuple[list[dict], dict, dict], list[dict], list[str]]:
+    """Read each month once for analysis, load increments and deload history."""
+    cutoff = today_d - timedelta(days=31 * max(months, increment_months))
+    first_month = f"{cutoff.year:04d}.{cutoff.month:02d}"
+    recent = {}
     deloads: set[str] = set()
     for ym in list_year_months(person):
-        for rd in read_monthly(person, ym):
-            exercise = rd.get("exercise")
-            if not (isinstance(exercise, str)
-                    and exercise.strip().upper() == TOTAL_LABEL):
-                continue
-            target_date = date_str(rd.get("date"))
-            notes = rd.get("notes")
-            if target_date and notes and DELOAD_MARKER in str(notes).lower():
-                deloads.add(target_date)
-    return sorted(deloads)
+        rows = read_monthly(person, ym)
+        deloads.update(_deload_dates(rows))
+        if ym >= first_month:
+            recent[ym] = rows
+
+    training = extract_rows(person, months, today_d, month_rows=recent)
+    increments = training[0] if months >= increment_months else extract_rows(
+        person, increment_months, today_d, month_rows=recent,
+    )[0]
+    return training, increments, sorted(deloads)
 
 
 

@@ -17,7 +17,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
+from unittest.mock import patch
+
+from shared import person_paths
+from workout_coach.lib import extract
 
 
 SKILLS_ROOT = Path(__file__).resolve().parents[1]
@@ -50,7 +55,7 @@ _SESSION_DATES = [
 LATEST_ANCHOR = "2026-06-30"
 
 # TOTAL-row deload markers: one inside the earliest window, one past every
-# anchor. ``read_tracker`` filters ``find_deloads`` on the horizon
+# anchor. ``read_tracker`` filters marked deload dates on the horizon
 # separately from ``_clip_series``, so it needs its own future row.
 _DELOAD_DATES = {"2026-05-04", "2026-07-06"}
 DELOAD_MARKER = "Deload Workout"
@@ -263,6 +268,18 @@ class _FixtureCase(unittest.TestCase):
 
 
 class PayloadHorizonTests(_FixtureCase):
+    def test_coach_reads_overlapping_months_once(self) -> None:
+        with patch.object(person_paths, "WORKOUT_TRACKER_ROOT", self.root), patch.object(
+            extract, "read_monthly", wraps=extract.read_monthly,
+        ) as read:
+            training, increments, deloads = extract.read_coach_training(PERSON, date(2026, 6, 30), 1, 3)
+
+        self.assertCountEqual([args[1] for args, _ in read.call_args_list],
+                              ["2026.04", "2026.05", "2026.06", "2026.07"])
+        self.assertEqual(training[0][0]["date"], "2026-05-04")
+        self.assertEqual(increments[0]["date"], "2026-04-06")
+        self.assertEqual(deloads, sorted(_DELOAD_DATES))
+
     def test_no_payload_value_is_dated_after_today(self) -> None:
         for today in ("2026-04-30", "2026-05-17", "2026-06-01", "2026-06-30"):
             with self.subTest(today=today):

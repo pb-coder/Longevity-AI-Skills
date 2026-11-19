@@ -62,6 +62,7 @@ from shared.csv_store import (
     write_profile,
 )
 from shared.data_git import commit_data
+from shared.health_import_receipts import record_health_import
 from shared.import_conflicts import find_import_conflicts, format_import_conflicts
 from shared.monthly_csv_upsert import (
     upsert_monthly_cardio,
@@ -726,6 +727,10 @@ def import_export(person: str,
         person, sessions, allow_past_months=allow_past_months,
     ))
 
+    try:
+        record_health_import(person, SOURCE_NAME, payload["meta"], since, until)
+    except OSError as exc:
+        out.append(f"WARN: could not record import coverage: {exc}")
     sha = commit_data(person, f"import: {export_path.name}")
     if sha:
         out.append(f"Committed {person} data: {sha}")

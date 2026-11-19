@@ -46,6 +46,25 @@ class CliSemanticTests(unittest.TestCase):
             self.assertNotIn(retired, data)
         return data
 
+    def test_reader_argument_validation(self) -> None:
+        reader = str(SKILLS_ROOT / "workout-coach" / "scripts" / "read_tracker.py")
+        valid = self.run_cmd(reader, "--person=person_a", "--today=2026-05-17",
+                             "--weekly", "--sessions=2", "--minutes=35")
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        self.assertIn("weekly_plan", json.loads(valid.stdout))
+        for flags, message in (
+            ([], "required: --person"),
+            (["--person", "person_a", "--sessions", "0"], "count from 1 to 14"),
+            (["--person", "person_a", "--weekly", "--minutes", "0"], "positive minutes"),
+            (["--person", "person_a", "--minutes", "30"], "require --weekly"),
+            (["--person", "person_a", "--weekly", "--override-gate"], "dated session analysis"),
+            (["--person", "person_a", "--unknown"], "unrecognized arguments"),
+        ):
+            with self.subTest(flags=flags):
+                proc = self.run_cmd(reader, *flags)
+                self.assertEqual(proc.returncode, 2)
+                self.assertIn(message, proc.stderr)
+
     def test_read_tracker_person_a_semantic_golden(self) -> None:
         data = self.read_tracker("person_a")
         self.assertEqual(len(data["monthly_sessions"]), 3)

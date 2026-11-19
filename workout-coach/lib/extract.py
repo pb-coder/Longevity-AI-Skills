@@ -17,11 +17,6 @@ CSV readers:
   missing-key backfill, so a tracker whose CSV predates a schema
   widening still presents the full key surface.
 - ``read_workout_sessions(person)`` — Apple Workout Sessions rows, ASC.
-- ``read_swim_workouts(person)`` / ``read_swim_laps(person)`` —
-  per-swim aggregates and per-lap detail. Aggregates are written on
-  every import; per-lap detail is frozen history from the retired XML
-  path, so ``read_swim_laps`` returns ``[]`` on any month imported
-  since the migration.
 
 Exercises database:
 
@@ -251,42 +246,6 @@ def read_health_metrics(person: str) -> list[dict]:
         out.append(rec)
     out.sort(key=lambda e: e["date"])
     return out
-
-
-def read_swim_workouts(person: str) -> list[dict]:
-    """Return per-swim aggregate rows aggregated across all per-month
-    ``swimming/YYYY.MM.workouts.csv`` files.
-
-    Pass-through to ``csv_store.read_swim_workouts`` — the analytics
-    layer doesn't reshape the schema, just consumes it.
-    """
-    return _csv_store.read_swim_workouts(person)
-
-
-def read_swim_laps(person: str) -> list[dict]:
-    """Return per-lap rows aggregated across all per-month
-    ``swimming/YYYY.MM.laps.csv`` files."""
-    return _csv_store.read_swim_laps(person)
-
-
-def read_sleep_nights(person: str) -> list[dict]:
-    """Return per-night aggregate rows from ``sleep/YYYY.MM.nights.csv``.
-
-    Pass-through to ``csv_store.read_sleep_nights``. Empty list when
-    the sleep folder is absent (a tracker that
-    haven't imported / logged any sleep yet).
-    """
-    return _csv_store.read_sleep_nights(person)
-
-
-def read_nutrition_phases(person: str) -> list[dict]:
-    """Return nutrition-phase rows from ``nutrition_phases.csv``.
-
-    Pass-through to ``csv_store.read_nutrition_phases``. Empty list
-    when the file is absent (no manual /log bulking/cutting entries
-    yet). Sorted DESC by ``start_date``.
-    """
-    return _csv_store.read_nutrition_phases(person)
 
 
 def read_workout_sessions(person: str) -> list[dict]:

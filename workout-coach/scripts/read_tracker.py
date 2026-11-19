@@ -1,127 +1,12 @@
-"""Read the given person's CSV store for /coach analysis.
+"""Read a person's tracker and emit the coaching snapshot as JSON.
 
-Emits one JSON blob on stdout organised around session-level signals
-(decisions, not raw arrays). Top blocks:
-
-  Source + capabilities:
-  - today, data_source, capabilities, auto_cardio_enabled
-  - estimated_max_hr, estimated_rest_hr — derived once at the top from
-    observed per-workout max HR, falling back to 208 − 0.7×age (age is
-    computed from Profile.birthday). Drives all HRR / TRIMP /
-    Karvonen-zone math below. Apple's own HR-zone boundaries were the
-    only independent read on max HR and are not in the export, so the
-    observed maximum is now the sole basis.
-
-  Strength + cardio sessions:
-  - monthly_sessions: canonical per-session record incl. TRIMP /
-    load_band (light/moderate/hard/red-line) / intensity_pct / max_hr /
-    volume / is_deload, sourced from the TOTAL row's metadata + Apple
-    per-workout max_hr. Replaces session_totals + workout_sessions_last_28d.
-  - weekly_volume_per_muscle, estimated_1rm, progression_summary
-  - stale_exercises (top 5 by reintroduction value), unknown_exercises
-  - deloads (user-marked), auto_deload_candidates (Python-detected)
-
-  Prescription memory (what was ASKED for, versus what happened):
-  - adherence: the previous plan reconciled against the logs — sets
-    prescribed vs performed, split isolation / compound, the per-exercise
-    ledger, substitutions, and the D5 bench list with its one question.
-  - next_dose: per exercise worked in the last 120 days, the next load and
-    rep range, derived from the log by double progression (the step is the
-    lift's own most common load jump, else the equipment's; a machine or
-    cable lift is judged on the usual gym, the other gym's load rides as
-    other_gym_load_kg). ``session_recommendation.load_policy`` only turns it
-    into a deload on a red-flag day. The coach copies it; it does not pick
-    weights itself.
-  - block: the current training block, its slots tagged anchor /
-    rotating, and whether the boundary has fired (deload or 6 weeks,
-    whichever first).
-  - rotation_candidates: derived starting loads for movements with no
-    logged history, so a rotated-in exercise can be prescribed at all.
-
-  Prescription specs + priority tiers:
-  - core_week_spec / arm_week_spec, muscle_priority_tiers,
-    muscle_volume_targets, volume_landmark_unit, synergist_credit_offset
-  - muscle_floors: {muscle: direct sets per week}, the bar the plan check
-    enforces (emphasis tier = MEV, every other tier = MV, direct sets, not
-    the fractional unit of muscle_volume_targets), scaled by
-    min(1, strength_sessions_per_week / 4) and, on a cadence deload week, by
-    (n - 0.5) / n, rounded down. A muscle with no floor is
-    ABSENT: core (its dose is core_week_spec), erectors, forearms, MV-0
-    muscles and muscles the catalog has no direct exercise for.
-  - strength_sessions_per_week (--sessions N, else profile.csv) and
-    last_session_type ({type, title, date, plan_date} of the newest strength
-    session; absent with last_session_type_reason when it cannot be told).
-
-  Cardio rollup:
-  - cardio_last_28d (sessions, minutes, distance, kcal)
-  - cardio_hr_zones_28d (HRR-based time-in-zone via Karvonen)
-
-  Recovery + training load (Python-derived):
-  - recovery: 0-10 score with named drivers (HRV, RHR, sleep, wrist temp,
-    HR Recovery 1-min, VO2max trend) + confidence
-  - training_load: CTL/ATL/TSB rolling EWMA from per-session TRIMP
-  - hr_at_volume_divergence: per-muscle slope of strength avg HR vs time
-
-  Bodyweight:
-  - bodyweight_latest, bodyweight_trend_kg_per_week
-  - bodyweight_trend: the same rate with its state. OLS over a minimum
-    28-day window; ``state`` is ``resolved`` only when the 95% interval
-    excludes zero, and ``bodyweight_trend_kg_per_week`` is null otherwise.
-    Read ``reason`` / ``note`` before saying anything about gaining or
-    losing.
-
-  Waist circumference (source-agnostic; both importers write the column):
-  - waist_latest: ``{value_cm, date}`` for the newest measurement at or
-    before ``--today``; absent when never measured.
-  - waist_trend_cm_per_4w: the same block SHAPE as bodyweight_trend, rate
-    in cm per 4 weeks, over a minimum 56-day window. ``cm_per_4w`` is
-    populated only when ``state == "resolved"``. A single measurement
-    returns ``unresolved`` / ``too_few_readings``, never 0.0.
-
-  Body fat and lean mass (same two importers, same 19-col schema):
-  - body_fat_latest: ``{value_pct, date}``; absent until first recorded.
-  - body_fat_trend_pct_per_4w: same block shape, minimum 84-day window.
-  - lean_mass_latest: ``{value_kg, date}``; absent until first recorded.
-  - lean_mass_trend_kg_per_4w: same block shape, minimum 112-day window.
-    Scale-DERIVED from bodyweight and body fat rather than measured, so a
-    resolved rate here restates those two rather than corroborating them.
-    Both trend blocks are emitted even when the column has never been
-    written; ``state``/``reason``/``note`` then say the channel is empty.
-
-  Daily activity and energy:
-  - daily_activity_28d: NEAT rollup. ``assessment`` (low / moderate /
-    high) is read off ``steps_daily_avg`` first, exercise minutes
-    second, walking minutes last; ``assessment_basis`` says which.
-  - energy_28d: daily TDEE with its active / basal split, ``n_days``,
-    and the per-week OLS trend on TDEE and on basal. ABSENT entirely
-    when neither energy column carries a reading in the window. TDEE is
-    summed per day from days carrying both components, never as the sum
-    of two independently-windowed means. Basal falling during an open
-    cut is adaptive thermogenesis and is why the split is stored.
-
-  Apple Health:
-  - health_metrics_weekly (4-week aggregates; raw daily behind
-    --include-daily-health)
-  - vo2max_latest, vo2max_trend_per_4w
-
-  Debug deep-dive (off by default):
-  - rows: flat per-set list (--include-rows)
-  - estimated_1rm.e1rm_history (--include-1rm-history)
-
-Usage:
-    python3 read_tracker.py --person <Name> [--months 3] [--today YYYY-MM-DD]
-        [--include-rows] [--include-1rm-history] [--include-daily-health]
-        [--pretty]
-
-Keeping the model out of the weeds on format quirks (string vs datetime
-dates, stringified numbers, casing inconsistency, empty-row streaks) is
-the whole point — and going further, this script also computes the
-training-science derivatives (TRIMP, recovery score, load bands, HR-at-
-volume divergence) so the coach LLM consumes structured signals rather
-than re-deriving them each run.
+The weekly snapshot is the current planning input. The dated snapshot remains
+available for historical assessment and plan validation. Run with --help for
+supported options.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from datetime import date, datetime, timedelta
@@ -147,6 +32,9 @@ if TYPE_CHECKING:
 # still get loaded later via ``workout_coach.lib.extract``; the facade
 # itself is the only thing skipped.
 from shared.csv_store_profile import read_profile  # noqa: E402
+from shared.csv_store_periodic import (  # noqa: E402
+    read_nutrition_phases, read_sleep_nights, read_swim_laps, read_swim_workouts,
+)
 from shared.health_import_receipts import read_health_import_receipts  # noqa: E402
 from shared.person_paths import monthly_dir  # noqa: E402
 from workout_coach.lib.constants import (  # noqa: E402
@@ -169,10 +57,6 @@ from workout_coach.lib.extract import (  # noqa: E402
     find_deloads,
     load_exercises_db,
     read_health_metrics,
-    read_nutrition_phases,
-    read_sleep_nights,
-    read_swim_laps,
-    read_swim_workouts,
     read_workout_sessions,
 )
 # The health analytics live in four focused modules, imported directly.
@@ -397,112 +281,37 @@ def _attach_body_comp_weekly(weekly: list[dict], readings: list[dict],
 
 
 
-class _Args:
-    person: str = ""
-    months: int = 3
-    today: str | None = None
-    include_rows: bool = False
-    include_1rm_history: bool = False
-    include_daily_health: bool = False
-    pretty: bool = False
-    # Honor an EXPLICIT user override of the recovery gate (SKILL.md's
-    # override protocol). When set, a restrictive Tier A/B/C call is
-    # normalized to a green/full-volume session, keeping the original
-    # rationale visible for transparency. Only the user may request this.
-    override_gate: bool = False
-    # The number of strength sessions to plan this week, when the user asked
-    # for a count in the /coach message. Overrides profile.csv's
-    # ``strength_sessions_per_week`` for the payload field of that name, and
-    # through it the weekly floors (`constants.floor_scale`).
-    sessions: int | None = None
-    weekly: bool = False
-    week_start: str | None = None
-    training_days: str | None = None
-    minutes: int | None = None
-
-
-def _parse_args(argv: list[str]) -> _Args:
-    """Hand-rolled parser for the 7 supported flags.
-
-    Replaces argparse to avoid pulling in inspect / shutil / lzma / _lzma /
-    _bz2 / gettext / urllib at cold-start. Semantics match the previous
-    argparse setup: --person required, --months int (default 3), --today
-    optional string, four store-true booleans. Supports --foo=value and
-    --foo value forms. Unknown flag → SystemExit(2) with a usage line.
-    """
-    a = _Args()
-    flag_aliases = {
-        "--include-rows": "include_rows",
-        "--include-1rm-history": "include_1rm_history",
-        "--include-daily-health": "include_daily_health",
-        "--pretty": "pretty",
-        "--override-gate": "override_gate",
-        "--weekly": "weekly",
-    }
-    value_aliases = {
-        "--person": "person",
-        "--months": "months",
-        "--today": "today",
-        "--sessions": "sessions",
-        "--week-start": "week_start",
-        "--training-days": "training_days",
-        "--minutes": "minutes",
-    }
-
-    def _bail(msg: str) -> None:
-        print(f"read_tracker: error: {msg}", file=sys.stderr)
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        print(f"read_tracker: error: {message}", file=sys.stderr)
         raise SystemExit(2)
 
-    i = 0
-    while i < len(argv):
-        tok = argv[i]
-        if tok in ("-h", "--help"):
-            print(
-                "usage: read_tracker.py --person NAME [--months N] "
-                "[--today YYYY-MM-DD] [--include-rows] "
-                "[--include-1rm-history] [--include-daily-health] [--pretty] "
-                "[--override-gate] [--sessions N] "
-                "[--weekly [--week-start YYYY-MM-DD] [--training-days DATE,DATE,...] [--minutes N]]"
-            )
-            raise SystemExit(0)
-        if "=" in tok and tok.startswith("--"):
-            key, _, value = tok.partition("=")
-            consumed = 1
-        else:
-            key = tok
-            value = argv[i + 1] if i + 1 < len(argv) else None
-            consumed = 2 if value is not None else 1
 
-        if key in flag_aliases:
-            setattr(a, flag_aliases[key], True)
-            i += 1
-            continue
-        if key in value_aliases:
-            attr = value_aliases[key]
-            if value is None or (consumed == 2 and value.startswith("--")):
-                _bail(f"argument {key}: expected a value")
-            if attr in ("months", "sessions", "minutes"):
-                try:
-                    setattr(a, attr, int(value))
-                except (TypeError, ValueError):
-                    _bail(f"argument --{attr}: invalid int value: {value!r}")
-                if attr == "sessions" and not 1 <= a.sessions <= 14:
-                    _bail("argument --sessions: expected a count from 1 to 14")
-                if attr == "minutes" and a.minutes < 1:
-                    _bail("argument --minutes: expected positive minutes")
-            else:
-                setattr(a, attr, value)
-            i += consumed
-            continue
-        _bail(f"unrecognized argument: {tok}")
-
-    if not a.person:
-        _bail("the following arguments are required: --person")
-    if a.weekly and a.override_gate:
-        _bail("--override-gate is available only for the dated session analysis")
-    if not a.weekly and any(value is not None for value in (a.week_start, a.training_days, a.minutes)):
-        _bail("--week-start, --training-days and --minutes require --weekly")
-    return a
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = _ArgumentParser(allow_abbrev=False)
+    parser.add_argument("--person", required=True)
+    parser.add_argument("--months", type=int, default=3)
+    parser.add_argument("--today")
+    for flag in ("include-rows", "include-1rm-history", "include-daily-health",
+                 "pretty", "override-gate", "weekly"):
+        parser.add_argument(f"--{flag}", action="store_true")
+    parser.add_argument("--sessions", type=int)
+    parser.add_argument("--week-start")
+    parser.add_argument("--training-days")
+    parser.add_argument("--minutes", type=int)
+    args = parser.parse_args(argv)
+    if not args.person:
+        parser.error("the following arguments are required: --person")
+    if args.sessions is not None and not 1 <= args.sessions <= 14:
+        parser.error("argument --sessions: expected a count from 1 to 14")
+    if args.minutes is not None and args.minutes < 1:
+        parser.error("argument --minutes: expected positive minutes")
+    if args.weekly and args.override_gate:
+        parser.error("--override-gate is available only for the dated session analysis")
+    if not args.weekly and any(value is not None for value in
+                               (args.week_start, args.training_days, args.minutes)):
+        parser.error("--week-start, --training-days and --minutes require --weekly")
+    return args
 
 
 def main() -> int:
@@ -535,10 +344,12 @@ def main() -> int:
     sessions_per_week = args.sessions or profile.get("strength_sessions_per_week")
     weekly = None
     existing_week = None
+    revisions = None
     if args.weekly:
-        from workout_coach.lib.weekly_prescription import latest_published_weeks
+        from workout_coach.lib.weekly_prescription import latest_published_weeks, read_week_revisions
 
-        published = latest_published_weeks(person, today_d)
+        revisions = read_week_revisions(person)
+        published = latest_published_weeks(person, today_d, revisions=revisions)
         try:
             weekly = week_context(
                 today_d, args.week_start, args.training_days,
@@ -638,18 +449,9 @@ def main() -> int:
         if r["exercise"].lower() not in db:
             unknown_set.add(r["exercise"])
 
-    # ---- Prescription memory (W2 + W5). Everything above this line reads
-    # what was PERFORMED. These blocks read what was PRESCRIBED —
-    # ``plans/<Person>/<date>-workout.md`` — and reconcile the two. Without
-    # them the coach cannot tell a movement it prescribes six times and the
-    # user performs zero times from one that works, and generation N cannot
-    # differ from N-1 because it never sees it. ----
-    # Priority tiers are resolved here rather than below because the bench
-    # rule needs them: retiring every route into an emphasis muscle while
-    # the same payload demands mid-MAV volume on it hands the coach two
-    # instructions it cannot both obey.
+    # Reconcile published and historical prescriptions with logged work.
     priority_tiers, priority_unknown = muscle_priority_tiers(profile)
-    plans_parsed = load_plans(person, today_d, limit=8, db=db)
+    plans_parsed = load_plans(person, today_d, limit=8, db=db, revisions=revisions)
     adherence = build_adherence(person, rows, db, today_d, catalog,
                                 priority_tiers=priority_tiers, plans=plans_parsed)
     fit = None
@@ -1052,32 +854,21 @@ def main() -> int:
         "data_source": data_source,
         "capabilities": capabilities,
         "auto_cardio_enabled": bool(profile.get("auto_cardio")),
-        # ---- Strength + cardio sessions (canonical session-level view) ----
         "monthly_sessions": monthly_sessions,
         "weekly_volume_per_muscle": weekly_volume,
         "estimated_1rm": e1rm,
         "progression_summary": progression_summary(rows, catalog),
         "stale_exercises": stale,
         "unknown_exercises": sorted(unknown_set),
-        # ---- Prescription memory: what was asked for, versus what happened.
-        # ``adherence`` is None on a first run (no plans on disk) and
-        # ``_compact`` drops it, which reads correctly as "unknown" rather
-        # than as 0% adherence. ----
         "adherence":            adherence,
         "next_dose":            next_dose,
         "block":                block,
         "rotation_candidates":  rot_candidates or None,
-        # ---- Distribution-shaped weekly specs + priority tiers (D8). ----
         "core_week_spec":         CORE_WEEK_SPEC,
         "arm_week_spec":          ARM_WEEK_SPEC,
         "muscle_priority_tiers":  priority_tiers,
         "muscle_volume_targets":  volume_targets,
         "muscle_floors":          floors,
-        # The session count to plan (``--sessions``, else profile.csv) and
-        # where the split rotation continues from. ``last_session_type`` is
-        # ``{type, title, date, plan_date}`` of the newest strength session;
-        # when it cannot be told, the key is absent and
-        # ``last_session_type_reason`` says why.
         "strength_sessions_per_week": sessions_per_week,
         "last_session_type":      last_session,
         "last_session_type_reason": last_session_reason,
@@ -1085,31 +876,13 @@ def main() -> int:
         "synergist_credit_offset": SYNERGIST_CREDIT_OFFSET,
         "deloads": deloads,
         "auto_deload_candidates": auto_deloads,
-        # ---- Cardio rollup ----
         "cardio_last_28d": cardio_last_28d(rows, today_d),
         "cardio_hr_zones_28d": cardio_zones,
-        # ---- Swim summary (only present when there are swims in the
-        # 28-day window; ``_compact`` drops None below). ----
         "swim_summary": swim,
-        # ---- Sleep summary (only present when XML tracker has nights in
-        # the 28-day window; ``_compact`` drops None for HL or no-data). ----
         "sleep_summary": sleep,
-        # ---- Nutrition phase (bulk / cut / maintain / recomp). Only
-        # present when the person has an open phase in
-        # nutrition_phases.csv; ``_compact`` drops None when absent so
-        # the renderer's card gate follows data presence. ----
         "nutrition_phase":      nutrition_phase,
-        # ---- Daily activity (NEAT) — all-day movement beyond workouts.
-        # ``assessment`` is now read off ``steps_daily_avg`` first;
-        # ``assessment_basis`` names which signal produced the band. ----
         "daily_activity_28d": daily_activity,
-        # ---- Daily energy expenditure: TDEE with its active / basal
-        # split, plus the OLS trend on each. Only present when the energy
-        # columns carry readings in the 28-day window; ``_compact`` drops
-        # None, the same gate ``sleep_summary`` / ``nutrition_phase``
-        # use. ----
         "energy_28d": energy,
-        # ---- Recovery + training load (Python-derived, not raw metrics) ----
         "recovery": recovery,
         "training_load": training_load,
         "training_load_by_modality": training_load_by_modality,
@@ -1117,55 +890,26 @@ def main() -> int:
         "age_years": age_years,
         "estimated_max_hr": max_hr,
         "estimated_rest_hr": round(rest_hr, 1) if rest_hr else None,
-        # ---- Bodyweight ----
         "bodyweight_latest": bw_latest,
-        # Scalar stays ``float | None`` for every existing consumer. The
-        # block beside it says WHY it is None — absent that, a renderer
-        # cannot tell "no weigh-ins" from "the rate is not resolvable",
-        # and the second of those is a sentence the coach must say out
-        # loud rather than silently omit.
         "bodyweight_trend_kg_per_week": bw_trend,
         "bodyweight_trend": bw_trend_block,
-        # ---- Waist circumference ----
-        # ``waist_latest`` is ``{value_cm, date}`` for the newest
-        # measurement at or before ``today``, and None (dropped by
-        # ``_compact``, same as ``bodyweight_latest`` / ``vo2max_latest``)
-        # when the column has never been filled in.
         "waist_latest": waist_latest,
-        # Same block shape as ``bodyweight_trend``, rate in cm per 4
-        # weeks: ``state`` / ``reason`` / ``note`` plus ``cm_per_4w``,
-        # which is populated ONLY when the 95% interval excludes zero.
-        # There is no bare-scalar twin on purpose — a caller that wants
-        # the number has to pass through ``state`` to reach it.
         "waist_trend_cm_per_4w": waist_trend_block,
-        # ---- Body fat % and lean mass ----
-        # Same pair-of-keys shape as waist. ``*_latest`` is None (and so
-        # dropped by ``_compact``) until the column carries a reading;
-        # the trend block is ALWAYS emitted, because "never recorded" is
-        # an answer the coach has to be able to read rather than infer
-        # from a missing key. Lean mass is scale-DERIVED from bodyweight
-        # and body fat, so a resolved rate there restates those two
-        # rather than corroborating them — its note says so.
         "body_fat_latest":            body_fat_latest,
         "body_fat_trend_pct_per_4w":  body_fat_trend_block,
         "lean_mass_latest":           lean_mass_latest,
         "lean_mass_trend_kg_per_4w":  lean_mass_trend_block,
-        # ---- Apple Health weekly aggregates (raw daily behind a flag) ----
         "health_metrics_weekly": weekly_health,
         "health_metrics_recent": health_recent if args.include_daily_health else None,
         "vo2max_latest": latest_metric(health_all, "vo2max"),
         "vo2max_trend_per_4w": metric_trend_per_4w(health_all, "vo2max"),
-        # ---- Recovery gate: 5-tier session recommendation. SKILL.md Phase 2
-        # MUST honor this before generating any workout. ----
         "session_recommendation": session_recommendation,
-        # ---- Session-length budget (set-count driven, per-person target) ----
         "session_target_min":     session_target_min,
         "target_working_sets":    target_working_sets,
         "session_time_model": {
             "overhead_min": session_warmup_min,
             "min_per_working_set": min_per_working_set,
         },
-        # ---- Longevity Trajectory tab ----
         "longevity_score":      longevity_score,
         "longevity_state":      longevity_state,
         "vo2_percentile":       vo2_percentile,
@@ -1174,7 +918,6 @@ def main() -> int:
         "sleep_regularity":     sleep_regularity,
         "rem_anomaly":          rem_anomaly,
         "movement_consistency": movement_consistency,
-        # ---- Debug deep-dive: flat per-set list (--include-rows). ----
         "rows": rows if args.include_rows else None,
     }
     if args.pretty:

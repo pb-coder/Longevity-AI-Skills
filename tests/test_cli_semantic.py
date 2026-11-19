@@ -18,17 +18,32 @@ FIXTURE_ROOT = SKILLS_ROOT / "tests" / "fixtures"
 class CliSemanticTests(unittest.TestCase):
     maxDiff = None
 
-    def run_cmd(self, *args: str) -> subprocess.CompletedProcess:
+    def run_cmd(self, *args: str, fixture_root: Path = FIXTURE_ROOT) -> subprocess.CompletedProcess:
         env = os.environ.copy()
-        env["WORKOUT_TRACKER_ROOT"] = str(FIXTURE_ROOT)
+        env["WORKOUT_TRACKER_ROOT"] = str(fixture_root)
         return subprocess.run(
             [sys.executable, *args],
-            cwd=FIXTURE_ROOT,
+            cwd=fixture_root,
             env=env,
             text=True,
             capture_output=True,
             check=False,
         )
+
+    def test_longevity_state_follows_the_selected_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(FIXTURE_ROOT / "person_a", root / "person_a")
+            longevity = root / "person_a/data/longevity"
+            longevity.mkdir()
+            (longevity / "profile.md").write_text("Location: Synthetic workspace\n", encoding="utf-8")
+            result = self.run_cmd(
+                str(SKILLS_ROOT / "workout-coach/scripts/read_tracker.py"),
+                "--person", "person_a", "--today", "2026-05-17", "--weekly",
+                fixture_root=root,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["longevity_state"]["location"], "Synthetic workspace")
 
     def read_tracker(self, person: str) -> dict:
         proc = self.run_cmd(

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from shared.person_paths import data_dir
+
 
 def vo2_percentile_age_sex(value: float | None, sex: str | None,
                             age: int | None) -> dict | None:
@@ -338,23 +340,10 @@ def compute_longevity_score(*, vo2_percentile: dict | None,
     }
 
 
-# =============================================================================
-# 5-tier session recommendation gate
-# =============================================================================
-#
-# The Today tab calls this BEFORE generating any workout. It decides which of
-# Tier A (rest) / B (reactive deload) / C (downgrade) / D (green) / E
-# (over-recovered) the user is in, based on the existing signals already in
-# the JSON. The SKILL.md Phase 2 prompt is required to honor the result —
-# this is the deterministic single source of truth so the LLM can't
-# rationalize past it.
-
 def read_longevity_state(person: str, today_d: date) -> dict | None:
-    """Parse the person's longevity ``.md`` files into a structured state
-    block for the Trajectory tab's personalized risk panel.
+    """Parse the person's longevity files from their configured tracker root.
 
-    Reads (where present) ``profile.md``, ``state.md``, ``interventions.md``,
-    ``biomarkers.md`` from ``<root>/<Person>/data/longevity/`` and surfaces:
+    Reads ``profile.md``, ``state.md`` and ``biomarkers.md`` when present:
 
     - ``has_profile``: whether a longevity profile exists for this person
     - ``age`` computed from DOB
@@ -367,28 +356,20 @@ def read_longevity_state(person: str, today_d: date) -> dict | None:
     - ``risk_flags``: list of dicts {key, label, status, hint} where
       ``status`` is one of "tracked" / "due" / "overdue" / "active".
 
-    Returns ``None`` when the directory doesn't exist (so <OtherPerson> without a
-    longevity/ folder gets a clean "no profile" state). Renderer reads
-    this directly.
+    Returns ``None`` when the longevity directory is absent.
     """
-    from pathlib import Path as _Path
-    skills_root = _Path(__file__).resolve().parents[3]
-    person_root = skills_root / person / "data" / "longevity"
+    person_root = data_dir(person) / "longevity"
     if not person_root.exists():
         return None
 
     def _read(name: str) -> str:
-        path = person_root / name
-        if not path.exists():
-            return ""
         try:
-            return path.read_text(encoding="utf-8")
+            return (person_root / name).read_text(encoding="utf-8")
         except OSError:
             return ""
 
     profile_md = _read("profile.md")
     state_md = _read("state.md")
-    interventions_md = _read("interventions.md")
     biomarkers_md = _read("biomarkers.md")
 
     out: dict = {"has_profile": True}

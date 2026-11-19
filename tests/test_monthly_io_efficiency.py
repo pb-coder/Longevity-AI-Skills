@@ -48,6 +48,18 @@ class MonthlyIoTests(unittest.TestCase):
                 monthly_csv.upsert_rows("Manual", "2026.05", [{**row, "set": 2}])
         self.assertEqual(path.read_bytes(), before)
 
+    def test_manual_batch_decodes_existing_rows_once(self):
+        row = {"date": "2026-05-12", "num": 1, "exercise": "Hack Squat",
+               "set": 1, "reps": 10, "kg": 40}
+        monthly_csv.upsert_rows("Manual", "2026.05", [row])
+        _, existing = monthly_csv_upsert._read_csv_rows(
+            person_paths.monthly_csv("Manual", "2026.05")
+        )
+        with patch.object(monthly_csv_upsert, "_row_to_dict", wraps=monthly_csv_upsert._row_to_dict) as decode:
+            result = monthly_csv.upsert_rows("Manual", "2026.05", [row] * 100, dry_run=True)
+        self.assertEqual(result, {"added": 0, "skipped": 100, "conflicts": 0, "replaced": 0})
+        self.assertEqual(decode.call_count, len(existing))
+
 
 if __name__ == "__main__":
     unittest.main()

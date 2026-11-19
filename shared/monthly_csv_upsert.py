@@ -93,8 +93,10 @@ def upsert_rows(person: str, year_month: str, rows: list[dict], *,
 
     index = {}
     exercise_sets = {}
+    decoded = []
     for i, raw in enumerate(existing):
         rd = _row_to_dict(raw)
+        decoded.append(rd)
         key = identity(rd)
         index.setdefault(key, []).append(i)
         exercise_sets.setdefault((key[0], key[2], key[3]), []).append(i)
@@ -108,12 +110,12 @@ def upsert_rows(person: str, year_month: str, rows: list[dict], *,
         if not indices:
             alternate = exercise_sets.get((key[0], key[2], key[3]), [])
             if alternate:
-                if len(alternate) == 1 and same(_row_to_dict(out[alternate[0]]), r):
+                if len(alternate) == 1 and same(decoded[alternate[0]], r):
                     result["skipped"] += 1
                 else:
                     result["conflicts"] += 1
                 continue
-        matches = [_row_to_dict(out[i]) for i in indices]
+        matches = [decoded[i] for i in indices]
         # Existing duplicate identities are ambiguous even when one row
         # matches the request; silently skipping would hide the other row.
         if len(matches) > 1:
@@ -132,11 +134,13 @@ def upsert_rows(person: str, year_month: str, rows: list[dict], *,
                     if r.get(field) is not None:
                         updated[field] = r[field]
                 out[indices[0]] = _dict_to_row(updated)
+                decoded[indices[0]] = _row_to_dict(out[indices[0]])
                 result["replaced"] += 1
             else:
                 result["conflicts"] += 1
             continue
         out.append(_dict_to_row(r))
+        decoded.append(_row_to_dict(out[-1]))
         index[key] = [len(out) - 1]
         exercise_sets.setdefault((key[0], key[2], key[3]), []).append(len(out) - 1)
         result["added"] += 1

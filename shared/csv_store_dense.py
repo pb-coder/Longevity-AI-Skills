@@ -87,7 +87,7 @@ HEALTH_METRICS_FIELDS_BY_SOURCE = {DATA_SOURCE: HEALTH_METRICS_FIELDS}
 # ``read_body_composition`` is the one read path for all four.
 #
 # Units: waist in centimetres, body fat in **percentage points** (18.0,
-# not 0.18 — see health_units.normalize_body_fat_pct), lean mass and
+# not 0.18), lean mass and
 # bodyweight in kilograms.
 #
 # All four accept manual entry, but not through ``/log``:
@@ -96,7 +96,7 @@ HEALTH_METRICS_FIELDS_BY_SOURCE = {DATA_SOURCE: HEALTH_METRICS_FIELDS}
 # Body Measurements) and reach this CSV on the next import. A ``/log``
 # path for them is Wave-2 work and is not wired yet.
 #
-# Both importers write all four sparse-merged, so a hand-typed waist
+# Imports write all four sparse-merged, so a hand-typed waist
 # reading and a scale-sourced one land in the same column without either
 # clobbering the other.
 BODY_COMPOSITION_FIELDS = (
@@ -153,18 +153,6 @@ WORKOUT_SESSIONS_FIELDS_BY_SOURCE = {DATA_SOURCE: WORKOUT_SESSIONS_FIELDS}
 STRENGTH_METADATA_DRIFT_THRESHOLD = 0.05
 
 
-# ============================================================ Helpers
-def _resolve_source(_person: str) -> str:
-    """Return the schema key for a person's stores.
-
-    One source survives, so this is a constant. It stays a function
-    because every read and write path calls it, and a tracker whose
-    profile has not been migrated yet must still resolve to a real
-    schema rather than raising a KeyError mid-read.
-    """
-    return DATA_SOURCE
-
-
 def read_health_metrics(person: str) -> list[dict]:
     """Return the Health Metrics rows as a list of dicts.
 
@@ -178,9 +166,8 @@ def read_health_metrics(person: str) -> list[dict]:
     code does not require migrating old rows. Fields whose header is
     not present on disk read as None for every row.
     """
-    source = _resolve_source(person)
-    fields = HEALTH_METRICS_FIELDS_BY_SOURCE[source]
-    expected_headers = HEALTH_METRICS_HEADERS_BY_SOURCE[source]
+    fields = HEALTH_METRICS_FIELDS
+    expected_headers = HEALTH_METRICS_HEADERS
     path = health_metrics_csv(person)
     header, rows = _read_csv_rows(path)
     if not header:
@@ -264,9 +251,8 @@ def migrate_health_metrics_header(person: str, dry_run: bool = False) -> str:
     ``--fix-distance-units`` precedent. ``dry_run`` reports the rewrite
     it would perform and writes nothing.
     """
-    source = _resolve_source(person)
-    headers = HEALTH_METRICS_HEADERS_BY_SOURCE[source]
-    fields = HEALTH_METRICS_FIELDS_BY_SOURCE[source]
+    headers = HEALTH_METRICS_HEADERS
+    fields = HEALTH_METRICS_FIELDS
     path = health_metrics_csv(person)
     on_disk, _rows = _read_csv_rows(path)
     if not on_disk:
@@ -304,9 +290,8 @@ def upsert_health_metrics(person: str, entries: Iterable[dict]) -> list[str]:
     if not entries:
         return ["Health Metrics: 0 dates written / 0 updated"]
 
-    source = _resolve_source(person)
-    fields = HEALTH_METRICS_FIELDS_BY_SOURCE[source]
-    headers = HEALTH_METRICS_HEADERS_BY_SOURCE[source]
+    fields = HEALTH_METRICS_FIELDS
+    headers = HEALTH_METRICS_HEADERS
 
     existing_rows = read_health_metrics(person)
     by_date: dict[str, dict] = {r["date"]: r for r in existing_rows}
@@ -377,9 +362,8 @@ def read_workout_sessions(person: str) -> list[dict]:
     read with ``incidental=None`` and the coach falls back to the
     legacy Notes-prefix check.
     """
-    source = _resolve_source(person)
-    fields = WORKOUT_SESSIONS_FIELDS_BY_SOURCE[source]
-    expected_headers = WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source]
+    fields = WORKOUT_SESSIONS_FIELDS
+    expected_headers = WORKOUT_SESSIONS_HEADERS
     path = workout_sessions_csv(person)
     header, rows = _read_csv_rows(path)
     if not header:
@@ -422,9 +406,8 @@ def upsert_workout_sessions(person: str, entries: Iterable[dict]) -> list[str]:
     if not entries:
         return ["Workout Sessions: 0 sessions written / 0 updated"]
 
-    source = _resolve_source(person)
-    fields = WORKOUT_SESSIONS_FIELDS_BY_SOURCE[source]
-    headers = WORKOUT_SESSIONS_HEADERS_BY_SOURCE[source]
+    fields = WORKOUT_SESSIONS_FIELDS
+    headers = WORKOUT_SESSIONS_HEADERS
 
     existing_rows = read_workout_sessions(person)
     by_key: dict[tuple, dict] = {

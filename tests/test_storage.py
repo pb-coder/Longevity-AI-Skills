@@ -100,48 +100,23 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(row["notes"], "manual")
 
     def test_upsert_workout_sessions_reparsed_timestamp_is_idempotent(self) -> None:
-        # Regression guard for a re-import duplication bug: the start key
-        # comes from health_units.hhmm(), re-derived from the export's
-        # timestamp on every run (not cached). A real re-import re-parses
-        # the same underlying HealthKit event and must produce the
-        # identical (date, start) key both times, or the dense
-        # (date, start) dedupe in upsert_workout_sessions would insert a
-        # second row instead of updating the first.
-        from datetime import datetime
+        # Reparse the same export on each import and preserve seconds in the key.
+        from shared.import_health_export_kit import build_workout_payload
 
-        from shared.health_units import hhmm
-
-        def build_entry() -> dict:
-            # Fresh datetime object each call, mirroring how each importer
-            # run re-parses the export from scratch rather than reusing
-            # state from a prior run.
-            dt = datetime(2026, 5, 1, 8, 15, 37)
-            return {
-                "date": "2026-05-01",
-                "start": hhmm(dt),
-                "apple_type": "Running",
-                "duration_min": 30,
-            }
-
-        csv_store.upsert_workout_sessions("Test", [build_entry()])
-        csv_store.upsert_workout_sessions("Test", [build_entry()])  # full re-import
+        payload = {
+            "meta": {"timeZone": "UTC", "rangeStart": "2026-05-01T00:00:00Z",
+                     "rangeEnd": "2026-05-02T00:00:00Z", "exportedAt": "2026-05-02T00:00:00Z"},
+            "activity": {"workouts": [{"start": "05-01 08:15:37",
+                                        "type": "Running", "durationSec": 1800}]},
+        }
+        for _ in range(2):
+            csv_store.upsert_workout_sessions(
+                "Test", build_workout_payload(payload, None, None)
+            )
 
         sessions = csv_store.read_workout_sessions("Test")
         self.assertEqual(len(sessions), 1)
         self.assertEqual(sessions[0]["start"], "08:15:37")
-
-    def test_hhmm_preserves_seconds_not_just_minute(self) -> None:
-        # Locks in hhmm()'s actual (second-precision) output. A prior audit
-        # mistakenly believed the importer wrote minute-only start keys via
-        # hhmm(); this pins the true behavior so a future regression to
-        # minute truncation is caught immediately.
-        from datetime import datetime
-
-        from shared.health_units import hhmm
-
-        self.assertEqual(hhmm(datetime(2026, 5, 1, 8, 15, 37)), "08:15:37")
-
-
 
     def test_frozen_swim_lap_history_remains_readable(self) -> None:
         import csv

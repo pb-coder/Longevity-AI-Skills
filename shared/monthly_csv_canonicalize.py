@@ -71,8 +71,8 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
         "load_basis":  rd.get("load_basis") or None,
     }
 
-    if is_strength and kind == "cardio":
-        # Cardio inside a mixed-day strength session — keep per-row metadata.
+    if not is_strength or kind == "cardio":
+        # Pure cardio sessions and cardio rows in mixed sessions keep metadata.
         out["duration"] = _format_duration_mmss(duration_min) \
             if duration_min is not None \
             else (rd.get("duration") if rd.get("duration") else None)
@@ -81,22 +81,9 @@ def _build_data_row(session_num: int, rd: dict, kind: str,
         out["total_cal"] = _numeric_cell(rd.get("total_cal"))
         out["elevation_m"] = _numeric_cell(rd.get("elevation_m"))
         out["elapsed"] = rd.get("elapsed")
-    elif is_strength:
-        # Strength / other rows: session metadata moved to TOTAL row.
-        # Exception: isometric holds (reps=0, kg=0 + duration) keep
-        # their per-set duration — it's hold time, not session time.
-        if _is_isometric_hold(rd) and duration_min is not None:
-            out["duration"] = _format_duration_mmss(duration_min)
-    else:
-        # Pure cardio session — every row keeps its own metadata.
-        out["duration"] = _format_duration_mmss(duration_min) \
-            if duration_min is not None \
-            else (rd.get("duration") if rd.get("duration") else None)
-        out["avg_hr"] = _numeric_cell(rd.get("avg_hr"))
-        out["active_cal"] = _numeric_cell(rd.get("active_cal"))
-        out["total_cal"] = _numeric_cell(rd.get("total_cal"))
-        out["elevation_m"] = _numeric_cell(rd.get("elevation_m"))
-        out["elapsed"] = rd.get("elapsed")
+    elif _is_isometric_hold(rd) and duration_min is not None:
+        # A hold's duration belongs to the set, not the session TOTAL.
+        out["duration"] = _format_duration_mmss(duration_min)
 
     return out
 

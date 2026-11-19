@@ -67,10 +67,6 @@ from .csv_store_profile import (  # noqa: F401
     write_profile,
 )
 
-# Back-compat private re-exports for existing scripts:
-# - ``shared/maintain.py`` imports ``_resolve_source``.
-from .csv_store_dense import _resolve_source  # noqa: F401,E402
-
 __all__ = [
     "CsvTableSpec",
     "replace_upsert_records",
@@ -115,6 +111,5 @@ __all__ = [
     "ensure_profile",
     "read_profile",
     "write_profile",
-    "_resolve_source",
     "_write_csv",
 ]

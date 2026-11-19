@@ -124,12 +124,8 @@ def _coerce_int(v):
 def _read_profile_cached(person: str) -> dict:
     """Cached read of the per-person profile dict.
 
-    The read path of ``read_tracker.py`` calls ``read_profile`` directly
-    plus indirectly via ``_resolve_source`` for both Health Metrics and
-    Workout Sessions, so the same tiny CSV gets parsed 3-4 times per
-    cold-CLI invocation. The cache returns the same dict object on hits;
-    ``read_profile`` clones it so callers can mutate safely. Writes call
-    ``_read_profile_cached.cache_clear()`` to invalidate.
+    ``read_profile`` clones the cached dict so callers can mutate safely.
+    Writes clear the cache to invalidate it.
     """
     out = dict(PROFILE_DEFAULTS)
     out["_unknown_rows"] = []

@@ -914,11 +914,9 @@ def waist_trend(
     naive version of this function, applied to bodyweight, once reported
     a confident loss across a stretch the user gained weight over.
 
-    Unit-confused input is not filtered here — ``health_units``'s
-    ``PLAUSIBLE_RANGES`` is the single corruption gate and it runs at
-    import. What this estimator adds is that one surviving bad reading
-    inflates the residual spread and widens the interval, so the verdict
-    degrades to ``ci_straddles_zero`` rather than to a confident slope.
+    Unit-confused input is not filtered here. An outlier can inflate the
+    residual spread and widen the interval, degrading the verdict to
+    ``ci_straddles_zero`` rather than a confident slope.
     """
     anchor = (
         today_d if isinstance(today_d, date)
@@ -1295,8 +1293,7 @@ def body_fat_trend(
 
     ``readings`` is ``[{"date": "YYYY-MM-DD", "pct": 18.4}, ...]``
     (``value`` and ``body_fat_pct` are accepted aliases). Percentage
-    POINTS, never a fraction — ``health_units.normalize_body_fat_pct``
-    owns that conversion at import and this estimator inherits it.
+    POINTS, never a fraction; this estimator expects the stored units.
 
     Always returns a block; read ``state`` before ``pct_per_4w``. See
     ``_body_comp_trend`` for the reason codes and ``waist_trend`` for why

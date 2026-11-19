@@ -6,7 +6,7 @@ from tracker.csv_table import (
     write_csv_atomic as _table_write_csv_atomic,
 )
 
-from .monthly_csv_schema import MONTHLY_COLS, MONTHLY_FIELDS, MONTHLY_HEADERS, TOTAL_LABEL
+from .monthly_csv_schema import MONTHLY_COLS, MONTHLY_FIELDS, MONTHLY_HEADERS
 from .monthly_csv_values import _numeric_cell
 from .person_paths import monthly_csv as monthly_csv_path
 

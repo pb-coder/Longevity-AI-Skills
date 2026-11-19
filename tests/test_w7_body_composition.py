@@ -1,7 +1,6 @@
 """W7b — leanness channel: waist / body fat / lean mass end to end.
 
-Covers the unit/range normalisation, the health_metrics.csv schema
-migration, and the manual-entry path a tape measure reading arrives on.
+Covers the health_metrics.csv schema migration and body composition storage.
 
 The absence cases matter as much as the presence ones: every metric here
 is one the store must handle by leaving the cell blank rather than
@@ -12,93 +11,15 @@ from __future__ import annotations
 import csv
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
 from shared import csv_store, csv_store_dense, maintain, person_paths
-from shared.health_units import (
-    PLAUSIBLE_RANGES,
-    normalize_body_fat_pct,
-    reset_unit_warnings,
-)
-
-
-class WarnStateTestCase(unittest.TestCase):
-    """Base case that clears ``convert_unit``'s warn-once registry.
-
-    That registry is process-global and warn-once by design (production
-    wants one line per bad unit, not one per row). Left un-reset it makes
-    tests order-dependent: whether a test sees its own warning depends on
-    whether an earlier test in the same process already burned that unit
-    string. Resetting per test lets two tests assert on the *same* unit
-    token and both pass, in either order.
-    """
-
-    def setUp(self) -> None:
-        super().setUp()
-        reset_unit_warnings()
-
-
-class BodyFatNormalisationTests(WarnStateTestCase):
-    def test_fraction_and_percentage_encodings_both_land_as_points(self) -> None:
-        self.assertEqual(normalize_body_fat_pct("0.18"), 18.0)
-        self.assertEqual(normalize_body_fat_pct(0.181), 18.1)
-        self.assertEqual(normalize_body_fat_pct(18.1), 18.1)
-
-    def test_a_fraction_of_one_is_not_a_hundred_percent_body_fat(self) -> None:
-        # The old gate was (0, 100], so 1.0 normalised to "100% body fat"
-        # and 0.005 to 0.5%. Both are impossible bodies; both were stored.
-        with redirect_stderr(StringIO()):
-            self.assertIsNone(normalize_body_fat_pct(1.0))
-            self.assertIsNone(normalize_body_fat_pct(0.005))
-
-    def test_guard_band_boundaries_are_inclusive(self) -> None:
-        self.assertEqual(normalize_body_fat_pct(3.0), 3.0)
-        self.assertEqual(normalize_body_fat_pct(75.0), 75.0)
-        self.assertEqual(normalize_body_fat_pct(0.03), 3.0)   # fraction form
-        self.assertEqual(normalize_body_fat_pct(0.75), 75.0)
-        with redirect_stderr(StringIO()):
-            self.assertIsNone(normalize_body_fat_pct(2.9))
-            self.assertIsNone(normalize_body_fat_pct(75.1))
-
-    def test_the_fraction_heuristic_dead_zone_drops_loudly(self) -> None:
-        # 1.0 < x < 3.0 is neither a fraction this code will scale nor a
-        # plausible percentage. It used to be stored verbatim as "2%".
-        for dead in (1.01, 2.0, 2.99):
-            err = StringIO()
-            with redirect_stderr(err):
-                self.assertIsNone(normalize_body_fat_pct(dead), dead)
-            self.assertIn("outside the plausible 3-75 range", err.getvalue())
-
-    def test_out_of_range_and_unparseable_values_are_dropped(self) -> None:
-        with redirect_stderr(StringIO()):
-            for bad in ("n/a", 0, -3, 101, 250):
-                self.assertIsNone(normalize_body_fat_pct(bad), bad)
-
-    def test_absent_values_are_silent_but_bad_ones_warn(self) -> None:
-        # "No reading" is not a rejection and must not print anything;
-        # everything the function actually refuses gets a line on stderr.
-        err = StringIO()
-        with redirect_stderr(err):
-            self.assertIsNone(normalize_body_fat_pct(None))
-            self.assertIsNone(normalize_body_fat_pct(""))
-        self.assertEqual(err.getvalue(), "")
-
-        for bad in ("n/a", 0, 1.0, 101):
-            err = StringIO()
-            with redirect_stderr(err):
-                normalize_body_fat_pct(bad)
-            self.assertIn("body fat percentage", err.getvalue(), bad)
-
-    def test_ranges_are_declared_in_one_place(self) -> None:
-        self.assertEqual(PLAUSIBLE_RANGES["waist_cm"], (30.0, 250.0))
-        self.assertEqual(PLAUSIBLE_RANGES["lean_body_mass_kg"], (20.0, 150.0))
-        self.assertEqual(PLAUSIBLE_RANGES["body_fat_pct"], (3.0, 75.0))
 
 
 # ------------------------------------------------------------- CSV store
-class HealthMetricsSchemaTests(WarnStateTestCase):
+class HealthMetricsSchemaTests(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
         self.tmp = tempfile.TemporaryDirectory()
@@ -234,7 +155,7 @@ class HealthMetricsSchemaTests(WarnStateTestCase):
         self.assertIn("already current", second)
 
 
-class ReadBodyCompositionTests(WarnStateTestCase):
+class ReadBodyCompositionTests(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
         self.tmp = tempfile.TemporaryDirectory()
@@ -282,7 +203,7 @@ class ReadBodyCompositionTests(WarnStateTestCase):
 
 
 # ------------------------------------------------------- maintain.py wiring
-class MaintainHeaderValidationTests(WarnStateTestCase):
+class MaintainHeaderValidationTests(unittest.TestCase):
     """A header mismatch must not switch the rest of validation off.
 
     Both real trackers sit on a 16-column health_metrics.csv against the

@@ -364,21 +364,13 @@ class SkillDocMatchesTheNullLoadContractTests(unittest.TestCase):
                 'weight. A movement with no candidate entry'):
             self.assertNotIn(stale, doc)
 
-    def test_both_sites_tell_the_coach_to_pick_a_conservative_load(self) -> None:
-        # Both places a coach can land on the null rule have to carry the
-        # instruction; fixing one leaves the other teaching the bug.
+    def test_starting_lift_guidance_uses_a_conservative_effort(self) -> None:
         doc = _SKILL_MD.read_text(encoding="utf-8")
-        payload_site = doc[doc.index("- `rotation_candidates`:"):]
-        payload_site = payload_site[:payload_site.index("\n**")]
-        coldstart_site = doc[doc.index("**Cold start.**"):]
-        coldstart_site = coldstart_site[:coldstart_site.index("\n- `uncovered`")]
-        for name, site in (("payload reference", payload_site),
-                           ("cold-start rule", coldstart_site)):
-            with self.subTest(site=name):
-                for basis in ("no_reference", "unknown_transfer"):
-                    self.assertIn(basis, site)
-                self.assertIn("conservative", site)
-                self.assertIn("2-3 reps in reserve", site)
+        guidance = doc.split("**Starting a lift.**", 1)[1].split("\n\n", 1)[0]
+        for basis in ("no_reference", "unknown_transfer", "bodyweight"):
+            self.assertIn(basis, guidance)
+        self.assertIn("conservative", guidance)
+        self.assertIn("2-3 reps in reserve", guidance)
 
 
 if __name__ == "__main__":

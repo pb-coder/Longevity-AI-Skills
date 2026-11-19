@@ -1,5 +1,7 @@
 # Substitute protocols — what to write when the gate restricts strength
 
+These templates document the historical dated recovery gate. The weekly coach publishes the intended strength sessions. A current request about changing one session is handled separately in chat using the person's report and available evidence. See the [weekly coach workflow](../SKILL.md).
+
 When `session_recommendation.tier` is **A**, **B**, or **C**, the coach does NOT write the planned strength session as-is.
 
 - **Tier C** is automatic: fill the markdown from the Tier C template below.

@@ -1,5 +1,7 @@
 # Coach final-review traps
 
+The rows below cover the historical dated assessment workflow. For a weekly plan, check that dates match the requested period, scoped restrictions are respected, and the Markdown shows one intended dose per slot. Use dated observations as context and keep individual session advice in chat.
+
 The authoritative workflow and programming rules are in [SKILL.md](../SKILL.md); do not maintain a second copy here. Before delivery, confirm person/path selection, the recovery gate and explicit overrides, saved-assessment-before-plan checkpoint, block continuity, `next_dose`, split and main-pattern coverage, core/arm/muscle floors and placement, deload handling, and strength-only bullet formatting. Run `check_plan.py` until blocking errors are fixed; correct advisory dose, pattern and cardio warnings unless the opener states a deliberate exception. Relay remaining warnings.
 
 Checks do not choose the split, respond to stalls, or prescribe the cadence deload for the coach. Follow the skill rules even when a validator would accept the plan. The traps below concern interpretation rather than a duplicate programming specification.

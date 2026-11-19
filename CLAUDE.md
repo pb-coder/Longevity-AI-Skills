@@ -29,10 +29,10 @@
 
 ## Working conventions
 
-- Read [README.md](README.md) for layout and supported workflows, then the relevant skill's `SKILL.md` for behavior.
+- Read the [workflow guide](docs/WORKFLOW.md) for layout and supported commands, then the relevant skill's `SKILL.md` for behavior.
 - Notes contain user-supplied, row-specific annotations. Repeated pipeline metadata belongs in typed columns. Preserve legacy `Source` identities and optional timestamp suffixes when reading existing rows.
 - Use canonical title-case exercise names from `shared/exercises-database.md`; aliases belong in the logger reference. Catalog additions require the skill's explicit confirmation flow.
 - Manual bodyweight and sleep are opt-in; never prompt for them. Refresh Health Export Kit automatically as the logger skill specifies.
 - Each person's `data/` is a separate git repository. One confirmed operation creates one commit; a history failure warns without failing the data write. Never run automatic git garbage collection or repacking. Avoid concurrent writes from multiple synced machines.
 - The importer archives successfully consumed JSON exports under `archive/health-exports/YYYY-MM/` unless `--keep-export` is set. It never overwrites a different archived file. Specify the export path when more than one candidate exists.
-- Coaching writes assessment JSON before workout markdown and must pass `check_plan.py`. See `workout-coach/SKILL.md` for the recovery gate and planning rules.
+- Weekly coaching publishes a validated prescription JSON and its Markdown view through `publish_week.py`. The prescription drives plan history. The assessment and Markdown checker remains available for dated legacy plans.

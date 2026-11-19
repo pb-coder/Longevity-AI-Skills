@@ -201,11 +201,12 @@ class NoCardioInPlanDocsTests(unittest.TestCase):
         self.assertNotIn("add cardio sessions to the plan",
                          self._read("SKILL.md"))
 
-    def test_the_pipeline_checks_every_run(self) -> None:
+    def test_coaching_uses_the_checked_weekly_publisher(self) -> None:
         skill = self._read("SKILL.md")
-        self.assertIn("scripts/check_plan.py", skill)
+        self.assertIn("scripts/publish_week.py", skill)
+        self.assertIn("Resolve errors before publication", skill)
         self.assertNotIn("scripts/render_dashboard.py", skill)
-        self.assertIn("Tier A or B: stop here and ask", skill)
+        self.assertNotIn("Tier A or B: stop here and ask", skill)
 
 
 if __name__ == "__main__":

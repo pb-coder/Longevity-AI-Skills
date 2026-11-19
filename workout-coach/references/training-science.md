@@ -1,5 +1,7 @@
 # Training Science Reference
 
+Use this reference for principles and evidence. The [weekly coach instructions](../SKILL.md) define the current workflow. The gate thresholds, strict set floors, fixed rotation cadence and mandatory review language in earlier programming examples describe the historical dated workflow. Use the person's goals, constraints and comparable performance to choose the week's intended dose.
+
 ## Quick Lookup
 
 | When analyzing...                  | Consult |
@@ -201,7 +203,7 @@ private tracker data at runtime.
 Flag every report:
 1. No effort column (RIR/RPE) — junk volume vs effective volume indistinguishable
 2. No rest period tracking — session density invisible
-3. No bodyweight trend — energy balance unknown
+3. Weight trends need multiple comparable observations over time. See the weekly phase review.
 4. No protein intake — most important nutritional variable unmeasured
 
 ## §14 Split Selection

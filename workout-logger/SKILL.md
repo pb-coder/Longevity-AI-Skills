@@ -160,14 +160,14 @@ The importer populates the `sleep/` folder when sleep-stage data exists. Manual 
 
 Nutrition phases (`bulk` / `cut` / `maintain` / `recomp`) are opt-in. The user signals one via a top-level line in the `/log` message:
 
-- **`bulking start [date] [target X kcal] [protein X g/kg] [rate X kg/wk] [stop: ...]`** — opens a new phase. `date` defaults to today; all other targets are optional and fall back to the bulk defaults (target rate 0.25 kg/wk; coach uses bulking-science.md for kcal/protein when omitted). `stop:` is a free-text pre-commitment line listing the off-ramp conditions (e.g. `stop: >0.5 kg/wk for 3 weeks; lifts stall 2 weeks; visible bloat`).
+- **`bulking start [date] [target X kcal] [protein X g/kg] [rate X %/wk or kg/wk] [stop: ...]`** opens a phase. The date defaults to today. Record only agreed targets. `stop:` stores the person's review criteria as text.
 - **`bulking end [date]`** — closes the open bulk phase. `date` defaults to today.
 - **`bulking update [field=value ...]`** — updates the open bulk phase's targets / notes. Same keys as start (target, protein, rate, stop, notes).
-- The same three commands exist for `cutting` (e.g. `cutting start`, defaults: target rate -0.5 kg/wk) and `maintaining` (target rate 0.0) and `recomp` (no target rate).
+- The same three commands exist for `cutting`, `maintaining` and `recomp`. Keep gain rates positive and loss rates negative.
 
 **No automatic prompts, no probing, no `AskUserQuestion`.** Absent ≡ didn't happen.
 
-Phases are stored in a single flat CSV at `<Person>/data/nutrition_phases.csv` (sparse: a handful of rows per year, so no per-month split). Dedupe key = `Start Date` (one phase per start_date). Opening a new phase while one is already open is allowed — both rows exist, and the coach's `nutrition_phase_summary` picks the most recent open phase. To "swap" phases cleanly, end the prior one first (`bulking end`) then start the new one.
+Phases are stored in `<Person>/data/nutrition_phases.csv`, one row per start date. The weekly coach reviews the latest open phase. When switching phases, end the previous phase and record the new start.
 
 Payload shape — add a `nutrition_phase` key alongside `rows` / `bodyweight` / `sleep`:
 
@@ -181,17 +181,16 @@ Payload shape — add a `nutrition_phase` key alongside `rows` / `bodyweight` / 
       "phase_type": "bulk",
       "target_kcal_delta": 300,
       "target_protein_g_per_kg": 1.8,
-      "target_rate_kg_per_wk": 0.25,
-      "stop_conditions": ">+0.5 kg/wk for 3 weeks; lifts stall 2 weeks; visible bloat",
-      "notes": "first bulk after 4-month maintain"
+      "target_rate_percent_per_week": 0.25,
+      "reference_weight_kg": 75,
+      "stop_conditions": "Review if weight is persistently above the agreed rate",
+      "notes": "First gain phase after maintenance"
     }
   ]
 }
 ```
 
-The logger calls `csv_store.upsert_nutrition_phases(person, payload["nutrition_phase"])` which sparse-merges on `Start Date`. Phase-type validation lives in the upsert (one of `bulk` / `cut` / `maintain` / `recomp`); unknown values raise ValueError. Coach reads via `read_nutrition_phases` and the lib helper `nutrition_phase_summary`.
-
-The coach evaluates whether the bulk is on-track by reading bodyweight rate from `health_metrics.csv` (smoothed-endpoint 14d window) — daily macro logging is NOT required. Phase metadata alone gives the coaching signal.
+The logger sparse-merges phase entries by `Start Date`. Existing `target_rate_kg_per_wk` targets are accepted. A supplied percentage takes precedence. The optional reference weight fixes conversions between percent and kilograms. The weekly coach reviews comparable within-phase weigh-ins and can defer a change when the trend is unresolved. Intake and protein targets are recorded separately from measurements.
 
 ### Bulk-seed (historical nutrition phases)
 

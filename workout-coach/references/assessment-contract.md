@@ -1,5 +1,7 @@
 # Assessment JSON contract
 
+This contract describes historical dated assessments used by `check_plan.py`. For weekly prescription publication and review, see the [coach skill](../SKILL.md).
+
 `plans/<Person>/<date>-coach_reads.json` is the durable coaching assessment. Write it before `<date>-workout.md`, then run `scripts/check_plan.py` against both and the tracker JSON. `SKILL.md` specifies how each assessment section interprets its source fields.
 
 ```json

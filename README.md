@@ -1,71 +1,40 @@
-# Longevity AI Skills
+# Workout Tracker
 
-Personal skills for workout logging, training analysis, and longevity research.
+A local-first set of skills for logging workouts, planning a week of strength training, and reviewing progress. Training records and generated plans stay in a private workspace alongside the code checkout.
 
-- `workout-logger` (`/log`) parses workouts into monthly CSVs, with optional bodyweight, sleep, swim CSS tests, and nutrition-phase updates. Unknown exercises follow a user-confirmed catalog proposal flow.
-- `workout-coach` (`/coach`) analyzes training, recovery, strength progression, swimming, and nutrition context. It writes dated assessment JSON and strength-workout markdown, then validates both.
-- `longevity-optimizer` (`/longevity`) researches interventions and biomarkers using private context and cited evidence.
+## What it does
 
-Read each skill's `SKILL.md` for its workflow. Developer conventions live in [CLAUDE.md](CLAUDE.md); coach module ownership is in [workout-coach/CODE_MAP.md](workout-coach/CODE_MAP.md).
+- **Log the training you did.** Record sets, reps, loads, gym or machine context, and optional bodyweight or nutrition-phase entries.
+- **Plan the week you intend to train.** Use your goals, available days, established lifts, and exercise preferences to build one full prescription per session.
+- **Bring health data in when it suits you.** Import Apple Health data from Health Export Kit in batches. The coach tracks observation dates and import coverage separately, and uses wearable trends as context.
+- **Review progress over time.** Follow comparable lift performance and declared cut, maintain, gain, or recomp phases. The coach can defer a change when the evidence is sparse.
 
-## Storage and outputs
+The weekly plan is saved as versioned JSON with a gym-friendly Markdown view. A session adjustment can be discussed separately. The log records what actually happened.
 
-The repository root is `Skills/`. Private data and generated plans live beside it and are never committed here:
+## Get started
 
-```
-<root>/
-├── <Person>/data/
-│   ├── health_metrics.csv
-│   ├── workout_sessions.csv
-│   ├── profile.csv
-│   ├── monthly/YYYY.MM.csv
-│   ├── swimming/YYYY.MM.workouts.csv
-│   ├── sleep/YYYY.MM.nights.csv
-│   ├── nutrition_phases.csv        # phase records when configured
-│   └── longevity/                 # private profile, state, interventions, biomarkers
-├── plans/<Person>/
-│   ├── YYYY-MM-DD-coach_reads.json
-│   └── YYYY-MM-DD-workout.md
-└── Skills/
+The CLI uses Python 3 and Git. Put this checkout inside a private tracker workspace, or set `WORKOUT_TRACKER_ROOT` to point to one. See the [workflow guide](docs/WORKFLOW.md) for the data layout, import commands, and optional coaching profile.
+
+From a workspace with the checkout named `Skills`:
+
+```sh
+python3 Skills/workout-coach/scripts/read_tracker.py --person "<Person>" --weekly
 ```
 
-Each person's `data/` is its own git repository, committed once per confirmed write. Git history provides rollback. History failures warn without failing the write; automatic repacking is prohibited for synced folders. Existing historical swim lap CSVs remain readable but receive no new writes.
+This reads the weekly coaching snapshot. The [workout coach skill](workout-coach/SKILL.md) defines how to turn that snapshot into a validated plan.
 
-`shared/import_health_export_kit.py` is the only importer. It reads `health-export-json-*.json`, updates supported health, workout, sleep, and swim fields, and archives the consumed export after success (`--keep-export` leaves the source in place). When more than one export is present, an explicit path is required. It does not supply daily HRV, wrist temperature, or per-lap swim detail; unavailable signals are omitted rather than treated as zero or requested from the user.
+| Skill | Use it for |
+| --- | --- |
+| [Workout coach](workout-coach/SKILL.md) | Weekly plans and training or nutrition reviews |
+| [Workout logger](workout-logger/SKILL.md) | Logging completed workouts and managing optional measurements and phases |
+| [Longevity optimizer](longevity-optimizer/SKILL.md) | Researching longevity topics with relevant private context |
 
-Imports now stop before writing or archiving if they would change populated health, sleep, swim, or workout-session fields. Run the importer with `--dry-run` to review conflict counts and all changed values; use `--overwrite-existing` only to apply the reviewed replacements. Existing fields do not record their source or freshness, so conflicts do not establish which value is newer. Blank fields can still be filled and equivalent numeric values do not conflict. This is an intentional change to the previous overwrite behavior.
+## Development
 
-## Monthly CSV schema migration
+Run the tests from the checkout:
 
-Schema v2 appends three optional columns, `Gym`, `Machine`, and `Load Basis`, after the unchanged 18-column schema. Readers accept legacy 17- and 18-column rows and treat missing context as unknown. A touched month is rewritten atomically in v2 on its next successful update or maintenance pass; there is no automatic bulk migration or invented historical metadata. Back up data and keep its history before an explicit maintenance migration. Rollback to software predating v2 requires restoring a pre-migration backup: old writers can drop new fields.
+```sh
+python3 -m unittest discover -s tests
+```
 
-For each set, `gym` and `machine` are explicit labels; `load_basis` is `total` or `plates_only`. Blank means unknown and retains legacy interpretation. Partial-bar figures are never used as total load for progression or e1RM. When named machine contexts exist, only a fully specified matching gym and machine are comparable; mixed or incomplete contexts cannot progress automatically. Replays with changed metadata are conflicts unless explicitly corrected.
-
-## Paired import workflow
-
-`python3 shared/prepare_training.py --entry <Person> <export.json> <workout-payload.json>` previews a named pairing. Repeat `--entry` for multiple people; use `-` for an omitted input. Review the pairings and add `--apply` to log workouts and import the corresponding health exports. Each export path must be unique, and the caller supplies ownership because the export cannot prove it. All entries are preflighted before writes; if an application step fails, earlier completed writes are not rolled back. `--allow-past-months` is available when needed.
-
-The preview reports import conflicts for every entry, including conflicts created by manual sleep or bodyweight in the paired payload. Applying requires `--overwrite-existing` if any import has conflicts; this option is passed to each importer.
-
-## Architecture and maintenance
-
-- `tracker/`: shared command context, typed contracts, CSV mechanics.
-- `shared/`: person-relative paths, stores, canonicalization, exercise catalog, importer, data history.
-- Skill directories: entry instructions, references, public scripts, and domain analytics.
-- `workout_coach/`: Python import facade for `workout-coach/`.
-
-CSV store and monthly-log facades delegate to focused schema, I/O, and policy modules. Keep one source of truth for paths, schemas, dates, catalog parsing, and capability gates. Preserve public contracts unless an intentional migration is documented. Notes are for row-specific user annotations.
-
-From this repository, run `python3 -m unittest discover -s tests -v`. From the tracker root, run `python3 Skills/shared/maintain.py --person <Person>` to canonicalize all months and validate stores after migrations or manual edits.
-
-Committed text must use `<Person>` / `<OtherPerson>` placeholders, never private profile facts. Private context stays outside this repository.
-
-## Retired features
-
-HTML dashboards and `render_dashboard.py` are retired; there is no HTML output or report-rendering command. Use the saved assessment JSON and workout markdown. The former HTML-only options and `Assessment:` links are unsupported.
-
-Thermal (sauna/cold) and light-therapy tracking, adherence analytics, suggestion inputs, and plan placeholders are retired. `thermal` and `light_therapy` logger payload keys are unsupported. Existing private CSVs and old generated reports are left untouched; they are not current coaching inputs. General longevity research remains available without claims of live modality tracking.
-
-The unused coach JSON outputs `tier_history`, `bodyweight_weekly`, and `week_over_week` are retired. Use the current session recommendation, bodyweight trend, and existing aggregate inputs. The unused public swim-lap writer `upsert_swim_laps` is retired; historical lap readers remain supported and imported swim aggregates continue unchanged.
-
-Importer status combines daily and sleep updates into one `Health Metrics:` line; its written/updated counts aggregate both passes.
+See the [coach code map](workout-coach/CODE_MAP.md) and [engineering conventions](CLAUDE.md) for module ownership and data boundaries.

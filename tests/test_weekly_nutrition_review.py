@@ -59,6 +59,23 @@ class WeeklyNutritionReviewTests(unittest.TestCase):
         self.assertEqual(result["targets"]["reference_weight_kg"], 100)
         self.assertEqual(result["targets"]["rate_kg_per_wk"], -0.5)
 
+    def test_nonfasted_and_old_measurements(self):
+        readings = weights(-0.5)
+        readings[-1]['notes'] = 'evening, not fasted'
+        result = weekly_nutrition_review(phase(), readings, TODAY)
+        self.assertEqual(result['actuals']['measurement_count'], 3)
+        self.assertEqual(result['coach_action_hint'], 'defer')
+        old = weights(-0.5, (29, 25, 20, 16))
+        result = weekly_nutrition_review(phase(), old, TODAY)
+        self.assertEqual(result['actuals']['latest_measurement_date'],
+                         (TODAY - timedelta(days=16)).isoformat())
+        self.assertIn('more than seven days', result['decision_reason'])
+
+    def test_missing_reference_is_not_wrong_sign(self):
+        result = weekly_nutrition_review(phase(), [], TODAY)
+        self.assertIn('reference weight', result['decision_reason'])
+        self.assertEqual(result['targets']['rate_kg_per_wk'], -0.5)
+
     def test_spread_overlapping_target_boundary_defers(self):
         readings = weights(-0.5, (14, 13, 1, 0))
         readings[0]["kg"] += 0.8

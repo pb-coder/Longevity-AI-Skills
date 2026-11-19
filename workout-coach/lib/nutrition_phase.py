@@ -33,7 +33,7 @@ from datetime import date, timedelta
 
 from .health_session_rec import _genuinely_stalled_lifts
 from .parsing import _parse_iso_date
-from .sessions import smoothed_rate_per_week
+from .sessions import _is_flagged_nonfasted, smoothed_rate_per_week
 
 
 # Default rate-band classifiers (kg/wk). Anchored on the lean-bulk
@@ -538,6 +538,8 @@ def weekly_nutrition_review(phases: list[dict], bodyweight_series: list[dict],
     # evidence. Conflicting same-day readings make that date unusable.
     by_date = {}
     for entry in bodyweight_series:
+        if not isinstance(entry, dict) or _is_flagged_nonfasted(entry):
+            continue
         d = _parse_iso_date(entry.get("date"))
         try:
             kg = float(entry.get("kg"))
@@ -550,9 +552,10 @@ def weekly_nutrition_review(phases: list[dict], bodyweight_series: list[dict],
                     if len(values) == 1)
     recent = [(d, kg) for d, kg in points if d >= today_d - timedelta(days=14)]
     actual = result["actuals"]
+    if points:
+        actual["latest_measurement_date"] = points[-1][0].isoformat()
     if recent:
         actual.update(first_measurement_date=recent[0][0].isoformat(),
-                      latest_measurement_date=recent[-1][0].isoformat(),
                       measurement_count=len(recent),
                       span_days=(recent[-1][0] - recent[0][0]).days)
 
@@ -592,10 +595,16 @@ def weekly_nutrition_review(phases: list[dict], bodyweight_series: list[dict],
     result["targets"].update(rate_percent_per_week=round(target_pct, 3) if target_pct is not None else None,
                              rate_kg_per_wk=round(target_kg, 3) if target_kg is not None else None,
                              basis=basis, reference_weight_kg=reference)
-    if ((kind == "cut" and (target_pct is None or target_pct >= 0)) or
-        (kind in ("bulk", "gain") and (target_pct is None or target_pct <= 0)) or
+    if target_pct is None:
+        result["decision_reason"] = "A reference weight is needed to convert the legacy kg target to a percentage."
+        return result
+    if ((kind == "cut" and target_pct >= 0) or
+        (kind in ("bulk", "gain") and target_pct <= 0) or
         (kind in ("maintain", "recomp") and target_pct != 0)):
         result["decision_reason"] = "The target is unresolved or its sign conflicts with the declared phase."
+        return result
+    if reference is None:
+        result["decision_reason"] = "A reference weight is needed to assess the phase trend."
         return result
     if points and (today_d - points[-1][0]).days > 7:
         result["decision_reason"] = "The latest comparable weigh-in is more than seven days old."
